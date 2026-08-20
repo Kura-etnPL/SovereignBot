@@ -15,15 +15,16 @@
 ## v0.2 — real agent harnesses and coordination
 
 - [x] Codex CLI adapter with resumable task sessions
+- [x] Claude Code CLI adapter with resumable task sessions
 - [x] Retry transition that preserves captured harness session state
 - [x] Supervisor/worker task graph and delegation protocol
 - [x] Durable task-event history and structured progress snapshots
 - [x] Dependency-aware scheduling and cascading cancellation
 - [x] Independent reviewer/approval + changes-requested retry flow
-- [ ] Claude Code adapter with resumable task sessions
+- [x] Adapter-driven Claude Code progress/retry events
 - [ ] AG-UI adapter
 - [ ] MCP client adapter
-- [ ] Harness health, leases, and richer adapter-driven progress events
+- [ ] Harness health and leases
 
 ## v0.3 — governed computer layer
 
