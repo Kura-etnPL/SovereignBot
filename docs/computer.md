@@ -1,141 +1,125 @@
-# Governed computer core
+# Governed computer layer
 
-SovereignBot's governed-computer layer separates **agent intelligence**, **action authority**, **driver implementation**, and **human/operator authority**.
+SovereignBot separates **agent intelligence**, **action authority**, **browser implementation**, and **human/operator authority**.
 
-The core does not assume Playwright, CDP, coordinate-only vision, or one browser vendor. A concrete driver/sidecar implements the low-level computer contract. SovereignBot owns the policy, refs, workspace boundary, control state, tokens, secret channel, and audit trail around it.
+The orchestration core does not depend on Playwright, CDP, coordinate vision, or a browser vendor. v0.3 now includes a production **W3C WebDriver sidecar** behind the same driver-neutral contract used by deterministic tests.
 
-> Current status: the governance core and deterministic in-memory driver are implemented. A production browser/computer sidecar is a follow-up. Do not treat the Memory driver as a real browser runtime.
+See [webdriver-sidecar.md](webdriver-sidecar.md) for the concrete production driver.
 
-## Per-agent isolation
+## Authority path
 
-For each configured agent SovereignBot creates a private computer root under the runtime data directory:
+A production worker action follows this path:
+
+```text
+worker
+  -> bearer token for this exact worker
+  -> task exists + status=running + assignedAgentId=this worker
+  -> hard runtime safety checks
+  -> Governor deny/allow/fail-closed policy
+  -> hash-chained audit decision
+  -> private driver/workspace side effect
+  -> outcome audit
+```
+
+Possessing a worker token is therefore insufficient without a currently running task owned by that worker.
+
+Hard runtime refusals (for example stale refs or active human control) cannot be overridden by a broad policy allow rule.
+
+## Per-agent identity and storage
+
+For each configured agent SovereignBot creates a separate computer identity under the runtime data directory:
 
 ```text
 computers/
   operator-token
   state.json
-  <agent>/
+  <base64url-worker-key>/
     token
     profile/
     workspace/
 ```
 
-Each agent receives a distinct random bearer token. The operator token is separate and has a different authority class.
+The encoded key is collision-free for arbitrary UTF-8 agent ids and is also used for durable state keys, avoiding special JavaScript object names such as `__proto__`.
 
-- **agent token**: may call governed actions only for that exact agent id;
-- **operator token**: may inspect/take/release human control and supply a requested secret;
-- an agent token is never accepted as an operator token.
+Each worker has its own:
 
-Token files are runtime state and must never be committed.
+- computer bearer token;
+- browser profile;
+- workspace;
+- server-held snapshot cache;
+- sidecar/browser session when the production driver is enabled.
 
-## Action path
+The operator token is a separate authority class and is never accepted as an agent token.
 
-A normal action follows one path:
+## Snapshot/ref model
 
-```text
-worker request
-  -> authenticate worker token
-  -> derive trusted server context
-  -> apply hard runtime safety invariants
-  -> Governor policy decision
-  -> append decision to hash-chained audit
-  -> invoke driver/workspace side effect only when allowed
-  -> append success/failure audit event
-```
+Workers never supply a trusted browser backend handle.
 
-A missing allow rule denies. Deny rules run before allow rules. Runtime hard denials such as stale refs or active human control cannot be overridden by a broad administrator allow rule.
+1. The driver snapshots visible structured elements.
+2. Private backend/WebDriver ids stay in the sidecar/core.
+3. SovereignBot assigns an opaque `snapshotId` and public refs.
+4. The worker receives only safe metadata such as ref, role, name, and input type.
+5. Click/type/key must reference the current snapshot/ref.
 
-## Snapshot and ref model
+A stale snapshot, invented ref, or missing ref is refused before driver side effects.
 
-Element actions do not trust the worker to describe the element it wants to operate.
+The production sidecar adds another private **browser session lease**. A reset/restart rotates the lease and invalidates every old driver handle.
 
-1. The driver returns a snapshot containing public refs plus any private backend handles.
-2. SovereignBot validates the refs and assigns its own opaque `snapshotId`.
-3. Only safe element metadata is returned to the worker (`ref`, role, name, type).
-4. Private driver handles remain server-side.
-5. `click`, `type`, and element-targeted `key` require the current `snapshotId` and a ref present in that server-held snapshot.
+## Navigation and network boundary
 
-A stale snapshot id, invented ref, or missing snapshot is a hard refusal and is audited. Navigation invalidates the cached snapshot.
+The core validates navigation intent before policy:
 
-This prevents an agent from bypassing policy by claiming that an arbitrary backend handle is a harmless button.
+- only `http`/`https`;
+- no embedded URL credentials;
+- known cloud metadata targets always denied;
+- private/loopback targets denied by default.
 
-## Navigation guard
+The WebDriver sidecar adds connection-time enforcement: browser HTTP(S) is sent through a loopback egress proxy that resolves DNS itself, checks every returned IP, and connects to the already-validated IP. This closes the obvious hostname-check → DNS-rebind → connect gap.
 
-Before policy or driver execution, the core validates navigation targets:
+Always-blocked address classes stay denied even when `computer.allowPrivateHosts` is enabled. The option only opens ordinary private/loopback networks for explicitly trusted local deployments.
 
-- only `http` and `https`;
-- no credentials embedded in the URL;
-- known cloud metadata hosts are always denied;
-- literal loopback/private/link-local targets are denied by default;
-- `computer.allowPrivateHosts: true` may relax the ordinary private-host check for trusted local deployments, but never the metadata-host block.
-
-Audit output removes URL credentials, query strings, and fragments so a token passed in a query parameter is not copied into the audit trail.
-
-### Important egress limitation
-
-The core preflight does **not** resolve DNS and does not claim to solve DNS rebinding, proxy indirection, or all network-namespace escape cases. A production driver/sidecar must add its own network egress enforcement at the connection/container/VM boundary and must revalidate the resolved destination.
+This proxy is not represented as an OS network namespace. Container/VM/firewall deployment remains available as stronger defense in depth.
 
 ## Workspace boundary
 
-Every agent gets its own workspace directory. File operations are governed separately:
+File tools are governed independently:
 
 - `list_files`
 - `read_file`
 - `write_file`
 
-Paths must be relative and remain under that agent's workspace. The workspace layer rejects:
+Paths must remain beneath the worker's workspace. Absolute paths, traversal, NUL paths, and symlink/junction escapes are refused.
 
-- absolute paths;
-- `..` escape;
-- NUL-containing paths;
-- symbolic-link/junction traversal through a workspace path.
+File contents themselves do not enter policy/audit metadata.
 
-File content is passed only to the execution callback and is not added to policy/audit metadata.
+## Human takeover
 
-## Human take-over
+A worker can request help, moving durable control state to `requested`. Agent computer actions then fail closed.
 
-A worker may request human help. That immediately changes the durable control mode to `requested` and freezes subsequent agent computer actions.
-
-The operator can then take explicit control:
+The operator may take and release control:
 
 ```text
-requested -> human -> agent
+agent -> requested -> human -> agent
 ```
 
-While control is `human`, worker actions fail closed rather than queueing for later. Control state is durable across SovereignBot restarts.
+While `human` owns control, agent actions are refused immediately rather than queued.
 
-Events include:
+## Secret channel
 
-- `computer.help_requested`
-- `computer.control_taken`
-- `computer.control_released`
+A worker requests a secret against a current snapshot/ref. Stored request metadata contains only the request id, task id, label, snapshot id, ref, and timestamp.
 
-## Secret-entry channel
+The operator-only supply route sends plaintext directly to `typeSecret`. Plaintext is not intentionally inserted into:
 
-Secrets do not travel through ordinary task text or the normal `type` policy payload.
-
-A worker requests a secret against a current server-held snapshot/ref. SovereignBot stores only:
-
-- request id;
-- task id;
-- label;
-- snapshot id;
-- element ref;
-- timestamp.
-
-The request pauses agent computer actions. An operator may supply the value through the operator-only endpoint. The plaintext is handed directly to the driver's `typeSecret` call and is never added to:
-
-- task state;
-- task events;
+- task state/events;
 - memory;
 - policy context;
-- audit payload.
+- normal audit payloads.
 
-Audit records the request, operator identity label, ref, and character count only. If the snapshot is no longer current (for example after restart), supply fails and asks the operator to re-establish a fresh safe target.
+Computer secret failures use fixed public/audit error messages. The audit layer also redacts credential-shaped fields before hashing/persistence.
 
-## Token-protected local API
+## Authenticated computer API
 
-Agent actions use the agent's token:
+Worker routes use the worker bearer token and a real running `taskId`:
 
 ```text
 POST /computers/:agentId/snapshot
@@ -151,29 +135,32 @@ POST /computers/:agentId/help
 POST /computers/:agentId/secret-request
 ```
 
-Every request sends:
-
-```text
-Authorization: Bearer <agent-computer-token>
-```
-
-The action body includes a `taskId` so policy/audit can bind the action to work.
-
-Operator-only routes use the distinct operator token:
+Operator-only routes use the independent operator token:
 
 ```text
 GET  /computers
 GET  /computers/:agentId/control
+GET  /computers/:agentId/health
 POST /computers/:agentId/control/take
 POST /computers/:agentId/control/release
+POST /computers/:agentId/lifecycle/start
+POST /computers/:agentId/lifecycle/stop
+POST /computers/:agentId/lifecycle/reset
 POST /computers/:agentId/secrets/:requestId/supply
 ```
 
-Operator route bodies use `actorId` as an audit label. Possession of the operator bearer token is the actual authorization check.
+Tokens are bootstrapped only through local CLI commands:
+
+```bash
+node src/cli.js computer token <agent-id> --config <config>
+node src/cli.js computer operator-token --config <config>
+```
+
+The HTTP API does not expose them.
 
 ## Driver contract
 
-A production driver is expected to implement:
+The core driver contract remains small:
 
 ```text
 snapshot()
@@ -181,23 +168,35 @@ navigate(url)
 click({ element })
 type({ element, text })
 key({ element?, key })
-scroll({ deltaX?, deltaY? })
+scroll(...)
 typeSecret({ element, text })
 ```
 
-The driver receives the private element object selected from SovereignBot's server-held snapshot, not an arbitrary backend handle supplied by the worker.
+Production v0.3 adds optional health/start/stop/reset lifecycle methods. The bundled WebDriver sidecar implements them.
 
-`MemoryComputerDriver` exists only for deterministic tests and driver-contract development. If no production driver is injected, browser/computer actions fail clearly rather than silently downgrading to a weaker automation method.
+`MemoryComputerDriver` remains only for deterministic contract tests; a configured production sidecar never silently falls back to visual automation or the memory driver.
 
-## What remains before issue #5 is complete
+## Real-browser validation
 
-The governed core is deliberately only the first half. A production-grade implementation still needs:
+CI runs the normal suite on Ubuntu/Windows with Node 22/24 and a separate real-browser job on Ubuntu 24.04 with Chrome + ChromeDriver.
 
-- a real structured browser/computer sidecar/driver;
-- network namespace/egress controls including resolved-address checks;
-- process/container lifecycle isolation for browser profiles;
-- authenticated driver transport and health/lease semantics;
-- end-to-end tests against a real browser target;
-- optional stronger container/VM sandboxing without making self-hosting a virtue by itself.
+The real-browser test proves:
 
-Issue #5 stays open until those pieces are implemented and validated.
+```text
+navigate
+-> structured snapshot
+-> type normal text
+-> type secret through dedicated path
+-> click
+-> observe page result
+-> reset browser
+-> refuse old lease
+```
+
+No external site is required for that test.
+
+## Important integration boundary
+
+The computer layer is a governed capability service. Merely configuring it does not magically rewrite the internal browser/shell tools of Codex or Claude Code.
+
+A worker should receive computer access through a controlled adapter/MCP tool that calls the `/computers/...` API with that worker's token and current task id. Giving the model raw WebDriver/CDP access would bypass the whole authority boundary and is not an acceptable integration.
