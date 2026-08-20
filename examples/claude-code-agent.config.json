@@ -1,0 +1,41 @@
+{
+  "dataDir": ".sovereignbot/data",
+  "bindHost": "127.0.0.1",
+  "port": 7341,
+  "agents": [
+    {
+      "id": "claude-worker",
+      "name": "Claude Code Worker",
+      "role": "worker",
+      "capabilities": ["coding", "review"],
+      "harness": {
+        "kind": "claude-code",
+        "cwd": ".",
+        "timeoutMs": 3600000
+      }
+    }
+  ],
+  "policy": {
+    "rules": [
+      {
+        "id": "stop-claude-repeat-loop",
+        "effect": "deny",
+        "match": {
+          "category": "harness",
+          "operation": "run",
+          "agentId": "claude-worker",
+          "repeatAtLeast": 10
+        }
+      },
+      {
+        "id": "allow-claude-worker",
+        "effect": "allow",
+        "match": {
+          "category": "harness",
+          "operation": "run",
+          "agentId": "claude-worker"
+        }
+      }
+    ]
+  }
+}
