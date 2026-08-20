@@ -1,14 +1,27 @@
 import { spawn } from "node:child_process";
-import { access } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, stat } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import net from "node:net";
 
-async function exists(path) {
+async function executableFile(path) {
     if (!path)
         return false;
     try {
-        await access(path);
+        const info = await stat(path);
+        if (!info.isFile())
+            return false;
+        await access(path, process.platform === "win32" ? constants.F_OK : constants.X_OK);
         return true;
+    }
+    catch {
+        return false;
+    }
+}
+
+async function directory(path) {
+    try {
+        return (await stat(path)).isDirectory();
     }
     catch {
         return false;
@@ -20,7 +33,7 @@ async function findOnPath(names) {
     for (const entry of entries) {
         for (const name of names) {
             const candidate = join(entry.replace(/^"|"$/g, ""), name);
-            if (await exists(candidate))
+            if (await executableFile(candidate))
                 return candidate;
         }
     }
@@ -37,12 +50,14 @@ async function executableFromEnvironment(browser) {
 
     const hinted = process.env[specs.env];
     if (hinted) {
-        if (await exists(hinted))
+        if (await executableFile(hinted))
             return hinted;
-        for (const name of specs.names) {
-            const nested = join(hinted, name);
-            if (await exists(nested))
-                return nested;
+        if (await directory(hinted)) {
+            for (const name of specs.names) {
+                const nested = join(hinted, name);
+                if (await executableFile(nested))
+                    return nested;
+            }
         }
     }
     return findOnPath(specs.names);
@@ -68,10 +83,13 @@ function defaultArgs(browser, port) {
     return [`--port=${port}`];
 }
 
-async function waitUntilReady(endpoint, child, timeoutMs, stderr) {
+async function waitUntilReady(endpoint, child, timeoutMs, stderr, spawnError) {
     const deadline = Date.now() + timeoutMs;
     let lastError;
     while (Date.now() < deadline) {
+        const startupError = spawnError();
+        if (startupError)
+            throw new Error(`WebDriver failed to start: ${startupError.message}`);
         if (child?.exitCode !== null && child?.exitCode !== undefined)
             throw new Error(`WebDriver exited before ready (${child.exitCode}): ${stderr().slice(-1600)}`);
         try {
@@ -118,13 +136,15 @@ export async function startWebDriverProcess({
         windowsHide: true,
     });
     let stderrText = "";
+    let startError;
+    child.once("error", (error) => { startError = error; });
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk) => {
         stderrText = `${stderrText}${chunk}`.slice(-12_000);
     });
     const endpointUrl = `http://127.0.0.1:${port}`;
     try {
-        await waitUntilReady(endpointUrl, child, startupTimeoutMs, () => stderrText);
+        await waitUntilReady(endpointUrl, child, startupTimeoutMs, () => stderrText, () => startError);
     }
     catch (error) {
         try {
