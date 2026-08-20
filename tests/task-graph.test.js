@@ -151,6 +151,38 @@ test("failed dependency blocks downstream work before any harness is launched", 
     assert.match(second.error, /dependency .* ended as blocked/);
 });
 
+test("progress is rejected before acceptance and from agents that do not own the running task", async () => {
+    const { runtime } = await newRuntime(5_000);
+    const task = await runtime.orchestrator.submit({
+        title: "Protected progress",
+        requiredCapabilities: ["research"],
+        preferredAgentId: "researcher",
+    });
+
+    await assert.rejects(
+        () => runtime.orchestrator.reportProgress(
+            task.id,
+            { eventId: "too-early", percent: 1, message: "not accepted yet" },
+            "researcher",
+        ),
+        /cannot report progress from status queued/,
+    );
+
+    const running = runtime.orchestrator.runNext();
+    await waitForStatus(runtime, task.id, "running");
+    await assert.rejects(
+        () => runtime.orchestrator.reportProgress(
+            task.id,
+            { eventId: "spoofed", percent: 50, message: "fake progress" },
+            "writer",
+        ),
+        /does not own task/,
+    );
+
+    await runtime.orchestrator.cancel(task.id);
+    await running;
+});
+
 test("progress events are idempotent and survive a runtime restart", async () => {
     const { dataDir, runtime } = await newRuntime(5_000);
     const task = await runtime.orchestrator.submit({
@@ -211,6 +243,7 @@ test("cancelling a plan propagates to a running child and queued descendants", a
     assert.equal((await taskById(runtime, plan.id)).status, "cancelled");
     assert.equal((await taskById(runtime, first.id)).status, "cancelled");
     assert.equal((await taskById(runtime, second.id)).status, "cancelled");
+    assert.equal((await runtime.audit.verify()).ok, true);
 });
 
 test("independent review can request changes, retry, and approve without duplicate review events", async () => {
