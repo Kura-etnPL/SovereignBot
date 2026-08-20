@@ -25,7 +25,7 @@
   "scripts": {
     "check": "node scripts/check.mjs",
     "test": "node --test",
-    "test:browser": "node tests/webdriver-real-browser.mjs",
+    "test:browser": "node tests/webdriver-real-browser.mjs && node tests/mcp-real-browser.mjs",
     "start": "node src/cli.js serve"
   }
 }

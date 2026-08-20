@@ -3,7 +3,9 @@ import { AuditLog } from "./audit.js";
 import { ComputerGateway } from "./computer-gateway.js";
 import { ComputerLifecycleManager } from "./computer-lifecycle.js";
 import { ComputerRegistry } from "./computer-registry.js";
+import { GovernedToolBridgeManager } from "./governed-tool-bridge.js";
 import { Governor } from "./governor.js";
+import { registerAgentToolBridgeManager } from "./harness.js";
 import { MemoryStore } from "./memory.js";
 import { Orchestrator } from "./orchestrator.js";
 import { PolicyEngine } from "./policy.js";
@@ -60,6 +62,12 @@ export async function createRuntime(config, options = {}) {
         audit,
     });
 
+    const governedToolBridge = new GovernedToolBridgeManager({ dataDir, computer, audit });
+    for (const agent of config.agents) {
+        if (Array.isArray(agent.governedTools) && agent.governedTools.length)
+            registerAgentToolBridgeManager(agent, governedToolBridge);
+    }
+
     return {
         config,
         orchestrator,
@@ -70,7 +78,9 @@ export async function createRuntime(config, options = {}) {
         rawComputer,
         computerLifecycle,
         computerRegistry,
+        governedToolBridge,
         async close() {
+            await governedToolBridge.close();
             await (managedComputerDriverFactory ?? computerDriverFactory)?.close?.();
         },
     };

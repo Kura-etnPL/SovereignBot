@@ -158,8 +158,16 @@ export class ClaudeCodeHarness {
             args.push("--max-turns", String(this.config.maxTurns));
         if (this.config.noChrome)
             args.push("--no-chrome");
-        if (Array.isArray(this.config.allowedTools) && this.config.allowedTools.length)
-            args.push("--allowedTools", this.config.allowedTools.join(","));
+
+        if (context.toolBridge?.claudeConfigPath)
+            args.push("--mcp-config", context.toolBridge.claudeConfigPath);
+
+        const allowedTools = new Set([
+            ...(Array.isArray(this.config.allowedTools) ? this.config.allowedTools : []),
+            ...(context.toolBridge?.claudeToolNames ?? []),
+        ]);
+        if (allowedTools.size)
+            args.push("--allowedTools", [...allowedTools].join(","));
         if (Array.isArray(this.config.disallowedTools) && this.config.disallowedTools.length)
             args.push("--disallowedTools", this.config.disallowedTools.join(","));
         if (existingSessionId)
@@ -274,6 +282,7 @@ export class ClaudeCodeHarness {
                         signal,
                         launcher: launch.source,
                         resultSubtype: resultEvent?.subtype,
+                        governedTools: Boolean(context.toolBridge),
                     },
                 };
             }
@@ -281,14 +290,14 @@ export class ClaudeCodeHarness {
                 return {
                     ok: false,
                     error: "Claude Code completed without a result event.",
-                    metadata: { sessionId, eventCount, progressCount, launcher: launch.source },
+                    metadata: { sessionId, eventCount, progressCount, launcher: launch.source, governedTools: Boolean(context.toolBridge) },
                 };
             }
             if (!sessionId) {
                 return {
                     ok: false,
                     error: "Claude Code completed without a session id; the task cannot be resumed safely.",
-                    metadata: { eventCount, progressCount, launcher: launch.source },
+                    metadata: { eventCount, progressCount, launcher: launch.source, governedTools: Boolean(context.toolBridge) },
                 };
             }
 
@@ -308,6 +317,7 @@ export class ClaudeCodeHarness {
                     launcher: launch.source,
                     resumed: Boolean(existingSessionId),
                     resultSubtype: resultEvent.subtype,
+                    governedTools: Boolean(context.toolBridge),
                 },
             };
         }
@@ -322,7 +332,7 @@ export class ClaudeCodeHarness {
             return {
                 ok: false,
                 error: error.message,
-                metadata: { sessionId, eventCount, progressCount, launcher: launch.source },
+                metadata: { sessionId, eventCount, progressCount, launcher: launch.source, governedTools: Boolean(context.toolBridge) },
             };
         }
         finally {

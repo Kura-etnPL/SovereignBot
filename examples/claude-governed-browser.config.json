@@ -1,0 +1,48 @@
+{
+  "dataDir": ".sovereignbot/data",
+  "bindHost": "127.0.0.1",
+  "port": 7341,
+  "computer": {
+    "allowPrivateHosts": false,
+    "driver": {
+      "kind": "webdriver-sidecar",
+      "browser": "chrome",
+      "headless": false
+    }
+  },
+  "agents": [
+    {
+      "id": "claude-browser-worker",
+      "name": "Claude Browser Worker",
+      "role": "worker",
+      "capabilities": ["coding", "browser"],
+      "governedTools": ["computer"],
+      "harness": {
+        "kind": "claude-code",
+        "cwd": ".",
+        "noChrome": true,
+        "timeoutMs": 3600000
+      }
+    }
+  ],
+  "policy": {
+    "repeatWindowMs": 180000,
+    "rules": [
+      {
+        "id": "stop-computer-loop",
+        "effect": "deny",
+        "match": { "category": "computer", "repeatAtLeast": 10 }
+      },
+      {
+        "id": "allow-claude-harness",
+        "effect": "allow",
+        "match": { "category": "harness", "agentId": "claude-browser-worker" }
+      },
+      {
+        "id": "allow-claude-governed-computer",
+        "effect": "allow",
+        "match": { "category": "computer", "agentId": "claude-browser-worker" }
+      }
+    ]
+  }
+}

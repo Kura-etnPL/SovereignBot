@@ -1,0 +1,47 @@
+{
+  "dataDir": ".sovereignbot/data",
+  "bindHost": "127.0.0.1",
+  "port": 7341,
+  "computer": {
+    "allowPrivateHosts": false,
+    "driver": {
+      "kind": "webdriver-sidecar",
+      "browser": "chrome",
+      "headless": false
+    }
+  },
+  "agents": [
+    {
+      "id": "codex-browser-worker",
+      "name": "Codex Browser Worker",
+      "role": "worker",
+      "capabilities": ["coding", "browser"],
+      "governedTools": ["computer"],
+      "harness": {
+        "kind": "codex",
+        "cwd": ".",
+        "timeoutMs": 3600000
+      }
+    }
+  ],
+  "policy": {
+    "repeatWindowMs": 180000,
+    "rules": [
+      {
+        "id": "stop-computer-loop",
+        "effect": "deny",
+        "match": { "category": "computer", "repeatAtLeast": 10 }
+      },
+      {
+        "id": "allow-codex-harness",
+        "effect": "allow",
+        "match": { "category": "harness", "agentId": "codex-browser-worker" }
+      },
+      {
+        "id": "allow-codex-governed-computer",
+        "effect": "allow",
+        "match": { "category": "computer", "agentId": "codex-browser-worker" }
+      }
+    ]
+  }
+}

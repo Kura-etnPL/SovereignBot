@@ -1,6 +1,9 @@
 #!/usr/bin/env node
+import { writeFile } from "node:fs/promises";
 
 const args = process.argv.slice(2);
+if (process.env.SOVEREIGNBOT_CAPTURE_ARGS)
+    await writeFile(process.env.SOVEREIGNBOT_CAPTURE_ARGS, JSON.stringify(args), "utf8");
 let prompt = "";
 process.stdin.setEncoding("utf8");
 for await (const chunk of process.stdin)
