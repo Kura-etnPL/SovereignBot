@@ -1,11 +1,14 @@
 import { join, resolve } from "node:path";
 import { AuditLog } from "./audit.js";
 import { ComputerGateway } from "./computer-gateway.js";
+import { ComputerLifecycleManager } from "./computer-lifecycle.js";
 import { ComputerRegistry } from "./computer-registry.js";
 import { Governor } from "./governor.js";
 import { MemoryStore } from "./memory.js";
 import { Orchestrator } from "./orchestrator.js";
 import { PolicyEngine } from "./policy.js";
+import { createWebDriverSidecarFactory } from "./sidecar-computer-driver.js";
+import { TaskBoundComputerGateway } from "./task-bound-computer.js";
 import { TaskEventStore } from "./task-events.js";
 import { TaskStore } from "./task-store.js";
 
@@ -23,12 +26,38 @@ export async function createRuntime(config, options = {}) {
 
     const computerRegistry = new ComputerRegistry(dataDir, config.agents.map((agent) => agent.id));
     await computerRegistry.init();
-    const computer = new ComputerGateway({
+
+    let managedComputerDriverFactory;
+    let computerDriverFactory = options.computerDriverFactory;
+    if (!computerDriverFactory && config.computer?.driver?.kind === "webdriver-sidecar") {
+        managedComputerDriverFactory = createWebDriverSidecarFactory({
+            ...config.computer.driver,
+            allowPrivateHosts: config.computer.allowPrivateHosts ?? false,
+        });
+        computerDriverFactory = managedComputerDriverFactory;
+    }
+
+    const rawComputer = new ComputerGateway({
         registry: computerRegistry,
         governor,
         audit,
-        driverFactory: options.computerDriverFactory,
+        driverFactory: computerDriverFactory,
         allowPrivateHosts: config.computer?.allowPrivateHosts ?? false,
+    });
+
+    const computer = options.bindComputerToTasks === false
+        ? rawComputer
+        : new TaskBoundComputerGateway({
+            inner: rawComputer,
+            taskResolver: (taskId) => tasks.get(taskId),
+            registry: computerRegistry,
+            governor,
+        });
+
+    const computerLifecycle = new ComputerLifecycleManager({
+        registry: computerRegistry,
+        driverFactory: computerDriverFactory,
+        audit,
     });
 
     return {
@@ -38,6 +67,11 @@ export async function createRuntime(config, options = {}) {
         audit,
         taskEvents,
         computer,
+        rawComputer,
+        computerLifecycle,
         computerRegistry,
+        async close() {
+            await (managedComputerDriverFactory ?? computerDriverFactory)?.close?.();
+        },
     };
 }

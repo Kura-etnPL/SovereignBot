@@ -30,7 +30,7 @@ function requiredPositional(args, index, name) {
 }
 
 function help() {
-    console.log(`SovereignBot 0.2.0
+    console.log(`SovereignBot 0.3.0
 
 Usage:
   sovereignbot init [--config path]
@@ -48,8 +48,12 @@ Usage:
   sovereignbot events <task-id>
   sovereignbot status
   sovereignbot audit verify
+  sovereignbot computer token <agent-id>
+  sovereignbot computer operator-token
+  sovereignbot computer list
 
 Every command accepts [--config path]. Repeated flags such as --cap and --depends may be supplied more than once.
+Computer bearer tokens are printed only by local CLI bootstrap commands; the HTTP API never returns them.
 `);
 }
 
@@ -75,11 +79,30 @@ async function main() {
         console.log(`SovereignBot listening on ${server.url}`);
         const stop = async () => {
             await server.close();
+            await runtime.close();
             process.exit(0);
         };
         process.on("SIGINT", stop);
         process.on("SIGTERM", stop);
         return;
+    }
+
+    if (command === "computer") {
+        const subcommand = args[1];
+        if (subcommand === "token") {
+            const agentId = requiredPositional(args, 2, "computer agent id");
+            console.log(JSON.stringify(await runtime.computer.agentCredentials(agentId), null, 2));
+            return;
+        }
+        if (subcommand === "operator-token") {
+            console.log(JSON.stringify(await runtime.computer.operatorCredentials(), null, 2));
+            return;
+        }
+        if (subcommand === "list") {
+            console.log(JSON.stringify(await runtime.computer.listComputers(), null, 2));
+            return;
+        }
+        throw new Error("computer requires token <agent-id>, operator-token, or list");
     }
 
     if (command === "submit") {

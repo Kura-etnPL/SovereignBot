@@ -14,6 +14,7 @@ async function collect(dir) {
 
 const files = [
   ...(await collect("src")),
+  ...(await collect("sidecars")),
   ...(await collect("tests")),
   ...(await collect("scripts")),
   ...(await collect("examples")),

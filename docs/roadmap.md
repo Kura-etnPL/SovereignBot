@@ -22,27 +22,40 @@
 - [x] Dependency-aware scheduling and cascading cancellation
 - [x] Independent reviewer/approval + changes-requested retry flow
 - [x] Adapter-driven Claude Code progress/retry events
-- [ ] AG-UI adapter
-- [ ] MCP client adapter
-- [ ] Harness health and leases
 
 ## v0.3 — governed computer layer
 
-- [ ] Per-agent browser/computer isolation
-- [ ] Snapshot/ref based browser actions
-- [ ] Human take-over and hand-back
-- [ ] Secret-entry channel excluded from transcripts
-- [ ] Filesystem/network/MCP policy contexts
-- [ ] Persistent distributed repeat detection
+- [x] Per-agent computer identity, browser profile, workspace, bearer token, and process/session boundary
+- [x] Server-held snapshot/ref model with private driver handles and stale-ref refusal
+- [x] Production W3C WebDriver sidecar for Chrome/Edge/Firefox
+- [x] Real Chrome + ChromeDriver E2E in CI
+- [x] Running-task ownership binding in front of computer actions
+- [x] Token-protected worker/operator computer API
+- [x] Human take-over and hand-back
+- [x] Secret-entry channel excluded from task/memory/audit payloads
+- [x] Filesystem and browser/network policy context
+- [x] Connection-time resolved-address egress proxy with hard metadata/reserved blocks
+- [x] Sidecar health, process/browser leases, start/stop/reset lifecycle
+- [x] Cross-platform core tests on Ubuntu/Windows Node 22/24
+- [ ] Governed MCP/computer tool bridge for Codex/Claude Code workers
+- [ ] Persistent repeat detection across runtime/process restarts
+- [ ] Optional container/VM/kernel egress isolation profile for higher-risk workers
 
 ## v0.4 — operator experience
 
 - [ ] Local web UI
-- [ ] Live task graph and worker status
+- [ ] Live task graph and worker/computer status
 - [ ] Policy editor + dry run
+- [ ] Human takeover/secret prompt surface
 - [ ] Memory inspector
 - [ ] Audit timeline + integrity badge
 - [ ] One-command Windows/macOS/Linux installer
+
+## Later integrations
+
+- [ ] AG-UI adapter where it improves interoperability
+- [ ] Generic governed MCP client/bridge
+- [ ] Harness health/lease telemetry beyond computer workers
 
 ## Non-goals
 
@@ -50,3 +63,4 @@
 - Mandatory hosted memory/thread backends
 - A single model/provider as the product architecture
 - Weakening governance to make integrations easier
+- Falling back to coordinate-only visual control when a structured driver is unavailable

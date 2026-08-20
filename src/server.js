@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { handleComputerApiRequest } from "./computer-api.js";
 
 async function readBody(request) {
     const chunks = [];
@@ -28,8 +29,14 @@ export function startServer(runtime) {
     const server = createServer(async (request, response) => {
         try {
             const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
+
+            if (url.pathname.startsWith("/computers")) {
+                await handleComputerApiRequest(runtime, request, response, url);
+                return;
+            }
+
             if (request.method === "GET" && url.pathname === "/health") {
-                send(response, 200, { ok: true, name: "SovereignBot", version: "0.2.0" });
+                send(response, 200, { ok: true, name: "SovereignBot", version: "0.3.0" });
                 return;
             }
             if (request.method === "GET" && url.pathname === "/agents") {
@@ -148,8 +155,10 @@ export function startServer(runtime) {
     return new Promise((resolve, reject) => {
         server.once("error", reject);
         server.listen(port, host, () => {
+            const address = server.address();
+            const actualPort = address && typeof address !== "string" ? address.port : port;
             resolve({
-                url: `http://${host}:${port}`,
+                url: `http://${host}:${actualPort}`,
                 close: () => new Promise((done, fail) => server.close((error) => (error ? fail(error) : done()))),
             });
         });

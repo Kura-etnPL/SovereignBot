@@ -1,9 +1,17 @@
 import { ComputerActionRefusedError } from "./computer-gateway.js";
 
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
 async function readBody(request) {
     const chunks = [];
-    for await (const chunk of request)
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    let total = 0;
+    for await (const chunk of request) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        total += buffer.length;
+        if (total > MAX_BODY_BYTES)
+            throw new Error("computer API request body is too large");
+        chunks.push(buffer);
+    }
     if (!chunks.length)
         return {};
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -14,6 +22,7 @@ function send(response, status, value) {
     response.writeHead(status, {
         "content-type": "application/json; charset=utf-8",
         "content-length": Buffer.byteLength(body),
+        "cache-control": "no-store",
     });
     response.end(body);
 }
@@ -43,6 +52,16 @@ async function requireOperator(runtime, request, response) {
     return false;
 }
 
+function errorStatus(error) {
+    if (error instanceof ComputerActionRefusedError)
+        return 403;
+    if (/unknown computer agent|not found/i.test(error.message))
+        return 404;
+    if (/sidecar|webdriver|browser\/computer driver/i.test(error.message))
+        return 503;
+    return 400;
+}
+
 export async function handleComputerApiRequest(runtime, request, response, url) {
     const parts = segments(url.pathname);
     try {
@@ -66,6 +85,13 @@ export async function handleComputerApiRequest(runtime, request, response, url) 
             return;
         }
 
+        if (request.method === "GET" && parts[2] === "health" && parts.length === 3) {
+            if (!(await requireOperator(runtime, request, response)))
+                return;
+            send(response, 200, await runtime.computerLifecycle.health(agentId));
+            return;
+        }
+
         if (request.method === "POST" && parts[2] === "control" && parts[3] === "take" && parts.length === 4) {
             if (!(await requireOperator(runtime, request, response)))
                 return;
@@ -82,6 +108,14 @@ export async function handleComputerApiRequest(runtime, request, response, url) 
             return;
         }
 
+        if (request.method === "POST" && parts[2] === "lifecycle" && ["start", "stop", "reset"].includes(parts[3]) && parts.length === 4) {
+            if (!(await requireOperator(runtime, request, response)))
+                return;
+            const body = await readBody(request);
+            send(response, 200, await runtime.computerLifecycle[parts[3]](agentId, body.actorId));
+            return;
+        }
+
         if (
             request.method === "POST"
             && parts[2] === "secrets"
@@ -92,11 +126,18 @@ export async function handleComputerApiRequest(runtime, request, response, url) 
             if (!(await requireOperator(runtime, request, response)))
                 return;
             const body = await readBody(request);
-            send(
-                response,
-                200,
-                await runtime.computer.supplySecret(agentId, body.actorId, parts[3], String(body.value ?? "")),
-            );
+            try {
+                send(
+                    response,
+                    200,
+                    await runtime.computer.supplySecret(agentId, body.actorId, parts[3], String(body.value ?? body.text ?? "")),
+                );
+            }
+            catch {
+                // Never surface downstream driver errors from the secret path. A third-party driver
+                // may accidentally include the entered value in its own error string.
+                send(response, 400, { error: "secret supply failed" });
+            }
             return;
         }
 
@@ -172,6 +213,6 @@ export async function handleComputerApiRequest(runtime, request, response, url) 
             });
             return;
         }
-        send(response, 400, { error: error.message });
+        send(response, errorStatus(error), { error: error.message });
     }
 }
