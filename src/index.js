@@ -13,5 +13,7 @@ export * from "./orchestrator.js";
 export * from "./policy.js";
 export * from "./runtime.js";
 export * from "./server.js";
+export * from "./sidecar-computer-driver.js";
+export * from "./task-bound-computer.js";
 export * from "./task-events.js";
 export * from "./task-store.js";
