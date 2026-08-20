@@ -1,6 +1,7 @@
 import { join, resolve } from "node:path";
 import { AuditLog } from "./audit.js";
 import { ComputerGateway } from "./computer-gateway.js";
+import { ComputerLifecycleManager } from "./computer-lifecycle.js";
 import { ComputerRegistry } from "./computer-registry.js";
 import { Governor } from "./governor.js";
 import { MemoryStore } from "./memory.js";
@@ -44,9 +45,6 @@ export async function createRuntime(config, options = {}) {
         allowPrivateHosts: config.computer?.allowPrivateHosts ?? false,
     });
 
-    // Production callers get task ownership binding by default. Low-level gateway contract tests may
-    // explicitly disable it so they can test refs/secrets/workspace mechanics without constructing an
-    // unrelated running task for every call.
     const computer = options.bindComputerToTasks === false
         ? rawComputer
         : new TaskBoundComputerGateway({
@@ -56,6 +54,12 @@ export async function createRuntime(config, options = {}) {
             governor,
         });
 
+    const computerLifecycle = new ComputerLifecycleManager({
+        registry: computerRegistry,
+        driverFactory: computerDriverFactory,
+        audit,
+    });
+
     return {
         config,
         orchestrator,
@@ -64,9 +68,10 @@ export async function createRuntime(config, options = {}) {
         taskEvents,
         computer,
         rawComputer,
+        computerLifecycle,
         computerRegistry,
         async close() {
-            await managedComputerDriverFactory?.close?.();
+            await (managedComputerDriverFactory ?? computerDriverFactory)?.close?.();
         },
     };
 }
