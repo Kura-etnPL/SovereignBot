@@ -9,7 +9,18 @@ SovereignBot is a local-first agent runtime. A configured harness may be able to
 - Command and Codex harness processes use `spawn(..., { shell: false })`.
 - SovereignBot does not enable Codex approval/sandbox bypass flags.
 - Every governed action decision is written to a tamper-evident hash-chained audit log before execution.
+- Task-state mutations, task-event appends, and audit-chain appends are serialized to avoid stale/concurrent writers corrupting durable state.
 - `.sovereignbot/`, `.env`, logs, and local runtime state are ignored by Git.
+
+## Supervisor / worker boundary
+
+A supervisor plan may delegate and inspect work, but supervisor role does not make that agent eligible to execute normal worker tasks. Worker ownership is assigned only after a compatible worker is selected and the governed harness launch is allowed.
+
+Review can require a separate reviewer capability and can forbid the executing worker from approving its own candidate result.
+
+The task-graph API currently accepts agent ids such as `actorAgentId` and `reviewerAgentId` as local protocol identities. **Those fields are not authentication credentials.** v0.2 has no network authentication layer, so an untrusted caller that can reach the local API must be assumed able to impersonate those protocol identities. Keep the API on loopback until authenticated actor/session binding is implemented, or put a trusted authenticated proxy in front of it.
+
+Progress/review event ids are idempotency keys, not secrets. Reusing one id for a different task/event type is rejected.
 
 ## Codex harness boundary
 
