@@ -9,8 +9,36 @@ import { startWebDriverProcess } from "./webdriver-process.js";
 
 const PROTOCOL = "sovereignbot.sidecar.v1";
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_BOOTSTRAP_BYTES = 64 * 1024;
 
-function parseConfig() {
+async function readBootstrap() {
+    const chunks = [];
+    let total = 0;
+    for await (const chunk of process.stdin) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        total += buffer.length;
+        if (total > MAX_BOOTSTRAP_BYTES)
+            throw new Error("sidecar bootstrap payload is too large");
+        chunks.push(buffer);
+    }
+    if (!chunks.length)
+        throw new Error("sidecar bootstrap payload is required");
+    let bootstrap;
+    try {
+        bootstrap = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    }
+    catch {
+        throw new Error("sidecar bootstrap payload is not valid JSON");
+    }
+    if (bootstrap?.protocol !== PROTOCOL)
+        throw new Error("sidecar bootstrap protocol mismatch");
+    if (typeof bootstrap.token !== "string" || bootstrap.token.length < 24)
+        throw new Error("sidecar bootstrap token is invalid");
+    return bootstrap;
+}
+
+async function parseConfig() {
+    const bootstrap = await readBootstrap();
     const raw = process.env.SOVEREIGNBOT_SIDECAR_CONFIG_JSON;
     let config = {};
     if (raw) {
@@ -21,14 +49,11 @@ function parseConfig() {
             throw new Error("SOVEREIGNBOT_SIDECAR_CONFIG_JSON is not valid JSON");
         }
     }
-    const token = process.env.SOVEREIGNBOT_SIDECAR_TOKEN;
     const profileDir = process.env.SOVEREIGNBOT_PROFILE_DIR;
-    if (!token || token.length < 24)
-        throw new Error("SOVEREIGNBOT_SIDECAR_TOKEN is required");
     if (!profileDir)
         throw new Error("SOVEREIGNBOT_PROFILE_DIR is required");
     return {
-        token,
+        token: bootstrap.token,
         profileDir: resolve(profileDir),
         browser: config.browser ?? "chrome",
         headless: Boolean(config.headless),
@@ -65,8 +90,7 @@ async function readJson(request) {
     }
     if (!chunks.length)
         return {};
-    const raw = Buffer.concat(chunks).toString("utf8");
-    return JSON.parse(raw);
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 function send(response, status, value) {
@@ -85,17 +109,24 @@ function safeError(error) {
 }
 
 async function main() {
-    const config = parseConfig();
+    const config = await parseConfig();
     await mkdir(config.profileDir, { recursive: true });
 
     const proxy = await startEgressProxy({ allowPrivateHosts: config.allowPrivateHosts });
-    const webdriver = await startWebDriverProcess({
-        browser: config.browser,
-        endpoint: config.webdriverUrl,
-        command: config.webdriverCommand,
-        args: config.webdriverArgs,
-        startupTimeoutMs: config.startupTimeoutMs,
-    });
+    let webdriver;
+    try {
+        webdriver = await startWebDriverProcess({
+            browser: config.browser,
+            endpoint: config.webdriverUrl,
+            command: config.webdriverCommand,
+            args: config.webdriverArgs,
+            startupTimeoutMs: config.startupTimeoutMs,
+        });
+    }
+    catch (error) {
+        await proxy.close().catch(() => undefined);
+        throw error;
+    }
 
     let client;
     let sessionLease;
@@ -150,7 +181,14 @@ async function main() {
         return value;
     }
 
-    await startSession();
+    try {
+        await startSession();
+    }
+    catch (error) {
+        await webdriver.close().catch(() => undefined);
+        await proxy.close().catch(() => undefined);
+        throw error;
+    }
 
     server = createServer(async (request, response) => {
         if (!tokenEqual(config.token, bearer(request))) {
@@ -276,8 +314,6 @@ async function main() {
             send(response, 404, { error: "not found" });
         }
         catch (error) {
-            // Secret input errors deliberately discard downstream/browser details. Some WebDriver
-            // implementations echo entered values in validation errors; those must never cross back.
             send(response, 400, { error: secretRoute ? "secret input failed" : safeError(error) });
         }
     });
