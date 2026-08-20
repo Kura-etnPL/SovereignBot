@@ -1,5 +1,6 @@
-import { createHarness } from "./harness.js";
+import { createHarness, harnessTarget } from "./harness.js";
 import { createId } from "./id.js";
+
 export class Orchestrator {
     agents;
     tasks;
@@ -8,6 +9,7 @@ export class Orchestrator {
     audit;
     #busy = new Map();
     #controllers = new Map();
+
     constructor(agents, tasks, memory, governor, audit) {
         this.agents = agents;
         this.tasks = tasks;
@@ -17,9 +19,11 @@ export class Orchestrator {
         for (const agent of agents)
             this.#busy.set(agent.id, 0);
     }
+
     listAgents() {
         return structuredClone(this.agents);
     }
+
     async submit(spec) {
         if (!spec.title.trim())
             throw new Error("task title is required");
@@ -44,12 +48,37 @@ export class Orchestrator {
         });
         return task;
     }
+
     async delegate(parentTaskId, spec) {
         return this.submit({ ...spec, parentTaskId });
     }
+
     async listTasks() {
         return this.tasks.list();
     }
+
+    async retry(taskId) {
+        const task = await this.requireTask(taskId);
+        if (!['failed', 'blocked', 'cancelled'].includes(task.status)) {
+            throw new Error(`task ${task.id} cannot be retried from status ${task.status}`);
+        }
+        const queued = await this.patch(task, {
+            status: "queued",
+            error: undefined,
+            result: undefined,
+        });
+        await this.audit.append({
+            type: "task.retried",
+            actor: "user",
+            subject: task.id,
+            data: {
+                assignedAgentId: task.assignedAgentId,
+                hasHarnessState: Boolean(task.harnessState),
+            },
+        });
+        return queued;
+    }
+
     async cancel(taskId) {
         const task = await this.requireTask(taskId);
         if (["completed", "failed", "blocked", "cancelled"].includes(task.status))
@@ -59,6 +88,7 @@ export class Orchestrator {
         await this.audit.append({ type: "task.cancelled", actor: "user", subject: task.id });
         return updated;
     }
+
     async runNext() {
         const queued = (await this.tasks.list()).find((task) => task.status === "queued");
         if (!queued)
@@ -68,6 +98,7 @@ export class Orchestrator {
             return undefined;
         return this.runTask(queued, agent);
     }
+
     async runUntilIdle(maxTasks = 100) {
         const finished = [];
         for (let index = 0; index < maxTasks; index += 1) {
@@ -78,9 +109,13 @@ export class Orchestrator {
         }
         return finished;
     }
+
     pickAgent(task) {
         const required = new Set(task.requiredCapabilities ?? []);
+        const pinnedAgentId = task.harnessState?.sessionId ? task.assignedAgentId : undefined;
         const eligible = this.agents.filter((agent) => {
+            if (pinnedAgentId && agent.id !== pinnedAgentId)
+                return false;
             if (task.preferredAgentId && agent.id !== task.preferredAgentId)
                 return false;
             if (![...required].every((capability) => agent.capabilities.includes(capability)))
@@ -98,14 +133,15 @@ export class Orchestrator {
             return a.id.localeCompare(b.id);
         })[0];
     }
+
     async runTask(task, agent) {
         const action = {
             category: "harness",
             operation: "run",
-            target: agent.harness.kind === "command" ? agent.harness.command : "echo",
+            target: harnessTarget(agent.harness),
             agentId: agent.id,
             taskId: task.id,
-            metadata: { role: agent.role },
+            metadata: { role: agent.role, harnessKind: agent.harness.kind },
         };
         const decision = await this.governor.authorize(action);
         if (!decision.allowed) {
@@ -122,6 +158,7 @@ export class Orchestrator {
             });
             return blocked;
         }
+
         this.#busy.set(agent.id, (this.#busy.get(agent.id) ?? 0) + 1);
         const controller = new AbortController();
         this.#controllers.set(task.id, controller);
@@ -130,22 +167,58 @@ export class Orchestrator {
             type: "task.started",
             actor: agent.id,
             subject: task.id,
-            data: { title: task.title },
+            data: { title: task.title, resumed: Boolean(task.harnessState?.sessionId) },
         });
+
+        const updateHarnessState = async (statePatch) => {
+            const current = await this.requireTask(task.id);
+            const previous = current.harnessState ?? {};
+            const changed = Object.entries(statePatch).some(([key, value]) => previous[key] !== value);
+            if (!changed)
+                return current;
+            const updated = await this.patch(current, {
+                harnessState: { ...previous, ...statePatch },
+            });
+            await this.audit.append({
+                type: "task.harness_state_updated",
+                actor: agent.id,
+                subject: task.id,
+                data: { keys: Object.keys(statePatch), kind: updated.harnessState?.kind },
+            });
+            return updated;
+        };
+
         try {
             const latest = await this.requireTask(task.id);
-            const result = await createHarness(agent).run({ task: latest, agent, signal: controller.signal });
+            const result = await createHarness(agent).run({
+                task: latest,
+                agent,
+                signal: controller.signal,
+                updateHarnessState,
+            });
+            const afterRun = await this.requireTask(task.id);
+            if (afterRun.status === "cancelled")
+                return afterRun;
+
             if (!result.ok) {
-                const failed = await this.patch(latest, { status: "failed", error: result.error ?? "harness failed" });
+                const failed = await this.patch(afterRun, {
+                    status: "failed",
+                    error: result.error ?? "harness failed",
+                });
                 await this.audit.append({
                     type: "task.failed",
                     actor: agent.id,
                     subject: task.id,
-                    data: { error: failed.error },
+                    data: { error: failed.error, harnessMetadata: result.metadata },
                 });
                 return failed;
             }
-            const completed = await this.patch(latest, { status: "completed", result: result.output, error: undefined });
+
+            const completed = await this.patch(afterRun, {
+                status: "completed",
+                result: result.output,
+                error: undefined,
+            });
             await this.memory.put({
                 scope: `task:${task.id}`,
                 key: "result",
@@ -162,26 +235,37 @@ export class Orchestrator {
                 type: "task.completed",
                 actor: agent.id,
                 subject: task.id,
-                data: { hasOutput: result.output !== undefined },
+                data: { hasOutput: result.output !== undefined, harnessMetadata: result.metadata },
             });
             return completed;
         }
         catch (error) {
             const latest = await this.requireTask(task.id);
+            if (latest.status === "cancelled")
+                return latest;
             const status = controller.signal.aborted ? "cancelled" : "failed";
-            return this.patch(latest, { status, error: error.message });
+            const updated = await this.patch(latest, { status, error: error.message });
+            await this.audit.append({
+                type: status === "cancelled" ? "task.cancelled" : "task.failed",
+                actor: agent.id,
+                subject: task.id,
+                data: { error: error.message },
+            });
+            return updated;
         }
         finally {
             this.#busy.set(agent.id, Math.max(0, (this.#busy.get(agent.id) ?? 1) - 1));
             this.#controllers.delete(task.id);
         }
     }
+
     async requireTask(id) {
         const task = await this.tasks.get(id);
         if (!task)
             throw new Error(`task not found: ${id}`);
         return task;
     }
+
     async patch(task, patch) {
         const updated = { ...task, ...patch, updatedAt: new Date().toISOString() };
         await this.tasks.upsert(updated);
