@@ -2,6 +2,15 @@ import { spawn } from "node:child_process";
 import { ClaudeCodeHarness } from "./claude-code-harness.js";
 import { CodexHarness } from "./codex-harness.js";
 
+const TOOL_BRIDGE_MANAGERS = new WeakMap();
+
+export function registerAgentToolBridgeManager(agent, manager) {
+    if (manager)
+        TOOL_BRIDGE_MANAGERS.set(agent, manager);
+    else
+        TOOL_BRIDGE_MANAGERS.delete(agent);
+}
+
 class EchoHarness {
     delayMs;
     constructor(delayMs = 0) {
@@ -95,6 +104,32 @@ class CommandHarness {
     }
 }
 
+class ToolBridgeHarness {
+    inner;
+    manager;
+    agent;
+
+    constructor(inner, manager, agent) {
+        this.inner = inner;
+        this.manager = manager;
+        this.agent = agent;
+    }
+
+    async run(context) {
+        const bridge = await this.manager.prepare({
+            task: context.task,
+            agent: this.agent,
+            signal: context.signal,
+        });
+        try {
+            return await this.inner.run({ ...context, toolBridge: bridge });
+        }
+        finally {
+            await bridge?.close("harness finished");
+        }
+    }
+}
+
 export function harnessTarget(harness) {
     if (harness.kind === "command")
         return harness.command;
@@ -105,7 +140,7 @@ export function harnessTarget(harness) {
     return "echo";
 }
 
-export function createHarness(agent) {
+function createBaseHarness(agent) {
     switch (agent.harness.kind) {
         case "echo":
             return new EchoHarness(agent.harness.delayMs);
@@ -118,4 +153,10 @@ export function createHarness(agent) {
         default:
             throw new Error(`unsupported harness kind: ${agent.harness.kind}`);
     }
+}
+
+export function createHarness(agent) {
+    const inner = createBaseHarness(agent);
+    const manager = TOOL_BRIDGE_MANAGERS.get(agent);
+    return manager ? new ToolBridgeHarness(inner, manager, agent) : inner;
 }
