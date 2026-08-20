@@ -5,6 +5,7 @@ export const DEFAULT_CONFIG_PATH = ".sovereignbot/config.json";
 const SUPPORTED_HARNESSES = new Set(["echo", "command", "codex", "claude-code"]);
 const SUPPORTED_COMPUTER_DRIVERS = new Set(["webdriver-sidecar"]);
 const SUPPORTED_BROWSERS = new Set(["chrome", "edge", "firefox"]);
+const SUPPORTED_GOVERNED_TOOLS = new Set(["computer"]);
 
 export function defaultConfig(dataDir = ".sovereignbot/data") {
     return {
@@ -131,6 +132,23 @@ function validateComputer(computer) {
     }
 }
 
+function validateGovernedTools(agent) {
+    if (agent.governedTools === undefined)
+        return;
+    if (!Array.isArray(agent.governedTools) || agent.governedTools.some((tool) => typeof tool !== "string"))
+        throw new Error(`agent ${agent.id} governedTools must be an array of strings`);
+    const unique = new Set(agent.governedTools);
+    if (unique.size !== agent.governedTools.length)
+        throw new Error(`agent ${agent.id} governedTools contains duplicates`);
+    for (const tool of unique) {
+        if (!SUPPORTED_GOVERNED_TOOLS.has(tool))
+            throw new Error(`agent ${agent.id} uses unsupported governed tool: ${tool}`);
+    }
+    if (unique.size && !["codex", "claude-code"].includes(agent.harness.kind)) {
+        throw new Error(`agent ${agent.id} governedTools require a codex or claude-code harness`);
+    }
+}
+
 export async function loadConfig(path = DEFAULT_CONFIG_PATH) {
     const absolute = resolve(path);
     const config = JSON.parse(await readFile(absolute, "utf8"));
@@ -162,6 +180,7 @@ export async function loadConfig(path = DEFAULT_CONFIG_PATH) {
         if (agent.harness.maxTurns !== undefined && (!Number.isInteger(agent.harness.maxTurns) || agent.harness.maxTurns <= 0)) {
             throw new Error(`harness.maxTurns for agent ${agent.id} must be a positive integer`);
         }
+        validateGovernedTools(agent);
     }
     if (!config.policy || !Array.isArray(config.policy.rules)) {
         throw new Error("config.policy.rules is required; SovereignBot fails closed without policy");
