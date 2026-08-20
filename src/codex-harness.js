@@ -80,6 +80,9 @@ function taskPrompt(task) {
                 : `Task input (JSON):\n${JSON.stringify(task.input, null, 2)}`,
         );
     }
+    if (task.review?.latest?.decision === "changes_requested" && task.review.latest.notes) {
+        parts.push(`Review feedback to address in this retry:\n${task.review.latest.notes}`);
+    }
     return parts.join("\n\n");
 }
 
