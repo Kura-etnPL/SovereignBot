@@ -93,6 +93,8 @@ export class GovernedToolBridgeManager {
         if (!["codex", "claude-code"].includes(agent.harness?.kind)) {
             throw new Error(`governed computer tools require a Codex or Claude Code harness, got ${agent.harness?.kind ?? "unknown"}`);
         }
+        if (signal?.aborted)
+            throw new Error("cannot open governed tool bridge: task is already aborted");
         if (task.status !== "running" || task.assignedAgentId !== agent.id) {
             throw new Error(`cannot open governed tool bridge for task ${task.id}: task is not running under agent ${agent.id}`);
         }
@@ -117,17 +119,25 @@ export class GovernedToolBridgeManager {
         };
         this.#leases.set(capability, lease);
 
-        await writeFile(bootstrapPath, `${JSON.stringify({
-            protocol: "sovereignbot.governed-bridge.v1",
-            brokerUrl: this.#url,
-            capability,
-        })}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        try {
+            await writeFile(bootstrapPath, `${JSON.stringify({
+                protocol: "sovereignbot.governed-bridge.v1",
+                brokerUrl: this.#url,
+                capability,
+            })}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
 
-        await writeFile(claudeConfigPath, `${JSON.stringify({
-            mcpServers: {
-                [GOVERNED_MCP_SERVER_NAME]: { command, args },
-            },
-        }, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+            await writeFile(claudeConfigPath, `${JSON.stringify({
+                mcpServers: {
+                    [GOVERNED_MCP_SERVER_NAME]: { command, args },
+                },
+            }, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        }
+        catch (error) {
+            lease.active = false;
+            this.#leases.delete(capability);
+            await Promise.allSettled([unlink(bootstrapPath), unlink(claudeConfigPath)]);
+            throw error;
+        }
 
         await this.#audit.append({
             type: "tool_bridge.opened",
@@ -137,14 +147,13 @@ export class GovernedToolBridgeManager {
         });
 
         let closed = false;
-        const onAbort = () => close("task aborted");
-        signal?.addEventListener("abort", onAbort, { once: true });
-
+        let onAbort;
         const close = async (reason = "harness finished") => {
             if (closed)
                 return;
             closed = true;
-            signal?.removeEventListener("abort", onAbort);
+            if (onAbort)
+                signal?.removeEventListener("abort", onAbort);
             lease.active = false;
             this.#leases.delete(capability);
             await Promise.allSettled([unlink(bootstrapPath), unlink(claudeConfigPath)]);
@@ -155,6 +164,12 @@ export class GovernedToolBridgeManager {
                 data: { bridgeId: id, reason },
             });
         };
+        onAbort = () => { void close("task aborted"); };
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) {
+            await close("task aborted before bridge handoff");
+            throw new Error("cannot open governed tool bridge: task was aborted during bridge setup");
+        }
 
         return {
             id,
