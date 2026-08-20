@@ -1,8 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+
 export async function ensureParent(path) {
     await mkdir(dirname(path), { recursive: true });
 }
+
 export async function readJsonFile(path, fallback) {
     try {
         return JSON.parse(await readFile(path, "utf8"));
@@ -13,9 +16,10 @@ export async function readJsonFile(path, fallback) {
         throw error;
     }
 }
+
 export async function writeJsonAtomic(path, value) {
     await ensureParent(path);
-    const temp = `${path}.tmp-${process.pid}-${Date.now()}`;
+    const temp = `${path}.tmp-${process.pid}-${randomUUID()}`;
     await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
     await rename(temp, path);
 }
