@@ -130,6 +130,12 @@ export class CodexHarness {
             args.push("--skip-git-repo-check");
         if (this.config.sandbox)
             args.push("--sandbox", this.config.sandbox);
+
+        // The bridge config contains only a local command and a path to a 0600 one-shot bootstrap
+        // file. The task-scoped capability token itself is not present in Codex argv, prompt or env.
+        for (const override of context.toolBridge?.codexConfigOverrides ?? [])
+            args.push("--config", override);
+
         if (existingSessionId)
             args.push("resume", existingSessionId);
 
@@ -220,23 +226,29 @@ export class CodexHarness {
                 return {
                     ok: false,
                     error: classifyFailure({ spawnError, stderr, code, signal, timedOut, cancelled }),
-                    metadata: { sessionId, eventCount, code, signal, launcher: launch.source },
+                    metadata: { sessionId, eventCount, code, signal, launcher: launch.source, governedTools: Boolean(context.toolBridge) },
                 };
             }
             if (turnFailure) {
-                return { ok: false, error: turnFailure, metadata: { sessionId, eventCount, launcher: launch.source } };
+                return { ok: false, error: turnFailure, metadata: { sessionId, eventCount, launcher: launch.source, governedTools: Boolean(context.toolBridge) } };
             }
             if (!sessionId) {
                 return {
                     ok: false,
                     error: "Codex completed without emitting thread.started; the session cannot be resumed safely.",
-                    metadata: { eventCount, launcher: launch.source },
+                    metadata: { eventCount, launcher: launch.source, governedTools: Boolean(context.toolBridge) },
                 };
             }
             return {
                 ok: true,
                 output: { text: finalResponse, sessionId, usage },
-                metadata: { sessionId, eventCount, launcher: launch.source, resumed: Boolean(existingSessionId) },
+                metadata: {
+                    sessionId,
+                    eventCount,
+                    launcher: launch.source,
+                    resumed: Boolean(existingSessionId),
+                    governedTools: Boolean(context.toolBridge),
+                },
             };
         }
         catch (error) {
@@ -247,7 +259,7 @@ export class CodexHarness {
             catch {
             }
             await exitPromise.catch(() => undefined);
-            return { ok: false, error: error.message, metadata: { sessionId, eventCount, launcher: launch.source } };
+            return { ok: false, error: error.message, metadata: { sessionId, eventCount, launcher: launch.source, governedTools: Boolean(context.toolBridge) } };
         }
         finally {
             clearTimeout(timeout);
