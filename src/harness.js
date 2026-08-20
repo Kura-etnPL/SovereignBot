@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { ClaudeCodeHarness } from "./claude-code-harness.js";
 import { CodexHarness } from "./codex-harness.js";
 
 class EchoHarness {
@@ -37,6 +38,8 @@ class CommandHarness {
             const controller = new AbortController();
             const onAbort = () => controller.abort();
             context.signal.addEventListener("abort", onAbort, { once: true });
+            if (context.signal.aborted)
+                controller.abort();
             const timeoutMs = this.config.timeoutMs ?? 15 * 60_000;
             const timeout = setTimeout(() => controller.abort(), timeoutMs);
             const child = spawn(this.config.command, this.config.args ?? [], {
@@ -97,6 +100,8 @@ export function harnessTarget(harness) {
         return harness.command;
     if (harness.kind === "codex")
         return harness.command ?? process.env.SOVEREIGNBOT_CODEX_BIN ?? "codex";
+    if (harness.kind === "claude-code")
+        return harness.command ?? process.env.SOVEREIGNBOT_CLAUDE_BIN ?? "claude";
     return "echo";
 }
 
@@ -108,6 +113,8 @@ export function createHarness(agent) {
             return new CommandHarness(agent.harness);
         case "codex":
             return new CodexHarness(agent.harness);
+        case "claude-code":
+            return new ClaudeCodeHarness(agent.harness);
         default:
             throw new Error(`unsupported harness kind: ${agent.harness.kind}`);
     }
