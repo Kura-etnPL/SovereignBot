@@ -1,6 +1,6 @@
 {
   "name": "sovereignbot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local-first AI coworker runtime with durable memory, governed actions, and multi-agent orchestration.",
   "type": "module",
   "private": false,
@@ -16,6 +16,7 @@
   },
   "files": [
     "src",
+    "sidecars",
     "docs",
     "README.md",
     "LICENSE",
@@ -24,6 +25,7 @@
   "scripts": {
     "check": "node scripts/check.mjs",
     "test": "node --test",
+    "test:browser": "node tests/webdriver-real-browser.mjs",
     "start": "node src/cli.js serve"
   }
 }
