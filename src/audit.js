@@ -3,6 +3,8 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { createId } from "./id.js";
 
+const SENSITIVE_AUDIT_KEY = /^(text|content|value|password|passwd|secret|token|authorization|cookie|set-cookie|api[_-]?key|session[_-]?id)$/i;
+
 function stable(value) {
     if (Array.isArray(value))
         return `[${value.map(stable).join(",")}]`;
@@ -17,6 +19,22 @@ function stable(value) {
 
 function digest(record) {
     return createHash("sha256").update(stable(record)).digest("hex");
+}
+
+function sanitize(value, key, eventType) {
+    if (key && SENSITIVE_AUDIT_KEY.test(key))
+        return "[REDACTED]";
+    if (eventType?.startsWith("computer.secret_") && key === "error")
+        return "secret operation failed";
+    if (Array.isArray(value))
+        return value.map((item) => sanitize(item, undefined, eventType));
+    if (value && typeof value === "object") {
+        const out = {};
+        for (const [childKey, child] of Object.entries(value))
+            out[childKey] = sanitize(child, childKey, eventType);
+        return out;
+    }
+    return value;
 }
 
 export class AuditLog {
@@ -36,7 +54,13 @@ export class AuditLog {
     }
 
     async append(input) {
-        const operation = this.#appendQueue.then(() => this.#appendNow(input));
+        const safeInput = {
+            ...input,
+            actor: sanitize(input.actor, "actor", input.type),
+            subject: sanitize(input.subject, "subject", input.type),
+            data: sanitize(input.data, undefined, input.type),
+        };
+        const operation = this.#appendQueue.then(() => this.#appendNow(safeInput));
         this.#appendQueue = operation.catch(() => undefined);
         return operation;
     }
