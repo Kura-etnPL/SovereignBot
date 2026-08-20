@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { createId } from "./id.js";
+
 function stable(value) {
     if (Array.isArray(value))
         return `[${value.map(stable).join(",")}]`;
@@ -13,22 +14,34 @@ function stable(value) {
     }
     return JSON.stringify(value);
 }
+
 function digest(record) {
     return createHash("sha256").update(stable(record)).digest("hex");
 }
+
 export class AuditLog {
     #path;
     #tail;
+    #appendQueue = Promise.resolve();
+
     constructor(path) {
         this.#path = path;
     }
+
     async init() {
         await mkdir(dirname(this.#path), { recursive: true });
         const records = await this.readAll();
         const last = records.at(-1);
         this.#tail = last ? { seq: last.seq, hash: last.hash } : { seq: 0, hash: "GENESIS" };
     }
+
     async append(input) {
+        const operation = this.#appendQueue.then(() => this.#appendNow(input));
+        this.#appendQueue = operation.catch(() => undefined);
+        return operation;
+    }
+
+    async #appendNow(input) {
         if (!this.#tail)
             await this.init();
         const tail = this.#tail;
@@ -47,6 +60,7 @@ export class AuditLog {
         this.#tail = { seq: record.seq, hash: record.hash };
         return record;
     }
+
     async readAll() {
         try {
             const raw = await readFile(this.#path, "utf8");
@@ -61,7 +75,9 @@ export class AuditLog {
             throw error;
         }
     }
+
     async verify() {
+        await this.#appendQueue;
         const records = await this.readAll();
         let prevHash = "GENESIS";
         let expectedSeq = 1;
