@@ -102,7 +102,7 @@ export async function resolveEgressTarget(host, { allowPrivateHosts = false } = 
         if (classification === "never")
             throw new Error(`egress target resolved to an always-blocked address: ${entry.address}`);
         if (classification === "private" && !allowPrivateHosts)
-            throw new Error(`egress target resolved to a private/loopback address: ${entry.address}`);
+            throw new Error(`egress target resolved to a blocked private/loopback address: ${entry.address}`);
     }
 
     return { host: normalized, ...results[0] };
