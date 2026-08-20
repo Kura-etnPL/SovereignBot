@@ -68,6 +68,24 @@ function stringArray(value, name) {
         throw new Error(`${name} must be an array of strings`);
 }
 
+function stringMap(value, name) {
+    if (value === undefined)
+        return;
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new Error(`${name} must be an object of string values`);
+    for (const [key, entry] of Object.entries(value)) {
+        if (!key || typeof entry !== "string")
+            throw new Error(`${name} must be an object of string values`);
+        if (key.includes("\0") || key.includes("="))
+            throw new Error(`${name} contains an invalid environment variable name: ${key}`);
+    }
+}
+
+function optionalString(value, name) {
+    if (value !== undefined && (typeof value !== "string" || !value.trim()))
+        throw new Error(`${name} must be a non-empty string`);
+}
+
 function validateComputer(computer) {
     if (computer === undefined)
         return;
@@ -86,8 +104,13 @@ function validateComputer(computer) {
         throw new Error(`unsupported WebDriver browser: ${driver.browser}`);
     if (driver.headless !== undefined && typeof driver.headless !== "boolean")
         throw new Error("config.computer.driver.headless must be a boolean");
+    optionalString(driver.browserBinary, "config.computer.driver.browserBinary");
+    optionalString(driver.webdriverCommand, "config.computer.driver.webdriverCommand");
+    optionalString(driver.sidecarCommand, "config.computer.driver.sidecarCommand");
+    optionalString(driver.cwd, "config.computer.driver.cwd");
     stringArray(driver.webdriverArgs, "config.computer.driver.webdriverArgs");
     stringArray(driver.sidecarArgs, "config.computer.driver.sidecarArgs");
+    stringMap(driver.env, "config.computer.driver.env");
     positiveInteger(driver.startupTimeoutMs, "config.computer.driver.startupTimeoutMs");
     positiveInteger(driver.requestTimeoutMs, "config.computer.driver.requestTimeoutMs");
 
@@ -103,6 +126,8 @@ function validateComputer(computer) {
         if (parsed.protocol !== "http:" || !["127.0.0.1", "localhost", "::1"].includes(host)) {
             throw new Error("config.computer.driver.webdriverUrl must be a loopback http endpoint");
         }
+        if (parsed.username || parsed.password)
+            throw new Error("config.computer.driver.webdriverUrl must not contain credentials");
     }
 }
 
