@@ -12,15 +12,18 @@
 - [x] Loopback HTTP control API
 - [x] CLI and CI
 
-## v0.2 — real agent harnesses
+## v0.2 — real agent harnesses and coordination
 
 - [x] Codex CLI adapter with resumable task sessions
 - [x] Retry transition that preserves captured harness session state
+- [x] Supervisor/worker task graph and delegation protocol
+- [x] Durable task-event history and structured progress snapshots
+- [x] Dependency-aware scheduling and cascading cancellation
+- [x] Independent reviewer/approval + changes-requested retry flow
 - [ ] Claude Code adapter with resumable task sessions
 - [ ] AG-UI adapter
 - [ ] MCP client adapter
-- [ ] Harness health, leases, cancellation, and structured progress events
-- [ ] Supervisor/worker plan contract and delegation protocol
+- [ ] Harness health, leases, and richer adapter-driven progress events
 
 ## v0.3 — governed computer layer
 
