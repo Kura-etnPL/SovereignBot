@@ -37,8 +37,12 @@ export class TaskEventStore {
         await this.init();
         const id = input.eventId ?? createId("event");
         const existing = this.#byId.get(id);
-        if (existing)
-            return { event: existing, duplicate: true };
+        if (existing) {
+            if (existing.taskId !== input.taskId || existing.type !== input.type) {
+                throw new Error(`event id ${id} is already bound to ${existing.taskId}/${existing.type}`);
+            }
+            return { event: structuredClone(existing), duplicate: true };
+        }
 
         const event = {
             id,
@@ -53,7 +57,7 @@ export class TaskEventStore {
         this.#events.push(event);
         this.#byId.set(id, event);
         this.#nextSeq.set(input.taskId, event.seq + 1);
-        return { event, duplicate: false };
+        return { event: structuredClone(event), duplicate: false };
     }
 
     async list(taskIds) {
