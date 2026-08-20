@@ -9,7 +9,6 @@ const METADATA_HOSTS = new Set([
     "metadata.google.internal",
     "metadata.google.internal.",
 ]);
-
 const ACTIVATING_KEYS = new Set(["Enter", "NumpadEnter", "Space", " "]);
 
 export class ComputerActionRefusedError extends Error {
@@ -58,6 +57,24 @@ function pageOf(url) {
     }
     catch {
         return { url: String(url), host: "" };
+    }
+}
+
+function safeAuditSubject(value) {
+    if (!value || typeof value !== "string")
+        return value;
+    try {
+        const parsed = new URL(value);
+        if (!["http:", "https:"].includes(parsed.protocol))
+            return value;
+        parsed.username = "";
+        parsed.password = "";
+        parsed.search = "";
+        parsed.hash = "";
+        return parsed.toString();
+    }
+    catch {
+        return value;
     }
 }
 
@@ -151,11 +168,11 @@ export class ComputerGateway {
                 target: cached?.url ?? "about:blank",
                 page: pageOf(cached?.url),
             },
-            async () => this.#driver(agentId).snapshot(),
+            async () => (await this.#driver(agentId)).snapshot(),
         );
-
         if (!result || !Array.isArray(result.elements))
             throw new Error("computer driver snapshot must return an elements array");
+
         const seen = new Set();
         const elements = new Map();
         for (const element of result.elements) {
@@ -193,7 +210,7 @@ export class ComputerGateway {
                 page: guard.ok ? guard.page : undefined,
                 hardDeny: guard.ok ? undefined : guard.reason,
             },
-            async () => this.#driver(agentId).navigate(guard.url),
+            async () => (await this.#driver(agentId)).navigate(guard.url),
         );
         this.#snapshots.delete(agentId);
         return result;
@@ -212,7 +229,7 @@ export class ComputerGateway {
                 element: resolved.element ? publicElement(resolved.element) : undefined,
                 hardDeny: resolved.reason,
             },
-            async () => this.#driver(agentId).click({ element: resolved.element }),
+            async () => (await this.#driver(agentId)).click({ element: resolved.element }),
         );
     }
 
@@ -229,15 +246,12 @@ export class ComputerGateway {
                 element: resolved.element ? publicElement(resolved.element) : undefined,
                 hardDeny: resolved.reason,
             },
-            // The text exists only on the execution path. It never enters policy/audit metadata.
-            async () => this.#driver(agentId).type({ element: resolved.element, text: input.text }),
+            async () => (await this.#driver(agentId)).type({ element: resolved.element, text: input.text }),
         );
     }
 
     async key(agentId, taskId, input) {
-        const resolved = input.ref
-            ? this.#resolveElement(agentId, input)
-            : this.#currentPage(agentId);
+        const resolved = input.ref ? this.#resolveElement(agentId, input) : this.#currentPage(agentId);
         return this.#govern(
             agentId,
             taskId,
@@ -250,7 +264,7 @@ export class ComputerGateway {
                 key: input.key,
                 hardDeny: resolved.reason,
             },
-            async () => this.#driver(agentId).key({ element: resolved.element, key: input.key }),
+            async () => (await this.#driver(agentId)).key({ element: resolved.element, key: input.key }),
         );
     }
 
@@ -266,7 +280,7 @@ export class ComputerGateway {
                 page: current.page,
                 hardDeny: current.reason,
             },
-            async () => this.#driver(agentId).scroll(input),
+            async () => (await this.#driver(agentId)).scroll(input),
         );
     }
 
@@ -282,7 +296,7 @@ export class ComputerGateway {
                 file: subject.file,
                 hardDeny: subject.reason,
             },
-            async () => this.#workspace(agentId).list(path),
+            async () => (await this.#workspace(agentId)).list(path),
         );
     }
 
@@ -298,7 +312,7 @@ export class ComputerGateway {
                 file: subject.file,
                 hardDeny: subject.reason,
             },
-            async () => this.#workspace(agentId).read(input.path, input.encoding),
+            async () => (await this.#workspace(agentId)).read(input.path, input.encoding),
         );
     }
 
@@ -314,8 +328,7 @@ export class ComputerGateway {
                 file: subject.file,
                 hardDeny: subject.reason,
             },
-            // Content stays off the policy/audit path.
-            async () => this.#workspace(agentId).write(input.path, input.content, input.encoding),
+            async () => (await this.#workspace(agentId)).write(input.path, input.content, input.encoding),
         );
     }
 
@@ -401,6 +414,14 @@ export class ComputerGateway {
             }),
         );
         await this.#registry.setSecretRequest(agentId, secretRequest);
+        await this.#registry.setControl(agentId, {
+            mode: "requested",
+            requestId: secretRequest.id,
+            reason: `secret requested: ${secretRequest.label}`,
+            taskId,
+            requestedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+        });
         await this.#audit.append({
             type: "computer.secret_requested",
             actor: agentId,
@@ -421,7 +442,6 @@ export class ComputerGateway {
             throw new Error(`secret request is no longer safe to fulfill: ${resolved.reason}`);
 
         const characters = [...String(text)].length;
-        // Record the human intent before side effects, but never record the value.
         await this.#audit.append({
             type: "computer.secret_supplied",
             actor: actorId,
@@ -429,11 +449,20 @@ export class ComputerGateway {
             data: { requestId, label: request.label, ref: request.ref, characters },
         });
         try {
-            const result = await this.#driver(agentId).typeSecret({
+            const result = await (await this.#driver(agentId)).typeSecret({
                 element: resolved.element,
                 text: String(text),
             });
             await this.#registry.clearSecretRequest(agentId);
+            const control = await this.#registry.control(agentId);
+            if (control.mode === "requested" && control.requestId === requestId) {
+                await this.#registry.setControl(agentId, {
+                    mode: "agent",
+                    releasedBy: actorId,
+                    releasedAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                });
+            }
             await this.#audit.append({
                 type: "computer.secret_supply_succeeded",
                 actor: actorId,
@@ -483,7 +512,7 @@ export class ComputerGateway {
             await this.#audit.append({
                 type: "computer.action_succeeded",
                 actor: agentId,
-                subject: descriptor.target,
+                subject: safeAuditSubject(descriptor.target),
                 data: {
                     taskId,
                     operation: descriptor.operation,
@@ -497,7 +526,7 @@ export class ComputerGateway {
             await this.#audit.append({
                 type: "computer.action_failed",
                 actor: agentId,
-                subject: descriptor.target,
+                subject: safeAuditSubject(descriptor.target),
                 data: {
                     taskId,
                     operation: descriptor.operation,
