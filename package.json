@@ -1,6 +1,6 @@
 {
   "name": "sovereignbot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local-first AI coworker runtime with durable memory, governed actions, and multi-agent orchestration.",
   "type": "module",
   "private": false,
@@ -23,7 +23,7 @@
   ],
   "scripts": {
     "check": "node scripts/check.mjs",
-    "test": "node --test tests/policy.test.js tests/audit.test.js tests/memory.test.js tests/orchestrator.test.js",
+    "test": "node --test",
     "start": "node src/cli.js serve"
   }
 }
