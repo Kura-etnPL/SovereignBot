@@ -3,6 +3,7 @@ export * from "./claude-code-harness.js";
 export * from "./codex-harness.js";
 export * from "./computer-driver.js";
 export * from "./computer-gateway.js";
+export * from "./computer-lifecycle.js";
 export * from "./computer-registry.js";
 export * from "./computer-workspace.js";
 export * from "./config.js";
