@@ -14,7 +14,8 @@
 
 ## v0.2 — real agent harnesses
 
-- [ ] Codex CLI adapter with resumable task sessions
+- [x] Codex CLI adapter with resumable task sessions
+- [x] Retry transition that preserves captured harness session state
 - [ ] Claude Code adapter with resumable task sessions
 - [ ] AG-UI adapter
 - [ ] MCP client adapter
