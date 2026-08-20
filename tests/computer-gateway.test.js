@@ -38,7 +38,10 @@ function config(dataDir, computer = {}) {
 async function runtimeFor(computer = {}) {
     const dataDir = await mkdtemp(join(tmpdir(), "sovereign-computer-"));
     const factory = createMemoryComputerDriverFactory();
-    const runtime = await createRuntime(config(dataDir, computer), { computerDriverFactory: factory });
+    const runtime = await createRuntime(config(dataDir, computer), {
+        computerDriverFactory: factory,
+        bindComputerToTasks: false,
+    });
     return { dataDir, factory, runtime };
 }
 
@@ -153,7 +156,10 @@ test("help and human takeover freeze agent actions and control survives restart"
         /human control is active/,
     );
 
-    const restarted = await createRuntime(config(dataDir), { computerDriverFactory: createMemoryComputerDriverFactory() });
+    const restarted = await createRuntime(config(dataDir), {
+        computerDriverFactory: createMemoryComputerDriverFactory(),
+        bindComputerToTasks: false,
+    });
     assert.equal((await restarted.computer.control("worker-a")).mode, "human");
 
     await runtime.computer.releaseControl("worker-a", "operator@example");
@@ -199,7 +205,10 @@ test("secret channel pauses the agent and never writes plaintext to audit", asyn
         ref: "password",
         label: "second password",
     });
-    const restarted = await createRuntime(config(dataDir), { computerDriverFactory: createMemoryComputerDriverFactory() });
+    const restarted = await createRuntime(config(dataDir), {
+        computerDriverFactory: createMemoryComputerDriverFactory(),
+        bindComputerToTasks: false,
+    });
     await assert.rejects(
         () => restarted.computer.supplySecret("worker-a", "operator@example", nextRequest.id, "NEVER-LOG-ME"),
         /fresh snapshot/,
