@@ -1,0 +1,100 @@
+import { spawn } from "node:child_process";
+class EchoHarness {
+    delayMs;
+    constructor(delayMs = 0) {
+        this.delayMs = delayMs;
+    }
+    async run(context) {
+        if (this.delayMs > 0) {
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(resolve, this.delayMs);
+                context.signal.addEventListener("abort", () => {
+                    clearTimeout(timeout);
+                    reject(new Error("aborted"));
+                }, { once: true });
+            });
+        }
+        return {
+            ok: true,
+            output: {
+                agent: context.agent.id,
+                title: context.task.title,
+                input: context.task.input,
+            },
+        };
+    }
+}
+class CommandHarness {
+    config;
+    constructor(config) {
+        this.config = config;
+    }
+    run(context) {
+        return new Promise((resolve) => {
+            const controller = new AbortController();
+            const onAbort = () => controller.abort();
+            context.signal.addEventListener("abort", onAbort, { once: true });
+            const timeoutMs = this.config.timeoutMs ?? 15 * 60_000;
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
+            const child = spawn(this.config.command, this.config.args ?? [], {
+                shell: false,
+                cwd: this.config.cwd,
+                env: this.config.inheritEnv === false
+                    ? { ...this.config.env }
+                    : { ...process.env, ...this.config.env },
+                stdio: ["pipe", "pipe", "pipe"],
+                signal: controller.signal,
+            });
+            let stdout = "";
+            let stderr = "";
+            child.stdout.setEncoding("utf8");
+            child.stderr.setEncoding("utf8");
+            child.stdout.on("data", (chunk) => (stdout += chunk));
+            child.stderr.on("data", (chunk) => (stderr += chunk));
+            child.on("error", (error) => {
+                clearTimeout(timeout);
+                context.signal.removeEventListener("abort", onAbort);
+                resolve({ ok: false, error: error.message });
+            });
+            child.on("close", (code, signal) => {
+                clearTimeout(timeout);
+                context.signal.removeEventListener("abort", onAbort);
+                const trimmed = stdout.trim();
+                let output = trimmed;
+                if (trimmed) {
+                    try {
+                        output = JSON.parse(trimmed);
+                    }
+                    catch {
+                    }
+                }
+                resolve({
+                    ok: code === 0,
+                    output,
+                    error: code === 0 ? undefined : stderr.trim() || `process exited ${code ?? signal}`,
+                    metadata: { exitCode: code, signal, stderr: stderr.trim() || undefined },
+                });
+            });
+            child.stdin.end(JSON.stringify({
+                protocol: "sovereignbot.harness.v1",
+                task: context.task,
+                agent: {
+                    id: context.agent.id,
+                    name: context.agent.name,
+                    role: context.agent.role,
+                    capabilities: context.agent.capabilities,
+                },
+            }));
+        });
+    }
+}
+export function createHarness(agent) {
+    switch (agent.harness.kind) {
+        case "echo":
+            return new EchoHarness(agent.harness.delayMs);
+        case "command":
+            return new CommandHarness(agent.harness);
+        default:
+            throw new Error(`unsupported harness kind: ${agent.harness.kind}`);
+    }
+}
