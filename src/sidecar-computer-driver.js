@@ -204,13 +204,18 @@ export class SidecarComputerDriver {
             env: {
                 ...sidecarBaseEnv(),
                 ...this.#config.env,
-                SOVEREIGNBOT_SIDECAR_TOKEN: transportToken,
                 SOVEREIGNBOT_PROFILE_DIR: this.#record.profileDir,
                 SOVEREIGNBOT_WORKSPACE_DIR: this.#record.workspaceDir,
                 SOVEREIGNBOT_SIDECAR_CONFIG_JSON: JSON.stringify(sidecarConfig),
             },
-            stdio: ["ignore", "pipe", "pipe"],
+            stdio: ["pipe", "pipe", "pipe"],
         });
+        // The private transport credential crosses exactly once over an inherited pipe. It is not in
+        // the child/browser environment or command line, so sibling same-user processes cannot obtain
+        // it through the common /proc/<pid>/environ shortcut.
+        child.stdin.on("error", () => {});
+        child.stdin.end(JSON.stringify({ protocol: SIDECAR_PROTOCOL, token: transportToken }));
+
         this.#stderr = "";
         child.stderr.setEncoding("utf8");
         child.stderr.on("data", (chunk) => { this.#stderr = capped(this.#stderr, chunk); });
