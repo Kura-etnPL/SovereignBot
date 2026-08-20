@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 import net from "node:net";
 
 const METADATA_HOSTS = new Set([
@@ -8,6 +8,30 @@ const METADATA_HOSTS = new Set([
     "100.100.100.200",
     "metadata.google.internal",
 ]);
+
+const NEVER_ALLOW = new BlockList();
+NEVER_ALLOW.addSubnet("0.0.0.0", 8, "ipv4");
+NEVER_ALLOW.addSubnet("169.254.0.0", 16, "ipv4");
+NEVER_ALLOW.addSubnet("192.0.0.0", 24, "ipv4");
+NEVER_ALLOW.addSubnet("192.0.2.0", 24, "ipv4");
+NEVER_ALLOW.addSubnet("198.18.0.0", 15, "ipv4");
+NEVER_ALLOW.addSubnet("198.51.100.0", 24, "ipv4");
+NEVER_ALLOW.addSubnet("203.0.113.0", 24, "ipv4");
+NEVER_ALLOW.addSubnet("224.0.0.0", 4, "ipv4");
+NEVER_ALLOW.addSubnet("240.0.0.0", 4, "ipv4");
+NEVER_ALLOW.addAddress("::", "ipv6");
+NEVER_ALLOW.addSubnet("fe80::", 10, "ipv6");
+NEVER_ALLOW.addSubnet("ff00::", 8, "ipv6");
+NEVER_ALLOW.addSubnet("2001:db8::", 32, "ipv6");
+
+const PRIVATE = new BlockList();
+PRIVATE.addSubnet("10.0.0.0", 8, "ipv4");
+PRIVATE.addSubnet("100.64.0.0", 10, "ipv4");
+PRIVATE.addSubnet("127.0.0.0", 8, "ipv4");
+PRIVATE.addSubnet("172.16.0.0", 12, "ipv4");
+PRIVATE.addSubnet("192.168.0.0", 16, "ipv4");
+PRIVATE.addAddress("::1", "ipv6");
+PRIVATE.addSubnet("fc00::", 7, "ipv6");
 
 function normalizeHost(value) {
     return String(value ?? "")
@@ -17,38 +41,36 @@ function normalizeHost(value) {
         .replace(/\.$/, "");
 }
 
-function ipv4Unsafe(host) {
-    const parts = host.split(".").map(Number);
-    if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255))
-        return true;
-    return parts[0] === 0
-        || parts[0] === 10
-        || parts[0] === 127
-        || (parts[0] === 169 && parts[1] === 254)
-        || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
-        || (parts[0] === 192 && parts[1] === 168)
-        || (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19))
-        || parts[0] >= 224;
+function mappedIpv4(address) {
+    const match = normalizeHost(address).match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
+    return match?.[1];
 }
 
-function ipv6Unsafe(host) {
-    const value = normalizeHost(host);
-    return value === "::"
-        || value === "::1"
-        || value.startsWith("fc")
-        || value.startsWith("fd")
-        || /^fe[89ab]/.test(value)
-        || value.startsWith("ff");
+function addressClass(address) {
+    const normalized = normalizeHost(address);
+    const mapped = mappedIpv4(normalized);
+    if (mapped)
+        return addressClass(mapped);
+    const family = isIP(normalized);
+    if (family === 4) {
+        if (NEVER_ALLOW.check(normalized, "ipv4"))
+            return "never";
+        if (PRIVATE.check(normalized, "ipv4"))
+            return "private";
+        return "public";
+    }
+    if (family === 6) {
+        if (NEVER_ALLOW.check(normalized, "ipv6"))
+            return "never";
+        if (PRIVATE.check(normalized, "ipv6"))
+            return "private";
+        return "public";
+    }
+    return "never";
 }
 
 export function isUnsafeAddress(address) {
-    const normalized = normalizeHost(address);
-    const family = isIP(normalized);
-    if (family === 4)
-        return ipv4Unsafe(normalized);
-    if (family === 6)
-        return ipv6Unsafe(normalized);
-    return true;
+    return addressClass(address) !== "public";
 }
 
 export function isBlockedHost(host) {
@@ -75,19 +97,14 @@ export async function resolveEgressTarget(host, { allowPrivateHosts = false } = 
     if (!results.length)
         throw new Error(`egress DNS returned no addresses for ${normalized}`);
 
-    if (!allowPrivateHosts) {
-        const unsafe = results.find((entry) => isUnsafeAddress(entry.address));
-        if (unsafe)
-            throw new Error(`egress target resolved to a blocked address: ${unsafe.address}`);
-    }
-    else {
-        const metadata = results.find((entry) => normalizeHost(entry.address) === "169.254.169.254");
-        if (metadata)
-            throw new Error("cloud metadata egress is always blocked");
+    for (const entry of results) {
+        const classification = addressClass(entry.address);
+        if (classification === "never")
+            throw new Error(`egress target resolved to an always-blocked address: ${entry.address}`);
+        if (classification === "private" && !allowPrivateHosts)
+            throw new Error(`egress target resolved to a private/loopback address: ${entry.address}`);
     }
 
-    // Connect to the concrete address we just validated instead of asking the OS to resolve the
-    // hostname a second time. This closes the obvious DNS-rebinding gap between policy and connect.
     return { host: normalized, ...results[0] };
 }
 
