@@ -13,11 +13,39 @@ function tokenMatches(expected, provided) {
     return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 }
 
+async function getOrCreateToken(path) {
+    try {
+        const existing = (await readFile(path, "utf8")).trim();
+        if (!existing)
+            throw new Error(`token file is empty: ${path}`);
+        return existing;
+    }
+    catch (error) {
+        if (error.code !== "ENOENT")
+            throw error;
+    }
+
+    const generated = randomBytes(32).toString("base64url");
+    try {
+        await writeFile(path, `${generated}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+        return generated;
+    }
+    catch (error) {
+        if (error.code !== "EEXIST")
+            throw error;
+        const existing = (await readFile(path, "utf8")).trim();
+        if (!existing)
+            throw new Error(`token file is empty: ${path}`);
+        return existing;
+    }
+}
+
 export class ComputerRegistry {
     #root;
     #statePath;
     #agentIds;
     #stateQueue = Promise.resolve();
+    #operatorToken;
 
     constructor(dataDir, agentIds) {
         this.#root = resolve(dataDir, "computers");
@@ -27,6 +55,7 @@ export class ComputerRegistry {
 
     async init() {
         await mkdir(this.#root, { recursive: true });
+        this.#operatorToken = await getOrCreateToken(join(this.#root, "operator-token"));
         for (const agentId of this.#agentIds)
             await this.ensure(agentId);
     }
@@ -40,20 +69,7 @@ export class ComputerRegistry {
         await mkdir(profileDir, { recursive: true });
         await mkdir(workspaceDir, { recursive: true });
 
-        const tokenPath = join(dir, "token");
-        let token;
-        try {
-            token = (await readFile(tokenPath, "utf8")).trim();
-        }
-        catch (error) {
-            if (error.code !== "ENOENT")
-                throw error;
-            token = randomBytes(32).toString("base64url");
-            await writeFile(tokenPath, `${token}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-        }
-        if (!token)
-            throw new Error(`computer token is empty for agent ${agentId}`);
-
+        const token = await getOrCreateToken(join(dir, "token"));
         const state = await this.#readState(agentId);
         return {
             id: `computer:${agentId}`,
@@ -88,9 +104,21 @@ export class ComputerRegistry {
         return tokenMatches(record.token, token);
     }
 
+    async authenticateOperator(token) {
+        if (!this.#operatorToken)
+            this.#operatorToken = await getOrCreateToken(join(this.#root, "operator-token"));
+        return tokenMatches(this.#operatorToken, token);
+    }
+
     async credentials(agentId) {
         const record = await this.ensure(agentId);
         return { agentId, token: record.token };
+    }
+
+    async operatorCredentials() {
+        if (!this.#operatorToken)
+            this.#operatorToken = await getOrCreateToken(join(this.#root, "operator-token"));
+        return { token: this.#operatorToken };
     }
 
     async control(agentId) {
