@@ -6,6 +6,8 @@ import { Governor } from "./governor.js";
 import { MemoryStore } from "./memory.js";
 import { Orchestrator } from "./orchestrator.js";
 import { PolicyEngine } from "./policy.js";
+import { createWebDriverSidecarFactory } from "./sidecar-computer-driver.js";
+import { TaskBoundComputerGateway } from "./task-bound-computer.js";
 import { TaskEventStore } from "./task-events.js";
 import { TaskStore } from "./task-store.js";
 
@@ -23,13 +25,36 @@ export async function createRuntime(config, options = {}) {
 
     const computerRegistry = new ComputerRegistry(dataDir, config.agents.map((agent) => agent.id));
     await computerRegistry.init();
-    const computer = new ComputerGateway({
+
+    let managedComputerDriverFactory;
+    let computerDriverFactory = options.computerDriverFactory;
+    if (!computerDriverFactory && config.computer?.driver?.kind === "webdriver-sidecar") {
+        managedComputerDriverFactory = createWebDriverSidecarFactory({
+            ...config.computer.driver,
+            allowPrivateHosts: config.computer.allowPrivateHosts ?? false,
+        });
+        computerDriverFactory = managedComputerDriverFactory;
+    }
+
+    const rawComputer = new ComputerGateway({
         registry: computerRegistry,
         governor,
         audit,
-        driverFactory: options.computerDriverFactory,
+        driverFactory: computerDriverFactory,
         allowPrivateHosts: config.computer?.allowPrivateHosts ?? false,
     });
+
+    // Production callers get task ownership binding by default. Low-level gateway contract tests may
+    // explicitly disable it so they can test refs/secrets/workspace mechanics without constructing an
+    // unrelated running task for every call.
+    const computer = options.bindComputerToTasks === false
+        ? rawComputer
+        : new TaskBoundComputerGateway({
+            inner: rawComputer,
+            taskResolver: (taskId) => tasks.get(taskId),
+            registry: computerRegistry,
+            governor,
+        });
 
     return {
         config,
@@ -38,6 +63,10 @@ export async function createRuntime(config, options = {}) {
         audit,
         taskEvents,
         computer,
+        rawComputer,
         computerRegistry,
+        async close() {
+            await managedComputerDriverFactory?.close?.();
+        },
     };
 }
