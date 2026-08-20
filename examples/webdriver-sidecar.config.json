@@ -1,0 +1,44 @@
+{
+  "dataDir": ".sovereignbot/data",
+  "bindHost": "127.0.0.1",
+  "port": 7341,
+  "computer": {
+    "allowPrivateHosts": false,
+    "driver": {
+      "kind": "webdriver-sidecar",
+      "browser": "chrome",
+      "headless": false,
+      "startupTimeoutMs": 30000,
+      "requestTimeoutMs": 30000
+    }
+  },
+  "agents": [
+    {
+      "id": "browser-worker",
+      "name": "Browser Worker",
+      "role": "worker",
+      "capabilities": ["browser"],
+      "harness": { "kind": "echo" }
+    }
+  ],
+  "policy": {
+    "repeatWindowMs": 180000,
+    "rules": [
+      {
+        "id": "stop-repeat-loop",
+        "effect": "deny",
+        "match": { "category": "computer", "repeatAtLeast": 10 }
+      },
+      {
+        "id": "allow-browser-worker-computer",
+        "effect": "allow",
+        "match": { "category": "computer", "agentId": "browser-worker" }
+      },
+      {
+        "id": "allow-demo-harness",
+        "effect": "allow",
+        "match": { "category": "harness", "agentId": "browser-worker" }
+      }
+    ]
+  }
+}
