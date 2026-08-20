@@ -1,0 +1,29 @@
+{
+  "name": "sovereignbot",
+  "version": "0.1.0",
+  "description": "Local-first AI coworker runtime with durable memory, governed actions, and multi-agent orchestration.",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "sovereignbot": "src/cli.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "test": "node --test tests/policy.test.js tests/audit.test.js tests/memory.test.js tests/orchestrator.test.js",
+    "start": "node src/cli.js serve"
+  }
+}
