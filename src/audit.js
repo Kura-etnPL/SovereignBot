@@ -3,7 +3,10 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { createId } from "./id.js";
 
-const SENSITIVE_AUDIT_KEY = /^(text|content|value|password|passwd|secret|token|authorization|cookie|set-cookie|api[_-]?key|session[_-]?id)$/i;
+// Keep ordinary domain fields such as `value`, `text`, and `content` usable in the audit log. The
+// actual computer type/write paths never put their payloads into audit metadata. Redact credential-
+// shaped fields globally, and make the secret channel stricter below.
+const SENSITIVE_AUDIT_KEY = /^(password|passwd|secret|secret[_-]?value|token|authorization|cookie|set-cookie|api[_-]?key|session[_-]?id)$/i;
 
 function stable(value) {
     if (Array.isArray(value))
@@ -26,6 +29,8 @@ function sanitize(value, key, eventType) {
         return "[REDACTED]";
     if (eventType?.startsWith("computer.secret_") && key === "error")
         return "secret operation failed";
+    if (eventType?.startsWith("computer.secret_") && /^(text|content|value)$/i.test(key ?? ""))
+        return "[REDACTED]";
     if (Array.isArray(value))
         return value.map((item) => sanitize(item, undefined, eventType));
     if (value && typeof value === "object") {
