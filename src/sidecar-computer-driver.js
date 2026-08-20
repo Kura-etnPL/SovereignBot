@@ -6,6 +6,26 @@ import { createInterface } from "node:readline";
 const SIDECAR_PROTOCOL = "sovereignbot.sidecar.v1";
 const BUNDLED_WEBDRIVER_SIDECAR = fileURLToPath(new URL("../sidecars/webdriver/server.js", import.meta.url));
 
+const SIDECAR_ENV_KEYS = [
+    "PATH", "PATHEXT", "SystemRoot", "WINDIR", "COMSPEC",
+    "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA",
+    "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "CommonProgramFiles", "CommonProgramFiles(x86)",
+    "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR",
+    "XDG_CONFIG_HOME", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+    "SNAP", "SNAP_NAME", "SNAP_INSTANCE_NAME",
+    "CHROMEWEBDRIVER", "GECKOWEBDRIVER", "EDGEWEBDRIVER",
+];
+
+function sidecarBaseEnv(source = process.env) {
+    const env = {};
+    for (const key of SIDECAR_ENV_KEYS) {
+        const value = source[key];
+        if (value !== undefined)
+            env[key] = value;
+    }
+    return env;
+}
+
 function capped(text, addition, max = 12_000) {
     return `${text}${addition}`.slice(-max);
 }
@@ -182,7 +202,7 @@ export class SidecarComputerDriver {
             cwd: this.#config.cwd,
             windowsHide: true,
             env: {
-                ...process.env,
+                ...sidecarBaseEnv(),
                 ...this.#config.env,
                 SOVEREIGNBOT_SIDECAR_TOKEN: transportToken,
                 SOVEREIGNBOT_PROFILE_DIR: this.#record.profileDir,
