@@ -1,6 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+
 export const DEFAULT_CONFIG_PATH = ".sovereignbot/config.json";
+const SUPPORTED_HARNESSES = new Set(["echo", "command", "codex"]);
+
 export function defaultConfig(dataDir = ".sovereignbot/data") {
     return {
         dataDir,
@@ -34,6 +37,7 @@ export function defaultConfig(dataDir = ".sovereignbot/data") {
         },
     };
 }
+
 export async function writeDefaultConfig(path = DEFAULT_CONFIG_PATH) {
     const absolute = resolve(path);
     await mkdir(dirname(absolute), { recursive: true });
@@ -48,6 +52,7 @@ export async function writeDefaultConfig(path = DEFAULT_CONFIG_PATH) {
     await writeFile(absolute, `${JSON.stringify(defaultConfig(), null, 2)}\n`, "utf8");
     return absolute;
 }
+
 export async function loadConfig(path = DEFAULT_CONFIG_PATH) {
     const absolute = resolve(path);
     const config = JSON.parse(await readFile(absolute, "utf8"));
@@ -63,6 +68,18 @@ export async function loadConfig(path = DEFAULT_CONFIG_PATH) {
         if (ids.has(agent.id))
             throw new Error(`duplicate agent id: ${agent.id}`);
         ids.add(agent.id);
+
+        if (!agent.harness?.kind)
+            throw new Error(`agent ${agent.id} needs harness.kind`);
+        if (!SUPPORTED_HARNESSES.has(agent.harness.kind)) {
+            throw new Error(`agent ${agent.id} uses unsupported harness kind: ${agent.harness.kind}`);
+        }
+        if (agent.harness.kind === "command" && !agent.harness.command) {
+            throw new Error(`command harness for agent ${agent.id} requires harness.command`);
+        }
+        if (agent.harness.kind === "codex" && agent.harness.prefixArgs?.length && !agent.harness.command) {
+            throw new Error(`codex harness prefixArgs for agent ${agent.id} require an explicit harness.command`);
+        }
     }
     if (!config.policy || !Array.isArray(config.policy.rules)) {
         throw new Error("config.policy.rules is required; SovereignBot fails closed without policy");

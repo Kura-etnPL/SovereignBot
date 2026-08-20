@@ -4,11 +4,11 @@
 
 **A local-first runtime for AI coworkers: durable memory, multi-agent orchestration, governed actions, and no mandatory cloud control plane.**
 
-[Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md) · [Security](SECURITY.md)
+[Architecture](docs/architecture.md) · [Codex harness](docs/codex.md) · [Roadmap](docs/roadmap.md) · [Security](SECURITY.md)
 
 </div>
 
-SovereignBot separates **intelligence** from **authority**. Your worker may be a local process, a subscription CLI, a model running elsewhere, or another agent protocol. SovereignBot keeps task state, memory, policy, routing, and the audit trail under your control.
+SovereignBot separates **intelligence** from **authority**. Your worker may be a local process, an already-authenticated subscription CLI, a model running elsewhere, or another agent protocol. SovereignBot keeps task state, memory, policy, routing, and the audit trail under your control.
 
 It is inspired by the strongest idea in projects such as OpenBot — agents should not receive unrestricted access just because they can reason — but it deliberately takes a different architectural path:
 
@@ -19,7 +19,7 @@ It is inspired by the strongest idea in projects such as OpenBot — agents shou
 - **fail-closed governance** before a worker is launched;
 - **tamper-evident audit logs** using a SHA-256 hash chain.
 
-> **Status: v0.1 foundation.** The core runtime is usable for local harnesses today. Browser/computer isolation and first-party Codex/Claude Code adapters are next.
+> **Status: v0.2.** The sovereign core is usable today, and SovereignBot now includes a resumable first-party Codex CLI harness. Claude Code, supervisor/worker coordination, and governed computer actions are next.
 
 ## Quick start
 
@@ -37,7 +37,30 @@ node src/cli.js audit verify
 
 `init` creates `.sovereignbot/config.json` with a safe demo worker and an explicit allow rule for that worker. Runtime state stays under `.sovereignbot/` and is ignored by Git.
 
-## Use a real local harness
+## Use Codex as a real worker
+
+If Codex CLI is already installed and signed in, SovereignBot can use that local executable directly. It does not require SovereignBot to hold a provider API key.
+
+```bash
+codex --version
+
+node src/cli.js submit "Inspect this repository and identify one high-value fix" \
+  --cap coding \
+  --config examples/codex-agent.config.json
+
+node src/cli.js run --config examples/codex-agent.config.json
+```
+
+When Codex starts a thread, SovereignBot immediately persists its session id into local task state. If the turn fails later, retrying the same task resumes the captured session instead of silently starting a fresh context:
+
+```bash
+node src/cli.js retry <task-id> --config examples/codex-agent.config.json
+node src/cli.js run --config examples/codex-agent.config.json
+```
+
+See [docs/codex.md](docs/codex.md) for executable discovery, Windows behavior, configuration, failure handling, and the exact v0.2 governance boundary.
+
+## Use a generic local harness
 
 A command harness is any executable that:
 
@@ -55,9 +78,9 @@ node src/cli.js submit "adapter smoke test" --cap demo --config examples/command
 node src/cli.js run --config examples/command-agent.config.json
 ```
 
-The protocol request contains the task plus a minimal agent identity. This boundary is where Codex CLI, Claude Code, AG-UI, MCP, and other harness adapters can plug in without changing orchestration or governance.
+The protocol request contains the task plus a minimal agent identity. This boundary is where Claude Code, AG-UI, MCP, and other harness adapters can plug in without changing orchestration or governance.
 
-## What v0.1 already does
+## What SovereignBot already does
 
 ### Local durable memory
 
@@ -65,15 +88,21 @@ Memory is append-only JSONL and scoped as `global`, `agent:<id>`, or `task:<id>`
 
 ### Multi-agent routing
 
-Each agent declares capabilities, concurrency, priority, and a harness. A task can request capabilities or a preferred worker. The orchestrator schedules only compatible, available workers.
+Each agent declares capabilities, concurrency, priority, and a harness. A task can request capabilities or a preferred worker. The orchestrator schedules only compatible, available workers. A task carrying a resumable harness session is pinned to the worker identity that owns that session.
+
+### Resumable harness state
+
+Harnesses can persist continuation state while a task is still running. Codex uses this to save `thread.started` immediately. The retry transition preserves that state while clearing the previous result/error, so a failed long-running task can continue rather than restart.
 
 ### Governed execution
 
-Every launch becomes a governed action. Policy evaluation is:
+Every harness launch becomes a governed action. Policy evaluation is:
 
 **deny rules → allow rules → deny by default**.
 
-Rules can currently match action category, operation, agent, target glob, and repeat count. The default config demonstrates a repeat guard that can stop an identical harness action from looping.
+Rules can currently match action category, operation, agent, target glob, and repeat count. The default/config examples demonstrate repeat guards that can stop an identical harness launch loop.
+
+For Codex specifically, v0.2 governs the decision to launch/resume the Codex worker. It does **not** yet intercept every internal Codex tool call; read [SECURITY.md](SECURITY.md) before granting a Codex worker broad local permissions.
 
 ### Tamper-evident audit
 
@@ -100,13 +129,14 @@ Default: `http://127.0.0.1:7341`
 | `/tasks` | GET | Task state |
 | `/tasks` | POST | Submit a task |
 | `/run` | POST | Drain runnable tasks |
+| `/tasks/:id/retry` | POST | Retry while preserving harness continuation state |
 | `/tasks/:id/cancel` | POST | Cancel a task |
 | `/memory?q=...` | GET | Inspect local memory |
 | `/audit/verify` | GET | Verify audit integrity |
 
-The v0.1 server intentionally binds to loopback and does not yet include network authentication. Read [SECURITY.md](SECURITY.md) before changing the bind address.
+The v0.2 server intentionally binds to loopback and does not yet include network authentication. Read [SECURITY.md](SECURITY.md) before changing the bind address.
 
-## Example configuration
+## Example multi-agent configuration
 
 ```json
 {
@@ -126,13 +156,14 @@ The v0.1 server intentionally binds to loopback and does not yet include network
       }
     },
     {
-      "id": "worker",
-      "name": "Worker",
+      "id": "codex-worker",
+      "name": "Codex Worker",
       "role": "worker",
-      "capabilities": ["coding"],
+      "capabilities": ["coding", "review"],
       "harness": {
-        "kind": "command",
-        "command": "my-worker-adapter"
+        "kind": "codex",
+        "cwd": ".",
+        "timeoutMs": 3600000
       }
     }
   ],
@@ -160,14 +191,14 @@ The v0.1 server intentionally binds to loopback and does not yet include network
 3. **No mandatory provider API.** The core runs with zero model credentials.
 4. **No single-agent assumption.** Planning, execution, review, and specialist workers are first-class.
 5. **No silent policy fallback.** Broken or absent policy denies instead of opening access.
-6. **No unaudited action path.** Governed integrations must pass through the governor.
+6. **No unaudited governed action path.** Integrations declared governed must pass through the governor.
 
 ## Next
 
-The next milestone is not another generic chat UI. It is the layer that makes SovereignBot useful for real work:
+The next milestones focus on real long-running work rather than another generic chat UI:
 
-- resumable **Codex CLI** and **Claude Code** harness adapters;
-- supervisor → worker delegation with structured plans/progress;
+- resumable **Claude Code** harness adapter;
+- supervisor → worker delegation with structured plans/progress/review;
 - governed **MCP** and **computer/browser** actions;
 - per-worker isolation and human take-over;
 - a local operator UI for task graphs, policy, memory, and audit.

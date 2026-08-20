@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+
 async function readBody(request) {
     const chunks = [];
     for await (const chunk of request)
@@ -7,6 +8,7 @@ async function readBody(request) {
         return undefined;
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
+
 function send(response, status, value) {
     const body = JSON.stringify(value, null, 2);
     response.writeHead(status, {
@@ -15,6 +17,7 @@ function send(response, status, value) {
     });
     response.end(body);
 }
+
 export function startServer(runtime) {
     const host = runtime.config.bindHost ?? "127.0.0.1";
     const port = runtime.config.port ?? 7341;
@@ -22,7 +25,7 @@ export function startServer(runtime) {
         try {
             const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
             if (request.method === "GET" && url.pathname === "/health") {
-                send(response, 200, { ok: true, name: "SovereignBot", version: "0.1.0" });
+                send(response, 200, { ok: true, name: "SovereignBot", version: "0.2.0" });
                 return;
             }
             if (request.method === "GET" && url.pathname === "/agents") {
@@ -41,6 +44,11 @@ export function startServer(runtime) {
             if (request.method === "POST" && url.pathname === "/run") {
                 const results = await runtime.orchestrator.runUntilIdle();
                 send(response, 200, results);
+                return;
+            }
+            if (request.method === "POST" && url.pathname.startsWith("/tasks/") && url.pathname.endsWith("/retry")) {
+                const id = decodeURIComponent(url.pathname.split("/")[2] ?? "");
+                send(response, 200, await runtime.orchestrator.retry(id));
                 return;
             }
             if (request.method === "POST" && url.pathname.startsWith("/tasks/") && url.pathname.endsWith("/cancel")) {

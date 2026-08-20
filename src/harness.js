@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { CodexHarness } from "./codex-harness.js";
+
 class EchoHarness {
     delayMs;
     constructor(delayMs = 0) {
@@ -24,6 +26,7 @@ class EchoHarness {
         };
     }
 }
+
 class CommandHarness {
     config;
     constructor(config) {
@@ -88,12 +91,23 @@ class CommandHarness {
         });
     }
 }
+
+export function harnessTarget(harness) {
+    if (harness.kind === "command")
+        return harness.command;
+    if (harness.kind === "codex")
+        return harness.command ?? process.env.SOVEREIGNBOT_CODEX_BIN ?? "codex";
+    return "echo";
+}
+
 export function createHarness(agent) {
     switch (agent.harness.kind) {
         case "echo":
             return new EchoHarness(agent.harness.delayMs);
         case "command":
             return new CommandHarness(agent.harness);
+        case "codex":
+            return new CodexHarness(agent.harness);
         default:
             throw new Error(`unsupported harness kind: ${agent.harness.kind}`);
     }

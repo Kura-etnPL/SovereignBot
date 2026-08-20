@@ -2,10 +2,12 @@
 import { loadConfig, writeDefaultConfig, DEFAULT_CONFIG_PATH } from "./config.js";
 import { createRuntime } from "./runtime.js";
 import { startServer } from "./server.js";
+
 function valueAfter(args, flag) {
     const index = args.indexOf(flag);
     return index >= 0 ? args[index + 1] : undefined;
 }
+
 function capabilities(args) {
     const values = [];
     for (let index = 0; index < args.length; index += 1) {
@@ -14,18 +16,21 @@ function capabilities(args) {
     }
     return values;
 }
+
 function help() {
-    console.log(`SovereignBot 0.1.0
+    console.log(`SovereignBot 0.2.0
 
 Usage:
   sovereignbot init [--config path]
   sovereignbot serve [--config path]
   sovereignbot submit <title> [--input json] [--cap capability] [--agent id] [--config path]
   sovereignbot run [--config path]
+  sovereignbot retry <task-id> [--config path]
   sovereignbot status [--config path]
   sovereignbot audit verify [--config path]
 `);
 }
+
 async function main() {
     const args = process.argv.slice(2);
     const command = args[0];
@@ -39,6 +44,7 @@ async function main() {
         console.log(`created ${written}`);
         return;
     }
+
     const config = await loadConfig(configPath);
     const runtime = await createRuntime(config);
     if (command === "serve") {
@@ -71,6 +77,13 @@ async function main() {
         console.log(JSON.stringify(await runtime.orchestrator.runUntilIdle(), null, 2));
         return;
     }
+    if (command === "retry") {
+        const taskId = args[1];
+        if (!taskId || taskId.startsWith("--"))
+            throw new Error("retry requires a task id");
+        console.log(JSON.stringify(await runtime.orchestrator.retry(taskId), null, 2));
+        return;
+    }
     if (command === "status") {
         console.log(JSON.stringify(await runtime.orchestrator.listTasks(), null, 2));
         return;
@@ -82,6 +95,7 @@ async function main() {
     help();
     process.exitCode = 1;
 }
+
 main().catch((error) => {
     console.error(error.stack ?? error.message);
     process.exitCode = 1;
