@@ -1,0 +1,41 @@
+{
+  "dataDir": ".sovereignbot/data",
+  "bindHost": "127.0.0.1",
+  "port": 7341,
+  "agents": [
+    {
+      "id": "codex-worker",
+      "name": "Codex Worker",
+      "role": "worker",
+      "capabilities": ["coding", "review"],
+      "harness": {
+        "kind": "codex",
+        "cwd": ".",
+        "timeoutMs": 3600000
+      }
+    }
+  ],
+  "policy": {
+    "rules": [
+      {
+        "id": "stop-codex-repeat-loop",
+        "effect": "deny",
+        "match": {
+          "category": "harness",
+          "operation": "run",
+          "agentId": "codex-worker",
+          "repeatAtLeast": 10
+        }
+      },
+      {
+        "id": "allow-codex-worker",
+        "effect": "allow",
+        "match": {
+          "category": "harness",
+          "operation": "run",
+          "agentId": "codex-worker"
+        }
+      }
+    ]
+  }
+}
