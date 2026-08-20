@@ -8,4 +8,5 @@ export * from "./orchestrator.js";
 export * from "./policy.js";
 export * from "./runtime.js";
 export * from "./server.js";
+export * from "./task-events.js";
 export * from "./task-store.js";
