@@ -9,6 +9,9 @@ export function defaultConfig(dataDir = ".sovereignbot/data") {
         dataDir,
         bindHost: "127.0.0.1",
         port: 7341,
+        computer: {
+            allowPrivateHosts: false,
+        },
         agents: [
             {
                 id: "local-echo",
@@ -58,6 +61,12 @@ export async function loadConfig(path = DEFAULT_CONFIG_PATH) {
     const config = JSON.parse(await readFile(absolute, "utf8"));
     if (!config.dataDir)
         throw new Error("config.dataDir is required");
+    if (config.computer !== undefined) {
+        if (!config.computer || typeof config.computer !== "object" || Array.isArray(config.computer))
+            throw new Error("config.computer must be an object");
+        if (config.computer.allowPrivateHosts !== undefined && typeof config.computer.allowPrivateHosts !== "boolean")
+            throw new Error("config.computer.allowPrivateHosts must be a boolean");
+    }
     if (!Array.isArray(config.agents) || config.agents.length === 0) {
         throw new Error("config.agents must contain at least one agent");
     }
