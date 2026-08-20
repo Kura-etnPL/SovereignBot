@@ -137,6 +137,8 @@ export class CodexHarness {
             controller.abort();
         };
         context.signal.addEventListener("abort", onAbort, { once: true });
+        if (context.signal.aborted)
+            controller.abort();
 
         let timedOut = false;
         const timeoutMs = this.config.timeoutMs ?? 60 * 60_000;
