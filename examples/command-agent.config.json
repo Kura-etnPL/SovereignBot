@@ -1,0 +1,32 @@
+{
+  "dataDir": ".sovereignbot/data",
+  "bindHost": "127.0.0.1",
+  "port": 7341,
+  "agents": [
+    {
+      "id": "local-command-worker",
+      "name": "Local Command Worker",
+      "role": "worker",
+      "capabilities": ["demo"],
+      "harness": {
+        "kind": "command",
+        "command": "node",
+        "args": ["examples/command-harness.mjs"]
+      }
+    }
+  ],
+  "policy": {
+    "rules": [
+      {
+        "id": "deny-runaway-loop",
+        "effect": "deny",
+        "match": { "category": "harness", "operation": "run", "repeatAtLeast": 10 }
+      },
+      {
+        "id": "allow-node-demo",
+        "effect": "allow",
+        "match": { "category": "harness", "operation": "run", "targetGlob": "node" }
+      }
+    ]
+  }
+}
