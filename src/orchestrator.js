@@ -3,6 +3,7 @@ import { createId } from "./id.js";
 
 const TERMINAL = new Set(["completed", "failed", "blocked", "cancelled"]);
 const ACTIVE_WORK = new Set(["queued", "accepted", "running", "awaiting_review", "changes_requested"]);
+const PROGRESS_STATUSES = new Set(["accepted", "running"]);
 
 function normalizeReview(review) {
     if (!review?.required)
@@ -176,9 +177,8 @@ export class Orchestrator {
         const nodeIds = new Set(nodes.map((task) => task.id));
         const edges = [];
         for (const task of descendants) {
-            if (task.parentTaskId) {
+            if (task.parentTaskId)
                 edges.push({ type: "parent", from: task.parentTaskId, to: task.id });
-            }
             for (const dependencyId of task.dependencyIds ?? []) {
                 if (nodeIds.has(dependencyId))
                     edges.push({ type: "dependency", from: dependencyId, to: task.id });
@@ -195,16 +195,17 @@ export class Orchestrator {
 
     async reportProgress(taskId, progress, actorAgentId) {
         const task = await this.requireTask(taskId);
-        if (!ACTIVE_WORK.has(task.status))
+        if (!PROGRESS_STATUSES.has(task.status))
             throw new Error(`task ${task.id} cannot report progress from status ${task.status}`);
         const actor = actorAgentId ?? task.ownerAgentId ?? task.assignedAgentId;
         if (!actor)
             throw new Error(`task ${task.id} has no worker identity for progress`);
-        if (task.ownerAgentId && task.ownerAgentId !== actor)
+        this.requireAgent(actor);
+        const owner = task.ownerAgentId ?? task.assignedAgentId;
+        if (owner !== actor)
             throw new Error(`agent ${actor} does not own task ${task.id}`);
-        if (progress.percent !== undefined && (progress.percent < 0 || progress.percent > 100)) {
+        if (progress.percent !== undefined && (progress.percent < 0 || progress.percent > 100))
             throw new Error("progress.percent must be between 0 and 100");
-        }
 
         const appended = await this.taskEvents.append({
             taskId,
@@ -218,7 +219,7 @@ export class Orchestrator {
             },
         });
         if (appended.duplicate)
-            return { task, event: appended.event, duplicate: true };
+            return { task: await this.requireTask(taskId), event: appended.event, duplicate: true };
 
         const updated = await this.patch(task, {
             progress: {
@@ -236,15 +237,13 @@ export class Orchestrator {
         const task = await this.requireTask(taskId);
         if (["queued", "accepted", "running"].includes(task.status) && task.lastRetryAt)
             return task;
-        if (!["failed", "blocked", "cancelled", "changes_requested"].includes(task.status)) {
+        const retryable = ["failed", "blocked", "cancelled", "changes_requested"];
+        if (!retryable.includes(task.status))
             throw new Error(`task ${task.id} cannot be retried from status ${task.status}`);
-        }
 
         const now = new Date().toISOString();
-        const review = task.review
-            ? { ...task.review, status: "pending" }
-            : undefined;
-        const queued = await this.patch(task, {
+        const review = task.review ? { ...task.review, status: "pending" } : undefined;
+        const transition = await this.transition(task.id, retryable, {
             status: "queued",
             attempt: (task.attempt ?? 0) + 1,
             lastRetryAt: now,
@@ -253,14 +252,17 @@ export class Orchestrator {
             candidateResult: undefined,
             review,
         });
+        if (!transition.changed)
+            return transition.task;
+
         await this.taskEvents.append({
             taskId: task.id,
             type: "task.retried",
             actor: "user",
             data: {
-                attempt: queued.attempt,
-                assignedAgentId: task.assignedAgentId,
-                hasHarnessState: Boolean(task.harnessState),
+                attempt: transition.task.attempt,
+                assignedAgentId: transition.task.assignedAgentId,
+                hasHarnessState: Boolean(transition.task.harnessState),
             },
         });
         await this.audit.append({
@@ -268,47 +270,47 @@ export class Orchestrator {
             actor: "user",
             subject: task.id,
             data: {
-                attempt: queued.attempt,
-                assignedAgentId: task.assignedAgentId,
-                hasHarnessState: Boolean(task.harnessState),
+                attempt: transition.task.attempt,
+                assignedAgentId: transition.task.assignedAgentId,
+                hasHarnessState: Boolean(transition.task.harnessState),
             },
         });
-        return queued;
+        return transition.task;
     }
 
     async cancel(taskId, options = {}) {
-        const cascade = options.cascade !== false;
         const targets = [await this.requireTask(taskId)];
-        if (cascade)
+        if (options.cascade !== false)
             targets.push(...(await this.tasks.descendants(taskId)));
 
-        const cancelled = [];
-        for (const task of targets) {
-            if (TERMINAL.has(task.status)) {
-                cancelled.push(task);
+        let rootResult = targets[0];
+        for (const snapshot of targets) {
+            this.#controllers.get(snapshot.id)?.abort();
+            const transition = await this.transition(
+                snapshot.id,
+                ["active", "queued", "accepted", "running", "awaiting_review", "changes_requested"],
+                { status: "cancelled", error: options.reason ?? "cancelled by user" },
+            );
+            if (snapshot.id === taskId)
+                rootResult = transition.task;
+            if (!transition.changed)
                 continue;
-            }
-            this.#controllers.get(task.id)?.abort();
-            const updated = await this.patch(task, {
-                status: "cancelled",
-                error: options.reason ?? "cancelled by user",
-            });
+
             await this.taskEvents.append({
-                taskId: task.id,
+                taskId: snapshot.id,
                 type: "task.cancelled",
                 actor: options.actor ?? "user",
-                eventId: task.id === taskId ? options.eventId : undefined,
-                data: { cascaded: task.id !== taskId, rootTaskId: taskId },
+                eventId: snapshot.id === taskId ? options.eventId : undefined,
+                data: { cascaded: snapshot.id !== taskId, rootTaskId: taskId },
             });
             await this.audit.append({
                 type: "task.cancelled",
                 actor: options.actor ?? "user",
-                subject: task.id,
-                data: { cascaded: task.id !== taskId, rootTaskId: taskId },
+                subject: snapshot.id,
+                data: { cascaded: snapshot.id !== taskId, rootTaskId: taskId },
             });
-            cancelled.push(updated);
         }
-        return cancelled[0];
+        return rootResult;
     }
 
     async reviewTask(taskId, reviewInput, reviewerAgentId) {
@@ -326,16 +328,13 @@ export class Orchestrator {
         if (!reviewerAgentId)
             throw new Error("reviewer agent id is required");
         const reviewer = this.requireAgent(reviewerAgentId);
-        const required = task.review.requiredCapabilities ?? ["review"];
-        if (!required.every((capability) => reviewer.capabilities.includes(capability))) {
-            throw new Error(`reviewer ${reviewer.id} lacks required capabilities: ${required.join(", ")}`);
-        }
-        if (task.review.independent !== false && reviewer.id === task.assignedAgentId) {
+        if (task.review.independent !== false && reviewer.id === task.assignedAgentId)
             throw new Error("independent review cannot be performed by the executing worker");
-        }
-        if (!["approve", "changes_requested"].includes(reviewInput.decision)) {
+        const required = task.review.requiredCapabilities ?? ["review"];
+        if (!required.every((capability) => reviewer.capabilities.includes(capability)))
+            throw new Error(`reviewer ${reviewer.id} lacks required capabilities: ${required.join(", ")}`);
+        if (!["approve", "changes_requested"].includes(reviewInput.decision))
             throw new Error("review decision must be approve or changes_requested");
-        }
 
         const eventType = reviewInput.decision === "approve" ? "review.approved" : "review.changes_requested";
         const appended = await this.taskEvents.append({
@@ -358,7 +357,7 @@ export class Orchestrator {
         const history = [...(task.review.history ?? []), reviewRecord];
 
         if (reviewInput.decision === "changes_requested") {
-            const updated = await this.patch(task, {
+            const transition = await this.transition(task.id, ["awaiting_review"], {
                 status: "changes_requested",
                 review: {
                     ...task.review,
@@ -368,16 +367,18 @@ export class Orchestrator {
                     latest: reviewRecord,
                 },
             });
+            if (!transition.changed)
+                return transition.task;
             await this.audit.append({
                 type: "review.changes_requested",
                 actor: reviewer.id,
                 subject: task.id,
                 data: { notes: reviewInput.notes },
             });
-            return updated;
+            return transition.task;
         }
 
-        const approved = await this.patch(task, {
+        const transition = await this.transition(task.id, ["awaiting_review"], {
             status: "completed",
             result: task.candidateResult,
             candidateResult: undefined,
@@ -390,14 +391,19 @@ export class Orchestrator {
             },
             error: undefined,
         });
-        await this.persistFinalResult(approved, task.assignedAgentId ?? task.ownerAgentId ?? "runtime");
+        if (!transition.changed)
+            return transition.task;
+        await this.persistFinalResult(
+            transition.task,
+            transition.task.assignedAgentId ?? transition.task.ownerAgentId ?? "runtime",
+        );
         await this.audit.append({
             type: "task.completed",
             actor: reviewer.id,
             subject: task.id,
             data: { reviewed: true, reviewerAgentId: reviewer.id },
         });
-        return approved;
+        return transition.task;
     }
 
     async aggregatePlan(planId, actorAgentId) {
@@ -439,11 +445,13 @@ export class Orchestrator {
                 error: task.error,
             })),
         };
-        const updated = await this.patch(plan, {
+        const transition = await this.transition(plan.id, ["active"], {
             status: allSucceeded ? "completed" : "failed",
             result,
             error: allSucceeded ? undefined : "one or more delegated tasks did not complete successfully",
         });
+        if (!transition.changed)
+            return transition.task;
         const type = allSucceeded ? "plan.completed" : "plan.failed";
         await this.taskEvents.append({ taskId: plan.id, type, actor, data: result });
         await this.audit.append({
@@ -452,16 +460,15 @@ export class Orchestrator {
             subject: plan.id,
             data: { statusCounts: result.statusCounts },
         });
-        return updated;
+        return transition.task;
     }
 
     async runNext() {
         const allTasks = await this.tasks.list();
         for (const queued of allTasks.filter((task) => task.status === "queued" && task.kind !== "plan")) {
             const dependencyState = this.dependencyState(queued, allTasks);
-            if (dependencyState.blockedReason) {
+            if (dependencyState.blockedReason)
                 return this.blockTask(queued, "runtime", dependencyState.blockedReason);
-            }
             if (!dependencyState.ready)
                 continue;
 
@@ -479,8 +486,7 @@ export class Orchestrator {
             });
             if (!available.length)
                 continue;
-            const agent = this.sortAgents(available)[0];
-            return this.runTask(queued, agent);
+            return this.runTask(queued, this.sortAgents(available)[0]);
         }
         return undefined;
     }
@@ -528,9 +534,8 @@ export class Orchestrator {
             const dependency = byId.get(dependencyId);
             if (!dependency)
                 return { ready: false, blockedReason: `dependency task missing: ${dependencyId}` };
-            if (["failed", "blocked", "cancelled"].includes(dependency.status)) {
+            if (["failed", "blocked", "cancelled"].includes(dependency.status))
                 return { ready: false, blockedReason: `dependency ${dependencyId} ended as ${dependency.status}` };
-            }
             if (dependency.status !== "completed")
                 return { ready: false };
         }
@@ -550,33 +555,40 @@ export class Orchestrator {
         if (!decision.allowed)
             return this.blockTask(task, agent.id, decision.reason, decision.ruleId);
 
-        const accepted = await this.patch(task, {
+        const acceptance = await this.transition(task.id, ["queued"], {
             status: "accepted",
             assignedAgentId: agent.id,
             ownerAgentId: agent.id,
         });
+        if (!acceptance.changed)
+            return acceptance.task;
         await this.taskEvents.append({
             taskId: task.id,
             type: "task.accepted",
             actor: agent.id,
-            data: { supervisorAgentId: task.supervisorAgentId },
+            data: { supervisorAgentId: acceptance.task.supervisorAgentId },
         });
 
         this.#busy.set(agent.id, (this.#busy.get(agent.id) ?? 0) + 1);
         const controller = new AbortController();
         this.#controllers.set(task.id, controller);
-        await this.patch(accepted, { status: "running" });
+        const running = await this.transition(task.id, ["accepted"], { status: "running" });
+        if (!running.changed) {
+            this.#busy.set(agent.id, Math.max(0, (this.#busy.get(agent.id) ?? 1) - 1));
+            this.#controllers.delete(task.id);
+            return running.task;
+        }
         await this.taskEvents.append({
             taskId: task.id,
             type: "task.started",
             actor: agent.id,
-            data: { attempt: task.attempt ?? 0 },
+            data: { attempt: running.task.attempt ?? 0 },
         });
         await this.audit.append({
             type: "task.started",
             actor: agent.id,
             subject: task.id,
-            data: { title: task.title, resumed: Boolean(task.harnessState?.sessionId) },
+            data: { title: running.task.title, resumed: Boolean(running.task.harnessState?.sessionId) },
         });
 
         const updateHarnessState = async (statePatch) => {
@@ -619,36 +631,40 @@ export class Orchestrator {
                 return afterRun;
 
             if (!result.ok) {
-                const failed = await this.patch(afterRun, {
+                const failure = await this.transition(task.id, ["running"], {
                     status: "failed",
                     error: result.error ?? "harness failed",
                 });
+                if (!failure.changed)
+                    return failure.task;
                 await this.taskEvents.append({
                     taskId: task.id,
                     type: "task.failed",
                     actor: agent.id,
-                    data: { error: failed.error },
+                    data: { error: failure.task.error },
                 });
                 await this.audit.append({
                     type: "task.failed",
                     actor: agent.id,
                     subject: task.id,
-                    data: { error: failed.error, harnessMetadata: result.metadata },
+                    data: { error: failure.task.error, harnessMetadata: result.metadata },
                 });
-                return failed;
+                return failure.task;
             }
 
             if (afterRun.review?.required) {
-                const awaitingReview = await this.patch(afterRun, {
+                const reviewTransition = await this.transition(task.id, ["running"], {
                     status: "awaiting_review",
                     candidateResult: result.output,
                     result: undefined,
                     error: undefined,
                     review: { ...afterRun.review, status: "pending" },
                 });
+                if (!reviewTransition.changed)
+                    return reviewTransition.task;
                 await this.memory.put({
                     scope: `task:${task.id}`,
-                    key: `candidate_result:attempt:${task.attempt ?? 0}`,
+                    key: `candidate_result:attempt:${reviewTransition.task.attempt ?? 0}`,
                     value: result.output,
                     tags: ["candidate-result", agent.id],
                 });
@@ -656,23 +672,25 @@ export class Orchestrator {
                     taskId: task.id,
                     type: "task.awaiting_review",
                     actor: agent.id,
-                    data: { requiredCapabilities: awaitingReview.review.requiredCapabilities },
+                    data: { requiredCapabilities: reviewTransition.task.review.requiredCapabilities },
                 });
                 await this.audit.append({
                     type: "task.awaiting_review",
                     actor: agent.id,
                     subject: task.id,
-                    data: { requiredCapabilities: awaitingReview.review.requiredCapabilities },
+                    data: { requiredCapabilities: reviewTransition.task.review.requiredCapabilities },
                 });
-                return awaitingReview;
+                return reviewTransition.task;
             }
 
-            const completed = await this.patch(afterRun, {
+            const completion = await this.transition(task.id, ["running"], {
                 status: "completed",
                 result: result.output,
                 error: undefined,
             });
-            await this.persistFinalResult(completed, agent.id);
+            if (!completion.changed)
+                return completion.task;
+            await this.persistFinalResult(completion.task, agent.id);
             await this.taskEvents.append({
                 taskId: task.id,
                 type: "task.completed",
@@ -685,27 +703,29 @@ export class Orchestrator {
                 subject: task.id,
                 data: { hasOutput: result.output !== undefined, harnessMetadata: result.metadata },
             });
-            return completed;
+            return completion.task;
         }
         catch (error) {
-            const latest = await this.requireTask(task.id);
-            if (latest.status === "cancelled")
-                return latest;
-            const status = controller.signal.aborted ? "cancelled" : "failed";
-            const updated = await this.patch(latest, { status, error: error.message });
+            const desiredStatus = controller.signal.aborted ? "cancelled" : "failed";
+            const transition = await this.transition(task.id, ["running", "accepted"], {
+                status: desiredStatus,
+                error: error.message,
+            });
+            if (!transition.changed)
+                return transition.task;
             await this.taskEvents.append({
                 taskId: task.id,
-                type: status === "cancelled" ? "task.cancelled" : "task.failed",
+                type: desiredStatus === "cancelled" ? "task.cancelled" : "task.failed",
                 actor: agent.id,
                 data: { error: error.message },
             });
             await this.audit.append({
-                type: status === "cancelled" ? "task.cancelled" : "task.failed",
+                type: desiredStatus === "cancelled" ? "task.cancelled" : "task.failed",
                 actor: agent.id,
                 subject: task.id,
                 data: { error: error.message },
             });
-            return updated;
+            return transition.task;
         }
         finally {
             this.#busy.set(agent.id, Math.max(0, (this.#busy.get(agent.id) ?? 1) - 1));
@@ -714,13 +734,13 @@ export class Orchestrator {
     }
 
     async blockTask(task, actor, reason, ruleId) {
-        if (task.status === "blocked")
-            return task;
-        const blocked = await this.patch(task, {
+        const transition = await this.transition(task.id, ["queued", "accepted", "running"], {
             status: "blocked",
             assignedAgentId: actor === "runtime" ? task.assignedAgentId : actor,
             error: reason,
         });
+        if (!transition.changed)
+            return transition.task;
         await this.taskEvents.append({
             taskId: task.id,
             type: "task.blocked",
@@ -733,7 +753,7 @@ export class Orchestrator {
             subject: task.id,
             data: { reason, ruleId },
         });
-        return blocked;
+        return transition.task;
     }
 
     async persistFinalResult(task, agentId) {
@@ -766,8 +786,25 @@ export class Orchestrator {
     }
 
     async patch(task, patch) {
-        const updated = { ...task, ...patch, updatedAt: new Date().toISOString() };
-        await this.tasks.upsert(updated);
-        return updated;
+        return this.tasks.update(task.id, (current) => ({
+            ...current,
+            ...patch,
+            updatedAt: new Date().toISOString(),
+        }));
+    }
+
+    async transition(taskId, allowedStatuses, patch) {
+        let changed = false;
+        const task = await this.tasks.update(taskId, (current) => {
+            if (!allowedStatuses.includes(current.status))
+                return current;
+            changed = true;
+            return {
+                ...current,
+                ...patch,
+                updatedAt: new Date().toISOString(),
+            };
+        });
+        return { task, changed };
     }
 }
