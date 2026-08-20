@@ -3,6 +3,8 @@ import { dirname, resolve } from "node:path";
 
 export const DEFAULT_CONFIG_PATH = ".sovereignbot/config.json";
 const SUPPORTED_HARNESSES = new Set(["echo", "command", "codex", "claude-code"]);
+const SUPPORTED_COMPUTER_DRIVERS = new Set(["webdriver-sidecar"]);
+const SUPPORTED_BROWSERS = new Set(["chrome", "edge", "firefox"]);
 
 export function defaultConfig(dataDir = ".sovereignbot/data") {
     return {
@@ -56,17 +58,60 @@ export async function writeDefaultConfig(path = DEFAULT_CONFIG_PATH) {
     return absolute;
 }
 
+function positiveInteger(value, name) {
+    if (value !== undefined && (!Number.isInteger(value) || value <= 0))
+        throw new Error(`${name} must be a positive integer`);
+}
+
+function stringArray(value, name) {
+    if (value !== undefined && (!Array.isArray(value) || value.some((item) => typeof item !== "string")))
+        throw new Error(`${name} must be an array of strings`);
+}
+
+function validateComputer(computer) {
+    if (computer === undefined)
+        return;
+    if (!computer || typeof computer !== "object" || Array.isArray(computer))
+        throw new Error("config.computer must be an object");
+    if (computer.allowPrivateHosts !== undefined && typeof computer.allowPrivateHosts !== "boolean")
+        throw new Error("config.computer.allowPrivateHosts must be a boolean");
+    if (computer.driver === undefined)
+        return;
+    if (!computer.driver || typeof computer.driver !== "object" || Array.isArray(computer.driver))
+        throw new Error("config.computer.driver must be an object");
+    const driver = computer.driver;
+    if (!SUPPORTED_COMPUTER_DRIVERS.has(driver.kind))
+        throw new Error(`unsupported computer driver kind: ${driver.kind}`);
+    if (driver.browser !== undefined && !SUPPORTED_BROWSERS.has(driver.browser))
+        throw new Error(`unsupported WebDriver browser: ${driver.browser}`);
+    if (driver.headless !== undefined && typeof driver.headless !== "boolean")
+        throw new Error("config.computer.driver.headless must be a boolean");
+    stringArray(driver.webdriverArgs, "config.computer.driver.webdriverArgs");
+    stringArray(driver.sidecarArgs, "config.computer.driver.sidecarArgs");
+    positiveInteger(driver.startupTimeoutMs, "config.computer.driver.startupTimeoutMs");
+    positiveInteger(driver.requestTimeoutMs, "config.computer.driver.requestTimeoutMs");
+
+    if (driver.webdriverUrl !== undefined) {
+        let parsed;
+        try {
+            parsed = new URL(driver.webdriverUrl);
+        }
+        catch {
+            throw new Error("config.computer.driver.webdriverUrl must be a valid URL");
+        }
+        const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+        if (parsed.protocol !== "http:" || !["127.0.0.1", "localhost", "::1"].includes(host)) {
+            throw new Error("config.computer.driver.webdriverUrl must be a loopback http endpoint");
+        }
+    }
+}
+
 export async function loadConfig(path = DEFAULT_CONFIG_PATH) {
     const absolute = resolve(path);
     const config = JSON.parse(await readFile(absolute, "utf8"));
     if (!config.dataDir)
         throw new Error("config.dataDir is required");
-    if (config.computer !== undefined) {
-        if (!config.computer || typeof config.computer !== "object" || Array.isArray(config.computer))
-            throw new Error("config.computer must be an object");
-        if (config.computer.allowPrivateHosts !== undefined && typeof config.computer.allowPrivateHosts !== "boolean")
-            throw new Error("config.computer.allowPrivateHosts must be a boolean");
-    }
+    validateComputer(config.computer);
     if (!Array.isArray(config.agents) || config.agents.length === 0) {
         throw new Error("config.agents must contain at least one agent");
     }
