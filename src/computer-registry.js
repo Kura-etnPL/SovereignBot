@@ -3,8 +3,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./fs-util.js";
 
-function safeSegment(agentId) {
-    return encodeURIComponent(agentId).replace(/%/g, "_");
+function identityKey(agentId) {
+    return Buffer.from(String(agentId), "utf8").toString("base64url");
 }
 
 function tokenMatches(expected, provided) {
@@ -40,6 +40,15 @@ async function getOrCreateToken(path) {
     }
 }
 
+function defaultState() {
+    return {
+        control: {
+            mode: "agent",
+            updatedAt: new Date(0).toISOString(),
+        },
+    };
+}
+
 export class ComputerRegistry {
     #root;
     #statePath;
@@ -63,7 +72,7 @@ export class ComputerRegistry {
     async ensure(agentId) {
         if (!this.#agentIds.has(agentId))
             throw new Error(`unknown computer agent: ${agentId}`);
-        const dir = join(this.#root, safeSegment(agentId));
+        const dir = join(this.#root, identityKey(agentId));
         const profileDir = join(dir, "profile");
         const workspaceDir = join(dir, "workspace");
         await mkdir(profileDir, { recursive: true });
@@ -145,24 +154,18 @@ export class ComputerRegistry {
         if (!this.#agentIds.has(agentId))
             throw new Error(`unknown computer agent: ${agentId}`);
         const all = await readJsonFile(this.#statePath, {});
-        return all[agentId] ?? {
-            control: {
-                mode: "agent",
-                updatedAt: new Date(0).toISOString(),
-            },
-        };
+        return all[identityKey(agentId)] ?? defaultState();
     }
 
     async #mutateState(agentId, mutator) {
         if (!this.#agentIds.has(agentId))
             throw new Error(`unknown computer agent: ${agentId}`);
+        const key = identityKey(agentId);
         const operation = this.#stateQueue.then(async () => {
             const all = await readJsonFile(this.#statePath, {});
-            const current = all[agentId] ?? {
-                control: { mode: "agent", updatedAt: new Date(0).toISOString() },
-            };
+            const current = all[key] ?? defaultState();
             const next = await mutator(structuredClone(current));
-            all[agentId] = next;
+            all[key] = next;
             await writeJsonAtomic(this.#statePath, all);
             return structuredClone(next);
         });
