@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 function normalizeForCompare(path) {
@@ -31,6 +31,26 @@ export function describeWorkspacePath(path) {
     };
 }
 
+async function rejectSymlinkTraversal(root, target, allowMissingTail) {
+    const rel = relative(root, target);
+    if (!rel)
+        return;
+    let current = root;
+    for (const segment of rel.split(sep).filter(Boolean)) {
+        current = resolve(current, segment);
+        try {
+            const metadata = await lstat(current);
+            if (metadata.isSymbolicLink())
+                throw new Error("workspace path crosses a symbolic link or junction");
+        }
+        catch (error) {
+            if (allowMissingTail && error.code === "ENOENT")
+                return;
+            throw error;
+        }
+    }
+}
+
 export class ComputerWorkspace {
     #root;
 
@@ -44,14 +64,21 @@ export class ComputerWorkspace {
 
     async list(path = ".") {
         const target = resolveWorkspacePath(this.#root, path);
+        await rejectSymlinkTraversal(this.#root, target, false);
         const entries = await readdir(target, { withFileTypes: true });
         return Promise.all(entries.map(async (entry) => {
             const absolute = resolve(target, entry.name);
-            const metadata = await stat(absolute);
+            const metadata = await lstat(absolute);
             return {
                 name: entry.name,
                 path: relative(this.#root, absolute).replace(/\\/g, "/") || ".",
-                type: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other",
+                type: metadata.isSymbolicLink()
+                    ? "symlink"
+                    : entry.isDirectory()
+                        ? "directory"
+                        : entry.isFile()
+                            ? "file"
+                            : "other",
                 size: metadata.size,
                 modifiedAt: metadata.mtime.toISOString(),
             };
@@ -60,6 +87,7 @@ export class ComputerWorkspace {
 
     async read(path, encoding = "utf8") {
         const target = resolveWorkspacePath(this.#root, path);
+        await rejectSymlinkTraversal(this.#root, target, false);
         if (encoding === "base64")
             return (await readFile(target)).toString("base64");
         return readFile(target, "utf8");
@@ -67,7 +95,19 @@ export class ComputerWorkspace {
 
     async write(path, content, encoding = "utf8") {
         const target = resolveWorkspacePath(this.#root, path);
+        await rejectSymlinkTraversal(this.#root, target, true);
         await mkdir(dirname(target), { recursive: true });
+        // Re-check after creating missing directories so an existing link can never become the final hop.
+        await rejectSymlinkTraversal(this.#root, dirname(target), false);
+        try {
+            const existing = await lstat(target);
+            if (existing.isSymbolicLink())
+                throw new Error("workspace path crosses a symbolic link or junction");
+        }
+        catch (error) {
+            if (error.code !== "ENOENT")
+                throw error;
+        }
         const buffer = encoding === "base64" ? Buffer.from(content, "base64") : Buffer.from(content, "utf8");
         await writeFile(target, buffer);
         return { path: relative(this.#root, target).replace(/\\/g, "/"), bytes: buffer.byteLength };
