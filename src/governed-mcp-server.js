@@ -100,8 +100,11 @@ function error(id, code, message) {
     write({ jsonrpc: "2.0", id, error: { code, message } });
 }
 
-function textContent(value) {
-    return [{ type: "text", text: JSON.stringify(value) }];
+function toolResult(value) {
+    const response = { content: [{ type: "text", text: JSON.stringify(value) }] };
+    if (value && typeof value === "object" && !Array.isArray(value))
+        response.structuredContent = value;
+    return response;
 }
 
 async function main() {
@@ -177,8 +180,7 @@ async function main() {
                 continue;
             }
             try {
-                const value = await invoke(name, request.params?.arguments ?? {});
-                result(request.id, { content: textContent(value), structuredContent: value });
+                result(request.id, toolResult(await invoke(name, request.params?.arguments ?? {})));
             }
             catch (toolError) {
                 result(request.id, {
