@@ -83,6 +83,25 @@ function defaultArgs(browser, port) {
     return [`--port=${port}`];
 }
 
+function validatedLoopbackEndpoint(value) {
+    let parsed;
+    try {
+        parsed = new URL(String(value));
+    }
+    catch {
+        throw new Error("configured WebDriver endpoint is not a valid URL");
+    }
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (parsed.protocol !== "http:" || !["127.0.0.1", "localhost", "::1"].includes(host))
+        throw new Error("configured WebDriver endpoint must be a loopback http endpoint");
+    if (parsed.username || parsed.password)
+        throw new Error("configured WebDriver endpoint must not contain credentials");
+    parsed.pathname = parsed.pathname.replace(/\/$/, "");
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString().replace(/\/$/, "");
+}
+
 async function waitUntilReady(endpoint, child, timeoutMs, stderr, spawnError) {
     const deadline = Date.now() + timeoutMs;
     let lastError;
@@ -113,7 +132,7 @@ export async function startWebDriverProcess({
     startupTimeoutMs = 15_000,
 } = {}) {
     if (endpoint) {
-        const normalized = String(endpoint).replace(/\/$/, "");
+        const normalized = validatedLoopbackEndpoint(endpoint);
         const response = await fetch(`${normalized}/status`, { signal: AbortSignal.timeout(startupTimeoutMs) });
         if (!response.ok)
             throw new Error(`configured WebDriver endpoint returned ${response.status}`);
