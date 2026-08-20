@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 export const DEFAULT_CONFIG_PATH = ".sovereignbot/config.json";
-const SUPPORTED_HARNESSES = new Set(["echo", "command", "codex"]);
+const SUPPORTED_HARNESSES = new Set(["echo", "command", "codex", "claude-code"]);
 
 export function defaultConfig(dataDir = ".sovereignbot/data") {
     return {
@@ -77,8 +77,11 @@ export async function loadConfig(path = DEFAULT_CONFIG_PATH) {
         if (agent.harness.kind === "command" && !agent.harness.command) {
             throw new Error(`command harness for agent ${agent.id} requires harness.command`);
         }
-        if (agent.harness.kind === "codex" && agent.harness.prefixArgs?.length && !agent.harness.command) {
-            throw new Error(`codex harness prefixArgs for agent ${agent.id} require an explicit harness.command`);
+        if (["codex", "claude-code"].includes(agent.harness.kind) && agent.harness.prefixArgs?.length && !agent.harness.command) {
+            throw new Error(`${agent.harness.kind} harness prefixArgs for agent ${agent.id} require an explicit harness.command`);
+        }
+        if (agent.harness.maxTurns !== undefined && (!Number.isInteger(agent.harness.maxTurns) || agent.harness.maxTurns <= 0)) {
+            throw new Error(`harness.maxTurns for agent ${agent.id} must be a positive integer`);
         }
     }
     if (!config.policy || !Array.isArray(config.policy.rules)) {

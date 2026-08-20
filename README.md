@@ -4,23 +4,24 @@
 
 **A local-first runtime for AI coworkers: durable memory, supervisor/worker orchestration, governed actions, and no mandatory cloud control plane.**
 
-[Architecture](docs/architecture.md) · [Task graph](docs/task-graph.md) · [Codex harness](docs/codex.md) · [Roadmap](docs/roadmap.md) · [Security](SECURITY.md)
+[Architecture](docs/architecture.md) · [Task graph](docs/task-graph.md) · [Codex](docs/codex.md) · [Claude Code](docs/claude-code.md) · [Roadmap](docs/roadmap.md) · [Security](SECURITY.md)
 
 </div>
 
-SovereignBot separates **intelligence** from **authority**. A worker may be a local process, an already-authenticated subscription CLI, a model running elsewhere, or another agent protocol. SovereignBot keeps task state, memory, policy, routing, review, and the audit trail under your control.
+SovereignBot separates **intelligence** from **authority**. A worker may be a local process, an independently authenticated Codex/Claude Code CLI, a model running elsewhere, or another agent protocol. SovereignBot keeps task state, memory, policy, routing, review, and the audit trail under your control.
 
 It is inspired by the strongest idea in projects such as OpenBot — agents should not receive unrestricted access just because they can reason — but deliberately takes a different architectural path:
 
 - **local durable state**, with no required hosted thread/memory backend;
 - **generic harness adapters**, rather than one mandatory agent protocol;
 - **no mandatory metered model API** to boot or use the runtime;
+- **resumable Codex and Claude Code workers** using locally installed CLIs;
 - **supervisor → worker task graphs**, with explicit ownership and dependency edges;
 - **independent review stages**, without sharing one hidden context;
 - **fail-closed governance** before a worker is launched;
 - **tamper-evident audit logs** using a SHA-256 hash chain.
 
-> **Status: v0.2.** The sovereign core, resumable Codex CLI worker, and durable supervisor/worker coordination protocol are implemented. Claude Code and fine-grained governed computer/MCP actions are next.
+> **Status: v0.2.** The sovereign core, resumable Codex + Claude Code workers, and durable supervisor/worker coordination protocol are implemented. Fine-grained governed MCP/computer actions and the operator UI are next.
 
 ## Quick start
 
@@ -63,29 +64,11 @@ node src/cli.js graph <plan-id> --config my-agents.json
 
 The graph persists parent/delegation edges, dependency edges, worker acceptance, structured progress, review history, retry attempts, results, and cancellation history. A failed dependency blocks downstream work before its harness launches.
 
-Reviewable work stops at `awaiting_review` with a candidate result. An independent reviewer may approve it or request changes:
+Reviewable work stops at `awaiting_review` with a candidate result. An independent reviewer may approve it or request changes; a resumable Codex or Claude Code worker receives the latest requested changes when the task continues its existing session. See [docs/task-graph.md](docs/task-graph.md).
 
-```bash
-node src/cli.js review <task-id> changes_requested \
-  --reviewer reviewer \
-  --event review-1 \
-  --notes "Add evidence for claim two" \
-  --config my-agents.json
+## Use Codex as a worker
 
-node src/cli.js retry <task-id> --config my-agents.json
-node src/cli.js run --config my-agents.json
-
-node src/cli.js review <task-id> approve \
-  --reviewer reviewer \
-  --event review-2 \
-  --config my-agents.json
-```
-
-A resumable Codex worker receives the latest changes-requested feedback when it continues its existing session. See [docs/task-graph.md](docs/task-graph.md) for the full protocol.
-
-## Use Codex as a real worker
-
-If Codex CLI is already installed and signed in, SovereignBot can use that local executable directly. It does not require SovereignBot to hold a provider API key.
+If Codex CLI is independently installed and signed in, SovereignBot can launch that local executable directly. SovereignBot itself does not need to hold a provider API key.
 
 ```bash
 codex --version
@@ -93,54 +76,56 @@ codex --version
 node src/cli.js submit "Inspect this repository and identify one high-value fix" \
   --cap coding \
   --config examples/codex-agent.config.json
-
 node src/cli.js run --config examples/codex-agent.config.json
 ```
 
-When Codex starts a thread, SovereignBot immediately persists its session id into local task state. If the turn fails later, retrying the same task resumes the captured session instead of silently starting a fresh context:
+When Codex emits `thread.started`, SovereignBot immediately persists the session id. If the turn later fails, `retry` resumes the captured session instead of silently starting fresh.
+
+See [docs/codex.md](docs/codex.md) for Windows discovery, configuration, failure handling, and the v0.2 governance boundary.
+
+## Use Claude Code as a worker
+
+If the official Claude Code CLI is independently installed and authenticated, SovereignBot can launch its native `claude` executable directly.
 
 ```bash
-node src/cli.js retry <task-id> --config examples/codex-agent.config.json
-node src/cli.js run --config examples/codex-agent.config.json
+claude --version
+
+node src/cli.js submit "Inspect this repository and implement one high-value fix" \
+  --cap coding \
+  --config examples/claude-code-agent.config.json
+node src/cli.js run --config examples/claude-code-agent.config.json
 ```
 
-See [docs/codex.md](docs/codex.md) for executable discovery, Windows behavior, configuration, failure handling, and the exact v0.2 governance boundary.
+The adapter uses Claude Code print mode with streaming JSON. It persists the `system/init` session id immediately, resumes with `--resume`, and maps supported Claude Code task-progress/API-retry events into SovereignBot's durable progress protocol.
+
+See [docs/claude-code.md](docs/claude-code.md) for installation discovery, authentication/distribution boundaries, configuration, live progress, and permissions.
 
 ## Use a generic local harness
 
-A command harness is any executable that:
-
-1. reads one JSON request from stdin;
-2. performs the task using whatever local/subscription agent access you choose;
-3. writes JSON or text to stdout;
-4. exits `0` on success.
-
-SovereignBot never invokes command harnesses through a shell.
-
-Try the included adapter example:
+A command harness is any executable that reads one JSON request from stdin, performs the task, writes JSON/text to stdout, and exits `0` on success. SovereignBot invokes it with `shell: false`.
 
 ```bash
 node src/cli.js submit "adapter smoke test" --cap demo --config examples/command-agent.config.json
 node src/cli.js run --config examples/command-agent.config.json
 ```
 
-The protocol request contains the task plus a minimal agent identity. This boundary is where Claude Code, AG-UI, MCP, and other harness adapters can plug in without changing orchestration or governance.
+This boundary is where future AG-UI, MCP, or other worker adapters can plug in without changing orchestration or governance.
 
 ## What SovereignBot already does
 
 ### Local durable memory
 
-Memory is append-only JSONL and scoped as `global`, `agent:<id>`, or `task:<id>`. Final task results are saved automatically into both task and agent memory scopes; review candidates are kept distinct until approved.
+Memory is append-only JSONL and scoped as `global`, `agent:<id>`, or `task:<id>`. Final task results are saved into task and agent scopes; review candidates remain separate until approved.
 
 ### Supervisor/worker task graph
 
-Plans, child tasks, dependencies, ownership, progress, review, retries, and cancellation are durable. Supervisors are excluded from normal worker scheduling unless a task explicitly opts into supervisor execution. That means planning ability does not silently become action authority.
+Plans, child tasks, dependencies, ownership, progress, review, retries, and cancellation are durable. Supervisors are excluded from normal worker scheduling unless a task explicitly opts into supervisor execution. Planning ability does not silently become action authority.
 
 Task-state writes are serialized and applied against the latest persisted state, so cancellation and worker completion cannot overwrite each other with stale snapshots. Task-event and security-audit appends are serialized independently.
 
 ### Resumable harness state
 
-Harnesses can persist continuation state while a task is still running. Codex uses this to save `thread.started` immediately. The retry transition preserves that state while clearing the previous result/error, so a failed long-running task can continue rather than restart.
+Harnesses can persist continuation state while a task is still running. Codex saves `thread.started`; Claude Code saves `system/init.session_id`. Retry preserves that state while clearing the previous result/error, so failed long-running work can continue rather than restart.
 
 ### Governed execution
 
@@ -148,9 +133,9 @@ Every harness launch becomes a governed action. Policy evaluation is:
 
 **deny rules → allow rules → deny by default**.
 
-Rules can currently match action category, operation, agent, target glob, and repeat count. The default/config examples demonstrate repeat guards that can stop an identical harness launch loop.
+Rules can match action category, operation, agent, target glob, and repeat count. Config examples demonstrate repeat guards that stop identical harness-launch loops.
 
-For Codex specifically, v0.2 governs the decision to launch/resume the Codex worker. It does **not** yet intercept every internal Codex tool call; read [SECURITY.md](SECURITY.md) before granting a Codex worker broad local permissions.
+For Codex and Claude Code, v0.2 governs the decision to launch/resume the worker. It does **not** yet intercept every internal shell/MCP/browser/file/network action; read [SECURITY.md](SECURITY.md) before granting workers broad local permissions.
 
 ### Durable workflow history + tamper-evident audit
 
@@ -199,40 +184,27 @@ The v0.2 server intentionally binds to loopback and does not yet include network
 ```json
 {
   "dataDir": ".sovereignbot/data",
-  "bindHost": "127.0.0.1",
-  "port": 7341,
   "agents": [
     {
       "id": "supervisor",
       "name": "Supervisor",
       "role": "supervisor",
       "capabilities": ["planning"],
-      "priority": 10,
-      "harness": {
-        "kind": "command",
-        "command": "my-supervisor-adapter"
-      }
+      "harness": { "kind": "command", "command": "my-supervisor-adapter" }
     },
     {
       "id": "codex-worker",
       "name": "Codex Worker",
       "role": "worker",
       "capabilities": ["coding"],
-      "harness": {
-        "kind": "codex",
-        "cwd": ".",
-        "timeoutMs": 3600000
-      }
+      "harness": { "kind": "codex", "cwd": "." }
     },
     {
-      "id": "reviewer",
-      "name": "Reviewer",
-      "role": "reviewer",
-      "capabilities": ["review"],
-      "harness": {
-        "kind": "command",
-        "command": "my-reviewer-adapter"
-      }
+      "id": "claude-worker",
+      "name": "Claude Code Worker",
+      "role": "worker",
+      "capabilities": ["coding", "review"],
+      "harness": { "kind": "claude-code", "cwd": "." }
     }
   ],
   "policy": {
@@ -264,12 +236,12 @@ The v0.2 server intentionally binds to loopback and does not yet include network
 
 ## Next
 
-The next milestones focus on real long-running work rather than another generic chat UI:
+The next milestones focus on safe real-world action, not another generic chat UI:
 
-- resumable **Claude Code** harness adapter;
 - governed **MCP** and **computer/browser** actions;
 - per-worker isolation and human take-over;
-- richer harness-driven live progress/leases;
+- harness health/leases;
+- AG-UI/MCP worker adapters where they add value;
 - a local operator UI for task graphs, policy, memory, and audit.
 
 See the full [roadmap](docs/roadmap.md).

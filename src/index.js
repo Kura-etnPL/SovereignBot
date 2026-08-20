@@ -1,4 +1,5 @@
 export * from "./audit.js";
+export * from "./claude-code-harness.js";
 export * from "./codex-harness.js";
 export * from "./config.js";
 export * from "./governor.js";
