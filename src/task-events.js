@@ -8,6 +8,7 @@ export class TaskEventStore {
     #events = [];
     #byId = new Map();
     #nextSeq = new Map();
+    #appendQueue = Promise.resolve();
 
     constructor(dataDir) {
         this.#path = join(dataDir, "task-events.jsonl");
@@ -34,6 +35,12 @@ export class TaskEventStore {
     }
 
     async append(input) {
+        const operation = this.#appendQueue.then(() => this.#appendNow(input));
+        this.#appendQueue = operation.catch(() => undefined);
+        return operation;
+    }
+
+    async #appendNow(input) {
         await this.init();
         const id = input.eventId ?? createId("event");
         const existing = this.#byId.get(id);
