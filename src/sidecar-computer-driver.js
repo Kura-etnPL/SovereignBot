@@ -197,17 +197,27 @@ export class SidecarComputerDriver {
 
         const startupTimeoutMs = this.#config.startupTimeoutMs ?? 20_000;
         const ready = await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error(`computer sidecar did not become ready within ${startupTimeoutMs}ms`)), startupTimeoutMs);
+            let settled = false;
+            const failWithContext = (prefix) => {
+                const detail = this.#stderr.trim().slice(-2400);
+                return new Error(detail ? `${prefix}: ${detail}` : prefix);
+            };
+            const timeout = setTimeout(() => {
+                if (!settled)
+                    reject(failWithContext(`computer sidecar did not become ready within ${startupTimeoutMs}ms`));
+            }, startupTimeoutMs);
             const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
             const finish = (fn, value) => {
+                if (settled)
+                    return;
+                settled = true;
                 clearTimeout(timeout);
                 lines.close();
                 fn(value);
             };
             child.once("error", (error) => finish(reject, error));
             child.once("exit", (code, signal) => {
-                if (!this.#endpoint)
-                    finish(reject, new Error(`computer sidecar exited before ready (${code ?? signal}): ${this.#stderr.slice(-1600)}`));
+                finish(reject, failWithContext(`computer sidecar exited before ready (${code ?? signal})`));
             });
             (async () => {
                 try {
@@ -259,9 +269,6 @@ export class SidecarComputerDriver {
             return await this.#requestRaw(method, path, body, options);
         }
         catch (error) {
-            // A failed transport may have happened after a click/type reached the sidecar. Never retry
-            // an action automatically: doing so can duplicate a side effect. The next caller may take
-            // a fresh snapshot after the sidecar is restarted.
             if (error.cause?.code === "ECONNREFUSED" || error.name === "TypeError") {
                 const child = this.#child;
                 this.#clearProcess(child);
