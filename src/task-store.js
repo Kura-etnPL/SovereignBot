@@ -3,6 +3,7 @@ import { readJsonFile, writeJsonAtomic } from "./fs-util.js";
 
 export class TaskStore {
     #path;
+    #writeQueue = Promise.resolve();
 
     constructor(dataDir) {
         this.#path = join(dataDir, "tasks.json");
@@ -45,12 +46,35 @@ export class TaskStore {
     }
 
     async upsert(task) {
-        const tasks = await this.list();
-        const index = tasks.findIndex((candidate) => candidate.id === task.id);
-        if (index === -1)
-            tasks.push(task);
-        else
-            tasks[index] = task;
-        await writeJsonAtomic(this.#path, tasks);
+        return this.#mutate(async (tasks) => {
+            const index = tasks.findIndex((candidate) => candidate.id === task.id);
+            if (index === -1)
+                tasks.push(structuredClone(task));
+            else
+                tasks[index] = structuredClone(task);
+            return structuredClone(task);
+        });
+    }
+
+    async update(id, updater) {
+        return this.#mutate(async (tasks) => {
+            const index = tasks.findIndex((candidate) => candidate.id === id);
+            if (index === -1)
+                throw new Error(`task not found: ${id}`);
+            const next = await updater(structuredClone(tasks[index]));
+            tasks[index] = structuredClone(next);
+            return structuredClone(next);
+        });
+    }
+
+    async #mutate(mutator) {
+        const operation = this.#writeQueue.then(async () => {
+            const tasks = await readJsonFile(this.#path, []);
+            const result = await mutator(tasks);
+            await writeJsonAtomic(this.#path, tasks);
+            return result;
+        });
+        this.#writeQueue = operation.catch(() => undefined);
+        return operation;
     }
 }
