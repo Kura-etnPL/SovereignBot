@@ -1,6 +1,7 @@
 function asArray(value) {
     return value === undefined ? undefined : Array.isArray(value) ? value : [value];
 }
+
 function globToRegExp(glob) {
     let out = "^";
     for (const char of glob) {
@@ -13,38 +14,76 @@ function globToRegExp(glob) {
     }
     return new RegExp(`${out}$`, "i");
 }
+
+function matchesAnyGlob(patterns, value) {
+    const list = asArray(patterns);
+    if (!list)
+        return true;
+    return list.some((pattern) => globToRegExp(pattern).test(value ?? ""));
+}
+
+function matchesExact(expected, actual) {
+    const list = asArray(expected);
+    return !list || list.includes(actual);
+}
+
 function matchesRule(rule, action, repeatCount) {
     const match = rule.match;
     if (!match)
         return true;
-    const categories = asArray(match.category);
-    if (categories && !categories.includes(action.category))
+
+    if (!matchesExact(match.category, action.category))
         return false;
-    const operations = asArray(match.operation);
-    if (operations && !operations.includes(action.operation))
+    if (!matchesExact(match.operation, action.operation))
         return false;
-    const agents = asArray(match.agentId);
-    if (agents && (!action.agentId || !agents.includes(action.agentId)))
+    if (!matchesExact(match.agentId, action.agentId))
         return false;
-    if (match.targetGlob && !globToRegExp(match.targetGlob).test(action.target ?? ""))
+    if (!matchesExact(match.intent, action.intent))
         return false;
+    if (!matchesExact(match.key, action.key))
+        return false;
+    if (!matchesExact(match.elementRole, action.element?.role))
+        return false;
+    if (!matchesExact(match.elementType, action.element?.type))
+        return false;
+    if (!matchesExact(match.fileExtension, action.file?.extension))
+        return false;
+
+    if (!matchesAnyGlob(match.targetGlob, action.target))
+        return false;
+    if (!matchesAnyGlob(match.pageUrlGlob, action.page?.url))
+        return false;
+    if (!matchesAnyGlob(match.pageHostGlob, action.page?.host))
+        return false;
+    if (!matchesAnyGlob(match.elementRefGlob, action.element?.ref))
+        return false;
+    if (!matchesAnyGlob(match.elementNameGlob, action.element?.name))
+        return false;
+    if (!matchesAnyGlob(match.filePathGlob, action.file?.path))
+        return false;
+    if (!matchesAnyGlob(match.fileNameGlob, action.file?.name))
+        return false;
+
     if (match.repeatAtLeast !== undefined && repeatCount < match.repeatAtLeast)
         return false;
     return true;
 }
+
 class RepeatTracker {
     #windowMs;
     #seen = new Map();
+
     constructor(windowMs) {
         this.#windowMs = windowMs;
     }
+
     count(action) {
         const now = Date.now();
         const key = JSON.stringify([
             action.agentId ?? "",
             action.category,
             action.operation,
-            action.target ?? "",
+            action.repeatKey ?? action.target ?? "",
             action.taskId ?? "",
         ]);
         const fresh = (this.#seen.get(key) ?? []).filter((at) => now - at <= this.#windowMs);
@@ -53,15 +92,30 @@ class RepeatTracker {
         return fresh.length;
     }
 }
+
 export class PolicyEngine {
     #rules;
     #repeat;
+
     constructor(config) {
         this.#rules = config.rules;
         this.#repeat = new RepeatTracker(config.repeatWindowMs ?? 180_000);
     }
+
     decide(action) {
         const repeatCount = this.#repeat.count(action);
+
+        // Hard safety conditions are runtime invariants rather than administrator policy. They still
+        // flow through the same decision/audit path, but no allow rule can override them.
+        if (action.hardDeny) {
+            return {
+                allowed: false,
+                ruleId: "__safety__",
+                reason: action.hardDeny,
+                repeatCount,
+            };
+        }
+
         for (const rule of this.#rules.filter((candidate) => candidate.effect === "deny")) {
             if (matchesRule(rule, action, repeatCount)) {
                 return {
