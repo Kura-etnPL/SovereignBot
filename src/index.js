@@ -13,6 +13,7 @@ export * from "./harness.js";
 export * from "./memory.js";
 export * from "./orchestrator.js";
 export * from "./policy.js";
+export * from "./repeat-store.js";
 export * from "./runtime.js";
 export * from "./server.js";
 export * from "./sidecar-computer-driver.js";
