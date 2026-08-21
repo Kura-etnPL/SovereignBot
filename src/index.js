@@ -24,3 +24,4 @@ export * from "./sidecar-computer-driver.js";
 export * from "./task-bound-computer.js";
 export * from "./task-events.js";
 export * from "./task-store.js";
+export * from "./worker-telemetry.js";
