@@ -46,6 +46,7 @@ export class AuditLog {
     #path;
     #tail;
     #appendQueue = Promise.resolve();
+    #listeners = new Set();
 
     constructor(path) {
         this.#path = path;
@@ -56,6 +57,17 @@ export class AuditLog {
         const records = await this.readAll();
         const last = records.at(-1);
         this.#tail = last ? { seq: last.seq, hash: last.hash } : { seq: 0, hash: "GENESIS" };
+    }
+
+    subscribe(listener) {
+        if (typeof listener !== "function")
+            throw new Error("audit listener must be a function");
+        this.#listeners.add(listener);
+        return () => this.#listeners.delete(listener);
+    }
+
+    subscriberCount() {
+        return this.#listeners.size;
     }
 
     async append(input) {
@@ -87,7 +99,19 @@ export class AuditLog {
         const record = { ...unsigned, hash: digest(unsigned) };
         await appendFile(this.#path, `${JSON.stringify(record)}\n`, "utf8");
         this.#tail = { seq: record.seq, hash: record.hash };
+        this.#notify(record);
         return record;
+    }
+
+    #notify(record) {
+        for (const listener of [...this.#listeners]) {
+            try {
+                listener(structuredClone(record));
+            }
+            catch {
+                // Telemetry observers cannot turn a durable audit append into an application failure.
+            }
+        }
     }
 
     async readAll() {

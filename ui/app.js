@@ -1,6 +1,13 @@
 let token = "";
 let overview;
 let currentView = "overview";
+let liveController;
+let liveReconnectTimer;
+let liveRefreshTimer;
+let liveGeneration = 0;
+let reconnectAttempt = 0;
+let selectedTaskId;
+
 const policyState = {
   loaded: false,
   active: undefined,
@@ -175,7 +182,20 @@ async function render() {
 
 function showJson(value, title = "Details") {
   $("#dialog-body").innerHTML = `<h3>${esc(title)}</h3><div class="json">${esc(JSON.stringify(value, null, 2))}</div>`;
-  $("#detail-dialog").showModal();
+  if (!$("#detail-dialog").open)
+    $("#detail-dialog").showModal();
+}
+
+async function refreshTaskDialog() {
+  if (!selectedTaskId || !$("#detail-dialog").open)
+    return;
+  const id = selectedTaskId;
+  const value = {
+    graph: await api(`/operator/tasks/${encodeURIComponent(id)}/graph`),
+    events: await api(`/operator/tasks/${encodeURIComponent(id)}/events`),
+  };
+  if (selectedTaskId === id)
+    showJson(value, "Task details");
 }
 
 function capturePolicyInputs() {
@@ -190,11 +210,14 @@ function capturePolicyInputs() {
 function bindContent() {
   document.querySelectorAll("[data-task]").forEach((button) => {
     button.onclick = async () => {
-      const id = button.dataset.task;
-      showJson({
+      selectedTaskId = button.dataset.task;
+      const id = selectedTaskId;
+      const value = {
         graph: await api(`/operator/tasks/${encodeURIComponent(id)}/graph`),
         events: await api(`/operator/tasks/${encodeURIComponent(id)}/events`),
-      }, "Task details");
+      };
+      if (selectedTaskId === id)
+        showJson(value, "Task details");
     };
   });
   document.querySelectorAll("[data-json]").forEach((button) => {
@@ -276,6 +299,143 @@ function bindContent() {
   });
 }
 
+function setLiveState(state, label) {
+  const badge = $("#live-badge");
+  if (!badge)
+    return;
+  badge.className = `badge live ${state}`;
+  badge.textContent = `Live · ${label}`;
+}
+
+function stopTelemetry() {
+  liveGeneration += 1;
+  clearTimeout(liveReconnectTimer);
+  clearTimeout(liveRefreshTimer);
+  liveReconnectTimer = undefined;
+  liveRefreshTimer = undefined;
+  reconnectAttempt = 0;
+  liveController?.abort();
+  liveController = undefined;
+}
+
+function scheduleLiveRefresh(notification) {
+  if (notification.source === "task" && notification.taskId && notification.taskId === selectedTaskId && $("#detail-dialog").open) {
+    void refreshTaskDialog().catch(() => undefined);
+  }
+
+  // Do not rebuild Policy while the operator is typing. The in-memory draft remains entirely local
+  // and telemetry cannot replace or reset it.
+  if (currentView === "policy")
+    return;
+
+  const shouldRefresh =
+    notification.source === "task"
+    || (notification.source === "audit" && ["overview", "computers", "audit", "memory"].includes(currentView));
+  if (!shouldRefresh)
+    return;
+
+  clearTimeout(liveRefreshTimer);
+  liveRefreshTimer = setTimeout(() => {
+    liveRefreshTimer = undefined;
+    void render().catch(() => undefined);
+  }, 180);
+}
+
+async function consumeTelemetry(response, generation) {
+  const reader = response.body?.getReader();
+  if (!reader)
+    throw new Error("telemetry response body is unavailable");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (generation === liveGeneration) {
+    const { done, value } = await reader.read();
+    if (done)
+      return "ended";
+    buffer += decoder.decode(value, { stream: true });
+    while (true) {
+      const newline = buffer.indexOf("\n");
+      if (newline < 0)
+        break;
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (!line)
+        continue;
+      let notification;
+      try {
+        notification = JSON.parse(line);
+      }
+      catch {
+        continue;
+      }
+      if (notification.source === "system" && notification.type === "connected") {
+        reconnectAttempt = 0;
+        setLiveState("connected", "Connected");
+        continue;
+      }
+      if (notification.source === "system" && notification.type === "heartbeat") {
+        setLiveState("connected", "Connected");
+        continue;
+      }
+      if (notification.source === "system" && notification.type === "session-ended") {
+        setLiveState("disconnected", "Session ended");
+        return "session-ended";
+      }
+      scheduleLiveRefresh(notification);
+    }
+  }
+  return "stopped";
+}
+
+function scheduleReconnect(generation) {
+  if (!token || generation !== liveGeneration)
+    return;
+  reconnectAttempt += 1;
+  const delay = Math.min(12_000, 750 * (2 ** Math.min(reconnectAttempt - 1, 4)));
+  setLiveState("reconnecting", `Retrying in ${Math.ceil(delay / 1000)}s`);
+  liveReconnectTimer = setTimeout(() => {
+    liveReconnectTimer = undefined;
+    if (generation === liveGeneration)
+      void connectTelemetry();
+  }, delay);
+}
+
+async function connectTelemetry() {
+  if (!token)
+    return;
+  const generation = ++liveGeneration;
+  clearTimeout(liveReconnectTimer);
+  liveController?.abort();
+  const controller = new AbortController();
+  liveController = controller;
+  setLiveState("reconnecting", "Connecting");
+
+  try {
+    const response = await fetch("/operator/stream", {
+      method: "GET",
+      headers: { authorization: `Bearer ${token}` },
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (generation !== liveGeneration)
+      return;
+    if (response.status === 401 || response.status === 403) {
+      setLiveState("disconnected", "Session ended");
+      return;
+    }
+    if (!response.ok)
+      throw new Error(`telemetry failed (${response.status})`);
+    const outcome = await consumeTelemetry(response, generation);
+    if (generation !== liveGeneration || outcome === "session-ended" || outcome === "stopped")
+      return;
+    scheduleReconnect(generation);
+  }
+  catch (error) {
+    if (generation !== liveGeneration || controller.signal.aborted)
+      return;
+    scheduleReconnect(generation);
+  }
+}
+
 $("#login-form").onsubmit = async (event) => {
   event.preventDefault();
   const candidate = $("#token").value.trim();
@@ -286,6 +446,7 @@ $("#login-form").onsubmit = async (event) => {
     $("#login").classList.add("hidden");
     $("#app").classList.remove("hidden");
     await render();
+    void connectTelemetry();
   }
   catch (error) {
     token = "";
@@ -295,6 +456,8 @@ $("#login-form").onsubmit = async (event) => {
 
 document.querySelectorAll("nav button").forEach((button) => {
   button.onclick = async () => {
+    if (currentView === "policy")
+      capturePolicyInputs();
     document.querySelectorAll("nav button").forEach((candidate) => candidate.classList.remove("active"));
     button.classList.add("active");
     currentView = button.dataset.view;
@@ -304,6 +467,7 @@ document.querySelectorAll("nav button").forEach((button) => {
 
 $("#refresh").onclick = () => render();
 $("#logout").onclick = async () => {
+  stopTelemetry();
   try {
     await api("/operator/session/revoke", { method: "POST", body: {} });
   }
@@ -312,4 +476,7 @@ $("#logout").onclick = async () => {
   token = "";
   location.reload();
 };
-$("#dialog-close").onclick = () => $("#detail-dialog").close();
+$("#dialog-close").onclick = () => {
+  selectedTaskId = undefined;
+  $("#detail-dialog").close();
+};

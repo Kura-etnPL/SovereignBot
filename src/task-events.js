@@ -9,6 +9,7 @@ export class TaskEventStore {
     #byId = new Map();
     #nextSeq = new Map();
     #appendQueue = Promise.resolve();
+    #listeners = new Set();
 
     constructor(dataDir) {
         this.#path = join(dataDir, "task-events.jsonl");
@@ -32,6 +33,17 @@ export class TaskEventStore {
                 throw error;
         }
         this.#loaded = true;
+    }
+
+    subscribe(listener) {
+        if (typeof listener !== "function")
+            throw new Error("task event listener must be a function");
+        this.#listeners.add(listener);
+        return () => this.#listeners.delete(listener);
+    }
+
+    subscriberCount() {
+        return this.#listeners.size;
     }
 
     async append(input) {
@@ -64,7 +76,19 @@ export class TaskEventStore {
         this.#events.push(event);
         this.#byId.set(id, event);
         this.#nextSeq.set(input.taskId, event.seq + 1);
+        this.#notify(event);
         return { event: structuredClone(event), duplicate: false };
+    }
+
+    #notify(event) {
+        for (const listener of [...this.#listeners]) {
+            try {
+                listener(structuredClone(event));
+            }
+            catch {
+                // Telemetry observers cannot turn a durable task-event append into an application failure.
+            }
+        }
     }
 
     async list(taskIds) {

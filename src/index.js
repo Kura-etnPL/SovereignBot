@@ -13,6 +13,7 @@ export * from "./harness.js";
 export * from "./memory.js";
 export * from "./operator-api.js";
 export * from "./operator-session.js";
+export * from "./operator-stream.js";
 export * from "./orchestrator.js";
 export * from "./policy-dry-run.js";
 export * from "./policy.js";
