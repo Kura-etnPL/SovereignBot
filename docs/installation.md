@@ -1,33 +1,12 @@
 # Portable installation and release artifacts
 
-SovereignBot can be distributed as a verified portable application without a global npm install.
+SovereignBot is designed to be installable without a global npm install, administrator/root access, PATH/profile mutation, a system service, or a background updater.
 
-The runtime has zero third-party Node dependencies, so the release payload contains the application files directly and uses the user's existing Node.js 22+ runtime.
+The current portable distribution requires **Node.js 22+** and a system `tar` command. SovereignBot itself has zero third-party Node runtime dependencies.
 
-## Security model
+## Release artifacts
 
-The installer deliberately does **not**:
-
-- require administrator/root access;
-- run `npm install` or modify global npm state;
-- edit `PATH` or shell profiles;
-- write the Windows registry;
-- create services or scheduled tasks;
-- create background update daemons;
-- install from a moving `main` branch;
-- publish releases automatically.
-
-Remote installation sources must use HTTPS and are expected to be immutable GitHub Release assets.
-
-## Release bundle
-
-Build locally with:
-
-```bash
-npm run build:release
-```
-
-`dist/` contains:
+`npm run build:release` creates deterministic artifacts under `dist/`:
 
 - `sovereignbot-<version>.tar.gz`
 - `sovereignbot-<version>.tar.gz.sha256`
@@ -36,123 +15,152 @@ npm run build:release
 - `install.ps1`
 - `install.sh`
 
-The release manifest contains:
+The release manifest records:
 
-- schema/package/version metadata;
-- minimum Node major version;
-- archive file, size, SHA-256, format, and declared root;
-- SHA-256 + size for every file inside the application payload;
-- hashes for the standalone installer assets.
+- archive file name, byte size, SHA-256, format and declared root;
+- minimum supported Node major version;
+- every shipped payload file with SHA-256 and byte size;
+- each installer/bootstrap asset with SHA-256 and byte size.
 
-The tar/gzip builder uses fixed metadata and sorted file paths so identical source produces a byte-identical archive.
+The archive is deterministic: identical source at the same version produces byte-identical archive output.
 
-## Install from a locally built release
+## What the package contains
 
-### Windows PowerShell
+The portable app payload contains the supported product surface:
 
-```powershell
-npm run build:release
-./install/install.ps1 `
-  -InstallDir "D:\Tools\SovereignBot" `
-  -Manifest (Resolve-Path ./dist/release-manifest.json).Path `
-  -InstallerCore (Resolve-Path ./dist/portable-install.mjs).Path
-```
+- `src/`
+- `sidecars/`
+- `ui/`
+- `docs/`
+- `examples/`
+- `package.json`
+- `README.md`
+- `LICENSE`
+- `SECURITY.md`
 
-### macOS / Linux
+It does not intentionally package tests, `.git`, `node_modules`, `.sovereignbot` runtime state, coverage, or build output.
 
-```bash
-npm run build:release
-sh install/install.sh \
-  --install-dir "$HOME/.local/share/sovereignbot" \
-  --manifest "$PWD/dist/release-manifest.json" \
-  --installer-core "$PWD/dist/portable-install.mjs"
-```
+## Installation boundary
 
-The resulting launcher is:
+Both platform wrappers use the same `portable-install.mjs` transaction core.
 
-```text
-Windows:       <install>/bin/sovereignbot.cmd
-macOS/Linux:   <install>/bin/sovereignbot
-```
+Before executing that core, the wrapper reads the release manifest, locates the declared `portable-install.mjs` asset hash, computes the actual SHA-256 of the selected/downloaded core, and refuses execution on mismatch.
 
-No PATH change is made. Invoke that launcher directly, or add its directory to PATH yourself if you intentionally want to.
+The wrappers also refuse a symlink/reparse-point install/bootstrap path rather than recursively cleaning through an attacker-controlled link.
 
-## Future install from an intentional public release
+The Node installer then:
 
-The bootstrap wrappers default to:
+1. loads the local or HTTPS release manifest;
+2. validates the manifest schema and path fields;
+3. validates Node.js 22+;
+4. obtains the archive;
+5. verifies archive byte size and SHA-256;
+6. checks tar paths and exact manifest membership;
+7. rejects non-regular tar entries (symlink, hardlink, directory, device, FIFO, etc.) before extraction;
+8. extracts into a staging directory under the selected install root;
+9. re-hashes every extracted file against the manifest;
+10. runs the staged CLI with `--help` before replacing the installed app;
+11. swaps the application directory transactionally;
+12. creates a local launcher under `<install>/bin`;
+13. writes `install-manifest.json`;
+14. removes staging state after completion.
 
-```text
-https://github.com/Kura-etnPL/SovereignBot/releases/latest/download/release-manifest.json
-```
+A corrupt archive is rejected before the installed app is replaced.
 
-They derive the installer core and archive from the same immutable release asset directory.
+## Upgrade and rollback
 
-This repository change **does not itself publish a GitHub Release**. The commands below are useful only after a maintainer intentionally publishes verified release assets.
-
-Prefer downloading the wrapper first instead of piping remote text directly into a shell.
-
-### Windows
-
-```powershell
-Invoke-WebRequest \
-  https://github.com/Kura-etnPL/SovereignBot/releases/latest/download/install.ps1 \
-  -OutFile ./install-sovereignbot.ps1
-
-./install-sovereignbot.ps1 -InstallDir "D:\Tools\SovereignBot"
-Remove-Item ./install-sovereignbot.ps1
-```
-
-### macOS / Linux
-
-```bash
-curl -fL \
-  https://github.com/Kura-etnPL/SovereignBot/releases/latest/download/install.sh \
-  -o ./install-sovereignbot.sh
-
-sh ./install-sovereignbot.sh --install-dir "$HOME/.local/share/sovereignbot"
-rm ./install-sovereignbot.sh
-```
-
-## Verification sequence
-
-Before application replacement, the Node installer core performs this sequence:
-
-1. validate the release manifest schema and safe relative paths;
-2. require Node.js at or above the declared major version;
-3. download/copy the archive into a staging directory under the chosen install root;
-4. verify archive size and SHA-256;
-5. list the tar without extracting and reject absolute paths, `..`, wrong roots, missing manifest files, or unmanifested files;
-6. extract into staging;
-7. verify every extracted file's size and SHA-256;
-8. run the staged CLI with `--help`;
-9. replace only `<install>/app`;
-10. create/update the known launcher under `<install>/bin`;
-11. persist `install-manifest.json`;
-12. remove staging.
-
-If a post-swap step fails, the previous application directory is restored.
-
-## Upgrade and data separation
-
-The installer owns only known application locations:
+Application files live under:
 
 ```text
 <install>/app
-<install>/bin/sovereignbot[.cmd]
-<install>/install-manifest.json
-<install>/.staging   (temporary)
-<install>/.bootstrap (temporary wrapper bootstrap)
 ```
 
-Unrelated files under the install root are preserved.
+Launchers live under:
 
-SovereignBot project/runtime state is not stored inside the release application's `app` directory. Normal `.sovereignbot/` state remains workspace/config scoped, so replacing the portable application payload does not delete task, memory, audit, computer, or policy state.
+```text
+<install>/bin
+```
 
-## CI
+An upgrade stages and verifies the new app first, then moves the previous app aside and swaps the new app into place. If a later launcher/manifest step fails, the previous app is restored.
 
-Normal CI tests the Node installer core on Ubuntu/Windows Node 22/24 and also executes the real wrappers:
+Windows filesystem/antivirus races on rename/remove (`EPERM`, `EBUSY`, `EACCES`) receive bounded retry; permanent errors are not retried indefinitely.
 
-- Linux `install.sh` → installed launcher `--help`
-- Windows `install.ps1` → installed launcher `--help`
+Installer-owned launcher/manifest files are also replaced transactionally. If both replacement and rollback of one of these files fail, the installer preserves the last recoverable `.old-*` backup and surfaces both errors instead of deleting the final recovery point.
 
-The release-artifact workflow is intentionally non-publishing. It has `contents: read`, verifies a tag matches `package.json`, builds the release bundle, and uploads it only as a temporary GitHub Actions artifact for maintainer inspection.
+Files unrelated to the installer-owned app/launcher/manifest paths are not deleted by normal reinstall/upgrade.
+
+## Windows
+
+For a prepared local release directory:
+
+```powershell
+pwsh -NoProfile -File .\install.ps1 `
+  -InstallDir "$env:LOCALAPPDATA\SovereignBot" `
+  -Manifest .\release-manifest.json `
+  -InstallerCore .\portable-install.mjs
+```
+
+The launcher is:
+
+```text
+<install>\bin\sovereignbot.cmd
+```
+
+## macOS / Linux
+
+For a prepared local release directory:
+
+```sh
+sh ./install.sh \
+  --install-dir "$HOME/.local/share/sovereignbot" \
+  --manifest ./release-manifest.json \
+  --installer-core ./portable-install.mjs
+```
+
+The launcher is:
+
+```text
+<install>/bin/sovereignbot
+```
+
+## Remote release source
+
+The production default points at the GitHub Releases `latest/download` asset path over HTTPS. The installer does not use a moving `main` branch as a release source.
+
+A public GitHub Release is intentionally separate from building/testing release artifacts. The release-artifact workflow has read-only repository contents permission and only uploads a GitHub Actions artifact; it cannot publish a public Release by itself.
+
+## What installation does not do
+
+Installation does **not** automatically:
+
+- modify `PATH`;
+- edit shell profiles;
+- write Windows registry entries;
+- create a system service;
+- create a scheduled task;
+- install a global npm package;
+- start SovereignBot in the background;
+- expose the operator console publicly;
+- configure Cloudflare or a domain.
+
+Those are separate, explicit operational choices.
+
+## CI acceptance
+
+The installer/release pipeline is covered by:
+
+- deterministic release build tests;
+- archive corruption refusal;
+- non-regular tar entry refusal;
+- local install and launcher `--help`;
+- reinstall preserving unrelated files;
+- failed-upgrade app rollback;
+- installer-owned file rollback failure preserving the final backup;
+- invalid Node version and unsafe manifest-path refusal;
+- wrapper refusal of a tampered installer core;
+- real POSIX bootstrap install on Ubuntu;
+- real PowerShell bootstrap install on Windows;
+- the existing Ubuntu/Windows Node 22/24 core matrix;
+- real Chrome + governed MCP browser E2E.
+
+No public release should be treated as trusted merely because artifact generation succeeded; an intentional version/release review remains required before publishing a stable tag.
