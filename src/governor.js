@@ -32,21 +32,29 @@ function safePage(page) {
 export class Governor {
     policy;
     audit;
+    repeatStore;
 
-    constructor(policy, audit) {
+    constructor(policy, audit, repeatStore) {
         this.policy = policy;
         this.audit = audit;
+        this.repeatStore = repeatStore;
     }
 
     async authorize(action) {
         let decision;
         try {
-            decision = this.policy.decide(action);
+            if (this.repeatStore) {
+                const repeatCount = await this.repeatStore.observe(action);
+                decision = this.policy.decide(action, { repeatCount });
+            }
+            else {
+                decision = this.policy.decide(action);
+            }
         }
         catch (error) {
             decision = {
                 allowed: false,
-                reason: `policy evaluation failed: ${error.message}`,
+                reason: `policy/repeat safety evaluation failed: ${error.message}`,
                 repeatCount: 0,
             };
         }
