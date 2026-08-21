@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>SovereignBot Operator Console</title>
+  <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+  <div id="login" class="login-shell">
+    <form id="login-form" class="login-card" autocomplete="off">
+      <div class="eyebrow">LOCAL OPERATOR</div>
+      <h1>SovereignBot</h1>
+      <p>Paste a short-lived session created by <code>sovereignbot operator-session</code>.</p>
+      <label>Operator session token<input id="token" type="password" autocomplete="off" spellcheck="false" required></label>
+      <button type="submit">Open console</button>
+      <div id="login-error" class="error" role="alert"></div>
+    </form>
+  </div>
+
+  <div id="app" class="app hidden">
+    <aside>
+      <div class="brand"><span class="mark">S</span><div><strong>SovereignBot</strong><small>Operator Console</small></div></div>
+      <nav>
+        <button data-view="overview" class="active">Overview</button>
+        <button data-view="tasks">Tasks</button>
+        <button data-view="computers">Computers</button>
+        <button data-view="memory">Memory</button>
+        <button data-view="audit">Audit</button>
+      </nav>
+      <div class="aside-bottom"><button id="logout" class="ghost">Revoke session</button></div>
+    </aside>
+    <main>
+      <header><div><div class="eyebrow">LOCAL · GOVERNED</div><h2 id="view-title">Overview</h2></div><div class="header-actions"><span id="audit-badge" class="badge">Audit —</span><button id="refresh" class="ghost">Refresh</button></div></header>
+      <section id="content"></section>
+    </main>
+  </div>
+
+  <dialog id="detail-dialog"><button id="dialog-close" class="dialog-close" aria-label="Close">×</button><div id="dialog-body"></div></dialog>
+  <script type="module" src="/ui/app.js"></script>
+</body>
+</html>
