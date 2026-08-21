@@ -33,6 +33,14 @@ const action = {
 
 test("policy draft validation rejects ambiguous or unsupported rule shapes", () => {
     assert.throws(
+        () => validatePolicyDraft({ rules: [], typoField: true }),
+        /policy draft contains unsupported field: typoField/,
+    );
+    assert.throws(
+        () => validatePolicyDraft({ rules: [{ id: "x", effect: "allow", priority: 1 }] }),
+        /rules\[0\] contains unsupported field: priority/,
+    );
+    assert.throws(
         () => validatePolicyDraft({ rules: [{ id: "x", effect: "maybe" }] }),
         /effect must be allow or deny/,
     );
@@ -127,6 +135,16 @@ test("operator policy dry-run cannot mutate live policy, repeat state or audit",
         const snapshot = await snapshotResponse.json();
         assert.deepEqual(snapshot.active, draft);
         assert.equal(snapshot.editable, false);
+
+        const validateResponse = await fetch(`${server.url}/operator/policy/validate`, {
+            method: "POST",
+            headers: auth,
+            body: JSON.stringify({ policy: snapshot.active }),
+        });
+        assert.equal(validateResponse.status, 200);
+        const validation = await validateResponse.json();
+        assert.equal(validation.ok, true);
+        assert.equal(validation.ruleCount, 2);
 
         const dryRunResponse = await fetch(`${server.url}/operator/policy/dry-run`, {
             method: "POST",
