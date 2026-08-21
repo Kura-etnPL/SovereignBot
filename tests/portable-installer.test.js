@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { buildRelease } from "../scripts/build-release.mjs";
-import { assertNodeVersion, installPortable, validateManifest } from "../install/portable-install.mjs";
+import {
+    assertNodeVersion,
+    installPortable,
+    validateArchiveEntryTypes,
+    validateManifest,
+    writeKnownFileAtomic,
+} from "../install/portable-install.mjs";
 
 function runInstalledHelp(installDir) {
     const launcher = process.platform === "win32"
@@ -62,7 +68,6 @@ test("portable installer verifies a local release, runs the launcher, and preser
         await writeFile(keepPath, "keep me", { encoding: "utf8", flag: "wx" }).catch(async (error) => {
             if (error.code !== "ENOENT") throw error;
         });
-        // Parent does not exist yet on the first write attempt; create it by performing the install.
         const first = await installPortable({ installDir, manifestSource: fixture.manifestPath });
         await writeFile(keepPath, "keep me", "utf8");
         assert.equal(first.version, fixture.built.manifest.version);
@@ -127,6 +132,51 @@ test("failed upgrade after app swap restores the previous app", async () => {
     finally {
         await rm(fixture.root, { recursive: true, force: true });
     }
+});
+
+test("installer preserves the last launcher backup if replacement and rollback both fail", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sovereign-launcher-rollback-"));
+    const path = join(root, "launcher");
+    await mkdir(root, { recursive: true });
+    await writeFile(path, "old launcher", "utf8");
+    let renameCall = 0;
+    const failingRename = async (from, to) => {
+        renameCall += 1;
+        if (renameCall === 1)
+            return rename(from, to);
+        const error = new Error(renameCall === 2 ? "replacement failed" : "rollback failed");
+        error.code = "EIO";
+        throw error;
+    };
+    try {
+        await assert.rejects(
+            () => writeKnownFileAtomic(path, "new launcher", undefined, { rename: failingRename }),
+            (error) => {
+                assert.equal(error instanceof AggregateError, true);
+                assert.match(error.message, /backup preserved/);
+                return true;
+            },
+        );
+        const entries = await readdir(root);
+        const backup = entries.find((entry) => entry.startsWith("launcher.old-"));
+        assert.ok(backup, "rollback failure must preserve the last recoverable backup");
+        assert.equal(await readFile(join(root, backup), "utf8"), "old launcher");
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("installer rejects non-regular tar entry types before extraction", () => {
+    assert.doesNotThrow(() => validateArchiveEntryTypes("-rw-r--r--  0 root root 10 Jan 01 00:00 sovereignbot/src/cli.js\n"));
+    assert.throws(
+        () => validateArchiveEntryTypes("lrwxrwxrwx  0 root root  0 Jan 01 00:00 sovereignbot/src/link -> ../../outside\n"),
+        /non-regular entry type/,
+    );
+    assert.throws(
+        () => validateArchiveEntryTypes("drwxr-xr-x  0 root root  0 Jan 01 00:00 sovereignbot/src/\n"),
+        /non-regular entry type/,
+    );
 });
 
 test("installer rejects invalid Node versions and unsafe manifest paths", () => {
