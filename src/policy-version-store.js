@@ -129,6 +129,23 @@ export class PolicyVersionStore {
         return { version: structuredClone(version), bootstrapped: false };
     }
 
+    async #createTransaction(transaction) {
+        validateTransaction(transaction);
+        try {
+            await this.#io.writeFile(
+                this.#transactionPath,
+                `${JSON.stringify(transaction, null, 2)}\n`,
+                { encoding: "utf8", flag: "wx" },
+            );
+        }
+        catch (error) {
+            if (error.code === "EEXIST")
+                throw new Error("another policy transaction or recovery marker already exists");
+            throw error;
+        }
+        return structuredClone(transaction);
+    }
+
     async #bootstrap(policy) {
         const version = this.#buildVersion(policy, {
             id: createId("policy"),
@@ -143,7 +160,7 @@ export class PolicyVersionStore {
             toHash: version.hash,
             startedAt: new Date().toISOString(),
         };
-        await this.#io.writeJson(this.#transactionPath, transaction);
+        await this.#createTransaction(transaction);
         try {
             await this.#writeVersion(version);
             await this.#writePointer(version);
@@ -151,7 +168,7 @@ export class PolicyVersionStore {
             return version;
         }
         catch (error) {
-            // Keep the transaction marker. A later startup can complete only this recognized bootstrap.
+            // Keep the marker: later startup may complete only this recognized bootstrap.
             throw error;
         }
     }
@@ -184,16 +201,21 @@ export class PolicyVersionStore {
     async #recoverCommittedActivationOrFail(marker, audit) {
         if (!audit)
             throw new Error(`incomplete policy activation ${marker.transactionId}; audit reconciliation is unavailable`);
+        const integrity = await audit.verify();
+        if (!integrity.ok)
+            throw new Error(`cannot reconcile policy activation ${marker.transactionId}: audit integrity failed at sequence ${integrity.seq ?? "unknown"}`);
         const records = await audit.readAll();
         const committed = records.some((record) =>
             ["policy.activated", "policy.rolled_back"].includes(record.type)
             && record.subject === marker.toVersionId
             && record.data?.transactionId === marker.transactionId,
         );
-        if (!committed) {
+        if (!committed)
             throw new Error(`incomplete policy activation ${marker.transactionId}; refusing startup until recovered`);
-        }
-        const pointer = validatePointer(await this.#io.readJson(this.#activePath, undefined));
+        const pointerRaw = await this.#io.readJson(this.#activePath, undefined);
+        if (!pointerRaw)
+            throw new Error(`committed policy activation ${marker.transactionId} has no active pointer`);
+        const pointer = validatePointer(pointerRaw);
         if (pointer.versionId !== marker.toVersionId || pointer.hash !== marker.toHash)
             throw new Error(`committed policy activation ${marker.transactionId} does not match active pointer`);
         const version = await this.readVersion(pointer.versionId);
@@ -261,9 +283,7 @@ export class PolicyVersionStore {
             toHash,
             startedAt: new Date().toISOString(),
         };
-        validateTransaction(transaction);
-        await this.#io.writeJson(this.#transactionPath, transaction);
-        return structuredClone(transaction);
+        return this.#createTransaction(transaction);
     }
 
     async setActive(version) {
