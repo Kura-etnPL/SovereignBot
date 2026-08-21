@@ -47,18 +47,28 @@
 - [x] Authenticated live task/audit telemetry + debounced console refresh
 - [x] Passive harness/worker utilization telemetry + live in-flight activity
 - [x] Policy draft editor + side-effect-free validate/dry-run explain
-- [ ] Transactional/versioned policy apply + rollback
+- [x] Transactional/versioned policy apply + rollback
 - [x] Human takeover/secret prompt surface
 - [x] Memory inspector/search
 - [x] Audit timeline + integrity badge
 - [x] Portable Windows/macOS/Linux installer + verified release artifact pipeline
-- [ ] First intentional public v0.4 release
+
+## v1.0 stabilization
+
+- [ ] `sovereignbot doctor` with passive provider/browser/runtime diagnostics
+- [ ] explicit durable-state backup/restore/export
+- [ ] idempotent schema/data migrations and crash-recovery cleanup
+- [ ] final secret/authority/security audit
+- [ ] release version/CHANGELOG/migration notes
+- [ ] release-candidate stress/soak suite
+- [ ] intentional `v1.0.0` public release after all release gates pass
 
 ## Later integrations
 
 - [ ] AG-UI adapter where it improves interoperability
 - [ ] Generic governed MCP client/bridge
 - [ ] Provider-specific health/lease telemetry that does not require quota-consuming probes
+- [ ] Optional Cloudflare/public remote operator deployment mode
 
 ## Non-goals
 

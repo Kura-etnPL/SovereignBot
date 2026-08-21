@@ -4,7 +4,7 @@
 
 **Local-first AI coworkers with durable memory, supervisor/worker orchestration, governed computer actions, and no mandatory cloud control plane.**
 
-[Architecture](docs/architecture.md) · [Task graph](docs/task-graph.md) · [Codex](docs/codex.md) · [Claude Code](docs/claude-code.md) · [Computer](docs/computer.md) · [Governed MCP](docs/governed-mcp.md) · [Policy dry-run](docs/policy-dry-run.md) · [WebDriver sidecar](docs/webdriver-sidecar.md) · [Roadmap](docs/roadmap.md) · [Security](SECURITY.md)
+[Architecture](docs/architecture.md) · [Task graph](docs/task-graph.md) · [Codex](docs/codex.md) · [Claude Code](docs/claude-code.md) · [Computer](docs/computer.md) · [Governed MCP](docs/governed-mcp.md) · [Operator console](docs/operator-console.md) · [Policy activation](docs/policy-activation.md) · [Installation](docs/installation.md) · [Roadmap](docs/roadmap.md) · [Security](SECURITY.md)
 
 </div>
 
@@ -14,20 +14,22 @@ Core principles:
 
 - **local durable state** — no required hosted memory/thread backend;
 - **no mandatory metered model API** — the runtime boots without provider credentials;
-- **resumable Codex + Claude Code workers** using locally installed CLIs;
+- **resumable Codex + Claude Code workers** using independently authenticated local CLIs;
 - **supervisor → worker DAGs** with explicit ownership, progress, retry, cancellation, and independent review;
 - **governed browser/computer actions** with task-bound authority and fail-closed policy;
 - **structured W3C WebDriver sidecar** rather than raw CDP/Playwright/coordinate vision in core;
 - **task-scoped governed MCP tools** for Codex/Claude Code without raw driver authority;
 - **per-worker browser profile/workspace/session identity**;
-- **human takeover + separate secret-entry channel**;
+- **human takeover + separate operator-only secret-entry channel**;
 - **persistent runaway-loop guard** that survives runtime restarts;
 - **tamper-evident SHA-256 audit chain**;
-- **short-lived local operator console sessions** instead of putting durable operator credentials in the browser.
+- **short-lived loopback operator sessions** instead of durable credentials in the browser;
+- **immutable policy versions with transactional Apply/Rollback and crash recovery**;
+- **verified portable installers** without global npm/admin/PATH mutation.
 
-> **Status: v0.4 in progress.** The sovereign core, resumable Codex/Claude Code harnesses, supervisor-worker protocol, production governed WebDriver computer layer, governed MCP bridge, persistent repeat guard, secure local operator console, passive live worker telemetry, policy draft/dry-run, and verified portable installer pipeline are implemented. Transactional/versioned policy activation and v1.0 operational hardening remain before the stable release.
+> **Status: v0.4 feature baseline / v1.0 stabilization.** The core runtime, Codex/Claude harnesses, supervisor-worker protocol, production governed browser, governed MCP bridge, persistent repeat guard, live local Operator Console, versioned policy activation, and verified portable installer pipeline are implemented. The remaining stable-release work is operational diagnostics, backup/restore and migrations, final security review, release documentation/versioning, and an RC stress/soak gate.
 
-## Quick start
+## Quick start from source
 
 Requires Node.js 22+ and has zero third-party Node runtime dependencies.
 
@@ -42,7 +44,7 @@ node src/cli.js audit verify
 
 `init` creates `.sovereignbot/config.json`. Runtime state under `.sovereignbot/` is ignored by Git.
 
-See [docs/installation.md](docs/installation.md) for the checksum-verified portable Windows/macOS/Linux installer and release artifact pipeline.
+For the checksum-verified portable Windows/macOS/Linux installation path, see [docs/installation.md](docs/installation.md).
 
 ## Supervisor → worker
 
@@ -77,7 +79,7 @@ node src/cli.js submit "Inspect and improve this repository" \
 node src/cli.js run --config examples/codex-agent.config.json
 ```
 
-The adapter persists `thread.started` immediately and resumes failed/review-retry work with the captured session. See [docs/codex.md](docs/codex.md).
+The adapter persists the Codex thread/session state immediately and resumes failed/review-retry work with the captured session. See [docs/codex.md](docs/codex.md).
 
 ## Claude Code worker
 
@@ -90,7 +92,7 @@ node src/cli.js submit "Inspect and improve this repository" \
 node src/cli.js run --config examples/claude-code-agent.config.json
 ```
 
-The adapter uses print-mode streaming JSON, persists the session id, resumes sessions, and maps supported progress/retry events into the durable task protocol. See [docs/claude-code.md](docs/claude-code.md).
+The adapter uses non-interactive streaming output, persists the Claude session id, resumes sessions, and maps supported progress/retry events into the durable task protocol. See [docs/claude-code.md](docs/claude-code.md).
 
 ## Governed computer and browser
 
@@ -136,7 +138,7 @@ A new snapshot invalidates old handles. Browser reset/restart rotates the browse
 
 Every configured worker has a distinct bearer credential, browser profile directory, workspace, sidecar process/browser session, and snapshot/ref cache.
 
-This is process/profile isolation. Stronger container/VM isolation can wrap the same sidecar contract without changing orchestration.
+This is process/profile isolation, not VM-strength isolation. Stronger container/VM isolation can wrap the same sidecar contract and remains recommended for higher-risk workers.
 
 ### Connection-time egress checks
 
@@ -144,7 +146,7 @@ Browser HTTP(S) is forced through the sidecar's local proxy. The proxy resolves 
 
 Metadata, link-local, multicast, benchmark/documentation/reserved ranges are always denied. Ordinary private/loopback/ULA networks are denied unless `computer.allowPrivateHosts` is explicitly enabled.
 
-This materially reduces DNS-rebinding/TOCTOU risk, but is not represented as equivalent to an OS network namespace. See [docs/webdriver-sidecar.md](docs/webdriver-sidecar.md).
+This reduces DNS-rebinding/TOCTOU risk, but is not represented as equivalent to an OS network namespace. See [docs/webdriver-sidecar.md](docs/webdriver-sidecar.md).
 
 ## Governed MCP for Codex / Claude Code
 
@@ -191,20 +193,24 @@ Open the printed loopback server URL at `/ui/` and paste the short-lived token.
 
 The browser keeps this token in page memory only. It is not put in cookies, localStorage, sessionStorage, or query parameters. The durable computer operator token is never exposed to the console.
 
-The console currently provides:
+The console provides:
 
 - overview/task inspection;
-- supervisor-worker graph + event details;
-- passive computer state;
+- supervisor-worker graph + durable events;
 - live task/audit telemetry;
 - passive worker/harness utilization and in-flight activity;
+- passive computer state;
 - take/release and browser lifecycle controls;
 - pending secret supply;
 - memory search;
 - audit timeline + integrity badge;
-- policy draft validation and side-effect-free dry-run explain.
+- policy draft validation and dry-run explain;
+- active policy version/hash/history;
+- explicit checked Apply and verified historical Rollback.
 
-The console is deliberately loopback-only in this milestone.
+The console is deliberately loopback-only for v1.0. Public/domain deployment is a separate later layer.
+
+See [docs/operator-console.md](docs/operator-console.md).
 
 ## Policy
 
@@ -212,7 +218,7 @@ Live policy evaluation is:
 
 **hard safety → deny rules → allow rules → deny by default**.
 
-Rules can match harness/computer category, operation/intent, agent, target, page host, element metadata, file metadata, key input, and repeat count. Runtime hard denials are non-overridable.
+Rules can match harness/computer category, operation/intent, agent, target, page host, element metadata, file metadata, key input, and repeat count. Runtime hard denials are non-overridable and are not part of the editable policy document.
 
 ### Persistent repeat safety
 
@@ -220,28 +226,31 @@ Production repeat observations are persisted before an action may be allowed. Th
 
 Restarting the runtime does not reset the active repeat window.
 
-### Policy draft / dry-run
+`repeatWindowMs` and `repeatMaxActiveFingerprints` are restart/migration-level safety settings. Live policy activation refuses targets whose effective values differ from the current active version.
+
+### Draft / dry-run
 
 The Policy view can load the current policy into an in-memory draft, validate it, and simulate an action with a caller-supplied `repeatCount`.
 
-Dry-run does not call the Governor, mutate the live policy, touch `repeat-state.json`, append action-decision audit rows, or execute any action. There is intentionally no Apply button yet. See [docs/policy-dry-run.md](docs/policy-dry-run.md).
+Dry-run does not call the Governor, mutate the live policy, touch `repeat-state.json`, append action-decision audit rows, or execute any action. See [docs/policy-dry-run.md](docs/policy-dry-run.md).
 
-## Computer API
+### Versioned Apply / Rollback
 
-Worker routes require that worker's bearer token **and** a current running `taskId` owned by that worker.
+The first startup creates an immutable hash-verified policy version and active pointer. Once that version state exists, later config edits cannot silently replace the active policy.
 
-Durable operator-token routes remain available for lower-level clients. The browser console uses its separate short-lived session layer instead.
+Apply requires an explicit short-lived operator-session mutation and at least one expected dry-run check. The server independently re-runs the check before creating/activating a new version.
 
-Computer lifecycle requests/outcomes are audited. Side-effecting browser actions are never automatically retried after transport loss.
+Activation uses an immutable version, atomic active pointer, transaction marker, runtime PolicyEngine swap, and hash-chained audit commit record. Pre-commit failures restore the previous engine/pointer; unresolved rollback leaves a recovery marker and future mutation/startup fails closed. If the audit commit succeeded but marker cleanup did not, restart reconciles only after verifying audit-chain integrity and matching transaction/version/pointer hashes.
 
-## Durable memory
+Rollback re-activates a verified existing version through the same transaction/audit path; history is never rewritten.
+
+See [docs/policy-activation.md](docs/policy-activation.md).
+
+## Durable memory and workflow history
 
 Append-only JSONL memory is scoped as `global`, `agent:<id>`, or `task:<id>`. Final results are saved to task/agent scopes; review candidates remain separate until approved.
 
-## Workflow history + security audit
-
-- `task-events.jsonl` reconstructs workflow/progress/review history;
-- `audit.jsonl` stores security decisions and important transitions in a hash chain.
+`task-events.jsonl` reconstructs workflow/progress/review history. `audit.jsonl` stores security decisions and important transitions in a SHA-256 hash chain.
 
 ```bash
 node src/cli.js audit verify
@@ -251,13 +260,10 @@ Editing/removing a historic audit row breaks verification.
 
 ## CI
 
-Normal regression coverage runs on:
+Required regression coverage includes:
 
-- Ubuntu + Node 22/24
-- Windows + Node 22/24
-
-Additional required jobs verify:
-
+- Ubuntu + Node 22/24;
+- Windows + Node 22/24;
 - real Chrome + ChromeDriver sidecar/governed MCP E2E;
 - real POSIX portable install;
 - real Windows PowerShell portable install.
@@ -269,18 +275,19 @@ Additional required jobs verify:
 3. **No mandatory provider API.** The core runs without model credentials.
 4. **No single-agent assumption.** Planning, work, review, and specialists are first-class.
 5. **No shared-context requirement.** Delegation passes explicit state/results.
-6. **No silent policy fallback.** Missing/broken policy fails closed.
+6. **No silent policy fallback.** Missing/broken durable policy state fails closed.
 7. **No unaudited governed action path.** Governed integrations pass through the Governor.
 8. **No silent automation downgrade.** A missing production driver fails clearly rather than falling back to coordinate vision.
 9. **No hidden live-policy mutation.** Policy simulation and policy activation are separate authority levels.
+10. **No unverified recovery.** Crash recovery requires durable state/hash/audit evidence rather than guessing.
 
-## Next
+## Toward v1.0
 
-The next blocking milestone is transactional/versioned policy apply + rollback, followed by v1.0 operational hardening: doctor/diagnostics, backup/restore and migration safety, release-candidate soak, and stable release documentation.
+The v0.4 product baseline is feature-complete after versioned policy activation. Stable v1.0 still requires operational hardening: `sovereignbot doctor`, backup/restore/export, migration/crash-recovery checks, final security review, stable version/CHANGELOG/release notes, and a release-candidate stress/soak gate.
 
-The public/domain deployment layer is intentionally separate from the loopback operator authority boundary.
+Public Cloudflare/domain deployment, AG-UI, extra providers, and mandatory container/VM packaging are intentionally non-blocking post-v1.0 work.
 
-See [docs/roadmap.md](docs/roadmap.md).
+See [docs/roadmap.md](docs/roadmap.md) and the v1.0 release gate in GitHub issues.
 
 ## License
 

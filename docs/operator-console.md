@@ -1,6 +1,6 @@
 # Local operator console
 
-SovereignBot v0.4 includes a dependency-free local operator console for inspecting the runtime and performing explicit operator-only computer actions.
+SovereignBot v0.4 includes a dependency-free local operator console for inspecting the runtime and performing explicit operator-only actions.
 
 The console is intentionally a view/controller for the existing runtime. It is **not** a second authority path.
 
@@ -30,26 +30,33 @@ The token is held only in the page's JavaScript memory. It is not written to `lo
 
 Use **Revoke session** when finished.
 
-## What the console can show
+## Console surfaces
 
-- task state and recent tasks;
-- supervisor/worker task graphs and events;
-- configured workers/agents;
+The console can show and manage:
+
+- overview and task state;
+- supervisor/worker task graphs and durable events;
+- passive worker/harness utilization and in-flight execution;
 - passive computer lifecycle/control state;
 - pending human secret requests;
 - local memory search;
-- audit-chain integrity and recent audit rows.
+- audit-chain integrity and recent audit rows;
+- policy draft validation/dry-run;
+- active policy version/hash and immutable history;
+- explicit versioned policy Apply/Rollback.
 
 ## Operator actions
 
-The first v0.4 milestone allows deliberate operator actions:
+Deliberate operator-only actions include:
 
 - take human control;
 - release control back to the agent;
 - start/stop/reset a managed computer;
-- supply a pending requested secret.
+- supply a pending requested secret;
+- activate a checked policy draft as a new immutable version;
+- roll back to a verified historical policy version.
 
-The UI does not expose raw WebDriver/CDP/Playwright handles, browser debug ports, worker bearer tokens, or the durable computer operator token.
+The UI does not expose raw WebDriver/CDP/Playwright handles, browser debug ports, worker bearer tokens, the durable computer operator token, or provider session identifiers.
 
 ## Session boundary
 
@@ -63,11 +70,13 @@ SovereignBot stores each active console session as one file under:
 
 The raw token is not stored. Session files contain only version/timestamps/label metadata. Per-session files also avoid a shared read-modify-write race when a running server revokes one session while a separate local CLI process creates another.
 
+The same short-lived operator session is the only browser credential accepted by `/operator/policy/apply` and `/operator/policy/rollback`. Worker/computer bearer tokens and governed MCP capabilities do not authenticate to `/operator/*`.
+
 ## Loopback only
 
 The built-in console and `/operator/*` API are enabled only when SovereignBot itself is configured on loopback (`127.0.0.1`, `localhost`, or `::1`) and the request arrives from loopback.
 
-Binding the main server to a LAN/public interface does **not** automatically publish the operator console. A future remote deployment mode would need its own authenticated transport and threat model.
+Binding the main server to a LAN/public interface does **not** automatically publish the operator console. Remote/public control is intentionally a separate post-v1.0 deployment problem with its own transport and threat model.
 
 ## Cross-origin protection
 
@@ -79,6 +88,36 @@ Operator mutations validate browser `Origin` when present and reject a mismatche
 - no external form target/base URI.
 
 The short-lived bearer is sent in the `Authorization` header, not a cookie or query string.
+
+## Live telemetry
+
+The console opens an authenticated NDJSON stream with the short-lived operator session in the `Authorization` header.
+
+The stream emits minimal invalidation signals for task/audit/harness activity; it does not send raw task payloads, model context, provider session ids, browser snapshots, secret values, or operator tokens.
+
+Open streams re-check the session and terminate after revoke/expiry.
+
+The Policy page is intentionally excluded from automatic telemetry rerender so background activity cannot overwrite or disrupt an in-progress draft.
+
+## Policy workflow
+
+The Policy page separates simulation from authority:
+
+1. edit the policy draft in browser memory;
+2. optionally validate it;
+3. define a simulated action and repeat count;
+4. run dry-run/explain;
+5. **Apply checked policy** becomes available only for that current draft/action result;
+6. Apply asks for explicit confirmation;
+7. the server independently re-runs the expected dry-run check;
+8. successful activation creates an immutable version, atomically moves the active pointer, swaps future Governor decisions, and records an audit commit;
+9. history can be inspected and a verified prior version can be explicitly rolled back.
+
+Editing draft/action/repeatCount invalidates the prior browser dry-run and disables Apply.
+
+`repeatWindowMs` and `repeatMaxActiveFingerprints` are restart/migration-level persistent safety settings and cannot be changed by live Apply/Rollback.
+
+See [policy-dry-run.md](policy-dry-run.md) and [policy-activation.md](policy-activation.md).
 
 ## Secret supply
 
@@ -98,18 +137,16 @@ Downstream secret-driver errors are converted to the fixed public error `secret 
 
 ## Passive status vs health
 
-Opening or refreshing the console must not start a browser.
+Opening or refreshing the console must not start a browser or provider CLI.
 
-The dashboard therefore uses `computerLifecycle.status()`, which only inspects whether an already-managed driver object exists. It does not instantiate a driver or call `health()`.
+The computer dashboard therefore uses `computerLifecycle.status()`, which only inspects whether an already-managed driver object exists. It does not instantiate a driver or call `health()`.
+
+Worker telemetry reads existing in-process/task state and does not launch Codex, Claude Code, MCP, or provider probes.
 
 The existing explicit computer `health()` endpoint retains its historical behavior and may start/connect the managed sidecar. Use **Start** or explicit health intentionally when you want active probing.
 
-## Remaining v0.4 work
+## Recovery state
 
-The first console is intentionally operational rather than a generic admin framework. Remaining v0.4 items include:
+If a policy activation committed its audit record but the transaction marker could not be removed, the Policy page reports **RECOVERY REQUIRED**. The active committed policy remains in force, but further policy mutation is locked until restart/reconciliation.
 
-- richer live DAG visualization;
-- policy editor + dry-run/explain view;
-- stronger computer lease/health telemetry without active probes;
-- installer/desktop launch experience;
-- optional event streaming instead of manual refresh.
+If an activation is interrupted before a valid audit commit and rollback cannot be proven, startup fails closed rather than guessing which policy should be active.

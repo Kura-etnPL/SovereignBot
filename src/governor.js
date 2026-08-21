@@ -40,6 +40,12 @@ export class Governor {
         this.repeatStore = repeatStore;
     }
 
+    replacePolicy(policy) {
+        if (!policy || typeof policy.decide !== "function")
+            throw new Error("replacement policy engine must provide decide(action, options)");
+        this.policy = policy;
+    }
+
     async authorize(action) {
         let decision;
         try {
