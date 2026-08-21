@@ -61,8 +61,9 @@ test("operator policy apply/history/rollback require the short-lived operator se
             headers: mutationHeaders,
             body: JSON.stringify({ policy: denyPolicy, checks, label: "deny echo" }),
         });
-        assert.equal(applyResponse.status, 200, await applyResponse.text().catch(() => ""));
-        const applied = await applyResponse.json();
+        const applyText = await applyResponse.text();
+        assert.equal(applyResponse.status, 200, applyText);
+        const applied = JSON.parse(applyText);
         assert.equal(applied.active.active, true);
         assert.notEqual(applied.active.id, initialId);
         assert.equal(JSON.stringify(applied).includes(session.token), false);
