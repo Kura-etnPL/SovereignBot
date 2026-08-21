@@ -9,6 +9,7 @@ import { registerAgentToolBridgeManager } from "./harness.js";
 import { MemoryStore } from "./memory.js";
 import { Orchestrator } from "./orchestrator.js";
 import { PolicyEngine } from "./policy.js";
+import { RepeatStore } from "./repeat-store.js";
 import { createWebDriverSidecarFactory } from "./sidecar-computer-driver.js";
 import { TaskBoundComputerGateway } from "./task-bound-computer.js";
 import { TaskEventStore } from "./task-events.js";
@@ -23,7 +24,12 @@ export async function createRuntime(config, options = {}) {
     const taskEvents = new TaskEventStore(dataDir);
     await taskEvents.init();
     const policy = new PolicyEngine(config.policy);
-    const governor = new Governor(policy, audit);
+    const repeatStore = options.repeatStore ?? new RepeatStore(dataDir, {
+        windowMs: config.policy.repeatWindowMs ?? 180_000,
+        maxActiveFingerprints: config.policy.repeatMaxActiveFingerprints ?? 10_000,
+    });
+    await repeatStore.init?.();
+    const governor = new Governor(policy, audit, repeatStore);
     const orchestrator = new Orchestrator(config.agents, tasks, taskEvents, memory, governor, audit);
 
     const computerRegistry = new ComputerRegistry(dataDir, config.agents.map((agent) => agent.id));
@@ -74,6 +80,7 @@ export async function createRuntime(config, options = {}) {
         memory,
         audit,
         taskEvents,
+        repeatStore,
         computer,
         rawComputer,
         computerLifecycle,
