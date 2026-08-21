@@ -9,9 +9,8 @@ function latestActivityByActor(events) {
         if (!event.actor)
             continue;
         const existing = latest.get(event.actor);
-        if (!existing || String(event.at) >= String(existing.at)) {
+        if (!existing || String(event.at) >= String(existing.at))
             latest.set(event.actor, { taskId: event.taskId, type: event.type, at: event.at });
-        }
     }
     return latest;
 }
@@ -30,7 +29,7 @@ export async function collectWorkerTelemetry(orchestrator) {
         const assigned = tasks.filter((task) => task.assignedAgentId === agent.id);
         const activeTaskIds = assigned.filter((task) => EXECUTION_STATUSES.has(task.status)).map((task) => task.id);
         const reviewCount = assigned.filter((task) => REVIEW_STATUSES.has(task.status)).length;
-        const resumableSessionTaskCount = assigned.filter((task) => Boolean(task.harnessState?.sessionId)).length;
+        const resumableSessionTaskCount = assigned.filter((task) => task.status !== "completed" && Boolean(task.harnessState?.sessionId)).length;
 
         let compatibleQueuedCount = 0;
         let runnableQueuedCount = 0;
