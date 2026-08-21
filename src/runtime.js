@@ -9,7 +9,9 @@ import { registerAgentToolBridgeManager } from "./harness.js";
 import { MemoryStore } from "./memory.js";
 import { OperatorSessionStore } from "./operator-session.js";
 import { Orchestrator } from "./orchestrator.js";
+import { PolicyManager } from "./policy-manager.js";
 import { PolicyEngine } from "./policy.js";
+import { PolicyVersionStore } from "./policy-version-store.js";
 import { RepeatStore } from "./repeat-store.js";
 import { createWebDriverSidecarFactory } from "./sidecar-computer-driver.js";
 import { TaskBoundComputerGateway } from "./task-bound-computer.js";
@@ -20,30 +22,45 @@ export async function createRuntime(config, options = {}) {
     const dataDir = resolve(config.dataDir);
     const audit = new AuditLog(join(dataDir, "audit.jsonl"));
     await audit.init();
+
+    const policyVersions = options.policyVersionStore ?? new PolicyVersionStore(dataDir);
+    const policyBootstrap = await policyVersions.init(config.policy, { audit });
+    const activePolicyVersion = policyBootstrap.version;
+    const runtimeConfig = {
+        ...config,
+        policy: structuredClone(activePolicyVersion.policy),
+    };
+
     const memory = new MemoryStore(join(dataDir, "memory.jsonl"));
     const tasks = new TaskStore(dataDir);
     const taskEvents = new TaskEventStore(dataDir);
     await taskEvents.init();
-    const policy = new PolicyEngine(config.policy);
+    const policy = new PolicyEngine(runtimeConfig.policy);
     const repeatStore = options.repeatStore ?? new RepeatStore(dataDir, {
-        windowMs: config.policy.repeatWindowMs ?? 180_000,
-        maxActiveFingerprints: config.policy.repeatMaxActiveFingerprints ?? 10_000,
+        windowMs: runtimeConfig.policy.repeatWindowMs ?? 180_000,
+        maxActiveFingerprints: runtimeConfig.policy.repeatMaxActiveFingerprints ?? 10_000,
     });
     await repeatStore.init?.();
     const operatorSessions = options.operatorSessions ?? new OperatorSessionStore(dataDir);
     await operatorSessions.init?.();
     const governor = new Governor(policy, audit, repeatStore);
-    const orchestrator = new Orchestrator(config.agents, tasks, taskEvents, memory, governor, audit);
+    const policyManager = new PolicyManager({
+        store: policyVersions,
+        governor,
+        audit,
+        runtimeConfig,
+    });
+    const orchestrator = new Orchestrator(runtimeConfig.agents, tasks, taskEvents, memory, governor, audit);
 
-    const computerRegistry = new ComputerRegistry(dataDir, config.agents.map((agent) => agent.id));
+    const computerRegistry = new ComputerRegistry(dataDir, runtimeConfig.agents.map((agent) => agent.id));
     await computerRegistry.init();
 
     let managedComputerDriverFactory;
     let computerDriverFactory = options.computerDriverFactory;
-    if (!computerDriverFactory && config.computer?.driver?.kind === "webdriver-sidecar") {
+    if (!computerDriverFactory && runtimeConfig.computer?.driver?.kind === "webdriver-sidecar") {
         managedComputerDriverFactory = createWebDriverSidecarFactory({
-            ...config.computer.driver,
-            allowPrivateHosts: config.computer.allowPrivateHosts ?? false,
+            ...runtimeConfig.computer.driver,
+            allowPrivateHosts: runtimeConfig.computer.allowPrivateHosts ?? false,
         });
         computerDriverFactory = managedComputerDriverFactory;
     }
@@ -53,7 +70,7 @@ export async function createRuntime(config, options = {}) {
         governor,
         audit,
         driverFactory: computerDriverFactory,
-        allowPrivateHosts: config.computer?.allowPrivateHosts ?? false,
+        allowPrivateHosts: runtimeConfig.computer?.allowPrivateHosts ?? false,
     });
 
     const computer = options.bindComputerToTasks === false
@@ -72,24 +89,27 @@ export async function createRuntime(config, options = {}) {
     });
 
     const governedToolBridge = new GovernedToolBridgeManager({ dataDir, computer, audit });
-    for (const agent of config.agents) {
+    for (const agent of runtimeConfig.agents) {
         if (Array.isArray(agent.governedTools) && agent.governedTools.length)
             registerAgentToolBridgeManager(agent, governedToolBridge);
     }
 
     return {
-        config,
+        config: runtimeConfig,
         orchestrator,
         memory,
         audit,
         taskEvents,
         repeatStore,
         operatorSessions,
+        policyVersions,
+        policyManager,
         computer,
         rawComputer,
         computerLifecycle,
         computerRegistry,
         governedToolBridge,
+        policyBootstrapped: policyBootstrap.bootstrapped,
         async close() {
             await governedToolBridge.close();
             await (managedComputerDriverFactory ?? computerDriverFactory)?.close?.();
