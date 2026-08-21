@@ -10,11 +10,7 @@ function latestActivityByActor(events) {
             continue;
         const existing = latest.get(event.actor);
         if (!existing || String(event.at) >= String(existing.at)) {
-            latest.set(event.actor, {
-                taskId: event.taskId,
-                type: event.type,
-                at: event.at,
-            });
+            latest.set(event.actor, { taskId: event.taskId, type: event.type, at: event.at });
         }
     }
     return latest;
@@ -24,7 +20,7 @@ export async function collectWorkerTelemetry(orchestrator) {
     const agents = orchestrator.listAgents();
     const tasks = await orchestrator.listTasks();
     const events = await orchestrator.taskEvents.list();
-    const activity = harnessActivitySnapshot();
+    const activity = harnessActivitySnapshot(orchestrator.agents);
     const latestByActor = latestActivityByActor(events);
     const queued = tasks.filter((task) => task.kind !== "plan" && task.status === "queued");
 
@@ -32,9 +28,7 @@ export async function collectWorkerTelemetry(orchestrator) {
         const maxConcurrency = agent.maxConcurrency ?? 1;
         const inFlightHarnessCount = activity.get(agent.id) ?? 0;
         const assigned = tasks.filter((task) => task.assignedAgentId === agent.id);
-        const activeTaskIds = assigned
-            .filter((task) => EXECUTION_STATUSES.has(task.status))
-            .map((task) => task.id);
+        const activeTaskIds = assigned.filter((task) => EXECUTION_STATUSES.has(task.status)).map((task) => task.id);
         const reviewCount = assigned.filter((task) => REVIEW_STATUSES.has(task.status)).length;
         const resumableSessionTaskCount = assigned.filter((task) => Boolean(task.harnessState?.sessionId)).length;
 
