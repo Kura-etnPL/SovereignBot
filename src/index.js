@@ -16,6 +16,8 @@ export * from "./operator-session.js";
 export * from "./operator-stream.js";
 export * from "./orchestrator.js";
 export * from "./policy-dry-run.js";
+export * from "./policy-manager.js";
+export * from "./policy-version-store.js";
 export * from "./policy.js";
 export * from "./repeat-store.js";
 export * from "./runtime.js";
