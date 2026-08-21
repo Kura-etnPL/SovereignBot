@@ -4,6 +4,23 @@ import { CodexHarness } from "./codex-harness.js";
 
 const TOOL_BRIDGE_MANAGERS = new WeakMap();
 const HARNESS_ACTIVITY = new Map();
+const HARNESS_ACTIVITY_LISTENERS = new Set();
+
+function notifyHarnessActivity(agentId, inFlightHarnessCount) {
+    const event = {
+        agentId,
+        inFlightHarnessCount,
+        at: new Date().toISOString(),
+    };
+    for (const listener of [...HARNESS_ACTIVITY_LISTENERS]) {
+        try {
+            listener({ ...event });
+        }
+        catch {
+            // Utilization observers are non-authoritative and cannot fail provider execution.
+        }
+    }
+}
 
 function adjustHarnessActivity(agentId, delta) {
     const next = Math.max(0, (HARNESS_ACTIVITY.get(agentId) ?? 0) + delta);
@@ -11,10 +28,22 @@ function adjustHarnessActivity(agentId, delta) {
         HARNESS_ACTIVITY.delete(agentId);
     else
         HARNESS_ACTIVITY.set(agentId, next);
+    notifyHarnessActivity(agentId, next);
 }
 
 export function harnessActivitySnapshot() {
     return new Map(HARNESS_ACTIVITY);
+}
+
+export function subscribeHarnessActivity(listener) {
+    if (typeof listener !== "function")
+        throw new Error("harness activity listener must be a function");
+    HARNESS_ACTIVITY_LISTENERS.add(listener);
+    return () => HARNESS_ACTIVITY_LISTENERS.delete(listener);
+}
+
+export function harnessActivitySubscriberCount() {
+    return HARNESS_ACTIVITY_LISTENERS.size;
 }
 
 export function registerAgentToolBridgeManager(agent, manager) {
