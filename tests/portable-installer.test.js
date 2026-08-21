@@ -8,14 +8,14 @@ import { buildRelease } from "../scripts/build-release.mjs";
 import { assertNodeVersion, installPortable, validateManifest } from "../install/portable-install.mjs";
 
 function runInstalledHelp(installDir) {
-    if (process.platform === "win32") {
-        const launcher = join(installDir, "bin", "sovereignbot.cmd");
-        return spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `"${launcher}" --help`], {
-            encoding: "utf8",
-            windowsHide: true,
-        });
-    }
-    return spawnSync(join(installDir, "bin", "sovereignbot"), ["--help"], { encoding: "utf8" });
+    const launcher = process.platform === "win32"
+        ? join(installDir, "bin", "sovereignbot.cmd")
+        : join(installDir, "bin", "sovereignbot");
+    return spawnSync(launcher, ["--help"], {
+        encoding: "utf8",
+        windowsHide: true,
+        shell: process.platform === "win32",
+    });
 }
 
 async function buildFixture(prefix) {
