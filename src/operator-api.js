@@ -1,4 +1,5 @@
 import { dryRunPolicy, validatePolicyDraft } from "./policy-dry-run.js";
+import { collectWorkerTelemetry } from "./worker-telemetry.js";
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
@@ -23,6 +24,7 @@ export async function handleOperatorApiRequest(runtime,request,response,url){
         if(request.method==="GET"&&url.pathname==="/operator/session"){send(response,200,{ok:true,scope:"operator-console"});return}
         if(request.method==="POST"&&url.pathname==="/operator/session/revoke"){requireSameOrigin(request);await runtime.operatorSessions.revoke(sessionToken);send(response,200,{revoked:true});return}
         if(request.method==="GET"&&url.pathname==="/operator/overview"){const tasks=await runtime.orchestrator.listTasks();const agents=runtime.orchestrator.listAgents().map(agent=>({id:agent.id,name:agent.name,role:agent.role,capabilities:agent.capabilities,governedTools:agent.governedTools,harnessKind:agent.harness?.kind}));send(response,200,{tasks,agents,computers:await computerDetails(runtime),audit:await runtime.audit.verify()});return}
+        if(request.method==="GET"&&url.pathname==="/operator/workers"){send(response,200,await collectWorkerTelemetry(runtime.orchestrator));return}
         if(request.method==="GET"&&url.pathname==="/operator/audit"){const limit=Math.max(1,Math.min(500,Number(url.searchParams.get("limit")??100)));const rows=await runtime.audit.readAll();send(response,200,rows.slice(-limit).reverse());return}
         if(request.method==="GET"&&url.pathname==="/operator/memory"){const scope=url.searchParams.get("scope")||undefined;const query=url.searchParams.get("q")||undefined;send(response,200,await runtime.memory.search({scope,query,limit:100}));return}
         if(request.method==="GET"&&url.pathname==="/operator/policy"){send(response,200,{active:validatePolicyDraft(runtime.config.policy),editable:false,note:"Snapshot only. Editing, validating, or dry-running this copy does not change the active runtime policy."});return}
