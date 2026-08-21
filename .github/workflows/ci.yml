@@ -24,6 +24,47 @@ jobs:
       - run: npm run check
       - run: npm test
 
+  portable-install-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm run build:release
+      - name: Install through POSIX bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          before="$PATH"
+          install_dir="$RUNNER_TEMP/sovereignbot-portable"
+          sh install/install.sh \
+            --install-dir "$install_dir" \
+            --manifest "$GITHUB_WORKSPACE/dist/release-manifest.json" \
+            --installer-core "$GITHUB_WORKSPACE/dist/portable-install.mjs"
+          test "$PATH" = "$before"
+          "$install_dir/bin/sovereignbot" --help | grep SovereignBot
+
+  portable-install-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm run build:release
+      - name: Install through PowerShell bootstrap
+        shell: pwsh
+        run: |
+          $before = $env:PATH
+          $installDir = Join-Path $env:RUNNER_TEMP "sovereignbot-portable"
+          ./install/install.ps1 `
+            -InstallDir $installDir `
+            -Manifest (Resolve-Path ./dist/release-manifest.json).Path `
+            -InstallerCore (Resolve-Path ./dist/portable-install.mjs).Path
+          if ($env:PATH -ne $before) { throw "installer modified PATH" }
+          & (Join-Path $installDir "bin/sovereignbot.cmd") --help | Select-String "SovereignBot"
+
   browser-e2e:
     runs-on: ubuntu-24.04
     steps:
