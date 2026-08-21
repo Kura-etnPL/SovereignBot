@@ -4,7 +4,7 @@
 
 **Local-first AI coworkers with durable memory, supervisor/worker orchestration, governed computer actions, and no mandatory cloud control plane.**
 
-[Architecture](docs/architecture.md) · [Task graph](docs/task-graph.md) · [Codex](docs/codex.md) · [Claude Code](docs/claude-code.md) · [Computer](docs/computer.md) · [WebDriver sidecar](docs/webdriver-sidecar.md) · [Roadmap](docs/roadmap.md) · [Security](SECURITY.md)
+[Architecture](docs/architecture.md) · [Task graph](docs/task-graph.md) · [Codex](docs/codex.md) · [Claude Code](docs/claude-code.md) · [Computer](docs/computer.md) · [Governed MCP](docs/governed-mcp.md) · [Policy dry-run](docs/policy-dry-run.md) · [WebDriver sidecar](docs/webdriver-sidecar.md) · [Roadmap](docs/roadmap.md) · [Security](SECURITY.md)
 
 </div>
 
@@ -16,13 +16,16 @@ Core principles:
 - **no mandatory metered model API** — the runtime boots without provider credentials;
 - **resumable Codex + Claude Code workers** using locally installed CLIs;
 - **supervisor → worker DAGs** with explicit ownership, progress, retry, cancellation, and independent review;
-- **governed browser/computer actions** with task-bound worker tokens and fail-closed policy;
-- **structured W3C WebDriver sidecar** rather than Playwright/CDP/coordinate vision in core;
+- **governed browser/computer actions** with task-bound authority and fail-closed policy;
+- **structured W3C WebDriver sidecar** rather than raw CDP/Playwright/coordinate vision in core;
+- **task-scoped governed MCP tools** for Codex/Claude Code without raw driver authority;
 - **per-worker browser profile/workspace/session identity**;
 - **human takeover + separate secret-entry channel**;
-- **tamper-evident SHA-256 audit chain**.
+- **persistent runaway-loop guard** that survives runtime restarts;
+- **tamper-evident SHA-256 audit chain**;
+- **short-lived local operator console sessions** instead of putting durable operator credentials in the browser.
 
-> **Status: v0.3.** The sovereign core, resumable Codex/Claude Code harnesses, supervisor-worker protocol, governed-computer core, authenticated computer API, and production Chrome/Edge/Firefox WebDriver sidecar are implemented. Real Chrome E2E runs in CI.
+> **Status: v0.4 in progress.** The sovereign core, resumable Codex/Claude Code harnesses, supervisor-worker protocol, production governed WebDriver computer layer, governed MCP bridge, persistent repeat guard, and secure local operator console are implemented. Policy draft validation/dry-run explain is the current v0.4 milestone.
 
 ## Quick start
 
@@ -85,9 +88,9 @@ node src/cli.js submit "Inspect and improve this repository" \
 node src/cli.js run --config examples/claude-code-agent.config.json
 ```
 
-The adapter uses print-mode streaming JSON, persists `system/init.session_id`, resumes sessions, and maps supported progress/retry events into the durable task protocol. See [docs/claude-code.md](docs/claude-code.md).
+The adapter uses print-mode streaming JSON, persists the session id, resumes sessions, and maps supported progress/retry events into the durable task protocol. See [docs/claude-code.md](docs/claude-code.md).
 
-## Production governed browser
+## Governed computer and browser
 
 Configure the driver-neutral computer core to use the bundled WebDriver sidecar:
 
@@ -104,23 +107,22 @@ Configure the driver-neutral computer core to use the bundled WebDriver sidecar:
 }
 ```
 
-See [examples/webdriver-sidecar.config.json](examples/webdriver-sidecar.config.json).
-
-The matching WebDriver executable must be independently available. Supported profiles are `chrome`, `edge`, and `firefox`.
+See [examples/webdriver-sidecar.config.json](examples/webdriver-sidecar.config.json). The matching WebDriver executable must be independently available. Supported profiles are `chrome`, `edge`, and `firefox`.
 
 The production action path is deliberately layered:
 
 ```text
-agent bearer token
-  -> current running task belongs to this agent
+worker/task authority
   -> hard safety checks
+  -> durable repeat observation
   -> Governor deny/allow/fail-closed decision
   -> audit decision
+  -> server-held snapshot/ref
   -> private sidecar handle
   -> WebDriver/browser side effect
 ```
 
-A leaked worker token cannot be paired with an invented task id or another worker's task.
+A worker cannot pair its authority with an invented task id or another worker's task.
 
 ### Structured refs, not raw browser handles
 
@@ -130,13 +132,7 @@ A new snapshot invalidates old handles. Browser reset/restart rotates the browse
 
 ### Per-worker isolation
 
-Every configured worker has a distinct:
-
-- bearer token;
-- browser profile directory;
-- workspace;
-- sidecar process/browser session;
-- snapshot/ref cache.
+Every configured worker has a distinct bearer credential, browser profile directory, workspace, sidecar process/browser session, and snapshot/ref cache.
 
 This is process/profile isolation. Stronger container/VM isolation can wrap the same sidecar contract without changing orchestration.
 
@@ -148,26 +144,85 @@ Metadata, link-local, multicast, benchmark/documentation/reserved ranges are alw
 
 This materially reduces DNS-rebinding/TOCTOU risk, but is not represented as equivalent to an OS network namespace. See [docs/webdriver-sidecar.md](docs/webdriver-sidecar.md).
 
+## Governed MCP for Codex / Claude Code
+
+A worker can opt into:
+
+```json
+"governedTools": ["computer"]
+```
+
+SovereignBot then attaches a task-scoped local stdio MCP server. The model receives structured governed tools, not raw WebDriver/CDP/Playwright authority.
+
+The MCP caller cannot choose `agentId`, `taskId`, worker bearer tokens, or operator tokens. Secret supply remains operator-only. See [docs/governed-mcp.md](docs/governed-mcp.md).
+
 ## Human takeover and secrets
 
-A worker may request human help; subsequent agent computer actions then fail closed. A separate operator token can take/release control and run browser lifecycle operations.
+A worker may request human help; subsequent agent computer actions then fail closed. Operator authority can take/release control and run browser lifecycle operations.
 
-Secrets use a dedicated route. Plaintext is handed directly to `typeSecret`; secret failures use fixed public/audit error messages, and credential-shaped audit fields are redacted before hash persistence.
+Secrets use a dedicated path. Plaintext is handed directly to `typeSecret`; secret failures use fixed public/audit error messages, and credential-shaped audit fields are redacted before hash persistence.
 
-Bootstrap bearer tokens locally — they are not returned by HTTP:
+Durable computer bearer tokens can still be bootstrapped locally for lower-level integrations:
 
 ```bash
 node src/cli.js computer token <worker-id> --config <config>
 node src/cli.js computer operator-token --config <config>
 ```
 
-## Computer API
+They are not returned by HTTP.
 
-Run the loopback server:
+## Local operator console
+
+Run SovereignBot on loopback:
 
 ```bash
-node src/cli.js serve --config examples/webdriver-sidecar.config.json
+node src/cli.js serve --config <config>
 ```
+
+In a second local terminal, mint a short-lived console session:
+
+```bash
+node src/cli.js operator-session --config <config>
+```
+
+Open the printed loopback server URL at `/ui/` and paste the short-lived token.
+
+The browser keeps this token in page memory only. It is not put in cookies, localStorage, sessionStorage, or query parameters. The durable computer operator token is never exposed to the console.
+
+The console currently provides:
+
+- overview/task inspection;
+- supervisor-worker graph + event details;
+- passive computer state;
+- take/release and browser lifecycle controls;
+- pending secret supply;
+- memory search;
+- audit timeline + integrity badge;
+- policy draft validation and side-effect-free dry-run explain.
+
+The console is deliberately loopback-only in this milestone.
+
+## Policy
+
+Live policy evaluation is:
+
+**hard safety → deny rules → allow rules → deny by default**.
+
+Rules can match harness/computer category, operation/intent, agent, target, page host, element metadata, file metadata, key input, and repeat count. Runtime hard denials are non-overridable.
+
+### Persistent repeat safety
+
+Production repeat observations are persisted before an action may be allowed. The state file contains only SHA-256 action fingerprints and timestamps, not raw targets, URLs, text, secrets, or bearer credentials.
+
+Restarting the runtime does not reset the active repeat window.
+
+### Policy draft / dry-run
+
+The Policy view can load the current policy into an in-memory draft, validate it, and simulate an action with a caller-supplied `repeatCount`.
+
+Dry-run does not call the Governor, mutate the live policy, touch `repeat-state.json`, append action-decision audit rows, or execute any action. There is intentionally no Apply button yet. See [docs/policy-dry-run.md](docs/policy-dry-run.md).
+
+## Computer API
 
 Worker routes require that worker's bearer token **and** a current running `taskId` owned by that worker:
 
@@ -185,43 +240,15 @@ POST /computers/:agentId/help
 POST /computers/:agentId/secret-request
 ```
 
-Operator-token routes:
-
-```text
-GET  /computers
-GET  /computers/:agentId/control
-GET  /computers/:agentId/health
-POST /computers/:agentId/control/take
-POST /computers/:agentId/control/release
-POST /computers/:agentId/lifecycle/start
-POST /computers/:agentId/lifecycle/stop
-POST /computers/:agentId/lifecycle/reset
-POST /computers/:agentId/secrets/:requestId/supply
-```
+Durable operator-token routes remain available for lower-level clients. The browser console uses its separate short-lived session layer instead.
 
 Computer lifecycle requests/outcomes are audited. Side-effecting browser actions are never automatically retried after transport loss.
 
-## Important harness boundary
-
-Configuring the governed computer service does **not** silently replace every internal shell/browser tool inside Codex or Claude Code.
-
-To let a model use this browser safely, expose the `/computers/...` capability through a controlled adapter/MCP tool that supplies the worker token and current task id. Giving the model raw WebDriver/CDP access would bypass the authority boundary.
-
-## Other runtime capabilities
-
-### Durable memory
+## Durable memory
 
 Append-only JSONL memory is scoped as `global`, `agent:<id>`, or `task:<id>`. Final results are saved to task/agent scopes; review candidates remain separate until approved.
 
-### Policy
-
-Policy evaluation is:
-
-**deny rules → allow rules → deny by default**.
-
-Rules can match harness/computer category, operation/intent, agent, target, page host, element metadata, file metadata, key input, and repeat count. Runtime hard denials are non-overridable.
-
-### Workflow history + security audit
+## Workflow history + security audit
 
 - `task-events.jsonl` reconstructs workflow/progress/review history;
 - `audit.jsonl` stores security decisions and important transitions in a hash chain.
@@ -239,11 +266,7 @@ Normal regression coverage runs on:
 - Ubuntu + Node 22/24
 - Windows + Node 22/24
 
-A separate `browser-e2e` job uses real Chrome + ChromeDriver on Ubuntu 24.04 and verifies:
-
-```text
-navigate -> structured snapshot -> type -> secret type -> click -> result -> reset -> stale lease refusal
-```
+A separate `browser-e2e` job uses real Chrome + ChromeDriver on Ubuntu 24.04 and verifies both the WebDriver sidecar and the governed MCP → Chrome acceptance chain.
 
 ## Project principles
 
@@ -255,10 +278,13 @@ navigate -> structured snapshot -> type -> secret type -> click -> result -> res
 6. **No silent policy fallback.** Missing/broken policy fails closed.
 7. **No unaudited governed action path.** Governed integrations pass through the Governor.
 8. **No silent automation downgrade.** A missing production driver fails clearly rather than falling back to coordinate vision.
+9. **No hidden live-policy mutation.** Policy simulation and policy activation are separate authority levels.
 
 ## Next
 
-The highest-value next layer is the **governed tool bridge**: expose computer/MCP capabilities to Codex/Claude Code workers without handing them raw driver authority, then build the local operator UI over the already-durable task/policy/audit state.
+The next v0.4 work is richer live task/worker telemetry, followed by a separately designed transactional/versioned policy apply + rollback path and installer/packaging work.
+
+The public/domain deployment layer is intentionally separate from the loopback operator authority boundary.
 
 See [docs/roadmap.md](docs/roadmap.md).
 
