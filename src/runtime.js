@@ -7,6 +7,7 @@ import { GovernedToolBridgeManager } from "./governed-tool-bridge.js";
 import { Governor } from "./governor.js";
 import { registerAgentToolBridgeManager } from "./harness.js";
 import { MemoryStore } from "./memory.js";
+import { OperatorSessionStore } from "./operator-session.js";
 import { Orchestrator } from "./orchestrator.js";
 import { PolicyEngine } from "./policy.js";
 import { RepeatStore } from "./repeat-store.js";
@@ -29,6 +30,8 @@ export async function createRuntime(config, options = {}) {
         maxActiveFingerprints: config.policy.repeatMaxActiveFingerprints ?? 10_000,
     });
     await repeatStore.init?.();
+    const operatorSessions = options.operatorSessions ?? new OperatorSessionStore(dataDir);
+    await operatorSessions.init?.();
     const governor = new Governor(policy, audit, repeatStore);
     const orchestrator = new Orchestrator(config.agents, tasks, taskEvents, memory, governor, audit);
 
@@ -81,6 +84,7 @@ export async function createRuntime(config, options = {}) {
         audit,
         taskEvents,
         repeatStore,
+        operatorSessions,
         computer,
         rawComputer,
         computerLifecycle,
