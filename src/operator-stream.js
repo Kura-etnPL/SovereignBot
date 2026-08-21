@@ -1,3 +1,4 @@
+import { subscribeHarnessActivity } from "./harness.js";
 import { loopbackHost, loopbackRemote } from "./operator-api.js";
 
 export const OPERATOR_STREAM_SESSION_CHECK_MS = 1000;
@@ -67,28 +68,23 @@ export async function handleOperatorStream(runtime, request, response) {
         if (closed || response.destroyed || response.writableEnded)
             return false;
         streamSeq += 1;
-        response.write(`${JSON.stringify({
-            streamSeq,
-            ...notification,
-        })}\n`);
+        response.write(`${JSON.stringify({ streamSeq, ...notification })}\n`);
         return true;
     };
 
     const removeTaskListener = runtime.taskEvents.subscribe((event) => {
-        emit({
-            source: "task",
-            type: event.type,
-            taskId: event.taskId,
-            sourceSeq: event.seq,
-            at: event.at,
-        });
+        emit({ source: "task", type: event.type, taskId: event.taskId, sourceSeq: event.seq, at: event.at });
     });
     const removeAuditListener = runtime.audit.subscribe((record) => {
+        emit({ source: "audit", type: record.type, sourceSeq: record.seq, at: record.at });
+    });
+    const removeHarnessListener = subscribeHarnessActivity((activity) => {
         emit({
-            source: "audit",
-            type: record.type,
-            sourceSeq: record.seq,
-            at: record.at,
+            source: "worker",
+            type: "harness.activity",
+            agentId: activity.agentId,
+            inFlightHarnessCount: activity.inFlightHarnessCount,
+            at: activity.at,
         });
     });
 
@@ -102,6 +98,7 @@ export async function handleOperatorStream(runtime, request, response) {
         clearInterval(heartbeatTimer);
         removeTaskListener();
         removeAuditListener();
+        removeHarnessListener();
     };
 
     response.once("close", cleanup);
@@ -127,7 +124,6 @@ export async function handleOperatorStream(runtime, request, response) {
             }
         }
         catch {
-            // Authentication state becoming unreadable fails closed for an existing stream.
             if (!closed) {
                 emit({ source: "system", type: "session-ended", at: new Date().toISOString() });
                 cleanup();
