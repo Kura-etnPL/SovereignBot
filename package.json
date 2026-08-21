@@ -19,6 +19,7 @@
     "sidecars",
     "ui",
     "docs",
+    "examples",
     "README.md",
     "LICENSE",
     "SECURITY.md"
@@ -27,6 +28,7 @@
     "check": "node scripts/check.mjs",
     "test": "node --test",
     "test:browser": "node tests/webdriver-real-browser.mjs && node tests/mcp-real-browser.mjs",
+    "build:release": "node scripts/build-release.mjs",
     "start": "node src/cli.js serve"
   }
 }
