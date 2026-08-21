@@ -1,3 +1,5 @@
+import { dryRunPolicy, validatePolicyDraft } from "./policy-dry-run.js";
+
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 function send(response, status, value) {
@@ -23,6 +25,9 @@ export async function handleOperatorApiRequest(runtime,request,response,url){
         if(request.method==="GET"&&url.pathname==="/operator/overview"){const tasks=await runtime.orchestrator.listTasks();const agents=runtime.orchestrator.listAgents().map(agent=>({id:agent.id,name:agent.name,role:agent.role,capabilities:agent.capabilities,governedTools:agent.governedTools,harnessKind:agent.harness?.kind}));send(response,200,{tasks,agents,computers:await computerDetails(runtime),audit:await runtime.audit.verify()});return}
         if(request.method==="GET"&&url.pathname==="/operator/audit"){const limit=Math.max(1,Math.min(500,Number(url.searchParams.get("limit")??100)));const rows=await runtime.audit.readAll();send(response,200,rows.slice(-limit).reverse());return}
         if(request.method==="GET"&&url.pathname==="/operator/memory"){const scope=url.searchParams.get("scope")||undefined;const query=url.searchParams.get("q")||undefined;send(response,200,await runtime.memory.search({scope,query,limit:100}));return}
+        if(request.method==="GET"&&url.pathname==="/operator/policy"){send(response,200,{active:validatePolicyDraft(runtime.config.policy),editable:false,note:"Snapshot only. Editing, validating, or dry-running this copy does not change the active runtime policy."});return}
+        if(request.method==="POST"&&url.pathname==="/operator/policy/validate"){requireSameOrigin(request);const body=await readBody(request);const policy=validatePolicyDraft(body.policy);send(response,200,{ok:true,ruleCount:policy.rules.length,repeatWindowMs:policy.repeatWindowMs??180000,repeatMaxActiveFingerprints:policy.repeatMaxActiveFingerprints??10000});return}
+        if(request.method==="POST"&&url.pathname==="/operator/policy/dry-run"){requireSameOrigin(request);const body=await readBody(request);send(response,200,dryRunPolicy({policy:body.policy,action:body.action,repeatCount:body.repeatCount??1}));return}
         if(request.method==="GET"&&p[0]==="operator"&&p[1]==="tasks"&&p[2]&&p[3]==="graph"){send(response,200,await runtime.orchestrator.getTaskGraph(p[2]));return}
         if(request.method==="GET"&&p[0]==="operator"&&p[1]==="tasks"&&p[2]&&p[3]==="events"){send(response,200,await runtime.orchestrator.listTaskEvents(p[2]));return}
         if(request.method==="POST"&&p[0]==="operator"&&p[1]==="computers"&&p[2]&&p[3]==="control"&&["take","release"].includes(p[4])){requireSameOrigin(request);const body=await readBody(request);const actorId=String(body.actorId??"operator-console").slice(0,120);send(response,200,p[4]==="take"?await runtime.computer.takeControl(p[2],actorId):await runtime.computer.releaseControl(p[2],actorId));return}

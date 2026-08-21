@@ -45,7 +45,8 @@
 
 - [x] Secure loopback local web UI + short-lived operator sessions
 - [ ] Live/streaming task graph and richer worker/computer telemetry
-- [ ] Policy editor + dry run
+- [x] Policy draft editor + side-effect-free validate/dry-run explain
+- [ ] Transactional/versioned policy apply + rollback
 - [x] Human takeover/secret prompt surface
 - [x] Memory inspector/search
 - [x] Audit timeline + integrity badge

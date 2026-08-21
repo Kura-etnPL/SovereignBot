@@ -27,46 +27,55 @@ function matchesExact(expected, actual) {
     return !list || list.includes(actual);
 }
 
-function matchesRule(rule, action, repeatCount) {
+/**
+ * Explain whether one policy rule matches without mutating repeat state.
+ * Failure output intentionally contains condition names only, never action values.
+ */
+export function explainRuleMatch(rule, action, repeatCount) {
     const match = rule.match;
     if (!match)
-        return true;
+        return { matched: true, failedConditions: [] };
 
+    const failedConditions = [];
     if (!matchesExact(match.category, action.category))
-        return false;
+        failedConditions.push("category");
     if (!matchesExact(match.operation, action.operation))
-        return false;
+        failedConditions.push("operation");
     if (!matchesExact(match.agentId, action.agentId))
-        return false;
+        failedConditions.push("agentId");
     if (!matchesExact(match.intent, action.intent))
-        return false;
+        failedConditions.push("intent");
     if (!matchesExact(match.key, action.key))
-        return false;
+        failedConditions.push("key");
     if (!matchesExact(match.elementRole, action.element?.role))
-        return false;
+        failedConditions.push("elementRole");
     if (!matchesExact(match.elementType, action.element?.type))
-        return false;
+        failedConditions.push("elementType");
     if (!matchesExact(match.fileExtension, action.file?.extension))
-        return false;
+        failedConditions.push("fileExtension");
 
     if (!matchesAnyGlob(match.targetGlob, action.target))
-        return false;
+        failedConditions.push("targetGlob");
     if (!matchesAnyGlob(match.pageUrlGlob, action.page?.url))
-        return false;
+        failedConditions.push("pageUrlGlob");
     if (!matchesAnyGlob(match.pageHostGlob, action.page?.host))
-        return false;
+        failedConditions.push("pageHostGlob");
     if (!matchesAnyGlob(match.elementRefGlob, action.element?.ref))
-        return false;
+        failedConditions.push("elementRefGlob");
     if (!matchesAnyGlob(match.elementNameGlob, action.element?.name))
-        return false;
+        failedConditions.push("elementNameGlob");
     if (!matchesAnyGlob(match.filePathGlob, action.file?.path))
-        return false;
+        failedConditions.push("filePathGlob");
     if (!matchesAnyGlob(match.fileNameGlob, action.file?.name))
-        return false;
+        failedConditions.push("fileNameGlob");
 
     if (match.repeatAtLeast !== undefined && repeatCount < match.repeatAtLeast)
-        return false;
-    return true;
+        failedConditions.push("repeatAtLeast");
+    return { matched: failedConditions.length === 0, failedConditions };
+}
+
+function matchesRule(rule, action, repeatCount) {
+    return explainRuleMatch(rule, action, repeatCount).matched;
 }
 
 class RepeatTracker {
