@@ -1,0 +1,50 @@
+let token = "";
+let overview;
+let currentView = "overview";
+const $ = (selector) => document.querySelector(selector);
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
+
+async function api(path, options = {}) {
+  const headers = { ...(options.body === undefined ? {} : {"content-type":"application/json"}), authorization:`Bearer ${token}` };
+  const response = await fetch(path, { ...options, headers:{...headers,...options.headers}, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  return data;
+}
+
+function status(task){return `<span class="status ${esc(task.status)}">${esc(task.status)}</span>`}
+function taskRow(task){return `<div class="row"><div class="row-main"><div class="row-title">${esc(task.title)}</div><div class="row-sub">${esc(task.id)} · ${esc(task.assignedAgentId||task.ownerAgentId||"unassigned")}</div></div><div class="actions">${status(task)}<button class="small-btn" data-task="${esc(task.id)}">Inspect</button></div></div>`}
+
+function overviewView(){
+  const tasks=overview.tasks||[], running=tasks.filter(t=>t.status==="running").length, review=tasks.filter(t=>["awaiting_review","changes_requested"].includes(t.status)).length;
+  const pending=(overview.computers||[]).filter(c=>c.pendingSecret).length;
+  return `<div class="grid"><div class="card"><h3>Tasks</h3><div class="metric">${tasks.length}</div><div class="muted">${running} running · ${review} review</div></div><div class="card"><h3>Workers</h3><div class="metric">${overview.agents.length}</div><div class="muted">${overview.agents.filter(a=>a.role==="supervisor").length} supervisors</div></div><div class="card"><h3>Operator attention</h3><div class="metric">${pending}</div><div class="muted">pending secret requests</div></div><div class="card wide"><h3>Active / recent tasks</h3><div class="list">${tasks.slice().reverse().slice(0,8).map(taskRow).join("")||'<div class="empty">No tasks yet</div>'}</div></div><div class="card"><h3>Audit integrity</h3><div class="metric">${overview.audit.ok?"✓":"!"}</div><div class="muted">${overview.audit.ok?`${overview.audit.count} verified rows`:esc(overview.audit.error||"verification failed")}</div></div></div>`;
+}
+function tasksView(){return `<div class="card full"><h3>All tasks</h3><div class="list">${(overview.tasks||[]).slice().reverse().map(taskRow).join("")||'<div class="empty">No tasks</div>'}</div></div>`}
+function computersView(){return `<div class="grid">${(overview.computers||[]).map(c=>`<div class="card computer"><h3><span class="health-dot ${c.health?.ok?'ok':''}"></span> ${esc(c.agentId)}</h3><div class="row-sub">Control: ${esc(c.control?.mode||"unknown")} · ${c.health?.ok?esc(c.health.browser||"driver ready"):esc(c.health?.error||"not running")}</div><div class="actions" style="margin-top:12px"><button class="small-btn" data-control="take" data-agent="${esc(c.agentId)}">Take control</button><button class="small-btn" data-control="release" data-agent="${esc(c.agentId)}">Release</button><button class="small-btn" data-life="start" data-agent="${esc(c.agentId)}">Start</button><button class="small-btn" data-life="stop" data-agent="${esc(c.agentId)}">Stop</button><button class="small-btn warn" data-life="reset" data-agent="${esc(c.agentId)}">Reset</button></div>${c.pendingSecret?`<form class="secret-box" data-secret-form data-agent="${esc(c.agentId)}" data-request="${esc(c.pendingSecret.id)}" autocomplete="off"><strong>Secret requested: ${esc(c.pendingSecret.label||"Secret")}</strong><div class="row-sub">Task ${esc(c.pendingSecret.taskId)}</div><input name="secret" type="password" autocomplete="off" required placeholder="Enter value — never stored"><button class="small-btn" type="submit">Supply securely</button></form>`:""}</div>`).join("")||'<div class="card full empty">No computers configured</div>'}</div>`}
+async function memoryView(){const rows=await api('/operator/memory');return `<div class="toolbar"><input id="memory-q" class="search" placeholder="Search memory"><button id="memory-search" class="small-btn">Search</button></div><div id="memory-results" class="list">${memoryRows(rows)}</div>`}
+function memoryRows(rows){return rows.map(r=>`<div class="row"><div class="row-main"><div class="row-title">${esc(r.key)}</div><div class="row-sub">${esc(r.scope)} · ${esc((r.tags||[]).join(", "))}</div></div><button class="small-btn" data-json='${esc(JSON.stringify(r))}'>View</button></div>`).join("")||'<div class="empty">No memory records</div>'}
+async function auditView(){const rows=await api('/operator/audit?limit=150');return `<div class="list">${rows.map(r=>`<div class="row"><div class="row-main"><div class="row-title">${esc(r.type)}</div><div class="row-sub">${esc(r.actor)} · ${esc(r.subject||"")} · ${esc(r.at||r.timestamp||"")}</div></div><button class="small-btn" data-json='${esc(JSON.stringify(r))}'>View</button></div>`).join("")||'<div class="empty">No audit rows</div>'}</div>`}
+
+async function render(){
+  $('#view-title').textContent=currentView[0].toUpperCase()+currentView.slice(1);
+  const content=$('#content'); content.innerHTML='<div class="empty">Loading…</div>';
+  if(["overview","tasks","computers"].includes(currentView)){overview=await api('/operator/overview');$('#audit-badge').textContent=overview.audit.ok?`Audit ✓ ${overview.audit.count}`:'Audit !';$('#audit-badge').className=`badge ${overview.audit.ok?'good':'bad'}`;}
+  content.innerHTML=currentView==="overview"?overviewView():currentView==="tasks"?tasksView():currentView==="computers"?computersView():currentView==="memory"?await memoryView():await auditView();
+  bindContent();
+}
+function showJson(value,title="Details"){$('#dialog-body').innerHTML=`<h3>${esc(title)}</h3><div class="json">${esc(JSON.stringify(value,null,2))}</div>`;$('#detail-dialog').showModal()}
+function bindContent(){
+  document.querySelectorAll('[data-task]').forEach(b=>b.onclick=async()=>{const id=b.dataset.task;showJson({graph:await api(`/operator/tasks/${encodeURIComponent(id)}/graph`),events:await api(`/operator/tasks/${encodeURIComponent(id)}/events`)},'Task details')});
+  document.querySelectorAll('[data-json]').forEach(b=>b.onclick=()=>showJson(JSON.parse(b.dataset.json)));
+  document.querySelectorAll('[data-control]').forEach(b=>b.onclick=async()=>{await api(`/operator/computers/${encodeURIComponent(b.dataset.agent)}/control/${b.dataset.control}`,{method:'POST',body:{actorId:'operator-console'}});await render()});
+  document.querySelectorAll('[data-life]').forEach(b=>b.onclick=async()=>{if(b.dataset.life==='reset'&&!confirm('Reset this browser session and profile state?'))return;await api(`/operator/computers/${encodeURIComponent(b.dataset.agent)}/lifecycle/${b.dataset.life}`,{method:'POST',body:{actorId:'operator-console'}});await render()});
+  document.querySelectorAll('[data-secret-form]').forEach(form=>form.onsubmit=async(e)=>{e.preventDefault();const input=form.elements.secret;const value=input.value;input.value='';try{await api(`/operator/computers/${encodeURIComponent(form.dataset.agent)}/secrets/${encodeURIComponent(form.dataset.request)}/supply`,{method:'POST',body:{actorId:'operator-console',value}});await render()}finally{input.value=''}});
+  $('#memory-search')?.addEventListener('click',async()=>{$('#memory-results').innerHTML=memoryRows(await api(`/operator/memory?q=${encodeURIComponent($('#memory-q').value)}`));bindContent()});
+}
+
+$('#login-form').onsubmit=async(e=>{e.preventDefault();const candidate=$('#token').value.trim();$('#token').value='';token=candidate;try{await api('/operator/session');$('#login').classList.add('hidden');$('#app').classList.remove('hidden');await render()}catch(err){token='';$('#login-error').textContent=err.message}});
+document.querySelectorAll('nav button').forEach(b=>b.onclick=async()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');currentView=b.dataset.view;await render()});
+$('#refresh').onclick=()=>render();
+$('#logout').onclick=async()=>{try{await api('/operator/session/revoke',{method:'POST',body:{}})}catch{}token='';location.reload()};
+$('#dialog-close').onclick=()=>$('#detail-dialog').close();
