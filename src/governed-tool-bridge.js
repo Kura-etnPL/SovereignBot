@@ -131,6 +131,15 @@ export class GovernedToolBridgeManager {
                     [GOVERNED_MCP_SERVER_NAME]: { command, args },
                 },
             }, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+
+            // Opening authority is itself security-sensitive. If the audit chain cannot record the
+            // grant, revoke the capability and remove local bootstrap material before returning.
+            await this.#audit.append({
+                type: "tool_bridge.opened",
+                actor: agent.id,
+                subject: task.id,
+                data: { bridgeId: id, server: GOVERNED_MCP_SERVER_NAME, tools: ["computer"] },
+            });
         }
         catch (error) {
             lease.active = false;
@@ -138,13 +147,6 @@ export class GovernedToolBridgeManager {
             await Promise.allSettled([unlink(bootstrapPath), unlink(claudeConfigPath)]);
             throw error;
         }
-
-        await this.#audit.append({
-            type: "tool_bridge.opened",
-            actor: agent.id,
-            subject: task.id,
-            data: { bridgeId: id, server: GOVERNED_MCP_SERVER_NAME, tools: ["computer"] },
-        });
 
         let closed = false;
         let onAbort;
@@ -154,6 +156,9 @@ export class GovernedToolBridgeManager {
             closed = true;
             if (onAbort)
                 signal?.removeEventListener("abort", onAbort);
+
+            // Revoke authority first. Cleanup/audit errors after this point must never resurrect the
+            // bridge or turn a successfully completed provider task into a failed provider task.
             lease.active = false;
             this.#leases.delete(capability);
             await Promise.allSettled([unlink(bootstrapPath), unlink(claudeConfigPath)]);
@@ -162,7 +167,7 @@ export class GovernedToolBridgeManager {
                 actor: agent.id,
                 subject: task.id,
                 data: { bridgeId: id, reason },
-            });
+            }).catch(() => undefined);
         };
         onAbort = () => { void close("task aborted"); };
         signal?.addEventListener("abort", onAbort, { once: true });
@@ -230,13 +235,18 @@ export class GovernedToolBridgeManager {
                     send(response, 404, { error: "unknown governed tool" });
                     return;
                 }
-                const result = await this.#invoke(lease, body.name, body.arguments ?? {});
+
+                // Record the attempt before any governed side effect. If this append fails, fail
+                // closed before invoking ComputerGateway so callers never retry an already-executed
+                // click/type because only the supplemental bridge audit failed afterward.
                 await this.#audit.append({
-                    type: "tool_bridge.invoked",
+                    type: "tool_bridge.invoking",
                     actor: lease.agentId,
                     subject: lease.taskId,
                     data: { bridgeId: lease.id, tool: body.name },
                 });
+
+                const result = await this.#invoke(lease, body.name, body.arguments ?? {});
                 send(response, 200, { ok: true, result });
             }
             catch (error) {
