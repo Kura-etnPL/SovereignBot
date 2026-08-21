@@ -9,6 +9,25 @@ export class ComputerLifecycleManager {
         this.#audit = audit;
     }
 
+    async status(agentId) {
+        await this.#registry.ensure(agentId);
+        if (!this.#driverFactory)
+            return { agentId, managed: false, running: false };
+
+        // A status read must never instantiate/start a browser. Bundled managed factories expose
+        // `get()` specifically so the operator UI can inspect whether a driver object already exists.
+        if (typeof this.#driverFactory.get === "function") {
+            const existing = this.#driverFactory.get(agentId);
+            return {
+                agentId,
+                managed: true,
+                instantiated: Boolean(existing),
+                running: existing ? undefined : false,
+            };
+        }
+        return { agentId, managed: true, instantiated: undefined, running: undefined };
+    }
+
     async health(agentId) {
         const driver = await this.#driver(agentId);
         if (typeof driver.health !== "function")
@@ -46,29 +65,14 @@ export class ComputerLifecycleManager {
         if (!actorId)
             throw new Error("operator actor id is required");
         const driver = await this.#driver(agentId);
-        await this.#audit.append({
-            type: `${eventType}.requested`,
-            actor: actorId,
-            subject: `computer:${agentId}`,
-            data: { agentId },
-        });
+        await this.#audit.append({ type: `${eventType}.requested`, actor: actorId, subject: `computer:${agentId}`, data: { agentId } });
         try {
             const result = await operation(driver);
-            await this.#audit.append({
-                type: eventType,
-                actor: actorId,
-                subject: `computer:${agentId}`,
-                data: { agentId, ok: true },
-            });
+            await this.#audit.append({ type: eventType, actor: actorId, subject: `computer:${agentId}`, data: { agentId, ok: true } });
             return result;
         }
         catch (error) {
-            await this.#audit.append({
-                type: `${eventType}.failed`,
-                actor: actorId,
-                subject: `computer:${agentId}`,
-                data: { agentId, error: error.message },
-            });
+            await this.#audit.append({ type: `${eventType}.failed`, actor: actorId, subject: `computer:${agentId}`, data: { agentId, error: error.message } });
             throw error;
         }
     }
