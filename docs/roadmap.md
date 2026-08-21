@@ -43,12 +43,12 @@
 
 ## v0.4 — operator experience
 
-- [ ] Local web UI
-- [ ] Live task graph and worker/computer status
+- [x] Secure loopback local web UI + short-lived operator sessions
+- [ ] Live/streaming task graph and richer worker/computer telemetry
 - [ ] Policy editor + dry run
-- [ ] Human takeover/secret prompt surface
-- [ ] Memory inspector
-- [ ] Audit timeline + integrity badge
+- [x] Human takeover/secret prompt surface
+- [x] Memory inspector/search
+- [x] Audit timeline + integrity badge
 - [ ] One-command Windows/macOS/Linux installer
 
 ## Later integrations

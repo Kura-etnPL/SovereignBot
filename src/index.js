@@ -11,6 +11,8 @@ export * from "./governed-tool-bridge.js";
 export * from "./governor.js";
 export * from "./harness.js";
 export * from "./memory.js";
+export * from "./operator-api.js";
+export * from "./operator-session.js";
 export * from "./orchestrator.js";
 export * from "./policy.js";
 export * from "./repeat-store.js";

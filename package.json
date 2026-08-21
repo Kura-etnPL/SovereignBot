@@ -1,6 +1,6 @@
 {
   "name": "sovereignbot",
-  "version": "0.3.0",
+  "version": "0.4.0-dev",
   "description": "Local-first AI coworker runtime with durable memory, governed actions, and multi-agent orchestration.",
   "type": "module",
   "private": false,
@@ -17,6 +17,7 @@
   "files": [
     "src",
     "sidecars",
+    "ui",
     "docs",
     "README.md",
     "LICENSE",
