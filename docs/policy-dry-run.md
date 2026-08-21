@@ -1,10 +1,8 @@
 # Policy draft editor and dry-run explain
 
-SovereignBot's operator console includes a policy **draft** editor for validation and simulation.
+SovereignBot's operator console includes a policy draft editor for validation and simulation. Dry-run remains deliberately side-effect free even though the console now has a separate, explicit versioned Apply/Rollback authority path.
 
-This surface is intentionally not a live policy editor.
-
-## What it can do
+## Draft and dry-run
 
 The Policy view can:
 
@@ -18,14 +16,11 @@ The Policy view can:
 - show which condition names prevented a rule from matching;
 - simulate the hard-safety deny path.
 
-## What it cannot do
-
-There is no Apply, Save, Reload, or Activate endpoint in this milestone.
-
 Dry-run does **not**:
 
-- modify `runtime.config.policy`;
-- replace `runtime.governor.policy`;
+- modify the live PolicyEngine;
+- move the durable active-policy pointer;
+- create a policy version;
 - write the config file;
 - observe or increment the production repeat counter;
 - write `repeat-state.json`;
@@ -33,7 +28,7 @@ Dry-run does **not**:
 - launch a harness;
 - perform a computer, browser, network, file, task, lifecycle, or secret action.
 
-The browser keeps the draft in current-page JavaScript memory only. A page refresh discards it.
+The browser keeps the draft in current-page JavaScript memory only. Telemetry does not auto-rerender the Policy page, so an in-progress draft is not overwritten by background events. A full page refresh discards the browser-memory draft.
 
 ## Evaluation order
 
@@ -75,17 +70,22 @@ The draft validator fails closed on:
 
 Failing on unknown fields is intentional. A misspelled policy field must not appear to work while being silently ignored.
 
-## Future live apply
+## Relationship to Apply
 
-A future policy-apply feature should be a separate authority-sensitive change. It will need, at minimum:
+Apply is a separate operator-only transaction described in [policy-activation.md](policy-activation.md).
 
-- explicit operator confirmation;
-- validated policy versioning;
-- transactional persistence;
-- rollback;
-- audit records for proposed/applied versions;
-- safe runtime reload semantics;
-- protection against weakening hard-safety invariants;
-- clear behavior for in-flight tasks.
+The console does not enable **Apply checked policy** until a dry-run has been performed against the current draft/action/repeatCount. Editing any of those inputs invalidates that browser-side result.
 
-The dry-run endpoint should remain side-effect free even after live apply exists.
+The browser result is not trusted as the authorization proof. On Apply, the browser sends the simulated action plus the expected `allowed` result and optional `ruleId`; the server runs `dryRunPolicy()` again against the submitted draft. A mismatch fails before an immutable policy version is created.
+
+This makes dry-run a required precondition/check for the UI workflow while keeping the dry-run endpoint itself pure.
+
+## Repeat-safety settings
+
+`repeatWindowMs` and `repeatMaxActiveFingerprints` configure the persistent RepeatStore. They are validated in drafts, but changing them during a live activation is refused because the existing repeat state was created under the current settings.
+
+Those two values are restart/migration-level safety settings, not ordinary hot policy fields. Live Apply/Rollback requires the target version to use the same effective repeat-store settings as the currently active version.
+
+## Hard safety is not editable policy
+
+Runtime hard denials remain outside the versioned policy document. An operator policy version cannot weaken or override those hard-safety invariants.
