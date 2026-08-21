@@ -1,5 +1,6 @@
 import { dryRunPolicy, validatePolicyDraft } from "./policy-dry-run.js";
 import { PolicyEngine } from "./policy.js";
+import { policyHash } from "./policy-version-store.js";
 
 function repeatSettings(policy) {
     return {
@@ -42,16 +43,11 @@ function validateChecks(policy, checks) {
         });
         if (!check.expect || typeof check.expect.allowed !== "boolean")
             throw new Error(`policy apply check ${index} must declare expect.allowed`);
-        if (result.decision.allowed !== check.expect.allowed) {
+        if (result.decision.allowed !== check.expect.allowed)
             throw new Error(`policy apply check ${index} decision mismatch: expected allowed=${check.expect.allowed}`);
-        }
-        if (check.expect.ruleId !== undefined && result.decision.ruleId !== check.expect.ruleId) {
+        if (check.expect.ruleId !== undefined && result.decision.ruleId !== check.expect.ruleId)
             throw new Error(`policy apply check ${index} rule mismatch`);
-        }
-        return {
-            index,
-            decision: result.decision,
-        };
+        return { index, decision: result.decision };
     });
 }
 
@@ -61,6 +57,7 @@ export class PolicyManager {
     #audit;
     #runtimeConfig;
     #queue = Promise.resolve();
+    #recoveryPending = false;
 
     constructor({ store, governor, audit, runtimeConfig }) {
         this.#store = store;
@@ -80,6 +77,7 @@ export class PolicyManager {
             active: structuredClone(current.policy),
             version: safeVersionMetadata(current, current.id),
             versions: versions.map((version) => safeVersionMetadata(version, current.id)),
+            recoveryPending: this.#recoveryPending,
         };
     }
 
@@ -104,13 +102,26 @@ export class PolicyManager {
         return operation;
     }
 
+    #assertMutable() {
+        if (this.#recoveryPending)
+            throw new Error("policy activation recovery is pending; restart/recover before another policy mutation");
+    }
+
     async #applyNow({ policy, checks, actor = "operator-console", label } = {}) {
+        this.#assertMutable();
         const current = this.#store.current();
         const draft = validatePolicyDraft(policy);
-        if (!sameRepeatSettings(current.policy, draft)) {
+        if (!sameRepeatSettings(current.policy, draft))
             throw new Error("repeatWindowMs and repeatMaxActiveFingerprints are restart-only safety settings and cannot change during live policy activation");
-        }
         const checkResults = validateChecks(draft, checks);
+        if (policyHash(draft) === current.hash) {
+            return {
+                active: safeVersionMetadata(current, current.id),
+                previousVersionId: current.id,
+                checks: checkResults,
+                noChange: true,
+            };
+        }
         const version = await this.#store.createVersion(draft, {
             source: "apply",
             label,
@@ -120,13 +131,13 @@ export class PolicyManager {
             actor,
             auditType: "policy.activated",
         });
-        return {
-            ...activation,
-            checks: checkResults,
-        };
+        if (activation.recoveryPending)
+            this.#recoveryPending = true;
+        return { ...activation, checks: checkResults };
     }
 
     async #rollbackNow({ versionId, actor = "operator-console" } = {}) {
+        this.#assertMutable();
         const current = this.#store.current();
         const target = await this.#store.readVersion(versionId);
         if (target.id === current.id) {
@@ -136,17 +147,18 @@ export class PolicyManager {
                 noChange: true,
             };
         }
-        if (!sameRepeatSettings(current.policy, target.policy)) {
+        if (!sameRepeatSettings(current.policy, target.policy))
             throw new Error("cannot live-roll back to a policy version with different repeat safety settings");
-        }
-        return this.#activate(target, current, {
+        const activation = await this.#activate(target, current, {
             actor,
             auditType: "policy.rolled_back",
         });
+        if (activation.recoveryPending)
+            this.#recoveryPending = true;
+        return activation;
     }
 
     async #activate(target, previous, { actor, auditType }) {
-        // Build the new engine before changing durable or runtime authority state.
         const nextEngine = new PolicyEngine(target.policy);
         const previousEngine = new PolicyEngine(previous.policy);
         const transaction = await this.#store.beginActivation({
@@ -157,7 +169,6 @@ export class PolicyManager {
 
         let pointerMoved = false;
         let runtimeMoved = false;
-        let committed = false;
         try {
             await this.#store.setActive(target);
             pointerMoved = true;
@@ -176,10 +187,7 @@ export class PolicyManager {
                     hash: target.hash,
                 },
             });
-            committed = true;
 
-            // The audit record is the durable commit record. If marker cleanup fails after this point,
-            // keep the new policy active. Startup reconciles the marker against that audit record.
             let recoveryPending = false;
             try {
                 await this.#store.clearTransaction();
@@ -195,8 +203,6 @@ export class PolicyManager {
             };
         }
         catch (error) {
-            if (committed)
-                throw error;
             const rollbackErrors = [];
             if (runtimeMoved) {
                 try {
@@ -224,6 +230,7 @@ export class PolicyManager {
                 }
             }
             if (rollbackErrors.length) {
+                this.#recoveryPending = true;
                 throw new AggregateError(
                     [error, ...rollbackErrors],
                     `policy activation failed and rollback was incomplete: ${error.message}`,
