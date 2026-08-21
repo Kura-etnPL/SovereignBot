@@ -2,9 +2,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, copyFile, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, normalize, parse, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+const SELF_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_MANIFEST_URL = "https://github.com/Kura-etnPL/SovereignBot/releases/latest/download/release-manifest.json";
 const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
@@ -14,16 +16,16 @@ function valueAfter(args, flag) {
     return index >= 0 ? args[index + 1] : undefined;
 }
 
-function defaultInstallDir() {
+export function defaultInstallDir() {
     if (process.platform === "win32")
         return join(process.env.LOCALAPPDATA ?? homedir(), "SovereignBot");
     return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "sovereignbot");
 }
 
-function assertNodeVersion(minimumMajor) {
-    const current = Number(process.versions.node.split(".")[0]);
+export function assertNodeVersion(minimumMajor, version = process.versions.node) {
+    const current = Number(String(version).split(".")[0]);
     if (!Number.isInteger(current) || current < minimumMajor)
-        throw new Error(`SovereignBot requires Node.js ${minimumMajor}+; current Node is ${process.versions.node}`);
+        throw new Error(`SovereignBot requires Node.js ${minimumMajor}+; current Node is ${version}`);
 }
 
 function sha256(buffer) {
@@ -75,7 +77,7 @@ function safeRelativePath(value, label) {
     return value;
 }
 
-function validateManifest(manifest) {
+export function validateManifest(manifest) {
     if (!manifest || manifest.schemaVersion !== 1)
         throw new Error("release manifest schema is invalid or unsupported");
     if (manifest.name !== "sovereignbot")
@@ -118,8 +120,7 @@ async function obtainArchive({ manifest, remoteUrl, localPath, stageDir }) {
         await writeFile(destination, bytes, { flag: "wx" });
     }
     else {
-        const source = join(dirname(localPath), manifest.archive.file);
-        await copyFile(source, destination);
+        await copyFile(join(dirname(localPath), manifest.archive.file), destination);
     }
     const bytes = await readFile(destination);
     if (bytes.length !== manifest.archive.bytes)
@@ -130,8 +131,8 @@ async function obtainArchive({ manifest, remoteUrl, localPath, stageDir }) {
     return destination;
 }
 
-function runTar(args, options = {}) {
-    const result = spawnSync("tar", args, { encoding: "utf8", windowsHide: true, ...options });
+function runTar(args) {
+    const result = spawnSync("tar", args, { encoding: "utf8", windowsHide: true });
     if (result.error?.code === "ENOENT")
         throw new Error("system `tar` command is required to install the portable release");
     if (result.error)
@@ -141,20 +142,34 @@ function runTar(args, options = {}) {
     return result.stdout ?? "";
 }
 
-function validateArchiveListing(archivePath, root) {
+function validateArchiveListing(archivePath, manifest) {
+    const root = manifest.archive.root;
     const listing = runTar(["-tzf", archivePath]);
     const entries = listing.split(/\r?\n/).filter(Boolean);
     if (!entries.length)
         throw new Error("release archive is empty");
+    const actualFiles = new Set();
     for (const raw of entries) {
         if (raw.includes("\\") || raw.startsWith("/") || raw.includes("\0"))
             throw new Error(`release archive contains unsafe entry: ${raw}`);
+        const isDirectory = raw.endsWith("/");
         const clean = raw.replace(/\/$/, "");
         const segments = clean.split("/");
         if (segments.some((segment) => segment === ".." || segment === "." || !segment))
             throw new Error(`release archive contains unsafe entry: ${raw}`);
         if (segments[0] !== root)
             throw new Error(`release archive entry escapes declared root ${root}: ${raw}`);
+        if (!isDirectory && clean !== root)
+            actualFiles.add(segments.slice(1).join("/"));
+    }
+    const expectedFiles = new Set(manifest.files.map((file) => file.path));
+    for (const path of actualFiles) {
+        if (!expectedFiles.has(path))
+            throw new Error(`release archive contains unmanifested file: ${path}`);
+    }
+    for (const path of expectedFiles) {
+        if (!actualFiles.has(path))
+            throw new Error(`release archive is missing manifest file: ${path}`);
     }
 }
 
@@ -185,19 +200,35 @@ async function rejectSymlinkIfPresent(path, label) {
         throw new Error(`${label} must not be a symbolic link: ${path}`);
 }
 
+async function writeKnownFileAtomic(path, content, mode) {
+    const temp = `${path}.new-${randomUUID()}`;
+    try {
+        await writeFile(temp, content, "utf8");
+        if (mode !== undefined)
+            await chmod(temp, mode);
+        await rename(temp, path);
+    }
+    finally {
+        await rm(temp, { force: true }).catch(() => undefined);
+    }
+}
+
 async function writeLaunchers(installDir) {
     const binDir = join(installDir, "bin");
     await mkdir(binDir, { recursive: true });
     await rejectSymlinkIfPresent(binDir, "installer bin directory");
     if (process.platform === "win32") {
-        const launcher = "@echo off\r\nnode \"%~dp0..\\app\\src\\cli.js\" %*\r\n";
-        await writeFile(join(binDir, "sovereignbot.cmd"), launcher, "utf8");
+        await writeKnownFileAtomic(
+            join(binDir, "sovereignbot.cmd"),
+            "@echo off\r\nnode \"%~dp0..\\app\\src\\cli.js\" %*\r\n",
+        );
     }
     else {
-        const launcher = "#!/bin/sh\nSCRIPT_DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec node \"$SCRIPT_DIR/../app/src/cli.js\" \"$@\"\n";
-        const path = join(binDir, "sovereignbot");
-        await writeFile(path, launcher, "utf8");
-        await chmod(path, 0o755);
+        await writeKnownFileAtomic(
+            join(binDir, "sovereignbot"),
+            "#!/bin/sh\nSCRIPT_DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec node \"$SCRIPT_DIR/../app/src/cli.js\" \"$@\"\n",
+            0o755,
+        );
     }
 }
 
@@ -213,6 +244,7 @@ async function installPayload({ installDir, payloadRoot, manifest, manifestSourc
     const backupDir = join(stageDir, "old-app");
     await rejectSymlinkIfPresent(appDir, "existing app directory");
     let movedOld = false;
+    let movedNew = false;
     try {
         const existing = await lstat(appDir).catch((error) => error.code === "ENOENT" ? undefined : Promise.reject(error));
         if (existing) {
@@ -222,15 +254,15 @@ async function installPayload({ installDir, payloadRoot, manifest, manifestSourc
             movedOld = true;
         }
         await rename(payloadRoot, appDir);
+        movedNew = true;
         await writeLaunchers(root);
-        await writeFile(join(root, "install-manifest.json"), `${JSON.stringify({
+        await writeKnownFileAtomic(join(root, "install-manifest.json"), `${JSON.stringify({
             ...manifest,
             installedFrom: isHttps(manifestSource) ? "github-release" : "local-manifest",
-        }, null, 2)}\n`, "utf8");
+        }, null, 2)}\n`);
     }
     catch (error) {
-        const newApp = await lstat(appDir).catch((problem) => problem.code === "ENOENT" ? undefined : Promise.reject(problem));
-        if (newApp && movedOld)
+        if (movedNew)
             await rm(appDir, { recursive: true, force: true }).catch(() => undefined);
         if (movedOld) {
             const old = await lstat(backupDir).catch((problem) => problem.code === "ENOENT" ? undefined : Promise.reject(problem));
@@ -249,6 +281,8 @@ export async function installPortable({ installDir = defaultInstallDir(), manife
     assertNodeVersion(manifest.node.minimumMajor);
 
     const root = resolve(installDir);
+    if (root === parse(root).root)
+        throw new Error("refusing to use a filesystem root as the install directory");
     await mkdir(root, { recursive: true });
     await rejectSymlinkIfPresent(root, "install directory");
     const stagingBase = join(root, ".staging");
@@ -260,7 +294,7 @@ export async function installPortable({ installDir = defaultInstallDir(), manife
 
     try {
         const archivePath = await obtainArchive({ manifest, ...location, stageDir });
-        validateArchiveListing(archivePath, manifest.archive.root);
+        validateArchiveListing(archivePath, manifest);
         runTar(["-xzf", archivePath, "-C", extractDir]);
         const payloadRoot = join(extractDir, ...manifest.archive.root.split("/"));
         await rejectSymlinkIfPresent(payloadRoot, "release payload root");
@@ -281,8 +315,7 @@ export async function installPortable({ installDir = defaultInstallDir(), manife
     }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname.replace(/^\/(?:[A-Za-z]:)/, (value) => value.slice(1)))) {
-    // The URL-path comparison above is only for direct execution; imported tests call installPortable.
+if (process.argv[1] && resolve(process.argv[1]) === resolve(SELF_PATH)) {
     const args = process.argv.slice(2);
     const result = await installPortable({
         installDir: valueAfter(args, "--install-dir") ?? defaultInstallDir(),
