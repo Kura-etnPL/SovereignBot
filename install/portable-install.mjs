@@ -169,7 +169,18 @@ function runTar(args) {
     return result.stdout ?? "";
 }
 
+export function validateArchiveEntryTypes(verboseListing) {
+    const entries = String(verboseListing).split(/\r?\n/).filter(Boolean);
+    if (!entries.length)
+        throw new Error("release archive verbose listing is empty");
+    for (const line of entries) {
+        if (line[0] !== "-")
+            throw new Error(`release archive contains a non-regular entry type: ${line}`);
+    }
+}
+
 function validateArchiveListing(archivePath, manifest) {
+    validateArchiveEntryTypes(runTar(["-tvzf", archivePath]));
     const root = manifest.archive.root;
     const listing = runTar(["-tzf", archivePath]);
     const entries = listing.split(/\r?\n/).filter(Boolean);
@@ -227,8 +238,12 @@ async function rejectSymlinkIfPresent(path, label) {
         throw new Error(`${label} must not be a symbolic link: ${path}`);
 }
 
-async function writeKnownFileAtomic(path, content, mode) {
+export async function writeKnownFileAtomic(path, content, mode, operations = {}) {
     const expected = Buffer.from(content, "utf8");
+    const renameFile = operations.rename ?? resilientRename;
+    const removeFile = operations.remove ?? resilientRemove;
+    const writeFileOperation = operations.write ?? writeFile;
+    const chmodOperation = operations.chmod ?? chmod;
     const existing = await lstat(path).catch((error) => error.code === "ENOENT" ? undefined : Promise.reject(error));
     if (existing) {
         if (existing.isSymbolicLink() || !existing.isFile())
@@ -236,7 +251,7 @@ async function writeKnownFileAtomic(path, content, mode) {
         const current = await readFile(path);
         if (current.equals(expected)) {
             if (mode !== undefined)
-                await chmod(path, mode);
+                await chmodOperation(path, mode);
             return;
         }
     }
@@ -244,29 +259,43 @@ async function writeKnownFileAtomic(path, content, mode) {
     const temp = `${path}.new-${randomUUID()}`;
     const backup = `${path}.old-${randomUUID()}`;
     let backedUp = false;
+    let preserveBackup = false;
     try {
-        await writeFile(temp, expected, { flag: "wx" });
+        await writeFileOperation(temp, expected, { flag: "wx" });
         if (mode !== undefined)
-            await chmod(temp, mode);
+            await chmodOperation(temp, mode);
         if (existing) {
-            await resilientRename(path, backup);
+            await renameFile(path, backup);
             backedUp = true;
         }
         try {
-            await resilientRename(temp, path);
+            await renameFile(temp, path);
         }
         catch (error) {
-            if (backedUp)
-                await resilientRename(backup, path).catch(() => undefined);
+            if (backedUp) {
+                try {
+                    await renameFile(backup, path);
+                    backedUp = false;
+                }
+                catch (rollbackError) {
+                    preserveBackup = true;
+                    throw new AggregateError(
+                        [error, rollbackError],
+                        `installer-owned file replacement failed and rollback failed; backup preserved at ${backup}`,
+                    );
+                }
+            }
             throw error;
         }
-        if (backedUp)
-            await resilientRemove(backup, { force: true });
+        if (backedUp) {
+            await removeFile(backup, { force: true });
+            backedUp = false;
+        }
     }
     finally {
-        await resilientRemove(temp, { force: true }).catch(() => undefined);
-        if (backedUp)
-            await resilientRemove(backup, { force: true }).catch(() => undefined);
+        await removeFile(temp, { force: true }).catch(() => undefined);
+        if (backedUp && !preserveBackup)
+            await removeFile(backup, { force: true }).catch(() => undefined);
     }
 }
 
