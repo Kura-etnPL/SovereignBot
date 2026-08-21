@@ -35,6 +35,7 @@ function harness({ failCreate, failFirstTargetPointer, failAudit, failClearAfter
     let marker;
     let pointerCalls = 0;
     let clearCalls = 0;
+    let createCalls = 0;
     const replacements = [];
     const auditRows = [];
     const store = {
@@ -42,6 +43,7 @@ function harness({ failCreate, failFirstTargetPointer, failAudit, failClearAfter
         listVersions: async () => [structuredClone(previous), structuredClone(target)],
         readVersion: async (id) => structuredClone(id === target.id ? target : previous),
         createVersion: async () => {
+            createCalls += 1;
             if (failCreate)
                 throw new Error("version write failed");
             return structuredClone(target);
@@ -92,8 +94,37 @@ function harness({ failCreate, failFirstTargetPointer, failAudit, failClearAfter
         get marker() { return marker; },
         get pointerCalls() { return pointerCalls; },
         get clearCalls() { return clearCalls; },
+        get createCalls() { return createCalls; },
     };
 }
+
+test("dry-run expectation mismatch fails before a policy version is created", async () => {
+    const t = harness();
+    await assert.rejects(
+        () => t.manager.apply({
+            policy: nextPolicy,
+            checks: [{ action, expect: { allowed: true } }],
+        }),
+        /decision mismatch/,
+    );
+    assert.equal(t.createCalls, 0);
+    assert.equal(t.pointerCalls, 0);
+    assert.equal(t.auditRows.length, 0);
+    assert.equal(t.store.current().id, t.previous.id);
+});
+
+test("applying the identical active policy is a checked no-op without a duplicate version", async () => {
+    const t = harness();
+    const result = await t.manager.apply({
+        policy: previousPolicy,
+        checks: [{ action, expect: { allowed: true, ruleId: "allow" } }],
+    });
+    assert.equal(result.noChange, true);
+    assert.equal(result.active.id, t.previous.id);
+    assert.equal(t.createCalls, 0);
+    assert.equal(t.pointerCalls, 0);
+    assert.equal(t.auditRows.length, 0);
+});
 
 test("version persistence failure leaves pointer and runtime policy untouched", async () => {
     const t = harness({ failCreate: true });
@@ -135,7 +166,7 @@ test("audit commit failure rolls pointer and runtime engine back before clearing
     assert.equal(t.marker, undefined);
 });
 
-test("marker cleanup failure after durable audit commit keeps new policy active for startup reconciliation", async () => {
+test("marker cleanup failure after durable audit commit keeps new policy active and locks further mutation", async () => {
     const t = harness({ failClearAfterCommit: true });
     const result = await t.manager.apply({ policy: nextPolicy, checks });
     assert.equal(result.recoveryPending, true);
@@ -148,4 +179,11 @@ test("marker cleanup failure after durable audit commit keeps new policy active 
     const decision = t.governor.policy.decide(action, { repeatCount: 1 });
     assert.equal(decision.allowed, false);
     assert.equal(decision.ruleId, "deny-echo");
+
+    await assert.rejects(
+        () => t.manager.rollback({ versionId: t.previous.id }),
+        /recovery is pending/,
+    );
+    assert.equal(t.auditRows.length, 1);
+    assert.equal(t.store.current().id, t.target.id);
 });
