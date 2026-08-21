@@ -3,18 +3,19 @@ import { ClaudeCodeHarness } from "./claude-code-harness.js";
 import { CodexHarness } from "./codex-harness.js";
 
 const TOOL_BRIDGE_MANAGERS = new WeakMap();
-const HARNESS_ACTIVITY = new Map();
+const HARNESS_ACTIVITY = new WeakMap();
 const HARNESS_ACTIVITY_LISTENERS = new Set();
 
-function notifyHarnessActivity(agentId, inFlightHarnessCount) {
+function notifyHarnessActivity(agent, inFlightHarnessCount) {
     const event = {
-        agentId,
+        agent,
+        agentId: agent.id,
         inFlightHarnessCount,
         at: new Date().toISOString(),
     };
     for (const listener of [...HARNESS_ACTIVITY_LISTENERS]) {
         try {
-            listener({ ...event });
+            listener(event);
         }
         catch {
             // Utilization observers are non-authoritative and cannot fail provider execution.
@@ -22,24 +23,34 @@ function notifyHarnessActivity(agentId, inFlightHarnessCount) {
     }
 }
 
-function adjustHarnessActivity(agentId, delta) {
-    const next = Math.max(0, (HARNESS_ACTIVITY.get(agentId) ?? 0) + delta);
+function adjustHarnessActivity(agent, delta) {
+    const next = Math.max(0, (HARNESS_ACTIVITY.get(agent) ?? 0) + delta);
     if (next === 0)
-        HARNESS_ACTIVITY.delete(agentId);
+        HARNESS_ACTIVITY.delete(agent);
     else
-        HARNESS_ACTIVITY.set(agentId, next);
-    notifyHarnessActivity(agentId, next);
+        HARNESS_ACTIVITY.set(agent, next);
+    notifyHarnessActivity(agent, next);
 }
 
-export function harnessActivitySnapshot() {
-    return new Map(HARNESS_ACTIVITY);
+export function harnessActivitySnapshot(agents = []) {
+    return new Map(agents.map((agent) => [agent.id, HARNESS_ACTIVITY.get(agent) ?? 0]));
 }
 
-export function subscribeHarnessActivity(listener) {
-    if (typeof listener !== "function")
-        throw new Error("harness activity listener must be a function");
-    HARNESS_ACTIVITY_LISTENERS.add(listener);
-    return () => HARNESS_ACTIVITY_LISTENERS.delete(listener);
+export function subscribeHarnessActivity(agents, listener) {
+    if (!Array.isArray(agents) || typeof listener !== "function")
+        throw new Error("harness activity subscription requires agents and a listener");
+    const allowed = new Set(agents);
+    const wrapped = (event) => {
+        if (!allowed.has(event.agent))
+            return;
+        listener({
+            agentId: event.agentId,
+            inFlightHarnessCount: event.inFlightHarnessCount,
+            at: event.at,
+        });
+    };
+    HARNESS_ACTIVITY_LISTENERS.add(wrapped);
+    return () => HARNESS_ACTIVITY_LISTENERS.delete(wrapped);
 }
 
 export function harnessActivitySubscriberCount() {
@@ -158,11 +169,7 @@ class ToolBridgeHarness {
     }
 
     async run(context) {
-        const bridge = await this.manager.prepare({
-            task: context.task,
-            agent: this.agent,
-            signal: context.signal,
-        });
+        const bridge = await this.manager.prepare({ task: context.task, agent: this.agent, signal: context.signal });
         try {
             return await this.inner.run({ ...context, toolBridge: bridge });
         }
@@ -174,20 +181,20 @@ class ToolBridgeHarness {
 
 class MeteredHarness {
     inner;
-    agentId;
+    agent;
 
-    constructor(inner, agentId) {
+    constructor(inner, agent) {
         this.inner = inner;
-        this.agentId = agentId;
+        this.agent = agent;
     }
 
     async run(context) {
-        adjustHarnessActivity(this.agentId, 1);
+        adjustHarnessActivity(this.agent, 1);
         try {
             return await this.inner.run(context);
         }
         finally {
-            adjustHarnessActivity(this.agentId, -1);
+            adjustHarnessActivity(this.agent, -1);
         }
     }
 }
@@ -221,5 +228,5 @@ export function createHarness(agent) {
     const base = createBaseHarness(agent);
     const manager = TOOL_BRIDGE_MANAGERS.get(agent);
     const governed = manager ? new ToolBridgeHarness(base, manager, agent) : base;
-    return new MeteredHarness(governed, agent.id);
+    return new MeteredHarness(governed, agent);
 }
