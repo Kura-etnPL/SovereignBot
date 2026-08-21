@@ -45,7 +45,7 @@
 
 - [x] Secure loopback local web UI + short-lived operator sessions
 - [x] Authenticated live task/audit telemetry + debounced console refresh
-- [ ] Richer harness/worker lease and utilization telemetry
+- [x] Passive harness/worker utilization telemetry + live in-flight activity
 - [x] Policy draft editor + side-effect-free validate/dry-run explain
 - [ ] Transactional/versioned policy apply + rollback
 - [x] Human takeover/secret prompt surface
@@ -57,7 +57,7 @@
 
 - [ ] AG-UI adapter where it improves interoperability
 - [ ] Generic governed MCP client/bridge
-- [ ] Harness health/lease telemetry beyond computer workers
+- [ ] Provider-specific health/lease telemetry that does not require quota-consuming probes
 
 ## Non-goals
 
