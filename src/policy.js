@@ -102,11 +102,11 @@ export class PolicyEngine {
         this.#repeat = new RepeatTracker(config.repeatWindowMs ?? 180_000);
     }
 
-    decide(action) {
-        const repeatCount = this.#repeat.count(action);
+    decide(action, options = {}) {
+        // Direct/in-memory callers keep the original synchronous semantics. Production Governor can
+        // supply a repeatCount that was durably persisted before policy evaluation.
+        const repeatCount = options.repeatCount ?? this.#repeat.count(action);
 
-        // Hard safety conditions are runtime invariants rather than administrator policy. They still
-        // flow through the same decision/audit path, but no allow rule can override them.
         if (action.hardDeny) {
             return {
                 allowed: false,

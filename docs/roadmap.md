@@ -37,8 +37,8 @@
 - [x] Connection-time resolved-address egress proxy with hard metadata/reserved blocks
 - [x] Sidecar health, process/browser leases, start/stop/reset lifecycle
 - [x] Cross-platform core tests on Ubuntu/Windows Node 22/24
-- [ ] Governed MCP/computer tool bridge for Codex/Claude Code workers
-- [ ] Persistent repeat detection across runtime/process restarts
+- [x] Governed MCP/computer tool bridge for Codex/Claude Code workers
+- [x] Persistent repeat detection across runtime/process restarts
 - [ ] Optional container/VM/kernel egress isolation profile for higher-risk workers
 
 ## v0.4 — operator experience
