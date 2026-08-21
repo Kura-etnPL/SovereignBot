@@ -25,7 +25,7 @@ Core principles:
 - **tamper-evident SHA-256 audit chain**;
 - **short-lived local operator console sessions** instead of putting durable operator credentials in the browser.
 
-> **Status: v0.4 in progress.** The sovereign core, resumable Codex/Claude Code harnesses, supervisor-worker protocol, production governed WebDriver computer layer, governed MCP bridge, persistent repeat guard, and secure local operator console are implemented. Policy draft validation/dry-run explain is the current v0.4 milestone.
+> **Status: v0.4 in progress.** The sovereign core, resumable Codex/Claude Code harnesses, supervisor-worker protocol, production governed WebDriver computer layer, governed MCP bridge, persistent repeat guard, secure local operator console, passive live worker telemetry, policy draft/dry-run, and verified portable installer pipeline are implemented. Transactional/versioned policy activation and v1.0 operational hardening remain before the stable release.
 
 ## Quick start
 
@@ -41,6 +41,8 @@ node src/cli.js audit verify
 ```
 
 `init` creates `.sovereignbot/config.json`. Runtime state under `.sovereignbot/` is ignored by Git.
+
+See [docs/installation.md](docs/installation.md) for the checksum-verified portable Windows/macOS/Linux installer and release artifact pipeline.
 
 ## Supervisor → worker
 
@@ -194,6 +196,8 @@ The console currently provides:
 - overview/task inspection;
 - supervisor-worker graph + event details;
 - passive computer state;
+- live task/audit telemetry;
+- passive worker/harness utilization and in-flight activity;
 - take/release and browser lifecycle controls;
 - pending secret supply;
 - memory search;
@@ -224,21 +228,7 @@ Dry-run does not call the Governor, mutate the live policy, touch `repeat-state.
 
 ## Computer API
 
-Worker routes require that worker's bearer token **and** a current running `taskId` owned by that worker:
-
-```text
-POST /computers/:agentId/snapshot
-POST /computers/:agentId/navigate
-POST /computers/:agentId/click
-POST /computers/:agentId/type
-POST /computers/:agentId/key
-POST /computers/:agentId/scroll
-POST /computers/:agentId/files/list
-POST /computers/:agentId/files/read
-POST /computers/:agentId/files/write
-POST /computers/:agentId/help
-POST /computers/:agentId/secret-request
-```
+Worker routes require that worker's bearer token **and** a current running `taskId` owned by that worker.
 
 Durable operator-token routes remain available for lower-level clients. The browser console uses its separate short-lived session layer instead.
 
@@ -266,7 +256,11 @@ Normal regression coverage runs on:
 - Ubuntu + Node 22/24
 - Windows + Node 22/24
 
-A separate `browser-e2e` job uses real Chrome + ChromeDriver on Ubuntu 24.04 and verifies both the WebDriver sidecar and the governed MCP → Chrome acceptance chain.
+Additional required jobs verify:
+
+- real Chrome + ChromeDriver sidecar/governed MCP E2E;
+- real POSIX portable install;
+- real Windows PowerShell portable install.
 
 ## Project principles
 
@@ -282,7 +276,7 @@ A separate `browser-e2e` job uses real Chrome + ChromeDriver on Ubuntu 24.04 and
 
 ## Next
 
-The next v0.4 work is richer live task/worker telemetry, followed by a separately designed transactional/versioned policy apply + rollback path and installer/packaging work.
+The next blocking milestone is transactional/versioned policy apply + rollback, followed by v1.0 operational hardening: doctor/diagnostics, backup/restore and migration safety, release-candidate soak, and stable release documentation.
 
 The public/domain deployment layer is intentionally separate from the loopback operator authority boundary.
 
