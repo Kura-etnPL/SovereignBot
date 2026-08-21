@@ -11,11 +11,16 @@ let selectedTaskId;
 const policyState = {
   loaded: false,
   active: undefined,
+  version: undefined,
+  versions: [],
+  recoveryPending: false,
   draftText: "",
   actionText: JSON.stringify({ category: "computer", operation: "navigate", agentId: "worker", target: "https://example.com/" }, null, 2),
   repeatCount: "1",
+  label: "",
   validation: undefined,
   result: undefined,
+  notice: "",
   error: "",
 };
 
@@ -96,16 +101,43 @@ async function memoryView() { const rows = await api("/operator/memory"); return
 function memoryRows(rows) { return rows.map((row) => `<div class="row"><div class="row-main"><div class="row-title">${esc(row.key)}</div><div class="row-sub">${esc(row.scope)} · ${esc((row.tags || []).join(", "))}</div></div><button class="small-btn" data-json='${esc(JSON.stringify(row))}'>View</button></div>`).join("") || '<div class="empty">No memory records</div>'; }
 async function auditView() { const rows = await api("/operator/audit?limit=150"); return `<div class="list">${rows.map((row) => `<div class="row"><div class="row-main"><div class="row-title">${esc(row.type)}</div><div class="row-sub">${esc(row.actor)} · ${esc(row.subject || "")} · ${esc(row.at || row.timestamp || "")}</div></div><button class="small-btn" data-json='${esc(JSON.stringify(row))}'>View</button></div>`).join("") || '<div class="empty">No audit rows</div>'}</div>`; }
 
-async function loadActivePolicy({ resetDraft = false } = {}) { const snapshot = await api("/operator/policy"); policyState.loaded = true; policyState.active = snapshot.active; if (resetDraft || !policyState.draftText) policyState.draftText = JSON.stringify(snapshot.active, null, 2); return snapshot; }
+async function loadActivePolicy({ resetDraft = false } = {}) {
+  const snapshot = await api("/operator/policy");
+  policyState.loaded = true;
+  policyState.active = snapshot.active;
+  policyState.version = snapshot.version;
+  policyState.versions = snapshot.versions || [];
+  policyState.recoveryPending = Boolean(snapshot.recoveryPending);
+  if (resetDraft || !policyState.draftText) policyState.draftText = JSON.stringify(snapshot.active, null, 2);
+  return snapshot;
+}
+
 function policyResult() {
   if (policyState.error) return `<div class="policy-result error-box">${esc(policyState.error)}</div>`;
+  if (policyState.notice) return `<div class="policy-result success-box">${esc(policyState.notice)}</div>`;
   if (policyState.result) return `<div class="policy-result"><div class="decision ${policyState.result.decision.allowed ? "allowed" : "denied"}">${policyState.result.decision.allowed ? "WOULD ALLOW" : "WOULD DENY"} · ${esc(policyState.result.decision.ruleId || "default fail-closed")}</div><div class="json">${esc(JSON.stringify(policyState.result, null, 2))}</div></div>`;
-  if (policyState.validation) return `<div class="policy-result"><div class="decision allowed">DRAFT VALID · ${esc(policyState.validation.ruleCount)} rules</div><div class="muted">No active policy was changed.</div></div>`;
-  return `<div class="policy-result muted">Validate the draft or run a simulated action. Nothing here changes the active runtime policy.</div>`;
+  if (policyState.validation) return `<div class="policy-result"><div class="decision allowed">DRAFT VALID · ${esc(policyState.validation.ruleCount)} rules</div><div class="muted">Validation does not change the active policy.</div></div>`;
+  return `<div class="policy-result muted">Run a dry-run before Apply. The server will re-run the same expected decision inside the activation transaction.</div>`;
 }
+
+function policyHistory() {
+  const rows = [...policyState.versions].reverse().map((version) => `<div class="version-row ${version.active ? "active" : ""}">
+    <div class="version-main"><div class="version-title">${version.active ? '<span class="version-tag">ACTIVE</span>' : ""}${esc(version.label || version.source || "policy version")}</div><div class="row-sub">${esc(version.id)} · ${esc(String(version.hash || "").slice(0, 16))}… · ${esc(version.createdAt || "")}</div></div>
+    <div class="actions"><button class="small-btn" data-policy-view="${esc(version.id)}">View</button>${version.active ? "" : `<button class="small-btn warn" data-policy-rollback="${esc(version.id)}">Rollback</button>`}</div>
+  </div>`).join("");
+  return rows || '<div class="empty">No policy versions</div>';
+}
+
 async function policyView() {
   if (!policyState.loaded) await loadActivePolicy();
-  return `<div class="policy-banner"><strong>DRAFT ONLY</strong><span>This editor cannot apply or reload policy. Validation and dry-run are side-effect free.</span></div><div class="policy-grid"><div class="card policy-card"><div class="card-heading"><h3>Policy draft</h3><button id="policy-reset" class="small-btn">Reset from active</button></div><textarea id="policy-draft" class="code-editor" spellcheck="false" aria-label="Policy draft JSON">${esc(policyState.draftText)}</textarea><div class="actions"><button id="policy-validate" class="small-btn">Validate draft</button></div></div><div class="card policy-card"><h3>Simulated action</h3><textarea id="policy-action" class="code-editor action-editor" spellcheck="false" aria-label="Simulated action JSON">${esc(policyState.actionText)}</textarea><label class="field-label">Simulated repeatCount<input id="policy-repeat" class="number-input" type="number" min="1" step="1" value="${esc(policyState.repeatCount)}"></label><div class="actions"><button id="policy-run" class="small-btn primary-inline">Run dry-run / explain</button></div>${policyResult()}</div></div>`;
+  const recovery = policyState.recoveryPending ? `<div class="policy-banner danger"><strong>RECOVERY REQUIRED</strong><span>A committed policy activation could not clear its transaction marker. Restart/recover before another policy mutation.</span></div>` : "";
+  return `${recovery}<div class="policy-banner"><strong>VERSIONED POLICY</strong><span>Draft/validate/dry-run are side-effect free. Apply and rollback are explicit audited authority changes.</span></div>
+    <div class="card full policy-active"><div><h3>Active policy</h3><div class="version-title"><span class="version-tag">ACTIVE</span>${esc(policyState.version?.label || policyState.version?.source || "policy")}</div><div class="row-sub">${esc(policyState.version?.id || "")}</div><div class="row-sub">SHA-256 ${esc(policyState.version?.hash || "")}</div></div></div>
+    <div class="policy-grid">
+      <div class="card policy-card"><div class="card-heading"><h3>Policy draft</h3><button id="policy-reset" class="small-btn">Reset from active</button></div><textarea id="policy-draft" class="code-editor" spellcheck="false" aria-label="Policy draft JSON">${esc(policyState.draftText)}</textarea><label class="field-label">Version label<input id="policy-label" class="search" maxlength="160" value="${esc(policyState.label)}" placeholder="Why are you changing this policy?"></label><div class="actions"><button id="policy-validate" class="small-btn">Validate draft</button><button id="policy-apply" class="small-btn primary-inline" ${policyState.result && !policyState.recoveryPending ? "" : "disabled"}>Apply checked policy</button></div></div>
+      <div class="card policy-card"><h3>Simulated action</h3><textarea id="policy-action" class="code-editor action-editor" spellcheck="false" aria-label="Simulated action JSON">${esc(policyState.actionText)}</textarea><label class="field-label">Simulated repeatCount<input id="policy-repeat" class="number-input" type="number" min="1" step="1" value="${esc(policyState.repeatCount)}"></label><div class="actions"><button id="policy-run" class="small-btn">Run dry-run / explain</button></div>${policyResult()}</div>
+    </div>
+    <div class="card full policy-history"><div class="card-heading"><h3>Immutable policy history</h3><span class="muted">Rollback re-activates a verified existing version</span></div><div class="version-list">${policyHistory()}</div></div>`;
 }
 
 async function render() {
@@ -128,7 +160,8 @@ async function render() {
 
 function showJson(value, title = "Details") { $("#dialog-body").innerHTML = `<h3>${esc(title)}</h3><div class="json">${esc(JSON.stringify(value, null, 2))}</div>`; if (!$("#detail-dialog").open) $("#detail-dialog").showModal(); }
 async function refreshTaskDialog() { if (!selectedTaskId || !$("#detail-dialog").open) return; const id = selectedTaskId; const value = { graph: await api(`/operator/tasks/${encodeURIComponent(id)}/graph`), events: await api(`/operator/tasks/${encodeURIComponent(id)}/events`) }; if (selectedTaskId === id) showJson(value, "Task details"); }
-function capturePolicyInputs() { if ($("#policy-draft")) policyState.draftText = $("#policy-draft").value; if ($("#policy-action")) policyState.actionText = $("#policy-action").value; if ($("#policy-repeat")) policyState.repeatCount = $("#policy-repeat").value; }
+function capturePolicyInputs() { if ($("#policy-draft")) policyState.draftText = $("#policy-draft").value; if ($("#policy-action")) policyState.actionText = $("#policy-action").value; if ($("#policy-repeat")) policyState.repeatCount = $("#policy-repeat").value; if ($("#policy-label")) policyState.label = $("#policy-label").value; }
+function clearPolicyFeedback({ keepValidation = false } = {}) { if (!keepValidation) policyState.validation = undefined; policyState.result = undefined; policyState.notice = ""; policyState.error = ""; }
 
 function bindContent() {
   document.querySelectorAll("[data-task]").forEach((button) => { button.onclick = async () => { selectedTaskId = button.dataset.task; const id = selectedTaskId; const value = { graph: await api(`/operator/tasks/${encodeURIComponent(id)}/graph`), events: await api(`/operator/tasks/${encodeURIComponent(id)}/events`) }; if (selectedTaskId === id) showJson(value, "Task details"); }; });
@@ -137,10 +170,45 @@ function bindContent() {
   document.querySelectorAll("[data-life]").forEach((button) => { button.onclick = async () => { if (button.dataset.life === "reset" && !confirm("Reset this browser session and profile state?")) return; await api(`/operator/computers/${encodeURIComponent(button.dataset.agent)}/lifecycle/${button.dataset.life}`, { method: "POST", body: { actorId: "operator-console" } }); await render(); }; });
   document.querySelectorAll("[data-secret-form]").forEach((form) => { form.onsubmit = async (event) => { event.preventDefault(); const input = form.elements.secret; const value = input.value; input.value = ""; try { await api(`/operator/computers/${encodeURIComponent(form.dataset.agent)}/secrets/${encodeURIComponent(form.dataset.request)}/supply`, { method: "POST", body: { actorId: "operator-console", value } }); await render(); } finally { input.value = ""; } }; });
   $("#memory-search")?.addEventListener("click", async () => { $("#memory-results").innerHTML = memoryRows(await api(`/operator/memory?q=${encodeURIComponent($("#memory-q").value)}`)); bindContent(); });
-  $("#policy-draft")?.addEventListener("input", capturePolicyInputs); $("#policy-action")?.addEventListener("input", capturePolicyInputs); $("#policy-repeat")?.addEventListener("input", capturePolicyInputs);
-  $("#policy-reset")?.addEventListener("click", async () => { await loadActivePolicy({ resetDraft: true }); policyState.validation = undefined; policyState.result = undefined; policyState.error = ""; await render(); });
-  $("#policy-validate")?.addEventListener("click", async () => { capturePolicyInputs(); policyState.validation = undefined; policyState.result = undefined; policyState.error = ""; try { const policy = JSON.parse(policyState.draftText); policyState.validation = await api("/operator/policy/validate", { method: "POST", body: { policy } }); } catch (error) { policyState.error = error.message; } await render(); });
-  $("#policy-run")?.addEventListener("click", async () => { capturePolicyInputs(); policyState.validation = undefined; policyState.result = undefined; policyState.error = ""; try { const policy = JSON.parse(policyState.draftText); const action = JSON.parse(policyState.actionText); const repeatCount = Number(policyState.repeatCount); policyState.result = await api("/operator/policy/dry-run", { method: "POST", body: { policy, action, repeatCount } }); } catch (error) { policyState.error = error.message; } await render(); });
+
+  $("#policy-draft")?.addEventListener("input", () => { capturePolicyInputs(); clearPolicyFeedback(); });
+  $("#policy-action")?.addEventListener("input", () => { capturePolicyInputs(); clearPolicyFeedback({ keepValidation: true }); });
+  $("#policy-repeat")?.addEventListener("input", () => { capturePolicyInputs(); clearPolicyFeedback({ keepValidation: true }); });
+  $("#policy-label")?.addEventListener("input", capturePolicyInputs);
+  $("#policy-reset")?.addEventListener("click", async () => { await loadActivePolicy({ resetDraft: true }); clearPolicyFeedback(); policyState.label = ""; await render(); });
+  $("#policy-validate")?.addEventListener("click", async () => { capturePolicyInputs(); clearPolicyFeedback(); try { const policy = JSON.parse(policyState.draftText); policyState.validation = await api("/operator/policy/validate", { method: "POST", body: { policy } }); } catch (error) { policyState.error = error.message; } await render(); });
+  $("#policy-run")?.addEventListener("click", async () => { capturePolicyInputs(); clearPolicyFeedback({ keepValidation: true }); try { const policy = JSON.parse(policyState.draftText); const action = JSON.parse(policyState.actionText); const repeatCount = Number(policyState.repeatCount); policyState.result = await api("/operator/policy/dry-run", { method: "POST", body: { policy, action, repeatCount } }); } catch (error) { policyState.error = error.message; } await render(); });
+  $("#policy-apply")?.addEventListener("click", async () => {
+    capturePolicyInputs();
+    if (!policyState.result) { policyState.error = "Run a dry-run on the current draft/action before Apply."; await render(); return; }
+    if (!confirm(`Apply this policy as a new immutable version?\n\nCurrent: ${policyState.version?.id || "unknown"}\nDecision check: ${policyState.result.decision.allowed ? "ALLOW" : "DENY"} via ${policyState.result.decision.ruleId || "default"}`)) return;
+    try {
+      const policy = JSON.parse(policyState.draftText);
+      const action = JSON.parse(policyState.actionText);
+      const repeatCount = Number(policyState.repeatCount);
+      const expected = { allowed: Boolean(policyState.result.decision.allowed) };
+      if (policyState.result.decision.ruleId !== undefined) expected.ruleId = policyState.result.decision.ruleId;
+      const applied = await api("/operator/policy/apply", { method: "POST", body: { policy, label: policyState.label, checks: [{ action, repeatCount, expect: expected }] } });
+      await loadActivePolicy({ resetDraft: true });
+      clearPolicyFeedback();
+      policyState.label = "";
+      policyState.notice = applied.noChange ? "Draft matches the active policy; no new version was created." : `Policy activated: ${applied.active.id}${applied.recoveryPending ? " · restart recovery pending" : ""}`;
+    } catch (error) { policyState.error = error.message; }
+    await render();
+  });
+  document.querySelectorAll("[data-policy-view]").forEach((button) => { button.onclick = async () => { try { showJson(await api(`/operator/policy/versions/${encodeURIComponent(button.dataset.policyView)}`), "Policy version"); } catch (error) { policyState.error = error.message; await render(); } }; });
+  document.querySelectorAll("[data-policy-rollback]").forEach((button) => { button.onclick = async () => {
+    const versionId = button.dataset.policyRollback;
+    if (!confirm(`Rollback the active policy to verified version ${versionId}?\n\nThis changes future Governor decisions and will be audited.`)) return;
+    try {
+      const rolled = await api("/operator/policy/rollback", { method: "POST", body: { versionId } });
+      await loadActivePolicy({ resetDraft: true });
+      clearPolicyFeedback();
+      policyState.label = "";
+      policyState.notice = rolled.noChange ? "That policy version is already active." : `Rolled back to ${rolled.active.id}`;
+    } catch (error) { policyState.error = error.message; }
+    await render();
+  }; });
 }
 
 function setLiveState(state, label) { const badge = $("#live-badge"); if (!badge) return; badge.className = `badge live ${state}`; badge.textContent = `Live · ${label}`; }
@@ -188,6 +256,6 @@ async function connectTelemetry() {
 
 $("#login-form").onsubmit = async (event) => { event.preventDefault(); const candidate = $("#token").value.trim(); $("#token").value = ""; token = candidate; try { await api("/operator/session"); $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); await render(); void connectTelemetry(); } catch (error) { token = ""; $("#login-error").textContent = error.message; } };
 document.querySelectorAll("nav button").forEach((button) => { button.onclick = async () => { if (currentView === "policy") capturePolicyInputs(); document.querySelectorAll("nav button").forEach((candidate) => candidate.classList.remove("active")); button.classList.add("active"); currentView = button.dataset.view; await render(); }; });
-$("#refresh").onclick = () => render();
+$("#refresh").onclick = async () => { if (currentView === "policy") { capturePolicyInputs(); await loadActivePolicy({ resetDraft: false }); } await render(); };
 $("#logout").onclick = async () => { stopTelemetry(); try { await api("/operator/session/revoke", { method: "POST", body: {} }); } catch {} token = ""; location.reload(); };
 $("#dialog-close").onclick = () => { selectedTaskId = undefined; $("#detail-dialog").close(); };
