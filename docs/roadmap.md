@@ -44,7 +44,8 @@
 ## v0.4 — operator experience
 
 - [x] Secure loopback local web UI + short-lived operator sessions
-- [ ] Live/streaming task graph and richer worker/computer telemetry
+- [x] Authenticated live task/audit telemetry + debounced console refresh
+- [ ] Richer harness/worker lease and utilization telemetry
 - [x] Policy draft editor + side-effect-free validate/dry-run explain
 - [ ] Transactional/versioned policy apply + rollback
 - [x] Human takeover/secret prompt surface
