@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -14,9 +14,11 @@ test("operator session stores only a hash, expires, and can be revoked", async (
     await store.init();
     const session = await store.issue({ ttlMs: 1_000, label: "test" });
     assert.equal(await store.authenticate(session.token), true);
-    const raw = await readFile(join(dataDir, "operator-sessions.json"), "utf8");
+    const files = await readdir(join(dataDir, "operator-sessions"));
+    assert.equal(files.length, 1);
+    assert.match(files[0], /^[0-9a-f]{64}\.json$/);
+    const raw = await readFile(join(dataDir, "operator-sessions", files[0]), "utf8");
     assert.equal(raw.includes(session.token), false);
-    assert.match(raw, /[0-9a-f]{64}/);
 
     assert.equal(await store.revoke(session.token), true);
     assert.equal(await store.authenticate(session.token), false);
