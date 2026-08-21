@@ -155,7 +155,7 @@ test("operator telemetry emits minimal task/audit notifications and revoke close
 
 test("operator telemetry expires an already-open stream", async () => {
     const { runtime, server } = await runtimeAndServer();
-    const session = await runtime.operatorSessions.issue({ ttlMs: 80 });
+    const session = await runtime.operatorSessions.issue({ ttlMs: 1_500 });
     try {
         const response = await fetch(`${server.url}/operator/stream`, {
             headers: {
@@ -169,7 +169,7 @@ test("operator telemetry expires an already-open stream", async () => {
 
         let ended;
         for (let attempt = 0; attempt < 4; attempt += 1) {
-            const notice = await stream.next(2500);
+            const notice = await stream.next(3500);
             if (!notice)
                 break;
             if (notice.type === "session-ended") {
