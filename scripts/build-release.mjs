@@ -9,6 +9,11 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const defaultOutDir = join(repoRoot, "dist");
 const SHIPPED_ROOTS = ["src", "sidecars", "ui", "docs", "examples"];
 const SHIPPED_FILES = ["package.json", "README.md", "LICENSE", "SECURITY.md"];
+const STANDALONE_INSTALLERS = [
+    "install/portable-install.mjs",
+    "install/install.ps1",
+    "install/install.sh",
+];
 const TAR_BLOCK = 512;
 
 function toPosix(path) {
@@ -19,12 +24,12 @@ function sha256(buffer) {
     return createHash("sha256").update(buffer).digest("hex");
 }
 
-async function walk(path, root = path) {
+async function walk(path) {
     const entries = [];
     for (const entry of await readdir(path, { withFileTypes: true })) {
         const absolute = join(path, entry.name);
         if (entry.isDirectory())
-            entries.push(...await walk(absolute, root));
+            entries.push(...await walk(absolute));
         else if (entry.isFile())
             entries.push(toPosix(relative(repoRoot, absolute)));
         else
@@ -66,8 +71,7 @@ function writeOctal(header, offset, length, value) {
 }
 
 function splitTarPath(path) {
-    const bytes = Buffer.byteLength(path);
-    if (bytes <= 100)
+    if (Buffer.byteLength(path) <= 100)
         return { name: path, prefix: "" };
     const segments = path.split("/");
     for (let index = segments.length - 1; index > 0; index -= 1) {
@@ -98,8 +102,7 @@ function tarHeader(path, size) {
     let checksum = 0;
     for (const byte of header)
         checksum += byte;
-    const text = checksum.toString(8).padStart(6, "0");
-    writeString(header, 148, 8, `${text}\0 `);
+    writeString(header, 148, 8, `${checksum.toString(8).padStart(6, "0")}\0 `);
     return header;
 }
 
@@ -121,6 +124,17 @@ async function buildTar(paths, rootName) {
     return { tar: Buffer.concat(chunks), fileManifest };
 }
 
+async function buildInstallerAssets(outDir) {
+    const installers = [];
+    for (const source of STANDALONE_INSTALLERS) {
+        const content = await readFile(join(repoRoot, source));
+        const file = basename(source);
+        await writeFile(join(outDir, file), content);
+        installers.push({ file, sha256: sha256(content), bytes: content.length });
+    }
+    return installers;
+}
+
 function valueAfter(args, flag) {
     const index = args.indexOf(flag);
     return index >= 0 ? args[index + 1] : undefined;
@@ -130,12 +144,15 @@ export async function buildRelease({ outDir = defaultOutDir } = {}) {
     const packageJson = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8"));
     if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(packageJson.version))
         throw new Error(`package version is not release-compatible: ${packageJson.version}`);
+    await mkdir(outDir, { recursive: true });
+
     const paths = await releasePaths();
     const rootName = "sovereignbot";
     const { tar, fileManifest } = await buildTar(paths, rootName);
     const archive = gzipSync(tar, { level: 9, mtime: 0 });
     const archiveName = `sovereignbot-${packageJson.version}.tar.gz`;
     const archiveHash = sha256(archive);
+    const installers = await buildInstallerAssets(outDir);
     const manifest = {
         schemaVersion: 1,
         name: packageJson.name,
@@ -148,10 +165,10 @@ export async function buildRelease({ outDir = defaultOutDir } = {}) {
             sha256: archiveHash,
             bytes: archive.length,
         },
+        installers,
         files: fileManifest,
     };
 
-    await mkdir(outDir, { recursive: true });
     await writeFile(join(outDir, archiveName), archive);
     await writeFile(join(outDir, `${archiveName}.sha256`), `${archiveHash}  ${archiveName}\n`, "utf8");
     await writeFile(join(outDir, "release-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
@@ -166,5 +183,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         archive: result.archiveName,
         sha256: result.archiveHash,
         files: result.manifest.files.length,
+        installers: result.manifest.installers.map((entry) => entry.file),
     }, null, 2));
 }
