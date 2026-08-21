@@ -26,6 +26,7 @@ export function defaultConfig(dataDir = ".sovereignbot/data") {
         ],
         policy: {
             repeatWindowMs: 180000,
+            repeatMaxActiveFingerprints: 10000,
             rules: [
                 {
                     id: "deny-runaway-loop",
@@ -185,5 +186,7 @@ export async function loadConfig(path = DEFAULT_CONFIG_PATH) {
     if (!config.policy || !Array.isArray(config.policy.rules)) {
         throw new Error("config.policy.rules is required; SovereignBot fails closed without policy");
     }
+    positiveInteger(config.policy.repeatWindowMs, "config.policy.repeatWindowMs");
+    positiveInteger(config.policy.repeatMaxActiveFingerprints, "config.policy.repeatMaxActiveFingerprints");
     return config;
 }
