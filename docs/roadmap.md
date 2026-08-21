@@ -51,7 +51,8 @@
 - [x] Human takeover/secret prompt surface
 - [x] Memory inspector/search
 - [x] Audit timeline + integrity badge
-- [ ] One-command Windows/macOS/Linux installer
+- [x] Portable Windows/macOS/Linux installer + verified release artifact pipeline
+- [ ] First intentional public v0.4 release
 
 ## Later integrations
 
