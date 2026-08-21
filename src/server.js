@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { handleComputerApiRequest } from "./computer-api.js";
 import { handleOperatorApiRequest, loopbackHost } from "./operator-api.js";
+import { handleOperatorStream } from "./operator-stream.js";
 
 const UI_FILES = {
     "/ui/": { path: fileURLToPath(new URL("../ui/index.html", import.meta.url)), type: "text/html; charset=utf-8" },
@@ -70,6 +71,10 @@ export function startServer(runtime) {
             if (url.pathname === "/ui" || url.pathname.startsWith("/ui/")) {
                 if (await sendUi(response, url.pathname, host))
                     return;
+            }
+            if (url.pathname === "/operator/stream") {
+                await handleOperatorStream(runtime, request, response);
+                return;
             }
             if (url.pathname.startsWith("/operator/")) {
                 await handleOperatorApiRequest(runtime, request, response, url);
