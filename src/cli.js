@@ -30,11 +30,12 @@ function requiredPositional(args, index, name) {
 }
 
 function help() {
-    console.log(`SovereignBot 0.3.0
+    console.log(`SovereignBot 0.4-dev
 
 Usage:
   sovereignbot init [--config path]
   sovereignbot serve [--config path]
+  sovereignbot operator-session [--ttl-minutes 30] [--label local-operator]
   sovereignbot submit <title> [--input json] [--cap capability] [--agent id]
   sovereignbot plan <title> --owner <supervisor-id> [--input json]
   sovereignbot delegate <parent-id> <title> --actor <supervisor-id> [--cap capability] [--agent id] [--depends task-id] [--review]
@@ -54,6 +55,7 @@ Usage:
 
 Every command accepts [--config path]. Repeated flags such as --cap and --depends may be supplied more than once.
 Computer bearer tokens are printed only by local CLI bootstrap commands; the HTTP API never returns them.
+Operator-console sessions are short-lived and separate from the durable computer operator token.
 `);
 }
 
@@ -77,6 +79,7 @@ async function main() {
     if (command === "serve") {
         const server = await startServer(runtime);
         console.log(`SovereignBot listening on ${server.url}`);
+        console.log(`Operator console: ${server.url}/ui/`);
         const stop = async () => {
             await server.close();
             await runtime.close();
@@ -84,6 +87,24 @@ async function main() {
         };
         process.on("SIGINT", stop);
         process.on("SIGTERM", stop);
+        return;
+    }
+
+    if (command === "operator-session") {
+        const ttlText = valueAfter(args, "--ttl-minutes");
+        const ttlMinutes = ttlText === undefined ? 30 : Number(ttlText);
+        if (!Number.isFinite(ttlMinutes) || ttlMinutes <= 0)
+            throw new Error("--ttl-minutes must be a positive number");
+        const session = await runtime.operatorSessions.issue({
+            ttlMs: Math.round(ttlMinutes * 60_000),
+            label: valueAfter(args, "--label") ?? "local-operator",
+        });
+        console.log(JSON.stringify({
+            token: session.token,
+            expiresAt: new Date(session.expiresAt).toISOString(),
+            consolePath: "/ui/",
+            note: "Paste this token into the local operator console. The raw token is not stored by SovereignBot.",
+        }, null, 2));
         return;
     }
 
@@ -107,148 +128,41 @@ async function main() {
 
     if (command === "submit") {
         const title = requiredPositional(args, 1, "submit task title");
-        const task = await runtime.orchestrator.submit({
-            title,
-            input: parseJsonOption(args, "--input"),
-            requiredCapabilities: valuesAfter(args, "--cap"),
-            preferredAgentId: valueAfter(args, "--agent"),
-        });
-        console.log(JSON.stringify(task, null, 2));
-        return;
+        const task = await runtime.orchestrator.submit({ title, input: parseJsonOption(args, "--input"), requiredCapabilities: valuesAfter(args, "--cap"), preferredAgentId: valueAfter(args, "--agent") });
+        console.log(JSON.stringify(task, null, 2)); return;
     }
-
     if (command === "plan") {
-        const title = requiredPositional(args, 1, "plan title");
-        const ownerAgentId = valueAfter(args, "--owner");
-        if (!ownerAgentId)
-            throw new Error("plan requires --owner <supervisor-id>");
-        console.log(JSON.stringify(await runtime.orchestrator.createPlan({
-            title,
-            input: parseJsonOption(args, "--input"),
-            ownerAgentId,
-        }), null, 2));
-        return;
+        const title = requiredPositional(args, 1, "plan title"); const ownerAgentId = valueAfter(args, "--owner");
+        if (!ownerAgentId) throw new Error("plan requires --owner <supervisor-id>");
+        console.log(JSON.stringify(await runtime.orchestrator.createPlan({ title, input: parseJsonOption(args, "--input"), ownerAgentId }), null, 2)); return;
     }
-
     if (command === "delegate") {
-        const parentTaskId = requiredPositional(args, 1, "parent task id");
-        const title = requiredPositional(args, 2, "delegated task title");
-        const actorAgentId = valueAfter(args, "--actor");
-        if (!actorAgentId)
-            throw new Error("delegate requires --actor <supervisor-id>");
+        const parentTaskId = requiredPositional(args, 1, "parent task id"); const title = requiredPositional(args, 2, "delegated task title"); const actorAgentId = valueAfter(args, "--actor");
+        if (!actorAgentId) throw new Error("delegate requires --actor <supervisor-id>");
         const reviewCaps = valuesAfter(args, "--review-cap");
-        console.log(JSON.stringify(await runtime.orchestrator.delegate(
-            parentTaskId,
-            {
-                title,
-                input: parseJsonOption(args, "--input"),
-                requiredCapabilities: valuesAfter(args, "--cap"),
-                preferredAgentId: valueAfter(args, "--agent"),
-                dependencyIds: valuesAfter(args, "--depends"),
-                review: args.includes("--review")
-                    ? {
-                        required: true,
-                        requiredCapabilities: reviewCaps.length ? reviewCaps : ["review"],
-                        independent: !args.includes("--self-review"),
-                    }
-                    : undefined,
-            },
-            actorAgentId,
-        ), null, 2));
-        return;
+        console.log(JSON.stringify(await runtime.orchestrator.delegate(parentTaskId, { title, input: parseJsonOption(args, "--input"), requiredCapabilities: valuesAfter(args, "--cap"), preferredAgentId: valueAfter(args, "--agent"), dependencyIds: valuesAfter(args, "--depends"), review: args.includes("--review") ? { required: true, requiredCapabilities: reviewCaps.length ? reviewCaps : ["review"], independent: !args.includes("--self-review") } : undefined }, actorAgentId), null, 2)); return;
     }
-
-    if (command === "run") {
-        console.log(JSON.stringify(await runtime.orchestrator.runUntilIdle(), null, 2));
-        return;
-    }
-
-    if (command === "retry") {
-        const taskId = requiredPositional(args, 1, "retry task id");
-        console.log(JSON.stringify(await runtime.orchestrator.retry(taskId), null, 2));
-        return;
-    }
-
-    if (command === "cancel") {
-        const taskId = requiredPositional(args, 1, "cancel task id");
-        console.log(JSON.stringify(await runtime.orchestrator.cancel(taskId, {
-            reason: valueAfter(args, "--reason"),
-            cascade: !args.includes("--no-cascade"),
-        }), null, 2));
-        return;
-    }
-
+    if (command === "run") { console.log(JSON.stringify(await runtime.orchestrator.runUntilIdle(), null, 2)); return; }
+    if (command === "retry") { console.log(JSON.stringify(await runtime.orchestrator.retry(requiredPositional(args, 1, "retry task id")), null, 2)); return; }
+    if (command === "cancel") { const taskId = requiredPositional(args, 1, "cancel task id"); console.log(JSON.stringify(await runtime.orchestrator.cancel(taskId, { reason: valueAfter(args, "--reason"), cascade: !args.includes("--no-cascade") }), null, 2)); return; }
     if (command === "progress") {
-        const taskId = requiredPositional(args, 1, "progress task id");
-        const actorAgentId = valueAfter(args, "--actor");
-        const eventId = valueAfter(args, "--event");
-        if (!actorAgentId || !eventId)
-            throw new Error("progress requires --actor <worker-id> and --event <id>");
+        const taskId = requiredPositional(args, 1, "progress task id"); const actorAgentId = valueAfter(args, "--actor"); const eventId = valueAfter(args, "--event");
+        if (!actorAgentId || !eventId) throw new Error("progress requires --actor <worker-id> and --event <id>");
         const percentText = valueAfter(args, "--percent");
-        console.log(JSON.stringify(await runtime.orchestrator.reportProgress(
-            taskId,
-            {
-                eventId,
-                percent: percentText === undefined ? undefined : Number(percentText),
-                message: valueAfter(args, "--message"),
-                data: parseJsonOption(args, "--data"),
-            },
-            actorAgentId,
-        ), null, 2));
-        return;
+        console.log(JSON.stringify(await runtime.orchestrator.reportProgress(taskId, { eventId, percent: percentText === undefined ? undefined : Number(percentText), message: valueAfter(args, "--message"), data: parseJsonOption(args, "--data") }, actorAgentId), null, 2)); return;
     }
-
     if (command === "review") {
-        const taskId = requiredPositional(args, 1, "review task id");
-        const decision = requiredPositional(args, 2, "review decision");
-        const reviewerAgentId = valueAfter(args, "--reviewer");
-        const eventId = valueAfter(args, "--event");
-        if (!reviewerAgentId || !eventId)
-            throw new Error("review requires --reviewer <agent-id> and --event <id>");
-        console.log(JSON.stringify(await runtime.orchestrator.reviewTask(
-            taskId,
-            { decision, eventId, notes: valueAfter(args, "--notes") },
-            reviewerAgentId,
-        ), null, 2));
-        return;
+        const taskId = requiredPositional(args, 1, "review task id"); const decision = requiredPositional(args, 2, "review decision"); const reviewerAgentId = valueAfter(args, "--reviewer"); const eventId = valueAfter(args, "--event");
+        if (!reviewerAgentId || !eventId) throw new Error("review requires --reviewer <agent-id> and --event <id>");
+        console.log(JSON.stringify(await runtime.orchestrator.reviewTask(taskId, { decision, eventId, notes: valueAfter(args, "--notes") }, reviewerAgentId), null, 2)); return;
     }
+    if (command === "aggregate") { const planId = requiredPositional(args, 1, "plan id"); const actorAgentId = valueAfter(args, "--actor"); if (!actorAgentId) throw new Error("aggregate requires --actor <supervisor-id>"); console.log(JSON.stringify(await runtime.orchestrator.aggregatePlan(planId, actorAgentId), null, 2)); return; }
+    if (command === "graph") { console.log(JSON.stringify(await runtime.orchestrator.getTaskGraph(requiredPositional(args, 1, "graph task id")), null, 2)); return; }
+    if (command === "events") { console.log(JSON.stringify(await runtime.orchestrator.listTaskEvents(requiredPositional(args, 1, "events task id")), null, 2)); return; }
+    if (command === "status") { console.log(JSON.stringify(await runtime.orchestrator.listTasks(), null, 2)); return; }
+    if (command === "audit" && args[1] === "verify") { console.log(JSON.stringify(await runtime.audit.verify(), null, 2)); return; }
 
-    if (command === "aggregate") {
-        const planId = requiredPositional(args, 1, "plan id");
-        const actorAgentId = valueAfter(args, "--actor");
-        if (!actorAgentId)
-            throw new Error("aggregate requires --actor <supervisor-id>");
-        console.log(JSON.stringify(await runtime.orchestrator.aggregatePlan(planId, actorAgentId), null, 2));
-        return;
-    }
-
-    if (command === "graph") {
-        const taskId = requiredPositional(args, 1, "graph task id");
-        console.log(JSON.stringify(await runtime.orchestrator.getTaskGraph(taskId), null, 2));
-        return;
-    }
-
-    if (command === "events") {
-        const taskId = requiredPositional(args, 1, "events task id");
-        console.log(JSON.stringify(await runtime.orchestrator.listTaskEvents(taskId), null, 2));
-        return;
-    }
-
-    if (command === "status") {
-        console.log(JSON.stringify(await runtime.orchestrator.listTasks(), null, 2));
-        return;
-    }
-
-    if (command === "audit" && args[1] === "verify") {
-        console.log(JSON.stringify(await runtime.audit.verify(), null, 2));
-        return;
-    }
-
-    help();
-    process.exitCode = 1;
+    help(); process.exitCode = 1;
 }
 
-main().catch((error) => {
-    console.error(error.stack ?? error.message);
-    process.exitCode = 1;
-});
+main().catch((error) => { console.error(error.stack ?? error.message); process.exitCode = 1; });
