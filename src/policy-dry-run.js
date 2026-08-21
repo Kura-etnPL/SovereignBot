@@ -1,5 +1,7 @@
 import { explainRuleMatch } from "./policy.js";
 
+const POLICY_FIELDS = new Set(["rules", "repeatWindowMs", "repeatMaxActiveFingerprints"]);
+const RULE_FIELDS = new Set(["id", "effect", "description", "match"]);
 const MATCH_FIELDS = new Set([
     "category",
     "operation",
@@ -39,6 +41,10 @@ function optionalPositiveInteger(value, name) {
 export function validatePolicyDraft(policy) {
     if (!isObject(policy))
         throw new Error("policy draft must be an object");
+    for (const key of Object.keys(policy)) {
+        if (!POLICY_FIELDS.has(key))
+            throw new Error(`policy draft contains unsupported field: ${key}`);
+    }
     if (!Array.isArray(policy.rules))
         throw new Error("policy draft rules must be an array");
     optionalPositiveInteger(policy.repeatWindowMs, "policy.repeatWindowMs");
@@ -50,6 +56,10 @@ export function validatePolicyDraft(policy) {
         const prefix = `policy.rules[${index}]`;
         if (!isObject(rule))
             throw new Error(`${prefix} must be an object`);
+        for (const key of Object.keys(rule)) {
+            if (!RULE_FIELDS.has(key))
+                throw new Error(`${prefix} contains unsupported field: ${key}`);
+        }
         if (typeof rule.id !== "string" || !rule.id.trim())
             throw new Error(`${prefix}.id must be a non-empty string`);
         if (ids.has(rule.id))
