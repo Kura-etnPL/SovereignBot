@@ -3,6 +3,19 @@ import { ClaudeCodeHarness } from "./claude-code-harness.js";
 import { CodexHarness } from "./codex-harness.js";
 
 const TOOL_BRIDGE_MANAGERS = new WeakMap();
+const HARNESS_ACTIVITY = new Map();
+
+function adjustHarnessActivity(agentId, delta) {
+    const next = Math.max(0, (HARNESS_ACTIVITY.get(agentId) ?? 0) + delta);
+    if (next === 0)
+        HARNESS_ACTIVITY.delete(agentId);
+    else
+        HARNESS_ACTIVITY.set(agentId, next);
+}
+
+export function harnessActivitySnapshot() {
+    return new Map(HARNESS_ACTIVITY);
+}
 
 export function registerAgentToolBridgeManager(agent, manager) {
     if (manager)
@@ -130,6 +143,26 @@ class ToolBridgeHarness {
     }
 }
 
+class MeteredHarness {
+    inner;
+    agentId;
+
+    constructor(inner, agentId) {
+        this.inner = inner;
+        this.agentId = agentId;
+    }
+
+    async run(context) {
+        adjustHarnessActivity(this.agentId, 1);
+        try {
+            return await this.inner.run(context);
+        }
+        finally {
+            adjustHarnessActivity(this.agentId, -1);
+        }
+    }
+}
+
 export function harnessTarget(harness) {
     if (harness.kind === "command")
         return harness.command;
@@ -156,7 +189,8 @@ function createBaseHarness(agent) {
 }
 
 export function createHarness(agent) {
-    const inner = createBaseHarness(agent);
+    const base = createBaseHarness(agent);
     const manager = TOOL_BRIDGE_MANAGERS.get(agent);
-    return manager ? new ToolBridgeHarness(inner, manager, agent) : inner;
+    const governed = manager ? new ToolBridgeHarness(base, manager, agent) : base;
+    return new MeteredHarness(governed, agent.id);
 }
