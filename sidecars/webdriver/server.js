@@ -145,7 +145,9 @@ async function main() {
             headless: config.headless,
             proxyUrl: proxy.url,
             browserBinary: config.browserBinary,
-            timeoutMs: config.requestTimeoutMs,
+            // Creating a browser session is part of sidecar startup. Do not let a shorter
+            // steady-state request timeout abort Chrome before startupTimeoutMs has elapsed.
+            timeoutMs: Math.max(config.requestTimeoutMs, config.startupTimeoutMs),
         });
         await client.start();
         sessionLease = randomUUID();
