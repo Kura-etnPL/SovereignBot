@@ -10,10 +10,37 @@ const SELF_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_MANIFEST_URL = "https://github.com/Kura-etnPL/SovereignBot/releases/latest/download/release-manifest.json";
 const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
+const TRANSIENT_FS_ERRORS = new Set(["EPERM", "EBUSY", "EACCES"]);
+const RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800];
 
 function valueAfter(args, flag) {
     const index = args.indexOf(flag);
     return index >= 0 ? args[index + 1] : undefined;
+}
+
+function sleep(ms) {
+    return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+async function retryTransientFs(operation) {
+    for (let attempt = 0; ; attempt += 1) {
+        try {
+            return await operation();
+        }
+        catch (error) {
+            if (!TRANSIENT_FS_ERRORS.has(error.code) || attempt >= RETRY_DELAYS_MS.length)
+                throw error;
+            await sleep(RETRY_DELAYS_MS[attempt]);
+        }
+    }
+}
+
+function resilientRename(from, to) {
+    return retryTransientFs(() => rename(from, to));
+}
+
+function resilientRemove(path, options = {}) {
+    return retryTransientFs(() => rm(path, options));
 }
 
 export function defaultInstallDir() {
@@ -201,15 +228,45 @@ async function rejectSymlinkIfPresent(path, label) {
 }
 
 async function writeKnownFileAtomic(path, content, mode) {
+    const expected = Buffer.from(content, "utf8");
+    const existing = await lstat(path).catch((error) => error.code === "ENOENT" ? undefined : Promise.reject(error));
+    if (existing) {
+        if (existing.isSymbolicLink() || !existing.isFile())
+            throw new Error(`installer-owned path is not a regular file: ${path}`);
+        const current = await readFile(path);
+        if (current.equals(expected)) {
+            if (mode !== undefined)
+                await chmod(path, mode);
+            return;
+        }
+    }
+
     const temp = `${path}.new-${randomUUID()}`;
+    const backup = `${path}.old-${randomUUID()}`;
+    let backedUp = false;
     try {
-        await writeFile(temp, content, "utf8");
+        await writeFile(temp, expected, { flag: "wx" });
         if (mode !== undefined)
             await chmod(temp, mode);
-        await rename(temp, path);
+        if (existing) {
+            await resilientRename(path, backup);
+            backedUp = true;
+        }
+        try {
+            await resilientRename(temp, path);
+        }
+        catch (error) {
+            if (backedUp)
+                await resilientRename(backup, path).catch(() => undefined);
+            throw error;
+        }
+        if (backedUp)
+            await resilientRemove(backup, { force: true });
     }
     finally {
-        await rm(temp, { force: true }).catch(() => undefined);
+        await resilientRemove(temp, { force: true }).catch(() => undefined);
+        if (backedUp)
+            await resilientRemove(backup, { force: true }).catch(() => undefined);
     }
 }
 
@@ -218,10 +275,7 @@ async function writeLaunchers(installDir) {
     await mkdir(binDir, { recursive: true });
     await rejectSymlinkIfPresent(binDir, "installer bin directory");
     if (process.platform === "win32") {
-        await writeKnownFileAtomic(
-            join(binDir, "sovereignbot.cmd"),
-            "@echo off\r\nnode \"%~dp0..\\app\\src\\cli.js\" %*\r\n",
-        );
+        await writeKnownFileAtomic(join(binDir, "sovereignbot.cmd"), "@echo off\r\nnode \"%~dp0..\\app\\src\\cli.js\" %*\r\n");
     }
     else {
         await writeKnownFileAtomic(
@@ -250,10 +304,10 @@ async function installPayload({ installDir, payloadRoot, manifest, manifestSourc
         if (existing) {
             if (!existing.isDirectory())
                 throw new Error(`existing app path is not a directory: ${appDir}`);
-            await rename(appDir, backupDir);
+            await resilientRename(appDir, backupDir);
             movedOld = true;
         }
-        await rename(payloadRoot, appDir);
+        await resilientRename(payloadRoot, appDir);
         movedNew = true;
         await writeLaunchers(root);
         await writeKnownFileAtomic(join(root, "install-manifest.json"), `${JSON.stringify({
@@ -262,17 +316,25 @@ async function installPayload({ installDir, payloadRoot, manifest, manifestSourc
         }, null, 2)}\n`);
     }
     catch (error) {
-        if (movedNew)
-            await rm(appDir, { recursive: true, force: true }).catch(() => undefined);
-        if (movedOld) {
-            const old = await lstat(backupDir).catch((problem) => problem.code === "ENOENT" ? undefined : Promise.reject(problem));
-            if (old)
-                await rename(backupDir, appDir).catch(() => undefined);
+        let rollbackError;
+        try {
+            if (movedNew)
+                await resilientRemove(appDir, { recursive: true, force: true });
+            if (movedOld) {
+                const old = await lstat(backupDir).catch((problem) => problem.code === "ENOENT" ? undefined : Promise.reject(problem));
+                if (old)
+                    await resilientRename(backupDir, appDir);
+            }
         }
+        catch (problem) {
+            rollbackError = problem;
+        }
+        if (rollbackError)
+            throw new AggregateError([error, rollbackError], `portable install failed and rollback also failed: ${error.message}`);
         throw error;
     }
     if (movedOld)
-        await rm(backupDir, { recursive: true, force: true });
+        await resilientRemove(backupDir, { recursive: true, force: true }).catch(() => undefined);
 }
 
 export async function installPortable({ installDir = defaultInstallDir(), manifestSource = DEFAULT_MANIFEST_URL } = {}) {
@@ -305,13 +367,11 @@ export async function installPortable({ installDir = defaultInstallDir(), manife
             installDir: root,
             version: manifest.version,
             binDir: join(root, "bin"),
-            launcher: process.platform === "win32"
-                ? join(root, "bin", "sovereignbot.cmd")
-                : join(root, "bin", "sovereignbot"),
+            launcher: process.platform === "win32" ? join(root, "bin", "sovereignbot.cmd") : join(root, "bin", "sovereignbot"),
         };
     }
     finally {
-        await rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
+        await resilientRemove(stageDir, { recursive: true, force: true }).catch(() => undefined);
     }
 }
 
