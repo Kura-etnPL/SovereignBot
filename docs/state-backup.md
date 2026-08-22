@@ -14,7 +14,7 @@ The default backup includes only the first class. Sensitive computer continuity 
 
 Backup and restore are **offline-consistent** operations in v1.0. Stop the SovereignBot runtime before running either command.
 
-Backup performs stable reads, rechecks every captured source file, and re-enumerates the selected state before publishing the bundle. If state changes during capture, it fails instead of claiming a mixed snapshot is consistent. This is a safety check, not an online cross-file transaction protocol.
+Backup performs stable reads, hashes every captured file, re-reads/re-hashes every captured source, and re-enumerates the selected state before publishing the bundle. If state changes during capture, it fails instead of claiming a mixed snapshot is consistent. This is a safety check, not an online cross-file transaction protocol.
 
 Restore must also be performed while the runtime is stopped. Running a live process against a `dataDir` while replacing that directory can invalidate any recovery guarantee.
 
@@ -41,7 +41,9 @@ It does **not** contain:
 - a live policy transaction/recovery marker
 - known `.tmp-*`, `.new-*`, `.old-*`, staging, or restore scratch
 - the application install payload
-- the external config file
+- the external config file or a hash of the full config
+
+The last rule is deliberate: provider/driver configuration can contain environment credentials, so backup metadata does not derive a fingerprint from the entire config object.
 
 A core recovery backup is still private user data: task input/results, memory, and ordinary audit data are intentionally preserved because this is a recovery copy, not a redacted export.
 
@@ -87,7 +89,6 @@ sovereign-core/
 - backup format/version
 - creation time
 - source SovereignBot version
-- a one-way config compatibility fingerprint
 - backup mode (`core` or `full-computer`)
 - whether sensitive computer state is present
 - every declared relative file path
@@ -157,6 +158,7 @@ It omits:
 - computer tokens/workspaces/browser profiles
 - operator sessions
 - governed bridge capabilities
+- the external runtime config and full-config fingerprints
 
 Export uses a distinct manifest format, so `restore` refuses it even if files are manually rearranged.
 
