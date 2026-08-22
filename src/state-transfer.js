@@ -28,6 +28,7 @@ const CORE_FILES = [
 ];
 const FORBIDDEN_PREFIXES = ["operator-sessions/", "tool-bridges/"];
 const POLICY_VERSION_ID = /^policy_[0-9a-f-]{36}$/;
+const POLICY_VERSION_FILE = /^policy-versions\/versions\/(policy_[0-9a-f-]{36})\.json$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 function sha256(value) {
@@ -67,6 +68,20 @@ function safeRelativePath(value, { allowComputers = false } = {}) {
     if (!allowComputers && (value === "computers" || value.startsWith("computers/")))
         return false;
     return true;
+}
+
+function allowedBackupPath(value, { allowComputers = false } = {}) {
+    if (!safeRelativePath(value, { allowComputers }))
+        return false;
+    if (CORE_FILES.includes(value))
+        return true;
+    if (value === "policy-versions/active.json")
+        return true;
+    if (POLICY_VERSION_FILE.test(value))
+        return true;
+    if (allowComputers && value.startsWith("computers/"))
+        return true;
+    return false;
 }
 
 async function statMaybe(path) {
@@ -247,6 +262,22 @@ function validPolicyPointer(pointer) {
         && !Number.isNaN(Date.parse(pointer.activatedAt));
 }
 
+function validatePolicyVersion(version, expectedId) {
+    if (!version || version.schemaVersion !== 1 || version.id !== expectedId || !POLICY_VERSION_ID.test(version.id ?? ""))
+        throw new Error("policy version is invalid");
+    if (!SHA256.test(version.hash ?? ""))
+        throw new Error("policy version has an invalid hash");
+    if (typeof version.createdAt !== "string" || Number.isNaN(Date.parse(version.createdAt)))
+        throw new Error("policy version has an invalid createdAt");
+    if (version.parentVersionId !== undefined && version.parentVersionId !== null && !POLICY_VERSION_ID.test(version.parentVersionId))
+        throw new Error("policy version has an invalid parentVersionId");
+    if (version.label !== undefined && typeof version.label !== "string")
+        throw new Error("policy version has an invalid label");
+    if (policyHash(version.policy) !== version.hash)
+        throw new Error("policy version hash mismatch");
+    return version;
+}
+
 async function validateStateDirectory(dataDir, { allowMissing = true } = {}) {
     const info = await statMaybe(dataDir);
     if (!info) {
@@ -294,12 +325,21 @@ async function validateStateDirectory(dataDir, { allowMissing = true } = {}) {
         const versionsInfo = await statMaybe(versionsDir);
         if (versionsInfo && (!versionsInfo.isDirectory() || versionsInfo.isSymbolicLink()))
             throw new Error("policy versions directory is not a normal directory");
-        const versionNames = versionsInfo
-            ? (await readdir(versionsDir)).filter((name) => name.endsWith(".json"))
-            : [];
+        const versionNames = versionsInfo ? await readdir(versionsDir) : [];
+        const versionById = new Map();
+        for (const name of versionNames) {
+            const match = /^(policy_[0-9a-f-]{36})\.json$/.exec(name);
+            if (!match)
+                throw new Error("policy versions directory contains an unsupported file");
+            const path = join(versionsDir, name);
+            const versionInfo = await statMaybe(path);
+            if (!versionInfo?.isFile() || versionInfo.isSymbolicLink())
+                throw new Error("policy version is not a regular file");
+            versionById.set(match[1], validatePolicyVersion(await readJson(path), match[1]));
+        }
         const activePath = join(policyRoot, "active.json");
         const activeInfo = await statMaybe(activePath);
-        if (!activeInfo && versionNames.length)
+        if (!activeInfo && versionById.size)
             throw new Error("policy versions exist but active.json is missing");
         if (activeInfo) {
             if (!activeInfo.isFile() || activeInfo.isSymbolicLink())
@@ -307,17 +347,9 @@ async function validateStateDirectory(dataDir, { allowMissing = true } = {}) {
             const pointer = await readJson(activePath);
             if (!validPolicyPointer(pointer))
                 throw new Error("active policy pointer is invalid");
-            const versionPath = join(versionsDir, `${pointer.versionId}.json`);
-            const version = await readJson(versionPath);
-            if (version?.schemaVersion !== 1
-                || version.id !== pointer.versionId
-                || !SHA256.test(version.hash ?? "")
-                || typeof version.createdAt !== "string"
-                || Number.isNaN(Date.parse(version.createdAt))
-                || policyHash(version.policy) !== pointer.hash
-                || version.hash !== pointer.hash) {
+            const version = versionById.get(pointer.versionId);
+            if (!version || version.hash !== pointer.hash)
                 throw new Error("active policy version is invalid or hash-mismatched");
-            }
         }
     }
     return { ok: true, empty: false };
@@ -360,8 +392,8 @@ export async function createStateBackup(config, output, {
         for (const source of sources) {
             const snapshot = await readStableFile(source.source);
             const path = portablePath(source.path);
-            if (!safeRelativePath(path, { allowComputers: includeComputerState }))
-                throw new Error("backup source resolved to an unsafe relative path");
+            if (!allowedBackupPath(path, { allowComputers: includeComputerState }))
+                throw new Error("backup source contains an unsafe path or unsupported state file");
             await writePrivateFile(join(stage, "files", ...path.split("/")), snapshot.content, 0o600);
             captured.push({
                 source: source.source,
@@ -417,8 +449,8 @@ function validateManifest(manifest) {
     const allowComputers = manifest.mode === "full-computer" && manifest.sensitiveComputerState === true;
     const seen = new Set();
     for (const entry of manifest.files) {
-        if (!entry || !safeRelativePath(entry.path, { allowComputers }))
-            throw new Error("backup manifest contains an unsafe path");
+        if (!entry || !allowedBackupPath(entry.path, { allowComputers }))
+            throw new Error("backup manifest contains an unsafe path or unsupported state file");
         if (seen.has(entry.path))
             throw new Error("backup manifest contains duplicate paths");
         seen.add(entry.path);
