@@ -184,7 +184,7 @@ async function seedState(root, { withComputers = true } = {}) {
     return { config, configPath, dataDir };
 }
 
-async function cloneConfig(config, dataDir) {
+function cloneConfig(config, dataDir) {
     return { ...structuredClone(config), dataDir };
 }
 
@@ -213,8 +213,7 @@ test("core backup restores durable state while excluding computer and ephemeral 
         assert.equal(text.includes(TASK_SECRET), true, "recovery backup preserves durable task contents");
 
         const restoredDir = join(root, "restored-core");
-        const restoredConfig = await cloneConfig(config, restoredDir);
-        const restored = await restoreStateBackup(restoredConfig, backup);
+        const restored = await restoreStateBackup(cloneConfig(config, restoredDir), backup);
         assert.equal(restored.mode, "core");
         for (const rel of [
             "tasks.json",
@@ -262,7 +261,7 @@ test("full-computer backup is explicit, sensitive, restorable, and still exclude
         assert.equal(text.includes(BRIDGE_SECRET), false);
 
         const restoredDir = join(root, "restored-full");
-        await restoreStateBackup(await cloneConfig(config, restoredDir), backup);
+        await restoreStateBackup(cloneConfig(config, restoredDir), backup);
         assert.match(await readFile(join(restoredDir, "computers", "operator-token"), "utf8"), /COMPUTER_TOKEN_SENSITIVE/);
         assert.equal(await readFile(join(restoredDir, "computers", "d29ya2Vy", "profile", "Cookies"), "utf8"), `${BROWSER_SECRET}\n`);
         assert.equal(await readFile(join(restoredDir, "computers", "d29ya2Vy", "workspace", "note.txt"), "utf8"), `${WORKSPACE_SECRET}\n`);
@@ -293,7 +292,7 @@ test("redacted export contains aggregate metadata only and is never accepted by 
         assert.equal(exported.repeat.activeFingerprintCount, 1);
         assert.equal(exported.policy.versionId, VERSION_ID);
 
-        const target = await cloneConfig(config, join(root, "should-not-restore"));
+        const target = cloneConfig(config, join(root, "should-not-restore"));
         await assert.rejects(() => restoreStateBackup(target, output), /format\/version is unsupported/);
         assert.equal(await exists(target.dataDir), false);
     }
@@ -314,7 +313,7 @@ test("tampered backup is rejected before replacement destination mutation", asyn
         await mkdir(destination);
         await writeFile(join(destination, "marker.txt"), "ORIGINAL\n", "utf8");
         await assert.rejects(
-            () => restoreStateBackup(await cloneConfig(config, destination), backup, { replace: true }),
+            () => restoreStateBackup(cloneConfig(config, destination), backup, { replace: true }),
             /integrity check failed/,
         );
         assert.equal(await readFile(join(destination, "marker.txt"), "utf8"), "ORIGINAL\n");
@@ -342,7 +341,7 @@ test("hostile manifest traversal and forbidden authority paths are rejected befo
             await mkdir(destination);
             await writeFile(join(destination, "marker.txt"), "ORIGINAL\n", "utf8");
             await assert.rejects(
-                () => restoreStateBackup(await cloneConfig(config, destination), backup, { replace: true }),
+                () => restoreStateBackup(cloneConfig(config, destination), backup, { replace: true }),
                 /unsafe path/,
             );
             assert.equal(await readFile(join(destination, "marker.txt"), "utf8"), "ORIGINAL\n");
@@ -409,7 +408,7 @@ test("replacement restore rolls the previous dataDir back when the staged swap f
         };
 
         await assert.rejects(
-            () => restoreStateBackup(await cloneConfig(source.config, destination), backup, { replace: true, renameFn }),
+            () => restoreStateBackup(cloneConfig(source.config, destination), backup, { replace: true, renameFn }),
             /injected swap failure/,
         );
         assert.equal(await readFile(join(destination, "marker.txt"), "utf8"), "ORIGINAL_STATE\n");
@@ -443,7 +442,7 @@ test("corrupt policy state with matching backup checksums is rejected before des
         await mkdir(destination);
         await writeFile(join(destination, "marker.txt"), "ORIGINAL\n", "utf8");
         await assert.rejects(
-            () => restoreStateBackup(await cloneConfig(source.config, destination), backup, { replace: true }),
+            () => restoreStateBackup(cloneConfig(source.config, destination), backup, { replace: true }),
             /active policy version is invalid or hash-mismatched/,
         );
         assert.equal(await readFile(join(destination, "marker.txt"), "utf8"), "ORIGINAL\n");
