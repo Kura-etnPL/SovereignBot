@@ -47,7 +47,9 @@ function transientSegment(name) {
     return name === ".staging"
         || name.includes(".tmp-")
         || name.includes(".new-")
-        || name.includes(".old-");
+        || name.includes(".old-")
+        || name.includes(".restore-staging-")
+        || name.includes(".restore-backup-");
 }
 
 function safeRelativePath(value, { allowComputers = false } = {}) {
@@ -85,25 +87,25 @@ async function normalDirectory(path, { allowMissing = false } = {}) {
     return info.isDirectory() && !info.isSymbolicLink();
 }
 
-async function ensureSafeDestinationRoot(path) {
+async function ensureSafeDirectoryTarget(path, label = "state destination") {
     const absolute = resolve(path);
     if (absolute === parse(absolute).root)
-        throw new Error("state destination cannot be a filesystem root");
+        throw new Error(`${label} cannot be a filesystem root`);
     const info = await statMaybe(absolute);
     if (info && (!info.isDirectory() || info.isSymbolicLink()))
-        throw new Error("state destination must be a normal directory");
+        throw new Error(`${label} must be a normal directory`);
     let parent = dirname(absolute);
     while (true) {
         const parentInfo = await statMaybe(parent);
         if (parentInfo) {
             if (!parentInfo.isDirectory() || parentInfo.isSymbolicLink())
-                throw new Error("state destination parent must be a normal directory");
+                throw new Error(`${label} parent must be a normal directory`);
             await access(parent, constants.R_OK | constants.W_OK);
             return absolute;
         }
         const next = dirname(parent);
         if (next === parent)
-            throw new Error("state destination has no usable parent directory");
+            throw new Error(`${label} has no usable parent directory`);
         parent = next;
     }
 }
@@ -216,6 +218,12 @@ async function collectBackupSources(dataDir, includeComputerState) {
     return entries.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+function sameSourceMembership(before, after) {
+    if (before.length !== after.length)
+        return false;
+    return before.every((entry, index) => entry.path === after[index].path);
+}
+
 async function readJson(path) {
     return JSON.parse(await readFile(path, "utf8"));
 }
@@ -239,7 +247,9 @@ function validPolicyPointer(pointer) {
         && typeof pointer.versionId === "string"
         && POLICY_VERSION_ID.test(pointer.versionId)
         && typeof pointer.hash === "string"
-        && SHA256.test(pointer.hash);
+        && SHA256.test(pointer.hash)
+        && typeof pointer.activatedAt === "string"
+        && !Number.isNaN(Date.parse(pointer.activatedAt));
 }
 
 async function validateStateDirectory(dataDir, { allowMissing = true } = {}) {
@@ -285,16 +295,27 @@ async function validateStateDirectory(dataDir, { allowMissing = true } = {}) {
             throw new Error("policy-versions is not a normal directory");
         if (await statMaybe(join(policyRoot, "transaction.json")))
             throw new Error("policy transaction/recovery marker is unresolved");
+        const versionsDir = join(policyRoot, "versions");
+        const versionNames = await normalDirectory(versionsDir, { allowMissing: true }) && await statMaybe(versionsDir)
+            ? (await readdir(versionsDir)).filter((name) => name.endsWith(".json"))
+            : [];
         const activePath = join(policyRoot, "active.json");
-        if (await statMaybe(activePath)) {
+        const activeInfo = await statMaybe(activePath);
+        if (!activeInfo && versionNames.length)
+            throw new Error("policy versions exist but active.json is missing");
+        if (activeInfo) {
+            if (!activeInfo.isFile() || activeInfo.isSymbolicLink())
+                throw new Error("active policy pointer is not a regular file");
             const pointer = await readJson(activePath);
             if (!validPolicyPointer(pointer))
                 throw new Error("active policy pointer is invalid");
-            const versionPath = join(policyRoot, "versions", `${pointer.versionId}.json`);
+            const versionPath = join(versionsDir, `${pointer.versionId}.json`);
             const version = await readJson(versionPath);
             if (version?.schemaVersion !== 1
                 || version.id !== pointer.versionId
                 || !SHA256.test(version.hash ?? "")
+                || typeof version.createdAt !== "string"
+                || Number.isNaN(Date.parse(version.createdAt))
                 || policyHash(version.policy) !== pointer.hash
                 || version.hash !== pointer.hash) {
                 throw new Error("active policy version is invalid or hash-mismatched");
@@ -305,7 +326,7 @@ async function validateStateDirectory(dataDir, { allowMissing = true } = {}) {
 }
 
 async function outputStage(output) {
-    const absolute = resolve(output);
+    const absolute = await ensureSafeDirectoryTarget(output, "state output");
     await mkdir(dirname(absolute), { recursive: true, mode: 0o700 });
     const existing = await statMaybe(absolute);
     if (existing)
@@ -321,7 +342,14 @@ async function writePrivateFile(path, content, mode = 0o600) {
     await chmod(path, mode).catch(() => undefined);
 }
 
-export async function createStateBackup(config, output, { includeComputerState = false } = {}) {
+async function movePath(source, destination, renameFn = rename) {
+    await replaceFileWithRetry(source, destination, { renameFn });
+}
+
+export async function createStateBackup(config, output, {
+    includeComputerState = false,
+    consistencyHook,
+} = {}) {
     const dataDir = resolve(config.dataDir);
     const outputPath = resolve(output);
     if (isWithin(dataDir, outputPath))
@@ -348,8 +376,13 @@ export async function createStateBackup(config, output, { includeComputerState =
                 },
             });
         }
+
+        await consistencyHook?.();
         for (const item of captured)
             await assertFingerprint(item.source, item.fingerprint);
+        const finalSources = await collectBackupSources(dataDir, includeComputerState);
+        if (!sameSourceMembership(sources, finalSources))
+            throw new Error("state file membership changed while backup was being captured; stop the runtime and retry");
 
         const manifest = {
             format: BACKUP_FORMAT,
@@ -363,7 +396,7 @@ export async function createStateBackup(config, output, { includeComputerState =
             files: captured.map((item) => item.manifest),
         };
         await writePrivateFile(join(stage, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-        await replaceFileWithRetry(stage, absolute);
+        await movePath(stage, absolute);
         return {
             path: absolute,
             mode: manifest.mode,
@@ -428,8 +461,8 @@ async function verifyBackupBundle(bundle) {
     const info = await statMaybe(bundlePath);
     if (!info?.isDirectory() || info.isSymbolicLink())
         throw new Error("backup bundle must be a normal directory");
-    const manifestInfo = await lstat(join(bundlePath, "manifest.json"));
-    if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink())
+    const manifestInfo = await statMaybe(join(bundlePath, "manifest.json"));
+    if (!manifestInfo?.isFile() || manifestInfo.isSymbolicLink())
         throw new Error("backup manifest must be a regular file");
     const manifest = await readJson(join(bundlePath, "manifest.json"));
     const { seen } = validateManifest(manifest);
@@ -450,8 +483,23 @@ async function copyVerifiedBundleToStage(bundlePath, manifest, stage) {
     }
 }
 
-export async function restoreStateBackup(config, bundle, { replace = false } = {}) {
-    const dataDir = await ensureSafeDestinationRoot(config.dataDir);
+async function restorePriorState({ dataDir, recovery, hadTarget, targetWasEmpty, renameFn }) {
+    const installed = await statMaybe(dataDir);
+    if (installed)
+        await rm(dataDir, { recursive: true, force: true });
+    if (hadTarget && !targetWasEmpty) {
+        await movePath(recovery, dataDir, renameFn);
+    }
+    else if (hadTarget && targetWasEmpty) {
+        await mkdir(dataDir, { recursive: true, mode: 0o700 });
+    }
+}
+
+export async function restoreStateBackup(config, bundle, {
+    replace = false,
+    renameFn = rename,
+} = {}) {
+    const dataDir = await ensureSafeDirectoryTarget(config.dataDir);
     const bundlePath = resolve(bundle);
     if (isWithin(dataDir, bundlePath))
         throw new Error("backup bundle cannot be inside the destination dataDir");
@@ -466,36 +514,69 @@ export async function restoreStateBackup(config, bundle, { replace = false } = {
             throw new Error("destination dataDir is not empty; pass --replace for transactional replacement");
     }
 
+    await mkdir(dirname(dataDir), { recursive: true, mode: 0o700 });
     const stage = join(dirname(dataDir), `.${basename(dataDir)}.restore-staging-${randomUUID()}`);
     const recovery = join(dirname(dataDir), `.${basename(dataDir)}.restore-backup-${randomUUID()}`);
     await mkdir(stage, { mode: 0o700 });
+    let previousMoved = false;
+    let newInstalled = false;
     try {
         await copyVerifiedBundleToStage(bundlePath, manifest, stage);
         await validateStateDirectory(stage, { allowMissing: false });
+
         if (targetInfo && targetEmpty) {
             await rm(dataDir, { recursive: true, force: true });
-            await replaceFileWithRetry(stage, dataDir);
+            await movePath(stage, dataDir, renameFn);
+            newInstalled = true;
         }
         else if (!targetInfo) {
-            await replaceFileWithRetry(stage, dataDir);
+            await movePath(stage, dataDir, renameFn);
+            newInstalled = true;
         }
         else {
-            await replaceFileWithRetry(dataDir, recovery);
+            await movePath(dataDir, recovery, renameFn);
+            previousMoved = true;
             try {
-                await replaceFileWithRetry(stage, dataDir);
+                await movePath(stage, dataDir, renameFn);
+                newInstalled = true;
             }
             catch (swapError) {
                 try {
-                    await replaceFileWithRetry(recovery, dataDir);
+                    await movePath(recovery, dataDir, renameFn);
+                    previousMoved = false;
                 }
                 catch (rollbackError) {
                     throw new AggregateError([swapError, rollbackError], "restore swap failed and previous dataDir rollback also failed");
                 }
                 throw swapError;
             }
-            await rm(recovery, { recursive: true, force: true });
         }
-        await validateStateDirectory(dataDir, { allowMissing: false });
+
+        try {
+            await validateStateDirectory(dataDir, { allowMissing: false });
+        }
+        catch (validationError) {
+            try {
+                await restorePriorState({
+                    dataDir,
+                    recovery,
+                    hadTarget: Boolean(targetInfo),
+                    targetWasEmpty: targetEmpty,
+                    renameFn,
+                });
+                previousMoved = false;
+                newInstalled = false;
+            }
+            catch (rollbackError) {
+                throw new AggregateError([validationError, rollbackError], "restored state validation failed and previous dataDir rollback also failed");
+            }
+            throw validationError;
+        }
+
+        if (previousMoved) {
+            await rm(recovery, { recursive: true, force: true });
+            previousMoved = false;
+        }
         return {
             path: dataDir,
             mode: manifest.mode,
@@ -505,6 +586,15 @@ export async function restoreStateBackup(config, bundle, { replace = false } = {
     }
     catch (error) {
         await rm(stage, { recursive: true, force: true }).catch(() => undefined);
+        if (previousMoved && !newInstalled) {
+            try {
+                await movePath(recovery, dataDir, renameFn);
+                previousMoved = false;
+            }
+            catch (rollbackError) {
+                throw new AggregateError([error, rollbackError], "restore failed and previous dataDir rollback also failed");
+            }
+        }
         throw error;
     }
 }
@@ -615,7 +705,7 @@ export async function exportState(config, output) {
         };
         await writePrivateFile(join(stage, "export.json"), exportJson);
         await writePrivateFile(join(stage, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-        await replaceFileWithRetry(stage, absolute);
+        await movePath(stage, absolute);
         return { path: absolute, restorable: false, redacted: true };
     }
     catch (error) {
