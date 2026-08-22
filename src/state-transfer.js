@@ -30,6 +30,9 @@ const FORBIDDEN_PREFIXES = ["operator-sessions/", "tool-bridges/"];
 const POLICY_VERSION_ID = /^policy_[0-9a-f-]{36}$/;
 const POLICY_VERSION_FILE = /^policy-versions\/versions\/(policy_[0-9a-f-]{36})\.json$/;
 const SHA256 = /^[0-9a-f]{64}$/;
+const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+const SAFE_TASK_STATUS = new Set(["queued", "accepted", "running", "awaiting_review", "changes_requested", "completed", "failed", "blocked", "cancelled"]);
+const SAFE_TASK_KIND = new Set(["work", "plan"]);
 
 function sha256(value) {
     return createHash("sha256").update(value).digest("hex");
@@ -53,13 +56,19 @@ function transientSegment(name) {
         || name.includes(".restore-backup-");
 }
 
+function portableSegment(name) {
+    return !/[<>:"|?*\u0000-\u001f]/.test(name)
+        && !/[. ]$/.test(name)
+        && !WINDOWS_RESERVED.test(name);
+}
+
 function safeRelativePath(value, { allowComputers = false } = {}) {
     if (typeof value !== "string" || !value || value.includes("\\") || value.includes("\0"))
         return false;
     if (value.startsWith("/") || value.endsWith("/") || value.includes("//"))
         return false;
     const parts = value.split("/");
-    if (parts.some((part) => !part || part === "." || part === ".." || transientSegment(part)))
+    if (parts.some((part) => !part || part === "." || part === ".." || transientSegment(part) || !portableSegment(part)))
         return false;
     if (FORBIDDEN_PREFIXES.some((prefix) => value === prefix.slice(0, -1) || value.startsWith(prefix)))
         return false;
@@ -182,7 +191,7 @@ async function walkRegularFiles(root, relativeRoot, entries) {
         const source = join(root, child.name);
         const rel = relativeRoot ? `${relativeRoot}/${child.name}` : child.name;
         if (!safeRelativePath(rel, { allowComputers: true }))
-            throw new Error("state snapshot contains a forbidden path");
+            throw new Error("state snapshot contains a forbidden or non-portable path");
         const childInfo = await lstat(source);
         if (childInfo.isSymbolicLink())
             throw new Error("state snapshot contains a symbolic link; stop/clean the source before backup");
@@ -446,7 +455,14 @@ function validateManifest(manifest) {
         throw new Error("backup manifest file list is invalid");
     if (!["core", "full-computer"].includes(manifest.mode))
         throw new Error("backup manifest mode is invalid");
-    const allowComputers = manifest.mode === "full-computer" && manifest.sensitiveComputerState === true;
+    if ((manifest.mode === "core" && manifest.sensitiveComputerState !== false)
+        || (manifest.mode === "full-computer" && manifest.sensitiveComputerState !== true)
+        || manifest.offlineConsistencyRequired !== true) {
+        throw new Error("backup manifest security metadata is inconsistent");
+    }
+    if (typeof manifest.createdAt !== "string" || Number.isNaN(Date.parse(manifest.createdAt)) || typeof manifest.sourceVersion !== "string")
+        throw new Error("backup manifest provenance metadata is invalid");
+    const allowComputers = manifest.mode === "full-computer";
     const seen = new Set();
     for (const entry of manifest.files) {
         if (!entry || !allowedBackupPath(entry.path, { allowComputers }))
@@ -508,7 +524,7 @@ async function copyVerifiedBundleToStage(bundlePath, manifest, stage) {
         if (snapshot.content.length !== entry.size || snapshot.fingerprint.sha256 !== entry.sha256)
             throw new Error("backup file integrity check failed");
         const target = join(stage, ...entry.path.split("/"));
-        await writePrivateFile(target, snapshot.content, entry.mode);
+        await writePrivateFile(target, snapshot.content, entry.mode & 0o700);
     }
 }
 
@@ -632,6 +648,24 @@ function increment(object, key) {
     object[key] = (object[key] ?? 0) + 1;
 }
 
+function safeTaskStatus(value) {
+    return SAFE_TASK_STATUS.has(value) ? value : "unknown";
+}
+
+function safeTaskKind(value) {
+    return SAFE_TASK_KIND.has(value) ? value : "unknown";
+}
+
+function safeScopeClass(value) {
+    if (value === "global")
+        return "global";
+    if (typeof value === "string" && value.startsWith("agent:"))
+        return "agent";
+    if (typeof value === "string" && value.startsWith("task:"))
+        return "task";
+    return "unknown";
+}
+
 async function safeExportSummary(config) {
     const dataDir = resolve(config.dataDir);
     const result = {
@@ -640,7 +674,7 @@ async function safeExportSummary(config) {
         restorable: false,
         tasks: { total: 0, byStatus: {}, byKind: {} },
         memory: { total: 0, byScopeClass: {} },
-        audit: { present: false, integrity: "not-present", rows: 0, byType: {} },
+        audit: { present: false, integrity: "not-present", rows: 0 },
         repeat: { activeFingerprintCount: 0 },
         policy: { initialized: false },
         diagnostics: [],
@@ -654,8 +688,8 @@ async function safeExportSummary(config) {
                 throw new Error("invalid");
             result.tasks.total = tasks.length;
             for (const task of tasks) {
-                increment(result.tasks.byStatus, String(task.status ?? "unknown"));
-                increment(result.tasks.byKind, String(task.kind ?? "unknown"));
+                increment(result.tasks.byStatus, safeTaskStatus(task?.status));
+                increment(result.tasks.byKind, safeTaskKind(task?.kind));
             }
         }
     }
@@ -664,11 +698,8 @@ async function safeExportSummary(config) {
     try {
         const rows = await parseJsonl(join(dataDir, "memory.jsonl"));
         result.memory.total = rows.length;
-        for (const row of rows) {
-            const scope = String(row.scope ?? "unknown");
-            const scopeClass = scope.includes(":") ? scope.split(":", 1)[0] : scope;
-            increment(result.memory.byScopeClass, scopeClass);
-        }
+        for (const row of rows)
+            increment(result.memory.byScopeClass, safeScopeClass(row?.scope));
     }
     catch { result.diagnostics.push("memory-unreadable"); }
 
@@ -679,9 +710,6 @@ async function safeExportSummary(config) {
             const verification = await new AuditLog(path).verify();
             result.audit.integrity = verification.ok ? "ok" : "invalid";
             result.audit.rows = verification.count ?? 0;
-            const rows = await parseJsonl(path);
-            for (const row of rows)
-                increment(result.audit.byType, String(row.type ?? "unknown"));
         }
     }
     catch { result.audit.integrity = "unreadable"; result.diagnostics.push("audit-unreadable"); }
@@ -690,7 +718,7 @@ async function safeExportSummary(config) {
         const path = join(dataDir, "repeat-state.json");
         if (await statMaybe(path)) {
             const repeat = await readJson(path);
-            result.repeat.activeFingerprintCount = repeat?.entries && typeof repeat.entries === "object"
+            result.repeat.activeFingerprintCount = repeat?.entries && typeof repeat.entries === "object" && !Array.isArray(repeat.entries)
                 ? Object.keys(repeat.entries).length
                 : 0;
         }
