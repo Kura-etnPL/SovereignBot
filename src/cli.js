@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { loadConfig, writeDefaultConfig, DEFAULT_CONFIG_PATH } from "./config.js";
+import { doctorExitCode, formatDoctorReport, runDoctor } from "./doctor.js";
 import { createRuntime } from "./runtime.js";
 import { startServer } from "./server.js";
 
@@ -34,6 +35,7 @@ function help() {
 
 Usage:
   sovereignbot init [--config path]
+  sovereignbot doctor [--json] [--config path]
   sovereignbot serve [--config path]
   sovereignbot operator-session [--ttl-minutes 30] [--label local-operator]
   sovereignbot submit <title> [--input json] [--cap capability] [--agent id]
@@ -54,6 +56,7 @@ Usage:
   sovereignbot computer list
 
 Every command accepts [--config path]. Repeated flags such as --cap and --depends may be supplied more than once.
+Doctor is passive with respect to model work/browser startup: it never runs a model prompt or starts WebDriver/browser merely to inspect readiness.
 Computer bearer tokens are printed only by local CLI bootstrap commands; the HTTP API never returns them.
 Operator-console sessions are short-lived and separate from the durable computer operator token.
 `);
@@ -70,6 +73,15 @@ async function main() {
     if (command === "init") {
         const written = await writeDefaultConfig(configPath);
         console.log(`created ${written}`);
+        return;
+    }
+    if (command === "doctor") {
+        const report = await runDoctor(configPath);
+        if (args.includes("--json"))
+            console.log(JSON.stringify(report, null, 2));
+        else
+            process.stdout.write(formatDoctorReport(report));
+        process.exitCode = doctorExitCode(report);
         return;
     }
 
