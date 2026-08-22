@@ -56,7 +56,7 @@ async function exists(path) {
         return await lstat(path);
     }
     catch (error) {
-        if (error.code === "ENOENT")
+        if (error.code === "ENOENT" || error.code === "ENOTDIR")
             return undefined;
         throw error;
     }
