@@ -94,6 +94,28 @@ test("missing provider CLI is warning while optional and error when durable work
     }
 });
 
+test("doctor resolves a PATH-based command harness without executing it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sovereign-doctor-path-command-"));
+    try {
+        const agent = {
+            id: "path-worker",
+            name: "PATH worker",
+            role: "worker",
+            capabilities: ["demo"],
+            harness: { kind: "command", command: "node" },
+        };
+        const { path } = await writeConfig(root, { agents: [agent] });
+        const report = await runDoctor(path);
+        const provider = checkById(report, "provider.path-worker");
+        assert.equal(provider.status, "ok");
+        assert.match(provider.details.executable.toLowerCase(), /node(?:\.exe)?$/);
+        assert.equal(doctorExitCode(report), 0);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test("doctor does not mutate an existing empty runtime data directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "sovereign-doctor-readonly-"));
     try {
