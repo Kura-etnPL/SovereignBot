@@ -120,12 +120,6 @@ async function appVersion() {
     }
 }
 
-function configFingerprint(config) {
-    const copy = structuredClone(config);
-    delete copy.dataDir;
-    return sha256(Buffer.from(JSON.stringify(copy)));
-}
-
 async function readStableFile(path) {
     const before = await lstat(path);
     if (before.isSymbolicLink() || !before.isFile())
@@ -144,17 +138,18 @@ async function readStableFile(path) {
             size: after.size,
             mtimeMs: after.mtimeMs,
             ctimeMs: after.ctimeMs,
+            sha256: sha256(content),
         },
         mode: after.mode & 0o777,
     };
 }
 
 async function assertFingerprint(path, fingerprint) {
-    const current = await lstat(path);
-    if (!current.isFile()
-        || current.size !== fingerprint.size
-        || current.mtimeMs !== fingerprint.mtimeMs
-        || current.ctimeMs !== fingerprint.ctimeMs) {
+    const current = await readStableFile(path);
+    if (current.fingerprint.size !== fingerprint.size
+        || current.fingerprint.mtimeMs !== fingerprint.mtimeMs
+        || current.fingerprint.ctimeMs !== fingerprint.ctimeMs
+        || current.fingerprint.sha256 !== fingerprint.sha256) {
         throw new Error("state changed while backup was being captured; stop the runtime and retry");
     }
 }
@@ -296,7 +291,10 @@ async function validateStateDirectory(dataDir, { allowMissing = true } = {}) {
         if (await statMaybe(join(policyRoot, "transaction.json")))
             throw new Error("policy transaction/recovery marker is unresolved");
         const versionsDir = join(policyRoot, "versions");
-        const versionNames = await normalDirectory(versionsDir, { allowMissing: true }) && await statMaybe(versionsDir)
+        const versionsInfo = await statMaybe(versionsDir);
+        if (versionsInfo && (!versionsInfo.isDirectory() || versionsInfo.isSymbolicLink()))
+            throw new Error("policy versions directory is not a normal directory");
+        const versionNames = versionsInfo
             ? (await readdir(versionsDir)).filter((name) => name.endsWith(".json"))
             : [];
         const activePath = join(policyRoot, "active.json");
@@ -371,7 +369,7 @@ export async function createStateBackup(config, output, {
                 manifest: {
                     path,
                     size: snapshot.content.length,
-                    sha256: sha256(snapshot.content),
+                    sha256: snapshot.fingerprint.sha256,
                     mode: snapshot.mode,
                 },
             });
@@ -389,7 +387,6 @@ export async function createStateBackup(config, output, {
             formatVersion: FORMAT_VERSION,
             createdAt: new Date().toISOString(),
             sourceVersion: await appVersion(),
-            configFingerprint: configFingerprint(config),
             mode: includeComputerState ? "full-computer" : "core",
             sensitiveComputerState: includeComputerState,
             offlineConsistencyRequired: true,
@@ -476,7 +473,7 @@ async function copyVerifiedBundleToStage(bundlePath, manifest, stage) {
     for (const entry of manifest.files) {
         const source = join(bundlePath, "files", ...entry.path.split("/"));
         const snapshot = await readStableFile(source);
-        if (snapshot.content.length !== entry.size || sha256(snapshot.content) !== entry.sha256)
+        if (snapshot.content.length !== entry.size || snapshot.fingerprint.sha256 !== entry.sha256)
             throw new Error("backup file integrity check failed");
         const target = join(stage, ...entry.path.split("/"));
         await writePrivateFile(target, snapshot.content, entry.mode);
@@ -608,7 +605,6 @@ async function safeExportSummary(config) {
     const result = {
         generatedAt: new Date().toISOString(),
         sourceVersion: await appVersion(),
-        configFingerprint: configFingerprint(config),
         restorable: false,
         tasks: { total: 0, byStatus: {}, byKind: {} },
         memory: { total: 0, byScopeClass: {} },
