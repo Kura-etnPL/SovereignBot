@@ -40,6 +40,22 @@ export function redactProviderContinuityRefs(value, refs) {
     return output;
 }
 
+function publicHarnessView(harness) {
+    if (!harness || typeof harness !== "object" || Array.isArray(harness))
+        return undefined;
+    return {
+        kind: harness.kind,
+        maxTurns: harness.maxTurns,
+        timeoutMs: harness.timeoutMs,
+        delayMs: harness.delayMs,
+        customCommandConfigured: Boolean(harness.command),
+        customCwdConfigured: Boolean(harness.cwd),
+        argumentCount: Array.isArray(harness.args) ? harness.args.length : undefined,
+        prefixArgumentCount: Array.isArray(harness.prefixArgs) ? harness.prefixArgs.length : undefined,
+        inheritsEnvironment: harness.inheritEnv !== false,
+    };
+}
+
 export function publicAgentView(agent) {
     if (!agent || typeof agent !== "object" || Array.isArray(agent))
         return agent;
@@ -50,6 +66,7 @@ export function publicAgentView(agent) {
         capabilities: agent.capabilities,
         governedTools: agent.governedTools,
         harnessKind: agent.harness?.kind,
+        harness: publicHarnessView(agent.harness),
         maxConcurrency: agent.maxConcurrency,
         priority: agent.priority,
     };
