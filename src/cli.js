@@ -5,7 +5,7 @@ import { doctorExitCode, formatDoctorReport, runDoctor } from "./doctor.js";
 import { createRuntime } from "./runtime.js";
 import { startServer } from "./server.js";
 import { createStateBackup, exportState, inspectStateBackup, restoreStateBackup } from "./state-transfer.js";
-import { providerContinuityRefs, publicProgressView, publicTaskGraphView, publicTaskListView, publicTaskView } from "./task-view.js";
+import { providerContinuityRefs, publicProgressView, publicRuntimeRecords, publicTaskGraphView, publicTaskListView, publicTaskView } from "./task-view.js";
 
 function valueAfter(args, flag) {
     const index = args.indexOf(flag);
@@ -246,7 +246,7 @@ async function main() {
     }
     if (command === "aggregate") { const planId = requiredPositional(args, 1, "plan id"); const actorAgentId = valueAfter(args, "--actor"); if (!actorAgentId) throw new Error("aggregate requires --actor <supervisor-id>"); console.log(JSON.stringify(await publicRuntimeTask(runtime, await runtime.orchestrator.aggregatePlan(planId, actorAgentId)), null, 2)); return; }
     if (command === "graph") { console.log(JSON.stringify(publicTaskGraphView(await runtime.orchestrator.getTaskGraph(requiredPositional(args, 1, "graph task id"))), null, 2)); return; }
-    if (command === "events") { console.log(JSON.stringify(await runtime.orchestrator.listTaskEvents(requiredPositional(args, 1, "events task id")), null, 2)); return; }
+    if (command === "events") { const events=await runtime.orchestrator.listTaskEvents(requiredPositional(args, 1, "events task id")); const tasks=await runtime.orchestrator.listTasks(); console.log(JSON.stringify(publicRuntimeRecords(events,tasks), null, 2)); return; }
     if (command === "status") { console.log(JSON.stringify(publicTaskListView(await runtime.orchestrator.listTasks()), null, 2)); return; }
     if (command === "audit" && args[1] === "verify") { console.log(JSON.stringify(await runtime.audit.verify(), null, 2)); return; }
 
