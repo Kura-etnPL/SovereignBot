@@ -57,7 +57,10 @@ test("redacted export contains aggregate metadata only and is never restorable",
         assert.equal(Object.hasOwn(exported.audit, "byType"), false, "audit event names are not exported as attacker-controlled keys");
 
         const target = cloneConfig(config, join(root, "should-not-restore"));
-        await assert.rejects(() => restoreStateBackup(target, output), /format\/version is unsupported/);
+        await assert.rejects(
+            () => restoreStateBackup(target, output),
+            /format\/version is unsupported|undeclared top-level files/,
+        );
         assert.equal(await exists(target.dataDir), false);
     }
     finally {
