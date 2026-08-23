@@ -91,7 +91,7 @@ test("policy crash recovery refuses to trust a matching commit record when audit
 
         await assert.rejects(
             () => createRuntime(config(dataDir)),
-            /audit integrity failed/,
+            /audit integrity failed|audit hash chain is invalid/,
         );
         assert.ok(await readFile(join(dataDir, "policy-versions", "transaction.json"), "utf8"));
     }
