@@ -30,7 +30,7 @@ test("stable release version is synchronized across package, CLI, health, change
     assert.equal(changelog.includes(`## [${packageJson.version}] - Unreleased`), false);
 
     const notes = await readFile(join(REPO_ROOT, "docs", "releases", `v${packageJson.version}.md`), "utf8");
-    assert.ok(notes.startsWith(`# SovereignBot ${packageJson.version}\n`));
+    assert.match(notes, new RegExp(`^# SovereignBot ${packageJson.version.replaceAll(".", "\\.")}\\r?\\n`));
 
     const dataDir = await mkdtemp(join(tmpdir(), "sovereign-release-version-"));
     let runtime;
