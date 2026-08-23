@@ -1,5 +1,5 @@
 import { dryRunPolicy, validatePolicyDraft } from "./policy-dry-run.js";
-import { publicTaskGraphView, publicTaskView } from "./task-view.js";
+import { publicMemoryRecords, publicTaskGraphView, publicTaskListView } from "./task-view.js";
 import { collectWorkerTelemetry } from "./worker-telemetry.js";
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -24,10 +24,10 @@ export async function handleOperatorApiRequest(runtime,request,response,url){
     try{
         if(request.method==="GET"&&url.pathname==="/operator/session"){send(response,200,{ok:true,scope:"operator-console"});return}
         if(request.method==="POST"&&url.pathname==="/operator/session/revoke"){requireSameOrigin(request);await runtime.operatorSessions.revoke(sessionToken);send(response,200,{revoked:true});return}
-        if(request.method==="GET"&&url.pathname==="/operator/overview"){const tasks=(await runtime.orchestrator.listTasks()).map(publicTaskView);const agents=runtime.orchestrator.listAgents().map(agent=>({id:agent.id,name:agent.name,role:agent.role,capabilities:agent.capabilities,governedTools:agent.governedTools,harnessKind:agent.harness?.kind}));send(response,200,{tasks,agents,computers:await computerDetails(runtime),audit:await runtime.audit.verify()});return}
+        if(request.method==="GET"&&url.pathname==="/operator/overview"){const tasks=publicTaskListView(await runtime.orchestrator.listTasks());const agents=runtime.orchestrator.listAgents().map(agent=>({id:agent.id,name:agent.name,role:agent.role,capabilities:agent.capabilities,governedTools:agent.governedTools,harnessKind:agent.harness?.kind}));send(response,200,{tasks,agents,computers:await computerDetails(runtime),audit:await runtime.audit.verify()});return}
         if(request.method==="GET"&&url.pathname==="/operator/workers"){send(response,200,await collectWorkerTelemetry(runtime.orchestrator));return}
         if(request.method==="GET"&&url.pathname==="/operator/audit"){const limit=Math.max(1,Math.min(500,Number(url.searchParams.get("limit")??100)));const rows=await runtime.audit.readAll();send(response,200,rows.slice(-limit).reverse());return}
-        if(request.method==="GET"&&url.pathname==="/operator/memory"){const scope=url.searchParams.get("scope")||undefined;const query=url.searchParams.get("q")||undefined;send(response,200,await runtime.memory.search({scope,query,limit:100}));return}
+        if(request.method==="GET"&&url.pathname==="/operator/memory"){const scope=url.searchParams.get("scope")||undefined;const query=url.searchParams.get("q")||undefined;const records=await runtime.memory.search({scope,query,limit:100});const tasks=await runtime.orchestrator.listTasks();send(response,200,publicMemoryRecords(records,tasks));return}
         if(request.method==="GET"&&url.pathname==="/operator/policy"){const snapshot=await runtime.policyManager.snapshot();send(response,200,{...snapshot,editable:false,note:"Draft editing and dry-run are side-effect free. Apply/rollback require explicit same-origin operator mutations."});return}
         if(request.method==="GET"&&p[0]==="operator"&&p[1]==="policy"&&p[2]==="versions"&&p[3]){send(response,200,await runtime.policyManager.getVersion(p[3]));return}
         if(request.method==="POST"&&url.pathname==="/operator/policy/validate"){requireSameOrigin(request);const body=await readBody(request);const policy=validatePolicyDraft(body.policy);send(response,200,{ok:true,ruleCount:policy.rules.length,repeatWindowMs:policy.repeatWindowMs??180000,repeatMaxActiveFingerprints:policy.repeatMaxActiveFingerprints??10000});return}
