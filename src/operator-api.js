@@ -18,12 +18,27 @@ function parts(pathname){return pathname.split("/").filter(Boolean).map(decodeUR
 async function requireSession(runtime,request,response){if(!loopbackHost(runtime.config.bindHost??"127.0.0.1")||!loopbackRemote(request.socket.remoteAddress)){send(response,403,{error:"operator console is available only on loopback"}); return} const token=bearer(request); if(!await runtime.operatorSessions.authenticate(token)){send(response,401,{error:"invalid or expired operator session"}); return} return token}
 async function computerDetails(runtime){const computers=await runtime.computer.listComputers(); return Promise.all(computers.map(async computer=>{const pending=await runtime.computerRegistry.secretRequest(computer.agentId); let lifecycle; try{lifecycle=await runtime.computerLifecycle.status(computer.agentId)}catch(error){lifecycle={managed:false,running:false,error:error.message}} return {...computer,lifecycle,pendingSecret:pending?{id:pending.id,taskId:pending.taskId,label:pending.label,createdAt:pending.createdAt,ref:pending.ref}:undefined}}))}
 
+function operatorTaskView(task) {
+    const { harnessState: _internalHarnessState, ...visible } = task;
+    return {
+        ...visible,
+        hasResumableSession: Boolean(task.harnessState?.sessionId),
+    };
+}
+
+function operatorTaskGraphView(graph) {
+    return {
+        ...graph,
+        nodes: (graph.nodes ?? []).map(operatorTaskView),
+    };
+}
+
 export async function handleOperatorApiRequest(runtime,request,response,url){
     const sessionToken=await requireSession(runtime,request,response); if(!sessionToken)return; const p=parts(url.pathname);
     try{
         if(request.method==="GET"&&url.pathname==="/operator/session"){send(response,200,{ok:true,scope:"operator-console"});return}
         if(request.method==="POST"&&url.pathname==="/operator/session/revoke"){requireSameOrigin(request);await runtime.operatorSessions.revoke(sessionToken);send(response,200,{revoked:true});return}
-        if(request.method==="GET"&&url.pathname==="/operator/overview"){const tasks=await runtime.orchestrator.listTasks();const agents=runtime.orchestrator.listAgents().map(agent=>({id:agent.id,name:agent.name,role:agent.role,capabilities:agent.capabilities,governedTools:agent.governedTools,harnessKind:agent.harness?.kind}));send(response,200,{tasks,agents,computers:await computerDetails(runtime),audit:await runtime.audit.verify()});return}
+        if(request.method==="GET"&&url.pathname==="/operator/overview"){const tasks=(await runtime.orchestrator.listTasks()).map(operatorTaskView);const agents=runtime.orchestrator.listAgents().map(agent=>({id:agent.id,name:agent.name,role:agent.role,capabilities:agent.capabilities,governedTools:agent.governedTools,harnessKind:agent.harness?.kind}));send(response,200,{tasks,agents,computers:await computerDetails(runtime),audit:await runtime.audit.verify()});return}
         if(request.method==="GET"&&url.pathname==="/operator/workers"){send(response,200,await collectWorkerTelemetry(runtime.orchestrator));return}
         if(request.method==="GET"&&url.pathname==="/operator/audit"){const limit=Math.max(1,Math.min(500,Number(url.searchParams.get("limit")??100)));const rows=await runtime.audit.readAll();send(response,200,rows.slice(-limit).reverse());return}
         if(request.method==="GET"&&url.pathname==="/operator/memory"){const scope=url.searchParams.get("scope")||undefined;const query=url.searchParams.get("q")||undefined;send(response,200,await runtime.memory.search({scope,query,limit:100}));return}
@@ -33,7 +48,7 @@ export async function handleOperatorApiRequest(runtime,request,response,url){
         if(request.method==="POST"&&url.pathname==="/operator/policy/dry-run"){requireSameOrigin(request);const body=await readBody(request);send(response,200,dryRunPolicy({policy:body.policy,action:body.action,repeatCount:body.repeatCount??1}));return}
         if(request.method==="POST"&&url.pathname==="/operator/policy/apply"){requireSameOrigin(request);const body=await readBody(request);send(response,200,await runtime.policyManager.apply({policy:body.policy,checks:body.checks,label:body.label,actor:"operator-console"}));return}
         if(request.method==="POST"&&url.pathname==="/operator/policy/rollback"){requireSameOrigin(request);const body=await readBody(request);send(response,200,await runtime.policyManager.rollback({versionId:body.versionId,actor:"operator-console"}));return}
-        if(request.method==="GET"&&p[0]==="operator"&&p[1]==="tasks"&&p[2]&&p[3]==="graph"){send(response,200,await runtime.orchestrator.getTaskGraph(p[2]));return}
+        if(request.method==="GET"&&p[0]==="operator"&&p[1]==="tasks"&&p[2]&&p[3]==="graph"){send(response,200,operatorTaskGraphView(await runtime.orchestrator.getTaskGraph(p[2])));return}
         if(request.method==="GET"&&p[0]==="operator"&&p[1]==="tasks"&&p[2]&&p[3]==="events"){send(response,200,await runtime.orchestrator.listTaskEvents(p[2]));return}
         if(request.method==="POST"&&p[0]==="operator"&&p[1]==="computers"&&p[2]&&p[3]==="control"&&["take","release"].includes(p[4])){requireSameOrigin(request);const body=await readBody(request);const actorId=String(body.actorId??"operator-console").slice(0,120);send(response,200,p[4]==="take"?await runtime.computer.takeControl(p[2],actorId):await runtime.computer.releaseControl(p[2],actorId));return}
         if(request.method==="POST"&&p[0]==="operator"&&p[1]==="computers"&&p[2]&&p[3]==="lifecycle"&&["start","stop","reset"].includes(p[4])){requireSameOrigin(request);const body=await readBody(request);send(response,200,await runtime.computerLifecycle[p[4]](p[2],String(body.actorId??"operator-console").slice(0,120)));return}
@@ -41,4 +56,4 @@ export async function handleOperatorApiRequest(runtime,request,response,url){
         send(response,404,{error:"not found"});
     }catch(error){send(response,error.statusCode??400,{error:error.message})}
 }
-export {loopbackHost,loopbackRemote};
+export {loopbackHost,loopbackRemote,operatorTaskView,operatorTaskGraphView};
