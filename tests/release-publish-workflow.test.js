@@ -78,7 +78,8 @@ test("v1 release documentation is reviewed and changelog ships in the declared p
     assert.match(migration, /docs\/state-backup\.md|state-backup\.md/);
     assert.match(notes, /# SovereignBot 1\.0\.0/);
     assert.match(notes, /security review/);
-    assert.match(notes, /RC soak/);
+    assert.match(notes, /restart\/retry\/review\/repeat-guard soak/);
+    assert.match(notes, /release candidate/);
 
     if (/^\d+\.\d+\.\d+$/.test(pkg.version)) {
         const stableNotes = await readFile(`docs/releases/v${pkg.version}.md`, "utf8");
