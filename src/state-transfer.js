@@ -17,6 +17,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { AuditLog } from "./audit.js";
+import { inspectComputerMigration } from "./computer-migration.js";
 import { replaceFileWithRetry } from "./fs-util.js";
 import { policyHash } from "./policy-version-store.js";
 
@@ -437,6 +438,21 @@ async function validateTopLevelBackupMembership(dataDir) {
     }
 }
 
+async function assertNoPendingComputerMigration(config, dataDir) {
+    let inspection;
+    try {
+        inspection = await inspectComputerMigration(
+            join(dataDir, "computers"),
+            (config.agents ?? []).map((agent) => String(agent.id)),
+        );
+    }
+    catch {
+        throw new Error("cannot back up while computer registry migration state is invalid or unsafe");
+    }
+    if (!["none", "current"].includes(inspection.status))
+        throw new Error("cannot back up while computer registry migration is required, in progress, or awaiting cleanup");
+}
+
 async function collectPolicySources(dataDir, entries) {
     const root = join(dataDir, "policy-versions");
     const info = await statMaybe(root);
@@ -563,6 +579,7 @@ export async function createStateBackup(config, output, {
     const outputPath = resolve(output);
     if (isWithin(dataDir, outputPath))
         throw new Error("backup output cannot be inside dataDir");
+    await assertNoPendingComputerMigration(config, dataDir);
     await validateStateDirectory(dataDir, { allowMissing: true });
     const sources = await collectBackupSources(dataDir, includeComputerState);
     const { absolute, stage } = await outputStage(outputPath);
