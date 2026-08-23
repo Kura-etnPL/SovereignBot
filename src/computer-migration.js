@@ -16,6 +16,7 @@ const MIGRATION_KIND = "computer-registry-v1-to-v2";
 const MIGRATION_ID = /^computermig_[0-9a-f-]{36}$/;
 const HASH = /^[0-9a-f]{64}$/;
 const MIGRATION_STAGE = /^state\.json\.migration-(computermig_[0-9a-f-]{36})$/;
+const MISSING_STATE_BYTES = Buffer.alloc(0);
 
 function sha256(value) {
     return createHash("sha256").update(value).digest("hex");
@@ -95,13 +96,6 @@ async function readFileMaybe(path, readFileFn = readFile) {
     }
 }
 
-async function fileHash(path, io) {
-    const info = await statMaybe(path, io.lstat);
-    if (!info || !info.isFile() || info.isSymbolicLink())
-        throw new Error("computer migration file must be a regular non-symlink file");
-    return sha256(await io.readFile(path));
-}
-
 function validateMarker(value, agentIds) {
     if (!value || value.schemaVersion !== MIGRATION_SCHEMA_VERSION || value.kind !== MIGRATION_KIND)
         throw new Error("computer migration marker is invalid or unsupported");
@@ -109,8 +103,12 @@ function validateMarker(value, agentIds) {
         throw new Error("computer migration marker id is invalid");
     if (typeof value.startedAt !== "string" || Number.isNaN(Date.parse(value.startedAt)))
         throw new Error("computer migration marker timestamp is invalid");
+    if (typeof value.sourceStateMissing !== "boolean")
+        throw new Error("computer migration marker source-state metadata is invalid");
     if (!HASH.test(value.sourceStateSha256 ?? "") || !HASH.test(value.targetStateSha256 ?? ""))
         throw new Error("computer migration marker state hash is invalid");
+    if (value.sourceStateMissing && value.sourceStateSha256 !== sha256(MISSING_STATE_BYTES))
+        throw new Error("computer migration marker missing-state hash is invalid");
     if (!HASH.test(value.agentSetSha256 ?? "") || value.agentSetSha256 !== computerAgentSetHash(agentIds))
         throw new Error("computer migration marker does not match the current configured agent set");
     return value;
@@ -167,14 +165,6 @@ async function inspectDirectories(root, agentIds, io) {
     return result;
 }
 
-function buildTargetState(stateValue, stateKind, agentIds) {
-    if (stateKind === "legacy")
-        return legacyToV2(stateValue, agentIds);
-    if (stateKind === "v2")
-        return stateValue;
-    throw new Error("computer migration cannot build a target from missing/unsupported state");
-}
-
 function parseState(raw) {
     if (raw === undefined)
         return { kind: "missing", value: undefined };
@@ -190,6 +180,20 @@ function parseState(raw) {
     if (legacyStateDocument(value))
         return { kind: "legacy", value };
     throw new Error("computer state has an unsupported schema/version");
+}
+
+function targetForState(state, agentIds) {
+    if (state.kind === "missing") {
+        const value = { version: 2, agents: {} };
+        return { value, text: exactStateText(value) };
+    }
+    if (state.kind === "legacy") {
+        const value = legacyToV2(state.value, agentIds);
+        return { value, text: exactStateText(value) };
+    }
+    if (state.kind === "v2")
+        return { value: state.value, text: undefined };
+    throw new Error("unsupported computer migration state kind");
 }
 
 function defaultIo(overrides = {}) {
@@ -244,19 +248,34 @@ export async function inspectComputerMigration(root, agentIds, overrides = {}) {
     const hasLegacyDirectories = directories.some((entry) => entry.legacyExists);
 
     if (!marker) {
-        if (state.kind === "missing")
-            return { status: hasLegacyDirectories ? "directory-migration-without-state" : "none", rootExists: true, state, marker: undefined, directories };
-        if (state.kind === "legacy") {
-            const targetState = buildTargetState(state.value, state.kind, agentIds);
+        if (state.kind === "missing") {
+            if (!hasLegacyDirectories)
+                return { status: "none", rootExists: true, state, marker: undefined, directories };
+            const target = targetForState(state, agentIds);
             return {
                 status: "needs-migration",
                 rootExists: true,
                 state,
                 marker: undefined,
                 directories,
-                sourceStateSha256: sha256(stateRaw),
-                targetState: targetState,
-                targetStateText: exactStateText(targetState),
+                sourceStateRaw: MISSING_STATE_BYTES,
+                sourceStateMissing: true,
+                targetState: target.value,
+                targetStateText: target.text,
+            };
+        }
+        if (state.kind === "legacy") {
+            const target = targetForState(state, agentIds);
+            return {
+                status: "needs-migration",
+                rootExists: true,
+                state,
+                marker: undefined,
+                directories,
+                sourceStateRaw: stateRaw,
+                sourceStateMissing: false,
+                targetState: target.value,
+                targetStateText: target.text,
             };
         }
         if (hasLegacyDirectories) {
@@ -266,7 +285,8 @@ export async function inspectComputerMigration(root, agentIds, overrides = {}) {
                 state,
                 marker: undefined,
                 directories,
-                sourceStateSha256: sha256(stateRaw),
+                sourceStateRaw: stateRaw,
+                sourceStateMissing: false,
                 targetState: state.value,
                 targetStateText: stateRaw.toString("utf8"),
             };
@@ -274,23 +294,33 @@ export async function inspectComputerMigration(root, agentIds, overrides = {}) {
         return { status: "current", rootExists: true, state, marker: undefined, directories };
     }
 
-    if (state.kind === "missing")
-        throw new Error("computer migration marker exists but state.json is missing");
-    let targetState;
-    let targetStateText;
-    if (state.kind === "legacy") {
+    if (marker.sourceStateMissing) {
+        if (state.kind === "missing") {
+            const target = targetForState(state, agentIds);
+            if (sha256(Buffer.from(target.text)) !== marker.targetStateSha256)
+                throw new Error("computer migration marker target hash does not match deterministic empty v2 state");
+        }
+        else if (state.kind === "v2") {
+            if (sha256(stateRaw) !== marker.targetStateSha256)
+                throw new Error("committed computer state does not match migration target hash");
+        }
+        else {
+            throw new Error("computer migration expected a missing source state but found legacy state.json");
+        }
+    }
+    else if (state.kind === "legacy") {
         if (sha256(stateRaw) !== marker.sourceStateSha256)
             throw new Error("legacy computer state changed after migration transaction creation");
-        targetState = buildTargetState(state.value, "legacy", agentIds);
-        targetStateText = exactStateText(targetState);
-        if (sha256(Buffer.from(targetStateText)) !== marker.targetStateSha256)
+        const target = targetForState(state, agentIds);
+        if (sha256(Buffer.from(target.text)) !== marker.targetStateSha256)
             throw new Error("computer migration marker target hash does not match deterministic v2 state");
     }
-    else {
+    else if (state.kind === "v2") {
         if (sha256(stateRaw) !== marker.targetStateSha256)
             throw new Error("committed computer state does not match migration target hash");
-        targetState = state.value;
-        targetStateText = stateRaw.toString("utf8");
+    }
+    else {
+        throw new Error("computer migration source state is missing unexpectedly");
     }
 
     const stageName = migrationStageName(marker.migrationId);
@@ -304,6 +334,9 @@ export async function inspectComputerMigration(root, agentIds, overrides = {}) {
             throw new Error("computer migration staged state hash mismatch");
     }
 
+    const target = state.kind === "v2"
+        ? { value: state.value, text: stateRaw.toString("utf8") }
+        : targetForState(state, agentIds);
     return {
         status: state.kind === "v2" && !hasLegacyDirectories ? "committed-marker" : "in-progress",
         rootExists: true,
@@ -313,17 +346,18 @@ export async function inspectComputerMigration(root, agentIds, overrides = {}) {
         stageName,
         stagePath,
         stageExists: stageRaw !== undefined,
-        targetState,
-        targetStateText,
+        targetState: target.value,
+        targetStateText: target.text,
     };
 }
 
-function buildMarker(sourceStateRaw, targetStateText, agentIds) {
+function buildMarker(sourceStateRaw, sourceStateMissing, targetStateText, agentIds) {
     return {
         schemaVersion: MIGRATION_SCHEMA_VERSION,
         kind: MIGRATION_KIND,
         migrationId: `computermig_${randomUUID()}`,
         startedAt: new Date().toISOString(),
+        sourceStateMissing,
         sourceStateSha256: sha256(sourceStateRaw),
         targetStateSha256: sha256(Buffer.from(targetStateText)),
         agentSetSha256: computerAgentSetHash(agentIds),
@@ -413,21 +447,22 @@ export async function migrateComputerRegistry(root, agentIds, overrides = {}) {
     let inspection = await inspectComputerMigration(root, agentIds, io);
     if (["current", "none"].includes(inspection.status))
         return { migrated: false, recovered: false };
-    if (inspection.status === "directory-migration-without-state")
-        throw new Error("legacy computer directories exist without state.json; refusing ambiguous migration");
     if (inspection.marker)
         return executeExistingTransaction(root, agentIds, inspection, io, { newlyCreated: false });
 
-    const stateRaw = await io.readFile(join(root, "state.json"));
-    const targetStateText = inspection.targetStateText;
-    const marker = buildMarker(stateRaw, targetStateText, agentIds);
+    const marker = buildMarker(
+        inspection.sourceStateRaw,
+        inspection.sourceStateMissing,
+        inspection.targetStateText,
+        agentIds,
+    );
     const markerPath = join(root, "migration.json");
     const stagePath = join(root, migrationStageName(marker.migrationId));
     let markerCreated = false;
     try {
         await writePrivateExclusive(io, markerPath, `${JSON.stringify(marker, null, 2)}\n`);
         markerCreated = true;
-        await writePrivateExclusive(io, stagePath, targetStateText);
+        await writePrivateExclusive(io, stagePath, inspection.targetStateText);
         inspection = await inspectComputerMigration(root, agentIds, io);
         return await executeExistingTransaction(root, agentIds, inspection, io, { newlyCreated: true });
     }
