@@ -20,7 +20,7 @@ import {
     seedLegacyComputer,
 } from "./computer-migration-fixtures.js";
 
-async function assertRuntimeRecovered(dataDir, agentIds = AGENT_IDS) {
+async function assertRuntimeRecovered(dataDir, agentIds = AGENT_IDS, { firstControlMode = "human" } = {}) {
     const config = runtimeConfig(dataDir, agentIds);
     await preflightRuntimeStartup(config);
     const runtime = await createRuntime(config);
@@ -29,7 +29,7 @@ async function assertRuntimeRecovered(dataDir, agentIds = AGENT_IDS) {
         assert.equal((await runtime.computerRegistry.credentials(agentIds[0])).token, LEGACY_TOKEN_A);
         if (agentIds[1])
             assert.equal((await runtime.computerRegistry.credentials(agentIds[1])).token, LEGACY_TOKEN_B);
-        assert.equal((await runtime.computerRegistry.control(agentIds[0])).mode, "human");
+        assert.equal((await runtime.computerRegistry.control(agentIds[0])).mode, firstControlMode);
     }
     finally {
         await runtime.close();
@@ -72,7 +72,9 @@ test("legacy computer directories without state.json still migrate transactional
         await persistMarker(plan, { stage: false });
         await moveLegacyDirectory(computers, AGENT_IDS[0]);
 
-        await assertRuntimeRecovered(dataDir);
+        // With no legacy state.json there is no durable human-control state to preserve.
+        // Tokens/profile/workspace migrate, while control correctly falls back to the registry default.
+        await assertRuntimeRecovered(dataDir, AGENT_IDS, { firstControlMode: "agent" });
         const state = JSON.parse(await readFile(join(computers, "state.json"), "utf8"));
         assert.deepEqual(state, { version: 2, agents: {} });
     }
