@@ -11,7 +11,7 @@ function section(text, start, end) {
     return text.slice(from, to === -1 ? text.length : to);
 }
 
-test("public release workflow is gated by successful main CI and narrows write authority to publish job", async () => {
+test("public release workflow is gated by successful main CI and merged-PR provenance with narrow write authority", async () => {
     const workflow = await readFile(WORKFLOW_PATH, "utf8");
     assert.match(workflow, /workflow_run:/);
     assert.match(workflow, /workflows:\s*\["CI"\]/);
@@ -27,9 +27,20 @@ test("public release workflow is gated by successful main CI and narrows write a
     assert.match(verify, /github\.event\.workflow_run\.event == 'push'/);
     assert.match(verify, /github\.event\.workflow_run\.head_branch == 'main'/);
     assert.match(verify, /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
+    assert.match(verify, /pull-requests: read/);
     assert.match(verify, /git fetch --no-tags origin main/);
     assert.match(verify, /Release candidate is no longer current main HEAD/);
+    assert.match(verify, /repos\/\$\{GITHUB_REPOSITORY\}\/commits\/\$sha\/pulls/);
+    assert.match(verify, /\.merged_at != null/);
+    assert.match(verify, /\.base\.ref == \\"main\\"/);
+    assert.match(verify, /\.merge_commit_sha == \\"\$sha\\"/);
+    assert.match(verify, /Stable release candidate is not the merge commit of a reviewed pull request into main/);
     assert.doesNotMatch(verify, /contents: write/);
+
+    const devSkip = verify.indexOf("Package version $version is not a stable release version; publication is intentionally skipped.");
+    const mainFetch = verify.indexOf("git fetch --no-tags origin main");
+    const prLookup = verify.indexOf('"repos/${GITHUB_REPOSITORY}/commits/$sha/pulls"');
+    assert.ok(devSkip >= 0 && mainFetch > devSkip && prLookup > mainFetch, "dev versions must skip before main-head and PR-provenance release checks");
 
     assert.match(publish, /needs: verify/);
     assert.match(publish, /needs\.verify\.outputs\.publish == 'true'/);
