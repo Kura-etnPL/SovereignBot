@@ -28,6 +28,7 @@
   "scripts": {
     "check": "node scripts/check.mjs",
     "test": "node --test",
+    "test:soak": "node scripts/rc-soak.mjs",
     "test:browser": "node tests/webdriver-real-browser.mjs && node tests/mcp-real-browser.mjs",
     "build:release": "node scripts/build-release.mjs",
     "start": "node src/cli.js serve"
