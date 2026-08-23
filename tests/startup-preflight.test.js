@@ -124,7 +124,7 @@ test("unsupported computer state version and empty token fail before migration/t
             const before = await files(dataDir);
             await assert.rejects(
                 () => createRuntime(config(dataDir)),
-                mode === "version" ? /computer state has an unsupported version\/schema/ : /computer operator token is empty/,
+                mode === "version" ? /computer state has an unsupported schema\/version/ : /computer operator token is empty/,
             );
             assert.deepEqual(await files(dataDir), before);
             assert.equal(await exists(join(computers, "state.json")), mode === "version");

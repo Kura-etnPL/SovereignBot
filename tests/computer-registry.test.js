@@ -63,5 +63,5 @@ test("ambiguous legacy directory collisions fail instead of copying one identity
     await mkdir(join(root, "_2F", "profile"), { recursive: true });
     await writeFile(join(root, "_2F", "token"), "ambiguous-token\n");
     const registry = new ComputerRegistry(dataDir, ["/", "_2F"]);
-    await assert.rejects(() => registry.init(), /cannot automatically migrate legacy computer directory/);
+    await assert.rejects(() => registry.init(), /legacy computer directory mapping is ambiguous across configured agents/);
 });
