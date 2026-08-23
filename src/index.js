@@ -24,6 +24,7 @@ export * from "./repeat-store.js";
 export * from "./runtime.js";
 export * from "./server.js";
 export * from "./sidecar-computer-driver.js";
+export * from "./state-transfer.js";
 export * from "./task-bound-computer.js";
 export * from "./task-events.js";
 export * from "./task-store.js";

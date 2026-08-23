@@ -3,6 +3,7 @@ import { loadConfig, writeDefaultConfig, DEFAULT_CONFIG_PATH } from "./config.js
 import { doctorExitCode, formatDoctorReport, runDoctor } from "./doctor.js";
 import { createRuntime } from "./runtime.js";
 import { startServer } from "./server.js";
+import { createStateBackup, exportState, inspectStateBackup, restoreStateBackup } from "./state-transfer.js";
 
 function valueAfter(args, flag) {
     const index = args.indexOf(flag);
@@ -36,6 +37,9 @@ function help() {
 Usage:
   sovereignbot init [--config path]
   sovereignbot doctor [--json] [--config path]
+  sovereignbot backup <output-directory> [--include-computer-state] [--config path]
+  sovereignbot restore <backup-directory> [--replace] [--config path]
+  sovereignbot export <output-directory> [--config path]
   sovereignbot serve [--config path]
   sovereignbot operator-session [--ttl-minutes 30] [--label local-operator]
   sovereignbot submit <title> [--input json] [--cap capability] [--agent id]
@@ -57,6 +61,9 @@ Usage:
 
 Every command accepts [--config path]. Repeated flags such as --cap and --depends may be supplied more than once.
 Doctor is passive with respect to model work/browser startup: it never runs a model prompt or starts WebDriver/browser merely to inspect readiness.
+Backup/restore/export run before normal runtime construction. Stop the runtime before backup or restore for an offline-consistent v1.0 snapshot.
+Default backup excludes computer tokens/workspaces/browser profiles. --include-computer-state explicitly creates a sensitive full-computer continuity backup.
+Export is redacted/non-restorable and never contains computer credentials/browser profiles, operator sessions, or governed bridge capabilities.
 Computer bearer tokens are printed only by local CLI bootstrap commands; the HTTP API never returns them.
 Operator-console sessions are short-lived and separate from the durable computer operator token.
 `);
@@ -82,6 +89,35 @@ async function main() {
         else
             process.stdout.write(formatDoctorReport(report));
         process.exitCode = doctorExitCode(report);
+        return;
+    }
+
+    if (["backup", "restore", "export"].includes(command)) {
+        const config = await loadConfig(configPath);
+        if (command === "backup") {
+            const output = requiredPositional(args, 1, "backup output directory");
+            const includeComputerState = args.includes("--include-computer-state");
+            if (includeComputerState) {
+                process.stderr.write(
+                    "WARNING: this full-computer backup may contain worker/operator bearer tokens, workspace data, browser cookies, and logged-in browser profiles. Store it as sensitive credential material.\n",
+                );
+            }
+            console.log(JSON.stringify(await createStateBackup(config, output, { includeComputerState }), null, 2));
+            return;
+        }
+        if (command === "restore") {
+            const input = requiredPositional(args, 1, "backup directory");
+            const manifest = await inspectStateBackup(input);
+            if (manifest.sensitiveComputerState === true) {
+                process.stderr.write(
+                    "WARNING: this backup contains sensitive computer continuity state and may restore browser login sessions and durable computer bearer tokens.\n",
+                );
+            }
+            console.log(JSON.stringify(await restoreStateBackup(config, input, { replace: args.includes("--replace") }), null, 2));
+            return;
+        }
+        const output = requiredPositional(args, 1, "export output directory");
+        console.log(JSON.stringify(await exportState(config, output), null, 2));
         return;
     }
 
