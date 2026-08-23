@@ -30,8 +30,11 @@ async function bundle(root, files) {
     await writeJson(join(root, "manifest.json"), {
         format: STATE_BACKUP_FORMAT,
         formatVersion: 1,
+        createdAt: new Date().toISOString(),
+        sourceVersion: "0.4.0-dev-test",
         mode: "core",
         sensitiveComputerState: false,
+        offlineConsistencyRequired: true,
         files: manifestFiles,
     });
 }
