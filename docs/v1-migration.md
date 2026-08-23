@@ -7,7 +7,7 @@ These notes cover the supported upgrade path from pre-1.0 local SovereignBot sta
 1. Stop the SovereignBot runtime. v1 recovery backups are intentionally offline-consistent rather than claiming a live cross-file snapshot.
 2. Preserve the external config file separately. Recovery backups do not silently copy the config because harness/driver environment fields may contain credentials.
 3. On a version that already provides the v1 recovery tooling, run `sovereignbot doctor --config <path>` and resolve hard integrity errors before creating a new backup.
-4. Create a core recovery backup with `sovereignbot backup <output> --config <path>`. If browser login/profile continuity is required, use `--include-computer-state` only intentionally and protect that backup as credential-sensitive material.
+4. Create a core recovery backup with `sovereignbot backup <output> --config <path>`. If browser login/profile continuity is required, use `--include-computer-state` only intentionally and protect that backup as credential-sensitive material. Full backup/restore/export behavior and the sensitive-state boundary are documented in `state-backup.md`.
 5. Do not manually delete policy transaction markers, ComputerRegistry migration markers, staging files, or crash-recovery evidence merely to make startup pass.
 
 ## ComputerRegistry v0.3 → v2
@@ -24,7 +24,7 @@ Do not delete those files manually. The full transaction ordering, rollback boun
 
 Core and full-computer backups deliberately refuse to run while the ComputerRegistry migration is required, active, or awaiting cleanup. Backup checks migration status both before capture and immediately before bundle publication so a migration cannot begin unnoticed in the middle of a core backup.
 
-Complete/recover the migration first, run `sovereignbot doctor`, then create the recovery backup.
+Complete/recover the migration first, run `sovereignbot doctor`, then create the recovery backup. See `state-backup.md` for the recovery-bundle format, restore replacement semantics, and the distinction between core and credential-sensitive computer/profile backups.
 
 ## Policy state
 
