@@ -14,7 +14,7 @@ The default backup includes only the first class. Sensitive computer continuity 
 
 Backup and restore are **offline-consistent** operations in v1.0. Stop the SovereignBot runtime before running either command.
 
-Backup performs stable reads, hashes every captured file, re-reads/re-hashes every captured source, and re-enumerates the selected state before publishing the bundle. If state changes during capture, it fails instead of claiming a mixed snapshot is consistent. This is a safety check, not an online cross-file transaction protocol.
+Backup streams each captured file through SHA-256 rather than loading whole files into memory, checks file identity before/after each read, re-reads/re-hashes every captured source, and re-enumerates the selected state before publishing the bundle. If state changes during capture, it fails instead of claiming a mixed snapshot is consistent. This is a safety check, not an online cross-file transaction protocol.
 
 Restore must also be performed while the runtime is stopped. Running a live process against a `dataDir` while replacing that directory can invalidate any recovery guarantee.
 
@@ -31,7 +31,8 @@ When present, the core bundle contains:
 - `memory.jsonl`
 - `audit.jsonl`
 - `repeat-state.json`
-- clean `policy-versions/**` state
+- clean `policy-versions/active.json`
+- clean immutable `policy-versions/versions/policy_<uuid>.json` history
 
 It does **not** contain:
 
@@ -39,7 +40,7 @@ It does **not** contain:
 - `operator-sessions/**`
 - `tool-bridges/**`
 - a live policy transaction/recovery marker
-- known `.tmp-*`, `.new-*`, `.old-*`, staging, or restore scratch
+- known top-level/runtime-owned atomic, staging, or restore scratch
 - the application install payload
 - the external config file or a hash of the full config
 
@@ -57,7 +58,7 @@ sovereignbot backup ./backups/sovereign-full \
   --config .sovereignbot/config.json
 ```
 
-This explicitly adds the complete `computers/**` tree. Depending on the local runtime, that can include:
+This explicitly adds the complete durable `computers/**` tree. Depending on the local runtime, that can include:
 
 - durable worker computer bearer tokens
 - the durable computer operator token
@@ -69,7 +70,9 @@ The manifest marks this bundle as `sensitiveComputerState: true`, and the CLI pr
 
 Even full-computer mode never includes `operator-sessions/**` or `tool-bridges/**`; short-lived UI sessions and bridge capabilities are not legitimate recovery state.
 
-A browser profile containing symbolic links/special files is refused rather than copied ambiguously. Stop browser/driver processes and clean transient profile lock artifacts before retrying.
+Runtime-owned atomic scratch directly under the computer registry root is excluded. Files inside a worker workspace or browser profile are **not** discarded merely because their names contain strings such as `.tmp-` or `.old-`; those nested names can be legitimate user/browser data and are preserved.
+
+A browser profile containing symbolic links/junctions or special files is refused rather than copied ambiguously. Stop browser/driver processes and clean transient profile lock artifacts before retrying.
 
 ## Bundle format
 
@@ -91,12 +94,15 @@ sovereign-core/
 - source SovereignBot version
 - backup mode (`core` or `full-computer`)
 - whether sensitive computer state is present
+- the offline-consistency requirement
 - every declared relative file path
 - every file size
 - every file SHA-256
 - original file mode metadata
 
-Only regular files and normal directories are accepted. Absolute paths, traversal, duplicate paths, backslash paths, symlinks, special files, ephemeral authority paths, and undeclared files are rejected.
+The manifest is bounded (currently 64 MiB and 250,000 declared files) so a malformed local bundle cannot request unbounded manifest parsing.
+
+Only declared SovereignBot recovery paths are accepted. Core restore is allowlisted to the five core files plus active/immutable policy state; full-computer mode additionally permits `computers/**`. Absolute paths, traversal, duplicate paths, Windows device/ADS-invalid names, backslash paths, case-insensitive portable-path collisions, symlinks/junctions, special files, ephemeral authority paths, undeclared payload files, and unexpected bundle-root files are rejected.
 
 The bundle is assembled in a sibling staging directory with restrictive permissions and published by rename only after consistency checks pass.
 
@@ -117,7 +123,7 @@ sovereignbot restore ./backups/sovereign-core \
   --config .sovereignbot/config.json
 ```
 
-Restore verifies the manifest and exact file membership, re-hashes every file, builds a complete staging tree, and validates core state before touching the destination.
+Restore validates the manifest and exact file membership, streams/re-hashes every payload file into a sibling staging tree, applies owner-only file permissions (preserving owner execute where relevant), and validates core state before touching the destination.
 
 Semantic validation includes:
 
@@ -126,9 +132,11 @@ Semantic validation includes:
 - repeat-state schema/fingerprints
 - audit hash-chain integrity
 - policy transaction cleanliness
+- **every** immutable policy version schema/hash, not just the active version
 - active policy pointer/version/hash consistency
+- basic v2 computer registry state shape when present
 
-For `--replace`, the previous `dataDir` is renamed to a sibling recovery directory. The staged state is installed and validated again before the old recovery copy is deleted. If the staged swap fails, SovereignBot attempts to move the previous directory back. A rollback failure is surfaced explicitly as an aggregate failure rather than guessed around.
+For `--replace`, the previous `dataDir` is renamed to a sibling recovery directory. The staged state is installed and validated again before the old recovery copy is deleted. If the staged swap fails, SovereignBot attempts to move the previous directory back. A rollback failure is surfaced explicitly as an aggregate failure rather than guessed around. An originally empty destination is recreated if its staged install fails.
 
 Restore never accepts a redacted export as a recovery backup.
 
@@ -143,9 +151,9 @@ sovereignbot export ./exports/sovereign-summary \
 
 The export is deliberately `restorable: false` and contains aggregate metadata only, including:
 
-- task counts by status/kind
-- memory count by scope class
-- audit integrity, row count, and event-type counts
+- task counts by a fixed known status/kind vocabulary (`unknown` for anything outside it)
+- memory count by fixed scope class (`global`, `agent`, `task`, or `unknown`)
+- audit integrity and row count
 - repeat active-fingerprint count
 - active policy version/hash
 - safe diagnostic codes
@@ -153,8 +161,9 @@ The export is deliberately `restorable: false` and contains aggregate metadata o
 It omits:
 
 - task titles/input/results/candidate results/progress data
-- memory keys/values
-- audit actor/subject/data payloads
+- attacker-controlled task status/kind strings from export keys
+- memory keys/values and attacker-controlled scope strings
+- audit event names, actor/subject/data payloads
 - computer tokens/workspaces/browser profiles
 - operator sessions
 - governed bridge capabilities
