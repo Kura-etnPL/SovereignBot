@@ -1,0 +1,37 @@
+name: RC Soak
+
+on:
+  pull_request:
+  push:
+    branches:
+      - rc/v1.0.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc-soak-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    name: soak (${{ matrix.os }}, Node 22)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check
+        run: npm run check
+      - name: Run deterministic RC soak
+        env:
+          SOVEREIGNBOT_SOAK_ROUNDS: "3"
+        run: npm run test:soak
