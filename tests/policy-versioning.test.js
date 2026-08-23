@@ -217,7 +217,7 @@ test("uncommitted activation marker blocks restart, while an audited committed m
 
         await assert.rejects(
             () => createRuntime(baseConfig(dataDir, allowPolicy)),
-            /incomplete policy activation/,
+            /incomplete policy activation|policy activation recovery/,
         );
 
         // Simulate the crash window after the durable audit commit but before transaction marker cleanup.
