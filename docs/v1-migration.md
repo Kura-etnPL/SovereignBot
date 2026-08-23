@@ -30,6 +30,21 @@ Complete/recover the migration first, run `sovereignbot doctor`, then create the
 
 Policy state is already versioned independently. Startup validates immutable policy versions, the active pointer, transaction markers, and the audit chain before normal runtime initialization. Unresolved or inconsistent policy transactions are fail-closed and must be reconciled by the supported recovery path rather than by falling back silently to the config policy.
 
+## Provider continuity metadata from pre-v1 development builds
+
+Codex/Claude resumability requires a provider session/thread reference to remain durable in internal `task.harnessState`. v1 therefore does **not** delete that continuity metadata from local state or recovery backups.
+
+Some pre-v1 development builds also duplicated the same reference into structured task result/candidate memory or provider failure text. v1 fixes future writes at the provider-result boundary and applies a narrow public compatibility projection for historical state:
+
+- raw `harnessState` is omitted from ordinary Operator and CLI task views and replaced with `hasResumableSession`;
+- a structured `sessionId` is removed from result/candidate/aggregate views only when its value exactly equals a known internal Codex/Claude continuity reference;
+- task-result/candidate-result memory receives the same exact-match projection;
+- old provider failure `error` strings have only exact known continuity references replaced in public task/event/audit views;
+- the durable task, memory, task-event, and hash-chained audit files are not rewritten merely to change their display representation;
+- unrelated business/command results whose `sessionId` does not equal a known provider continuity reference remain visible.
+
+This is intentionally not a new generic schema migration. It preserves retry/resume and audit integrity while preventing historical internal continuity metadata from being re-exposed through v1 product surfaces. See `security-release-review.md` for the reviewed authority classes and canary tests.
+
 ## Computer/browser credentials
 
 Default core backups exclude `computers/**`, operator sessions, governed bridge capabilities, and browser profiles. `--include-computer-state` is an explicit sensitive recovery mode that may include worker/operator bearer tokens, browser cookies/login state, and workspace content.
