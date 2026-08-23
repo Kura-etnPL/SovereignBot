@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       publish: ${{ steps.meta.outputs.publish }}
       version: ${{ steps.meta.outputs.version }}
@@ -41,6 +42,8 @@ jobs:
       - name: Identify and lock stable release candidate
         id: meta
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           sha="${{ github.event.workflow_run.head_sha }}"
@@ -66,6 +69,15 @@ jobs:
           main_sha="$(git rev-parse origin/main)"
           test "$sha" = "$main_sha" || {
             echo "Release candidate is no longer current main HEAD" >&2
+            exit 1
+          }
+
+          merged_pr_count="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/commits/$sha/pulls" \
+            --jq "[.[] | select(.merged_at != null and .base.ref == \"main\" and .merge_commit_sha == \"$sha\")] | length")"
+          test "$merged_pr_count" -ge 1 || {
+            echo "Stable release candidate is not the merge commit of a reviewed pull request into main" >&2
             exit 1
           }
 
