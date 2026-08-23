@@ -1,0 +1,178 @@
+name: Publish public release
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.meta.outputs.publish }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      sha: ${{ steps.meta.outputs.sha }}
+      notes: ${{ steps.meta.outputs.notes }}
+      artifact: ${{ steps.meta.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Lock candidate to current main and package version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="${{ github.event.workflow_run.head_sha }}"
+          test "$(git rev-parse HEAD)" = "$sha" || {
+            echo "Checked-out commit does not match the completed CI run" >&2
+            exit 1
+          }
+          git fetch --no-tags origin main
+          main_sha="$(git rev-parse origin/main)"
+          test "$sha" = "$main_sha" || {
+            echo "Release candidate is no longer current main HEAD" >&2
+            exit 1
+          }
+
+          version="$(node -p "require('./package.json').version")"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "notes=" >> "$GITHUB_OUTPUT"
+            echo "artifact=" >> "$GITHUB_OUTPUT"
+            echo "Package version $version is not a stable release version; publication is intentionally skipped."
+            exit 0
+          fi
+
+          tag="v$version"
+          notes="docs/releases/v$version.md"
+          artifact="sovereignbot-release-$version-$sha"
+          test -s "$notes" || {
+            echo "Reviewed release notes are missing or empty: $notes" >&2
+            exit 1
+          }
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "notes=$notes" >> "$GITHUB_OUTPUT"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+      - name: Syntax and unit/integration tests
+        if: steps.meta.outputs.publish == 'true'
+        run: |
+          npm run check
+          npm test
+      - name: Real Chrome and governed MCP E2E
+        if: steps.meta.outputs.publish == 'true'
+        run: |
+          google-chrome --version
+          chromedriver --version
+          npm run test:browser
+      - name: Build deterministic release payload
+        if: steps.meta.outputs.publish == 'true'
+        run: npm run build:release
+      - name: Verify release payload version and checksum
+        if: steps.meta.outputs.publish == 'true'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          manifest_version="$(node -p "JSON.parse(require('fs').readFileSync('dist/release-manifest.json','utf8')).version")"
+          test "$manifest_version" = "$RELEASE_VERSION"
+          checksum="sovereignbot-$RELEASE_VERSION.tar.gz.sha256"
+          test -f "dist/$checksum"
+          (cd dist && sha256sum -c "$checksum")
+      - name: Upload verified release payload
+        if: steps.meta.outputs.publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: verify
+    if: needs.verify.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.verify.outputs.artifact }}
+          path: dist
+      - name: Re-verify immutable release inputs
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+          RELEASE_SHA: ${{ needs.verify.outputs.sha }}
+          RELEASE_NOTES: ${{ needs.verify.outputs.notes }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(node -p "require('./package.json').version")" = "$RELEASE_VERSION"
+          test -s "$RELEASE_NOTES"
+          manifest_version="$(node -p "JSON.parse(require('fs').readFileSync('dist/release-manifest.json','utf8')).version")"
+          test "$manifest_version" = "$RELEASE_VERSION"
+          (cd dist && sha256sum -c "sovereignbot-$RELEASE_VERSION.tar.gz.sha256")
+      - name: Create immutable tag and public GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+          RELEASE_SHA: ${{ needs.verify.outputs.sha }}
+          RELEASE_NOTES: ${{ needs.verify.outputs.notes }}
+        run: |
+          set -euo pipefail
+          test "$RELEASE_TAG" = "v$RELEASE_VERSION"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            git update-ref -d refs/tags/__sovereignbot_release_check 2>/dev/null || true
+            git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/__sovereignbot_release_check"
+            existing_sha="$(git rev-list -n 1 refs/tags/__sovereignbot_release_check)"
+            git update-ref -d refs/tags/__sovereignbot_release_check
+            test "$existing_sha" = "$RELEASE_SHA" || {
+              echo "Existing tag $RELEASE_TAG points to a different commit; refusing to move it" >&2
+              exit 1
+            }
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$RELEASE_TAG" "$RELEASE_SHA" -m "SovereignBot $RELEASE_VERSION"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $RELEASE_TAG already exists; refusing to overwrite it" >&2
+            exit 1
+          fi
+
+          gh release create "$RELEASE_TAG" dist/* \
+            --verify-tag \
+            --title "SovereignBot $RELEASE_VERSION" \
+            --notes-file "$RELEASE_NOTES"
