@@ -17,22 +17,25 @@ SovereignBot intentionally distinguishes credentials, capabilities, continuity m
 | Secret-supply plaintext | Password/secret typed by the operator into an explicit pending browser request | No ordinary durable copy | Never returned to the model/worker, task result, memory, event, telemetry, or audit plaintext path. |
 | Browser login/profile material | Cookies, browser profile databases, logged-in sessions | Durable only in the per-worker profile | Never normal export/release output. Included only by explicitly sensitive full-computer backup. |
 
-## Provider continuity finding and v1 fix
+## Findings and v1 fixes
 
-The pre-release review found that resumable provider ids had more public copies than required:
+The pre-release review found four public-boundary problems rather than treating the security gate as a paperwork exercise:
 
 1. Operator task overview/graph returned the complete internal task object, including `harnessState.sessionId`.
 2. Codex/Claude success output structurally included `sessionId`, so Orchestrator persisted a duplicate into task result and task-result memory.
 3. Ordinary local CLI task/status/graph output also printed the complete internal task object.
+4. The older loopback task API returned complete agent/task/memory/event objects. `/agents` could therefore expose full harness configuration/environment, and task submission could carry runtime-owned fields such as `harnessState`, assigned/owner identity, result/error/progress, or retry attempt state.
 
-The v1 boundary keeps resume capability without those public copies:
+The v1 boundary keeps capability and observability without those leaks:
 
 - provider parsers may still discover a provider session/thread id;
 - `updateHarnessState()` persists the reference in internal `task.harnessState` so retry/restart can resume;
 - the common provider-result boundary removes the system-added top-level `sessionId` before a successful result becomes task result/candidate memory;
 - provider failure text has an exact known continuity reference replaced before it becomes task error;
 - common public task projection omits `harnessState` and exposes only `hasResumableSession`;
-- Operator and ordinary CLI task surfaces use that same projection;
+- Operator, ordinary CLI, and loopback task/memory/event responses use the same continuity projection;
+- `/agents` exposes safe agent metadata rather than the full harness object/environment;
+- HTTP task creation/delegation strips runtime-owned task fields before calling Orchestrator, so a client cannot seed a provider resume reference or pre-completed internal state through the ordinary task submission surface;
 - worker telemetry reports only resumable task counts, not provider ids;
 - audit credential-shaped `sessionId` fields are redacted before persistence.
 
@@ -48,7 +51,7 @@ v1 does not invent a generic state migration or rewrite the hash-chained audit t
 - a structured `sessionId` is removed only when its value exactly equals one of those known internal continuity refs;
 - an `error` string has only exact known refs replaced;
 - task-result/candidate-result memory is projected, while unrelated arbitrary memory is not rewritten;
-- audit/event files remain unchanged at rest, preserving their integrity/history, while their Operator/CLI views redact known continuity refs;
+- audit/event files remain unchanged at rest, preserving their integrity/history, while their Operator/CLI/task-API views redact known continuity refs;
 - an unrelated business/command result whose `sessionId` is not a known provider continuity ref remains visible.
 
 Recovery backups remain recovery backups: internal `harnessState` continuity metadata is retained because deleting it would break retry/resume. Protect durable state and backups as local sensitive state.
@@ -106,6 +109,7 @@ The final frozen release-review PR must keep the complete seven-job matrix green
 
 - `tests/security-release-review.test.js` — provider result/memory/audit canaries, Operator authority surfaces, operator-only secret supply, and hard-network/policy precedence;
 - `tests/security-legacy-continuity.test.js` — historical provider continuity duplicates remain at rest but are redacted from Operator/CLI views without blanket-removing unrelated business `sessionId` fields;
+- `tests/security-loopback-api.test.js` — legacy loopback `/agents`/task/memory/event reads use safe projections, provider/config canaries do not escape, and HTTP submission cannot persist forged runtime-owned task state;
 - `tests/task-bound-computer.test.js` — exact running-task ownership and cross-worker/invented/terminal task refusal;
 - `tests/computer-gateway.test.js` — hard URL/navigation guards, private-host setting, audit URL redaction, and secret channel behavior;
 - `tests/sidecar-driver.test.js` — secret-error redaction, browser lease freshness, and egress address classification;
