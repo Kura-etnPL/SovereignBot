@@ -16,13 +16,16 @@ SovereignBot is a local-first agent runtime. A configured worker may execute pow
 
 ## General server authentication boundary
 
-The v0.3 **computer routes are bearer-token protected**, but the broader task-graph/control API is still a loopback-local operator surface and does not yet bind protocol actor ids such as `actorAgentId` to an authenticated user session.
+The **computer routes are bearer-token protected**, while the broader task-graph/control API remains a loopback-local operator surface and does not bind protocol actor ids such as `actorAgentId` to an authenticated user session.
+
+The broader API does not treat that local trust model as permission to expose internal authority metadata: agent reads omit full harness configuration/environment, task/memory/event responses use the same provider-continuity projection as the Operator/CLI surfaces, and HTTP task submission strips runtime-owned fields such as `harnessState`, assigned/owner identity, result/error/progress, and retry attempt state before creating a new task.
 
 Therefore:
 
 - keep the main server on loopback unless it is behind a trusted authenticated local gateway;
 - do not treat `actorAgentId` / `reviewerAgentId` strings as authentication credentials;
-- do not expose the task graph API directly to an untrusted LAN/Internet client.
+- do not expose the task graph API directly to an untrusted LAN/Internet client;
+- do not confuse public-response redaction with an OS isolation boundary: a same-user process that can read the data directory can still read internal durable state.
 
 The computer API uses a stronger boundary described below.
 
@@ -36,7 +39,9 @@ Progress/review event ids are idempotency keys, not secrets. Reusing an id for a
 
 ## Codex harness boundary
 
-The Codex adapter launches the user's independently installed/signed-in Codex CLI and persists the emitted session id so work can resume.
+The Codex adapter launches the user's independently installed/signed-in Codex CLI and persists the emitted thread/session id as **internal continuity metadata** so work can resume.
+
+The raw continuity reference remains in internal `task.harnessState` and recovery state, but v1 ordinary task result/memory, Operator, loopback task API, CLI task/status/graph, and worker-telemetry surfaces do not structurally expose it. Public task views expose only `hasResumableSession`. Provider audit metadata uses credential-shaped-key redaction before persistence. Pre-v1 development state with historical duplicate result/error references is handled by an exact-match public compatibility projection rather than by rewriting the hash-chained audit or deleting the authoritative resume state.
 
 Governance at the harness boundary controls **launch/resume**, not every internal Codex shell/MCP/browser/file/network action. Those internal tools remain subject to Codex configuration/sandbox unless the worker is explicitly wired to SovereignBot's governed tool/computer API.
 
@@ -45,6 +50,8 @@ Do not give a Codex worker raw WebDriver/CDP access as a shortcut around that in
 ## Claude Code harness boundary
 
 The Claude Code adapter launches the independently installed official `claude` executable. SovereignBot does not embed Claude/Anthropic login, redistribute account credentials, or proxy third-party rate limits.
+
+Claude Code session ids used for resume have the same v1 internal-continuity classification and public-projection rules as Codex: the raw value may remain in internal `harnessState`/recovery data, but ordinary task result/memory, Operator/CLI/task API, telemetry, and audit surfaces do not use it as public product data.
 
 As with Codex, launch/resume governance does not automatically intercept every internal Bash/file/MCP/browser/plugin/subagent action. Those remain subject to Claude Code settings, permissions, hooks, plugins, MCP configuration, sandbox availability, and OS account rights unless integrated through a governed SovereignBot capability.
 
@@ -70,7 +77,7 @@ A leaked worker token cannot be paired with an invented task id or another worke
 
 The operator token is independent. Agent tokens are not accepted on operator routes and the operator token is not returned through HTTP.
 
-Bootstrap tokens only with the local CLI and protect their output like credentials.
+Bootstrap tokens only with the explicit local CLI credential commands and protect their output like credentials. Ordinary task/status commands do not print them.
 
 ## Snapshot/ref boundary
 
@@ -126,6 +133,8 @@ A secret request stores only request metadata (id/task/label/snapshot/ref/time).
 Defense in depth:
 
 - normal computer audit/policy metadata never receives type/write plaintext;
+- workers/governed MCP may request a secret but have no secret-supply tool/authority;
+- secret supply requires the independent operator authority path (or the short-lived authenticated Operator-console path layered on it);
 - the public secret-supply API replaces downstream errors with a fixed message;
 - secret-operation audit errors are replaced with a fixed message;
 - credential-shaped audit keys (password/secret/token/auth/cookie/API key/session id) are redacted before hashing/persistence.
@@ -134,7 +143,7 @@ No component can guarantee that a compromised browser itself will not send a cre
 
 ## Browser profile isolation scope
 
-v0.3 uses separate processes/sessions/profiles/workspaces per worker. It does not claim VM-strength OS isolation between browser processes running as the same account.
+SovereignBot uses separate processes/sessions/profiles/workspaces per worker. It does not claim VM-strength OS isolation between browser processes running as the same account.
 
 For high-risk accounts or untrusted sites, run the sidecar under a dedicated OS account/container/VM. The driver-neutral contract is designed to support that without weakening or rewriting the Governor.
 

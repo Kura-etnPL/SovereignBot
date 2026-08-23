@@ -5,6 +5,7 @@ import { CodexHarness } from "./codex-harness.js";
 const TOOL_BRIDGE_MANAGERS = new WeakMap();
 const HARNESS_ACTIVITY = new WeakMap();
 const HARNESS_ACTIVITY_LISTENERS = new Set();
+const PROVIDER_SESSION_REDACTION = "[REDACTED_PROVIDER_SESSION]";
 
 function notifyHarnessActivity(agent, inFlightHarnessCount) {
     const event = {
@@ -179,6 +180,45 @@ class ToolBridgeHarness {
     }
 }
 
+function publicProviderResult(result) {
+    if (!result || typeof result !== "object")
+        return result;
+    const outputSessionId = result.output && typeof result.output === "object" && !Array.isArray(result.output)
+        ? result.output.sessionId
+        : undefined;
+    const sessionId = typeof result.metadata?.sessionId === "string" && result.metadata.sessionId
+        ? result.metadata.sessionId
+        : (typeof outputSessionId === "string" && outputSessionId ? outputSessionId : undefined);
+
+    let output = result.output;
+    if (output && typeof output === "object" && !Array.isArray(output)) {
+        const { sessionId: _providerContinuityReference, ...publicOutput } = output;
+        output = publicOutput;
+    }
+
+    const error = typeof result.error === "string" && sessionId
+        ? result.error.split(sessionId).join(PROVIDER_SESSION_REDACTION)
+        : result.error;
+
+    return {
+        ...result,
+        ...(Object.hasOwn(result, "output") ? { output } : {}),
+        ...(Object.hasOwn(result, "error") ? { error } : {}),
+    };
+}
+
+class ProviderResultBoundaryHarness {
+    inner;
+
+    constructor(inner) {
+        this.inner = inner;
+    }
+
+    async run(context) {
+        return publicProviderResult(await this.inner.run(context));
+    }
+}
+
 class MeteredHarness {
     inner;
     agent;
@@ -226,7 +266,10 @@ function createBaseHarness(agent) {
 
 export function createHarness(agent) {
     const base = createBaseHarness(agent);
+    const providerSafe = ["codex", "claude-code"].includes(agent.harness.kind)
+        ? new ProviderResultBoundaryHarness(base)
+        : base;
     const manager = TOOL_BRIDGE_MANAGERS.get(agent);
-    const governed = manager ? new ToolBridgeHarness(base, manager, agent) : base;
+    const governed = manager ? new ToolBridgeHarness(providerSafe, manager, agent) : providerSafe;
     return new MeteredHarness(governed, agent);
 }
