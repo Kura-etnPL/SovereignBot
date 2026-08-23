@@ -5,6 +5,7 @@ import { CodexHarness } from "./codex-harness.js";
 const TOOL_BRIDGE_MANAGERS = new WeakMap();
 const HARNESS_ACTIVITY = new WeakMap();
 const HARNESS_ACTIVITY_LISTENERS = new Set();
+const PROVIDER_SESSION_REDACTION = "[REDACTED_PROVIDER_SESSION]";
 
 function notifyHarnessActivity(agent, inFlightHarnessCount) {
     const event = {
@@ -180,10 +181,30 @@ class ToolBridgeHarness {
 }
 
 function publicProviderResult(result) {
-    if (!result?.ok || !result.output || typeof result.output !== "object" || Array.isArray(result.output))
+    if (!result || typeof result !== "object")
         return result;
-    const { sessionId: _providerContinuityReference, ...output } = result.output;
-    return { ...result, output };
+    const outputSessionId = result.output && typeof result.output === "object" && !Array.isArray(result.output)
+        ? result.output.sessionId
+        : undefined;
+    const sessionId = typeof result.metadata?.sessionId === "string" && result.metadata.sessionId
+        ? result.metadata.sessionId
+        : (typeof outputSessionId === "string" && outputSessionId ? outputSessionId : undefined);
+
+    let output = result.output;
+    if (output && typeof output === "object" && !Array.isArray(output)) {
+        const { sessionId: _providerContinuityReference, ...publicOutput } = output;
+        output = publicOutput;
+    }
+
+    const error = typeof result.error === "string" && sessionId
+        ? result.error.split(sessionId).join(PROVIDER_SESSION_REDACTION)
+        : result.error;
+
+    return {
+        ...result,
+        ...(Object.hasOwn(result, "output") ? { output } : {}),
+        ...(Object.hasOwn(result, "error") ? { error } : {}),
+    };
 }
 
 class ProviderResultBoundaryHarness {
