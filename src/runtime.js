@@ -14,11 +14,17 @@ import { PolicyEngine } from "./policy.js";
 import { PolicyVersionStore } from "./policy-version-store.js";
 import { RepeatStore } from "./repeat-store.js";
 import { createWebDriverSidecarFactory } from "./sidecar-computer-driver.js";
+import { preflightRuntimeStartup } from "./startup-preflight.js";
 import { TaskBoundComputerGateway } from "./task-bound-computer.js";
 import { TaskEventStore } from "./task-events.js";
 import { TaskStore } from "./task-store.js";
 
 export async function createRuntime(config, options = {}) {
+    // This must remain the first stateful boundary in runtime construction. It performs reads only
+    // and refuses hard state-integrity/filesystem failures before normal initialization can create,
+    // prune, migrate, recover, or otherwise mutate unrelated runtime state.
+    await preflightRuntimeStartup(config);
+
     const dataDir = resolve(config.dataDir);
     const audit = new AuditLog(join(dataDir, "audit.jsonl"));
     await audit.init();
