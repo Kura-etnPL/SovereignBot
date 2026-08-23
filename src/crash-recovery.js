@@ -22,6 +22,7 @@ const FORMAT_VERSION = 1;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const TMP_SUFFIX = `\\.tmp-\\d+-${UUID}`;
 const BRIDGE_ID = `bridge_${UUID}`;
+const TASK_ID = new RegExp(`^task_${UUID}$`);
 const ACTIVE_TASK_STATUSES = new Set(["accepted", "running"]);
 const CONTROLLED_SCANS = [
     {
@@ -82,18 +83,6 @@ async function assertNoSymlinkComponents(path, label) {
         if (info.isSymbolicLink())
             throw recoveryError(`${label} traverses a symbolic-link/junction component`);
     }
-}
-
-async function requireNormalDirectory(path, label, { optional = false } = {}) {
-    const info = await statMaybe(path);
-    if (!info) {
-        if (optional)
-            return undefined;
-        throw recoveryError(`${label} is missing`);
-    }
-    if (!info.isDirectory() || info.isSymbolicLink())
-        throw recoveryError(`${label} must be a normal non-symlink directory`);
-    return info;
 }
 
 async function requireRegularFile(path, label) {
@@ -184,12 +173,7 @@ async function scanControlledDirectory(dataDir, spec, recoverable, blocking) {
         }
         try {
             const snapshot = await hashRegularFile(source, rel);
-            recoverable.push({
-                path: rel,
-                category: spec.category,
-                source,
-                snapshot,
-            });
+            recoverable.push({ path: rel, category: spec.category, source, snapshot });
         }
         catch (error) {
             reportBlock(blocking, "unreadable-recoverable-entry", rel, error.message);
@@ -255,7 +239,10 @@ async function inspectActiveWork(dataDir, blocking) {
     }
     return tasks
         .filter((task) => task && ACTIVE_TASK_STATUSES.has(task.status))
-        .map((task) => ({ id: String(task.id ?? "unknown"), status: task.status }));
+        .map((task) => {
+            const rawId = String(task.id ?? "");
+            return { id: TASK_ID.test(rawId) ? rawId : "unknown", status: task.status };
+        });
 }
 
 async function policyTransactionInfo(dataDir) {
@@ -299,13 +286,7 @@ async function inspectCrashRecoveryDetailed(config) {
     await assertNoSymlinkComponents(dataDir, "dataDir");
     const info = await statMaybe(dataDir);
     if (!info) {
-        return {
-            dataDir,
-            recoverable: [],
-            blocking: [],
-            activeWork: [],
-            policyTransaction: { present: false },
-        };
+        return { dataDir, recoverable: [], blocking: [], activeWork: [], policyTransaction: { present: false } };
     }
     if (!info.isDirectory() || info.isSymbolicLink())
         throw recoveryError("dataDir must be a normal non-symlink directory");
@@ -353,10 +334,7 @@ async function nearestExistingParent(path) {
 }
 
 async function prepareQuarantineTarget(dataDir, requested) {
-    const generated = join(
-        dirname(dataDir),
-        `.${basename(dataDir)}.recovery-quarantine-${Date.now()}-${randomUUID()}`,
-    );
+    const generated = join(dirname(dataDir), `.${basename(dataDir)}.recovery-quarantine-${Date.now()}-${randomUUID()}`);
     const target = resolve(requested ?? generated);
     if (target === parse(target).root || isWithin(dataDir, target))
         throw recoveryError("quarantine must be outside dataDir and cannot be a filesystem root");
@@ -413,10 +391,7 @@ async function rollbackMoved(moved, dataDir, stage, renameFn) {
         throw new AggregateError(failures, "one or more quarantined artifacts could not be rolled back");
 }
 
-export async function applyCrashRecovery(config, {
-    quarantine,
-    renameFn = rename,
-} = {}) {
+export async function applyCrashRecovery(config, { quarantine, renameFn = rename } = {}) {
     const detailed = await inspectCrashRecoveryDetailed(config);
     const report = publicReport(detailed);
     if (!detailed.recoverable.length)
@@ -434,10 +409,10 @@ export async function applyCrashRecovery(config, {
             await verifySnapshot(entry.source, entry.snapshot, entry.path);
             const destination = join(stage, ...entry.path.split("/"));
             await moveWithRetry(entry.source, destination, renameFn);
+            moved.push(entry);
             const movedSnapshot = await hashRegularFile(destination, entry.path);
             if (movedSnapshot.size !== entry.snapshot.size || movedSnapshot.sha256 !== entry.snapshot.sha256)
                 throw recoveryError(`${entry.path} changed while being quarantined`);
-            moved.push(entry);
         }
 
         const manifest = {
