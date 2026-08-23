@@ -1,5 +1,6 @@
 const RESUMABLE_PROVIDER_KINDS = new Set(["codex", "claude-code"]);
 const TASK_RESULT_TAGS = new Set(["task-result", "candidate-result"]);
+const PROVIDER_SESSION_REDACTION = "[REDACTED_PROVIDER_SESSION]";
 
 function providerContinuityRef(task) {
     const state = task?.harnessState;
@@ -10,6 +11,13 @@ function providerContinuityRef(task) {
 
 export function providerContinuityRefs(tasks = []) {
     return new Set(tasks.map(providerContinuityRef).filter(Boolean));
+}
+
+function redactErrorString(value, refs) {
+    let output = value;
+    for (const ref of refs)
+        output = output.split(ref).join(PROVIDER_SESSION_REDACTION);
+    return output;
 }
 
 export function redactProviderContinuityRefs(value, refs) {
@@ -23,6 +31,10 @@ export function redactProviderContinuityRefs(value, refs) {
     for (const [key, child] of Object.entries(value)) {
         if (key === "sessionId" && typeof child === "string" && refs.has(child))
             continue;
+        if (key === "error" && typeof child === "string") {
+            output[key] = redactErrorString(child, refs);
+            continue;
+        }
         output[key] = redactProviderContinuityRefs(child, refs);
     }
     return output;
@@ -41,6 +53,9 @@ export function publicTaskView(task, refs = providerContinuityRefs([task])) {
         ...(Object.hasOwn(visible, "candidateResult")
             ? { candidateResult: redactProviderContinuityRefs(visible.candidateResult, refs) }
             : {}),
+        ...(typeof visible.error === "string"
+            ? { error: redactErrorString(visible.error, refs) }
+            : {}),
         hasResumableSession: Boolean(ownContinuityRef),
     };
 }
@@ -57,6 +72,9 @@ export function publicTaskGraphView(graph) {
     return {
         ...graph,
         nodes: (graph.nodes ?? []).map((task) => publicTaskView(task, refs)),
+        events: Array.isArray(graph.events)
+            ? graph.events.map((record) => redactProviderContinuityRefs(record, refs))
+            : graph.events,
     };
 }
 
@@ -82,4 +100,11 @@ export function publicMemoryRecords(records = [], tasks = []) {
             value: redactProviderContinuityRefs(record.value, refs),
         };
     });
+}
+
+export function publicRuntimeRecords(records = [], tasks = []) {
+    const refs = providerContinuityRefs(tasks);
+    return refs.size
+        ? records.map((record) => redactProviderContinuityRefs(record, refs))
+        : records;
 }
