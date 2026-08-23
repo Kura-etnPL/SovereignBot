@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { access, lstat, readFile, readdir } from "node:fs/promises";
 import { dirname, join, parse, relative, resolve, sep } from "node:path";
 import { AuditLog } from "./audit.js";
+import { inspectComputerMigration } from "./computer-migration.js";
 import { policyHash } from "./policy-version-store.js";
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -442,16 +443,34 @@ async function validateComputers(dataDir, agents) {
             fail(`computers/${entry.name} is a symbolic-link/junction`);
         if (!entry.isDirectory() && !entry.isFile())
             fail(`computers/${entry.name} is a special file`);
-        if (entry.isFile() && !["state.json", "operator-token"].includes(entry.name)) {
-            if (runtimeScratchName(entry.name))
-                fail(`stale computer-registry scratch requires recovery before startup: ${entry.name}`);
-            fail(`computer registry contains unsupported file: ${entry.name}`);
-        }
+    }
+
+    const agentIdList = agents.map((agent) => String(agent.id));
+    let migration;
+    try {
+        migration = await inspectComputerMigration(root, agentIdList);
+    }
+    catch (error) {
+        fail(error instanceof Error ? error.message : "computer migration state is invalid");
+    }
+
+    const allowedRootFiles = new Set(["state.json", "operator-token"]);
+    if (migration.marker) {
+        allowedRootFiles.add("migration.json");
+        if (migration.stageName)
+            allowedRootFiles.add(migration.stageName);
+    }
+    for (const entry of rootEntries) {
+        if (!entry.isFile() || allowedRootFiles.has(entry.name))
+            continue;
+        if (runtimeScratchName(entry.name))
+            fail(`stale computer-registry scratch requires recovery before startup: ${entry.name}`);
+        fail(`computer registry contains unsupported file: ${entry.name}`);
     }
 
     await validateToken(join(root, "operator-token"), "computer operator token");
     const state = await readJsonRegular(join(root, "state.json"), "computer state");
-    const agentIds = new Set(agents.map((agent) => String(agent.id)));
+    const agentIds = new Set(agentIdList);
     if (state !== undefined) {
         if (!state || typeof state !== "object" || Array.isArray(state))
             fail("computer state must be an object");
