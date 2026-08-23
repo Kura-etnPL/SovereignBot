@@ -38,7 +38,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Lock candidate to current main and package version
+      - name: Identify and lock stable release candidate
         id: meta
         shell: bash
         run: |
@@ -46,12 +46,6 @@ jobs:
           sha="${{ github.event.workflow_run.head_sha }}"
           test "$(git rev-parse HEAD)" = "$sha" || {
             echo "Checked-out commit does not match the completed CI run" >&2
-            exit 1
-          }
-          git fetch --no-tags origin main
-          main_sha="$(git rev-parse origin/main)"
-          test "$sha" = "$main_sha" || {
-            echo "Release candidate is no longer current main HEAD" >&2
             exit 1
           }
 
@@ -67,6 +61,13 @@ jobs:
             echo "Package version $version is not a stable release version; publication is intentionally skipped."
             exit 0
           fi
+
+          git fetch --no-tags origin main
+          main_sha="$(git rev-parse origin/main)"
+          test "$sha" = "$main_sha" || {
+            echo "Release candidate is no longer current main HEAD" >&2
+            exit 1
+          }
 
           tag="v$version"
           notes="docs/releases/v$version.md"
