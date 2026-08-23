@@ -250,11 +250,11 @@ test("v1 RC stateful orchestration/policy/repeat soak survives repeated restart 
             taskId: "rc-soak-repeat-across-restart",
         };
         for (let attempt = 1; attempt < REPEAT_THRESHOLD; attempt += 1) {
-            const decision = await runtime.governor.authorize(repeatedAction);
+            const decision = await runtime.orchestrator.governor.authorize(repeatedAction);
             assert.equal(decision.allowed, true, `attempt ${attempt} should remain below repeat threshold`);
         }
         runtime = await reopen(runtime, dataDir);
-        const denied = await runtime.governor.authorize(repeatedAction);
+        const denied = await runtime.orchestrator.governor.authorize(repeatedAction);
         assert.equal(denied.allowed, false);
         assert.equal(denied.ruleId, "deny-soak-repeat");
         await assertHealthy(runtime);
