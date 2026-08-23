@@ -7,6 +7,7 @@ export * from "./computer-lifecycle.js";
 export * from "./computer-registry.js";
 export * from "./computer-workspace.js";
 export * from "./config.js";
+export * from "./crash-recovery.js";
 export * from "./doctor.js";
 export * from "./governed-tool-bridge.js";
 export * from "./governor.js";
