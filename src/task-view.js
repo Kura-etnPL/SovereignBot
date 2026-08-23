@@ -1,4 +1,5 @@
 const RESUMABLE_PROVIDER_KINDS = new Set(["codex", "claude-code"]);
+const PROCESS_HARNESS_KINDS = new Set(["command", "codex", "claude-code"]);
 const TASK_RESULT_TAGS = new Set(["task-result", "candidate-result"]);
 const PROVIDER_SESSION_REDACTION = "[REDACTED_PROVIDER_SESSION]";
 
@@ -43,16 +44,19 @@ export function redactProviderContinuityRefs(value, refs) {
 function publicHarnessView(harness) {
     if (!harness || typeof harness !== "object" || Array.isArray(harness))
         return undefined;
+    const processHarness = PROCESS_HARNESS_KINDS.has(harness.kind);
     return {
         kind: harness.kind,
         maxTurns: harness.maxTurns,
         timeoutMs: harness.timeoutMs,
-        delayMs: harness.delayMs,
-        customCommandConfigured: Boolean(harness.command),
-        customCwdConfigured: Boolean(harness.cwd),
-        argumentCount: Array.isArray(harness.args) ? harness.args.length : undefined,
-        prefixArgumentCount: Array.isArray(harness.prefixArgs) ? harness.prefixArgs.length : undefined,
-        inheritsEnvironment: harness.inheritEnv !== false,
+        delayMs: harness.kind === "echo" ? harness.delayMs : undefined,
+        customCommandConfigured: processHarness ? Boolean(harness.command) : undefined,
+        customCwdConfigured: processHarness ? Boolean(harness.cwd) : undefined,
+        argumentCount: harness.kind === "command" && Array.isArray(harness.args) ? harness.args.length : undefined,
+        prefixArgumentCount: RESUMABLE_PROVIDER_KINDS.has(harness.kind) && Array.isArray(harness.prefixArgs)
+            ? harness.prefixArgs.length
+            : undefined,
+        inheritsEnvironment: processHarness ? harness.inheritEnv !== false : undefined,
     };
 }
 
