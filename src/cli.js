@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { loadConfig, writeDefaultConfig, DEFAULT_CONFIG_PATH } from "./config.js";
+import { applyCrashRecovery, inspectCrashRecovery } from "./crash-recovery.js";
 import { doctorExitCode, formatDoctorReport, runDoctor } from "./doctor.js";
 import { createRuntime } from "./runtime.js";
 import { startServer } from "./server.js";
@@ -40,6 +41,7 @@ Usage:
   sovereignbot backup <output-directory> [--include-computer-state] [--config path]
   sovereignbot restore <backup-directory> [--replace] [--config path]
   sovereignbot export <output-directory> [--config path]
+  sovereignbot recover [--apply] [--quarantine path] [--config path]
   sovereignbot serve [--config path]
   sovereignbot operator-session [--ttl-minutes 30] [--label local-operator]
   sovereignbot submit <title> [--input json] [--cap capability] [--agent id]
@@ -64,6 +66,7 @@ Doctor is passive with respect to model work/browser startup: it never runs a mo
 Backup/restore/export run before normal runtime construction. Stop the runtime before backup or restore for an offline-consistent v1.0 snapshot.
 Default backup excludes computer tokens/workspaces/browser profiles. --include-computer-state explicitly creates a sensitive full-computer continuity backup.
 Export is redacted/non-restorable and never contains computer credentials/browser profiles, operator sessions, or governed bridge capabilities.
+Recover is read-only by default. --apply explicitly quarantines only recognized stale runtime artifacts and assumes all runtime/browser worker processes are stopped.
 Computer bearer tokens are printed only by local CLI bootstrap commands; the HTTP API never returns them.
 Operator-console sessions are short-lived and separate from the durable computer operator token.
 `);
@@ -89,6 +92,23 @@ async function main() {
         else
             process.stdout.write(formatDoctorReport(report));
         process.exitCode = doctorExitCode(report);
+        return;
+    }
+
+    if (command === "recover") {
+        const config = await loadConfig(configPath);
+        const apply = args.includes("--apply");
+        const quarantine = valueAfter(args, "--quarantine");
+        if (!apply && quarantine)
+            throw new Error("--quarantine is valid only with recover --apply");
+        if (!apply) {
+            console.log(JSON.stringify(await inspectCrashRecovery(config), null, 2));
+            return;
+        }
+        process.stderr.write(
+            "WARNING: recover --apply is an offline operation. Stop SovereignBot, provider workers, browser/WebDriver processes, and governed tool subprocesses before continuing. Recognized crash artifacts will be moved into a private sibling quarantine, not deleted.\n",
+        );
+        console.log(JSON.stringify(await applyCrashRecovery(config, { quarantine }), null, 2));
         return;
     }
 
