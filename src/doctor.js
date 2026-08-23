@@ -5,6 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, parse, resolve } from "
 import { AuditLog } from "./audit.js";
 import { resolveClaudeCodeLaunch } from "./claude-code-harness.js";
 import { resolveCodexLaunch } from "./codex-harness.js";
+import { inspectComputerMigration } from "./computer-migration.js";
 import { loadConfig } from "./config.js";
 import { policyHash } from "./policy-version-store.js";
 
@@ -644,6 +645,51 @@ function verifyWebDriverUrl(url) {
     }
 }
 
+async function checkComputerMigration(config, dataDir, checks) {
+    const root = join(dataDir, "computers");
+    try {
+        const inspection = await inspectComputerMigration(root, config.agents.map((agent) => String(agent.id)));
+        if (["none", "current"].includes(inspection.status)) {
+            checks.push(check(
+                "computer.migration",
+                "ok",
+                inspection.status === "current" ? "Computer registry schema is current" : "Computer registry has no migration state",
+            ));
+            return;
+        }
+
+        const legacyDirectories = inspection.directories?.filter((entry) => entry.legacyExists).length ?? 0;
+        const currentDirectories = inspection.directories?.filter((entry) => entry.currentExists).length ?? 0;
+        const markerPresent = Boolean(inspection.marker);
+        checks.push(check(
+            "computer.migration",
+            "warning",
+            markerPresent
+                ? "A valid computer registry migration transaction is pending/recoverable"
+                : "Computer registry state requires the supported v0.3-to-v2 migration",
+            {
+                status: inspection.status,
+                markerPresent,
+                stagePresent: Boolean(inspection.stageExists),
+                legacyDirectories,
+                currentDirectories,
+            },
+            markerPresent
+                ? "Restart SovereignBot with the same configured agent set to resume/finish the migration; do not delete migration evidence manually."
+                : "Start SovereignBot once with intact state to perform the supported migration; take a recovery backup after migration completes.",
+        ));
+    }
+    catch {
+        checks.push(check(
+            "computer.migration",
+            "error",
+            "Computer registry migration state is malformed, tampered, or unsafe",
+            undefined,
+            "Do not delete or rewrite migration evidence blindly. Restore known-good state or repair it using the documented migration procedure.",
+        ));
+    }
+}
+
 async function checkComputerStorage(config, dataDir, checks) {
     const paths = [{ kind: "registry", path: join(dataDir, "computers") }];
     for (const agent of config.agents) {
@@ -682,6 +728,7 @@ async function checkComputerStorage(config, dataDir, checks) {
 }
 
 async function checkComputer(config, dataDir, checks) {
+    await checkComputerMigration(config, dataDir, checks);
     const needsComputer = config.agents.some((agent) => agent.governedTools?.includes("computer"));
     const driver = config.computer?.driver;
     if (!driver) {
