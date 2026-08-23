@@ -609,6 +609,7 @@ export async function createStateBackup(config, output, {
         await consistencyHook?.();
         for (const item of captured)
             await assertFingerprint(item.source, item.fingerprint);
+        await assertNoPendingComputerMigration(config, dataDir);
         const finalSources = await collectBackupSources(dataDir, includeComputerState);
         if (!sameSourceMembership(sources, finalSources))
             throw new Error("state file membership changed while backup was being captured; stop the runtime and retry");
