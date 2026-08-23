@@ -179,6 +179,25 @@ class ToolBridgeHarness {
     }
 }
 
+function publicProviderResult(result) {
+    if (!result?.ok || !result.output || typeof result.output !== "object" || Array.isArray(result.output))
+        return result;
+    const { sessionId: _providerContinuityReference, ...output } = result.output;
+    return { ...result, output };
+}
+
+class ProviderResultBoundaryHarness {
+    inner;
+
+    constructor(inner) {
+        this.inner = inner;
+    }
+
+    async run(context) {
+        return publicProviderResult(await this.inner.run(context));
+    }
+}
+
 class MeteredHarness {
     inner;
     agent;
@@ -226,7 +245,12 @@ function createBaseHarness(agent) {
 
 export function createHarness(agent) {
     const base = createBaseHarness(agent);
+    const providerSafe = ["codex", "claude-code"].includes(agent.harness.kind)
+        ? new ProviderResultBoundaryHarness(base)
+        : base;
     const manager = TOOL_BRIDGE_MANAGERS.get(agent);
-    const governed = manager ? new ToolBridgeHarness(base, manager, agent) : base;
+    const governed = manager ? new ToolBridgeHarness(providerSafe, manager, agent) : providerSafe;
     return new MeteredHarness(governed, agent);
 }
+
+export { publicProviderResult };
