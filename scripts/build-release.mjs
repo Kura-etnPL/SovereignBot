@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const defaultOutDir = join(repoRoot, "dist");
 const SHIPPED_ROOTS = ["src", "sidecars", "ui", "docs", "examples"];
-const SHIPPED_FILES = ["package.json", "README.md", "LICENSE", "SECURITY.md"];
+const SHIPPED_FILES = ["package.json", "README.md", "CHANGELOG.md", "LICENSE", "SECURITY.md"];
 const STANDALONE_INSTALLERS = [
     "install/portable-install.mjs",
     "install/install.ps1",
