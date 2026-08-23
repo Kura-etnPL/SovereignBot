@@ -24,6 +24,7 @@ const TMP_SUFFIX = `\\.tmp-\\d+-${UUID}`;
 const BRIDGE_ID = `bridge_${UUID}`;
 const TASK_ID = new RegExp(`^task_${UUID}$`);
 const ACTIVE_TASK_STATUSES = new Set(["accepted", "running"]);
+const POLICY_TRANSACTION_KINDS = new Set(["bootstrap", "activation"]);
 const CONTROLLED_SCANS = [
     {
         dir: "",
@@ -142,6 +143,10 @@ function reportBlock(blocking, code, path, summary) {
     blocking.push({ code, ...(path ? { path } : {}), summary });
 }
 
+function unknownScratchDisplayPath(dir) {
+    return dir ? `${portablePath(dir)}/[unknown-temp-like]` : "[unknown-temp-like]";
+}
+
 async function scanControlledDirectory(dataDir, spec, recoverable, blocking) {
     const dir = spec.dir ? join(dataDir, spec.dir) : dataDir;
     const info = await statMaybe(dir);
@@ -159,7 +164,7 @@ async function scanControlledDirectory(dataDir, spec, recoverable, blocking) {
                 reportBlock(
                     blocking,
                     "unrecognized-runtime-scratch",
-                    portablePath(spec.dir ? join(spec.dir, entry.name) : entry.name),
+                    unknownScratchDisplayPath(spec.dir),
                     "temp-like filename is not an audited recoverable pattern",
                 );
             }
@@ -194,7 +199,7 @@ async function scanToolBridges(dataDir, recoverable, blocking) {
     for (const entry of entries) {
         const rel = `tool-bridges/${entry.name}`;
         if (!BRIDGE_FILE.test(entry.name)) {
-            reportBlock(blocking, "unknown-bridge-entry", rel, "tool-bridges contains an entry not produced by the governed bridge manager");
+            reportBlock(blocking, "unknown-bridge-entry", "tool-bridges/[unknown]", "tool-bridges contains an entry not produced by the governed bridge manager");
             continue;
         }
         if (!entry.isFile() || entry.isSymbolicLink()) {
@@ -257,7 +262,7 @@ async function policyTransactionInfo(dataDir) {
         return {
             present: true,
             structurallyReadable: true,
-            kind: typeof value?.kind === "string" ? value.kind : "unknown",
+            kind: POLICY_TRANSACTION_KINDS.has(value?.kind) ? value.kind : "unknown",
         };
     }
     catch {
@@ -420,7 +425,6 @@ export async function applyCrashRecovery(config, { quarantine, renameFn = rename
             formatVersion: FORMAT_VERSION,
             createdAt: new Date().toISOString(),
             sourceVersion: await appVersion(),
-            sourceDataDirName: basename(detailed.dataDir),
             files: moved.map((entry) => ({
                 path: entry.path,
                 category: entry.category,
