@@ -46,7 +46,7 @@ async function publicRuntimeProgress(runtime, progress) {
 }
 
 function help() {
-    console.log(`SovereignBot 0.4-dev
+    console.log(`SovereignBot 1.0.0
 
 Usage:
   sovereignbot init [--config path]
