@@ -5,7 +5,7 @@ import { doctorExitCode, formatDoctorReport, runDoctor } from "./doctor.js";
 import { createRuntime } from "./runtime.js";
 import { startServer } from "./server.js";
 import { createStateBackup, exportState, inspectStateBackup, restoreStateBackup } from "./state-transfer.js";
-import { publicProgressView, publicTaskGraphView, publicTaskView } from "./task-view.js";
+import { providerContinuityRefs, publicProgressView, publicTaskGraphView, publicTaskListView, publicTaskView } from "./task-view.js";
 
 function valueAfter(args, flag) {
     const index = args.indexOf(flag);
@@ -31,6 +31,18 @@ function requiredPositional(args, index, name) {
     if (!value || value.startsWith("--"))
         throw new Error(`${name} is required`);
     return value;
+}
+
+async function taskRefs(runtime) {
+    return providerContinuityRefs(await runtime.orchestrator.listTasks());
+}
+
+async function publicRuntimeTask(runtime, task) {
+    return publicTaskView(task, await taskRefs(runtime));
+}
+
+async function publicRuntimeProgress(runtime, progress) {
+    return publicProgressView(progress, await taskRefs(runtime));
 }
 
 function help() {
@@ -199,39 +211,43 @@ async function main() {
     if (command === "submit") {
         const title = requiredPositional(args, 1, "submit task title");
         const task = await runtime.orchestrator.submit({ title, input: parseJsonOption(args, "--input"), requiredCapabilities: valuesAfter(args, "--cap"), preferredAgentId: valueAfter(args, "--agent") });
-        console.log(JSON.stringify(publicTaskView(task), null, 2)); return;
+        console.log(JSON.stringify(await publicRuntimeTask(runtime, task), null, 2)); return;
     }
     if (command === "plan") {
         const title = requiredPositional(args, 1, "plan title"); const ownerAgentId = valueAfter(args, "--owner");
         if (!ownerAgentId) throw new Error("plan requires --owner <supervisor-id>");
-        console.log(JSON.stringify(publicTaskView(await runtime.orchestrator.createPlan({ title, input: parseJsonOption(args, "--input"), ownerAgentId })), null, 2)); return;
+        console.log(JSON.stringify(await publicRuntimeTask(runtime, await runtime.orchestrator.createPlan({ title, input: parseJsonOption(args, "--input"), ownerAgentId })), null, 2)); return;
     }
     if (command === "delegate") {
         const parentTaskId = requiredPositional(args, 1, "parent task id"); const title = requiredPositional(args, 2, "delegated task title"); const actorAgentId = valueAfter(args, "--actor");
         if (!actorAgentId) throw new Error("delegate requires --actor <supervisor-id>");
         const reviewCaps = valuesAfter(args, "--review-cap");
         const delegated = await runtime.orchestrator.delegate(parentTaskId, { title, input: parseJsonOption(args, "--input"), requiredCapabilities: valuesAfter(args, "--cap"), preferredAgentId: valueAfter(args, "--agent"), dependencyIds: valuesAfter(args, "--depends"), review: args.includes("--review") ? { required: true, requiredCapabilities: reviewCaps.length ? reviewCaps : ["review"], independent: !args.includes("--self-review") } : undefined }, actorAgentId);
-        console.log(JSON.stringify(publicTaskView(delegated), null, 2)); return;
+        console.log(JSON.stringify(await publicRuntimeTask(runtime, delegated), null, 2)); return;
     }
-    if (command === "run") { console.log(JSON.stringify((await runtime.orchestrator.runUntilIdle()).map(publicTaskView), null, 2)); return; }
-    if (command === "retry") { console.log(JSON.stringify(publicTaskView(await runtime.orchestrator.retry(requiredPositional(args, 1, "retry task id"))), null, 2)); return; }
-    if (command === "cancel") { const taskId = requiredPositional(args, 1, "cancel task id"); console.log(JSON.stringify(publicTaskView(await runtime.orchestrator.cancel(taskId, { reason: valueAfter(args, "--reason"), cascade: !args.includes("--no-cascade") })), null, 2)); return; }
+    if (command === "run") {
+        const finished = await runtime.orchestrator.runUntilIdle();
+        const refs = await taskRefs(runtime);
+        console.log(JSON.stringify(finished.map((task) => publicTaskView(task, refs)), null, 2)); return;
+    }
+    if (command === "retry") { console.log(JSON.stringify(await publicRuntimeTask(runtime, await runtime.orchestrator.retry(requiredPositional(args, 1, "retry task id"))), null, 2)); return; }
+    if (command === "cancel") { const taskId = requiredPositional(args, 1, "cancel task id"); console.log(JSON.stringify(await publicRuntimeTask(runtime, await runtime.orchestrator.cancel(taskId, { reason: valueAfter(args, "--reason"), cascade: !args.includes("--no-cascade") })), null, 2)); return; }
     if (command === "progress") {
         const taskId = requiredPositional(args, 1, "progress task id"); const actorAgentId = valueAfter(args, "--actor"); const eventId = valueAfter(args, "--event");
         if (!actorAgentId || !eventId) throw new Error("progress requires --actor <worker-id> and --event <id>");
         const percentText = valueAfter(args, "--percent");
         const progress = await runtime.orchestrator.reportProgress(taskId, { eventId, percent: percentText === undefined ? undefined : Number(percentText), message: valueAfter(args, "--message"), data: parseJsonOption(args, "--data") }, actorAgentId);
-        console.log(JSON.stringify(publicProgressView(progress), null, 2)); return;
+        console.log(JSON.stringify(await publicRuntimeProgress(runtime, progress), null, 2)); return;
     }
     if (command === "review") {
         const taskId = requiredPositional(args, 1, "review task id"); const decision = requiredPositional(args, 2, "review decision"); const reviewerAgentId = valueAfter(args, "--reviewer"); const eventId = valueAfter(args, "--event");
         if (!reviewerAgentId || !eventId) throw new Error("review requires --reviewer <agent-id> and --event <id>");
-        console.log(JSON.stringify(publicTaskView(await runtime.orchestrator.reviewTask(taskId, { decision, eventId, notes: valueAfter(args, "--notes") }, reviewerAgentId)), null, 2)); return;
+        console.log(JSON.stringify(await publicRuntimeTask(runtime, await runtime.orchestrator.reviewTask(taskId, { decision, eventId, notes: valueAfter(args, "--notes") }, reviewerAgentId)), null, 2)); return;
     }
-    if (command === "aggregate") { const planId = requiredPositional(args, 1, "plan id"); const actorAgentId = valueAfter(args, "--actor"); if (!actorAgentId) throw new Error("aggregate requires --actor <supervisor-id>"); console.log(JSON.stringify(publicTaskView(await runtime.orchestrator.aggregatePlan(planId, actorAgentId)), null, 2)); return; }
+    if (command === "aggregate") { const planId = requiredPositional(args, 1, "plan id"); const actorAgentId = valueAfter(args, "--actor"); if (!actorAgentId) throw new Error("aggregate requires --actor <supervisor-id>"); console.log(JSON.stringify(await publicRuntimeTask(runtime, await runtime.orchestrator.aggregatePlan(planId, actorAgentId)), null, 2)); return; }
     if (command === "graph") { console.log(JSON.stringify(publicTaskGraphView(await runtime.orchestrator.getTaskGraph(requiredPositional(args, 1, "graph task id"))), null, 2)); return; }
     if (command === "events") { console.log(JSON.stringify(await runtime.orchestrator.listTaskEvents(requiredPositional(args, 1, "events task id")), null, 2)); return; }
-    if (command === "status") { console.log(JSON.stringify((await runtime.orchestrator.listTasks()).map(publicTaskView), null, 2)); return; }
+    if (command === "status") { console.log(JSON.stringify(publicTaskListView(await runtime.orchestrator.listTasks()), null, 2)); return; }
     if (command === "audit" && args[1] === "verify") { console.log(JSON.stringify(await runtime.audit.verify(), null, 2)); return; }
 
     help(); process.exitCode = 1;
