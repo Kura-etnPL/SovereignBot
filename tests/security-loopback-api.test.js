@@ -103,7 +103,10 @@ test("loopback task API projects internal authority and strips runtime-owned sub
 
         const agents = JSON.parse(agentsText);
         assert.equal(agents[0].harnessKind, "echo");
-        assert.equal(Object.hasOwn(agents[0], "harness"), false);
+        assert.equal(agents[0].harness.kind, "echo");
+        assert.equal(agents[0].harness.customCommandConfigured, true);
+        assert.equal(Object.hasOwn(agents[0].harness, "command"), false);
+        assert.equal(Object.hasOwn(agents[0].harness, "env"), false);
         const tasks = JSON.parse(tasksText);
         const providerView = tasks.find((task) => task.id === "task_loopback_provider");
         const businessView = tasks.find((task) => task.id === "task_loopback_business");
