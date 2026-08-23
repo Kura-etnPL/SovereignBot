@@ -273,5 +273,3 @@ export function createHarness(agent) {
     const governed = manager ? new ToolBridgeHarness(providerSafe, manager, agent) : providerSafe;
     return new MeteredHarness(governed, agent);
 }
-
-export { publicProviderResult };
