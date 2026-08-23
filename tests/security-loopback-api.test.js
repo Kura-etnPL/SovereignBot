@@ -30,9 +30,11 @@ test("loopback task API projects internal authority and strips runtime-owned sub
                 role: "worker",
                 capabilities: ["demo"],
                 harness: {
-                    kind: "echo",
+                    kind: "codex",
                     env: { PROVIDER_PASSWORD: CONFIG_SECRET },
                     command: `private-command-${CONFIG_SECRET}`,
+                    prefixArgs: ["--private-wrapper-arg"],
+                    timeoutMs: 4_321,
                 },
             }],
             policy: {
@@ -102,10 +104,15 @@ test("loopback task API projects internal authority and strips runtime-owned sub
             assertAbsent(label, text, PROVIDER_REF);
 
         const agents = JSON.parse(agentsText);
-        assert.equal(agents[0].harnessKind, "echo");
-        assert.equal(agents[0].harness.kind, "echo");
+        assert.equal(agents[0].harnessKind, "codex");
+        assert.equal(agents[0].harness.kind, "codex");
+        assert.equal(agents[0].harness.timeoutMs, 4_321);
         assert.equal(agents[0].harness.customCommandConfigured, true);
+        assert.equal(agents[0].harness.prefixArgumentCount, 1);
+        assert.equal(agents[0].harness.inheritsEnvironment, true);
         assert.equal(Object.hasOwn(agents[0].harness, "command"), false);
+        assert.equal(Object.hasOwn(agents[0].harness, "cwd"), false);
+        assert.equal(Object.hasOwn(agents[0].harness, "prefixArgs"), false);
         assert.equal(Object.hasOwn(agents[0].harness, "env"), false);
         const tasks = JSON.parse(tasksText);
         const providerView = tasks.find((task) => task.id === "task_loopback_provider");
