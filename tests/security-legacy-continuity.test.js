@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
-import { publicProviderResult } from "../src/harness.js";
+import { createHarness } from "../src/harness.js";
 import { createRuntime } from "../src/runtime.js";
 import { startServer } from "../src/server.js";
 
@@ -44,15 +44,45 @@ function runCli(configPath, ...args) {
     return result.stdout;
 }
 
-test("provider result boundary redacts continuity refs from errors but keeps internal metadata", () => {
-    const projected = publicProviderResult({
-        ok: false,
-        error: `provider failed while resuming ${PROVIDER_REF}`,
-        metadata: { sessionId: PROVIDER_REF, eventCount: 3 },
-    });
-    assert.equal(projected.error.includes(PROVIDER_REF), false);
-    assert.match(projected.error, /REDACTED_PROVIDER_SESSION/);
-    assert.equal(projected.metadata.sessionId, PROVIDER_REF, "internal diagnostic metadata remains available");
+test("provider harness boundary redacts continuity refs from failure text while retaining internal resume state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sovereign-security-provider-error-"));
+    try {
+        const fakeProvider = join(root, "fake-provider-error.mjs");
+        await writeFile(fakeProvider, `
+for await (const _chunk of process.stdin) {}
+console.log(JSON.stringify({ type: "thread.started", thread_id: ${JSON.stringify(PROVIDER_REF)} }));
+console.error(${JSON.stringify(`provider failed while resuming ${PROVIDER_REF}`)});
+process.exit(7);
+`, "utf8");
+        const agent = {
+            id: "provider-worker",
+            name: "Provider worker",
+            role: "worker",
+            capabilities: ["coding"],
+            harness: {
+                kind: "codex",
+                command: process.execPath,
+                prefixArgs: [fakeProvider],
+                timeoutMs: 5_000,
+            },
+        };
+        const statePatches = [];
+        const result = await createHarness(agent).run({
+            task: { id: "task_provider_error", title: "provider error", input: {} },
+            agent,
+            signal: new AbortController().signal,
+            updateHarnessState: async (patch) => statePatches.push(patch),
+            reportProgress: async () => undefined,
+        });
+        assert.equal(result.ok, false);
+        assert.equal(result.metadata.sessionId, PROVIDER_REF, "internal diagnostic metadata retains continuity ref");
+        assert.ok(statePatches.some((patch) => patch.sessionId === PROVIDER_REF), "resume state was captured before failure");
+        assert.equal(result.error.includes(PROVIDER_REF), false);
+        assert.match(result.error, /REDACTED_PROVIDER_SESSION/);
+    }
+    finally {
+        await rm(root, { recursive: true, force: true });
+    }
 });
 
 test("legacy provider continuity duplicates stay at rest but are redacted from Operator and CLI views", async () => {
