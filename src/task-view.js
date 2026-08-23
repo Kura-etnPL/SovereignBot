@@ -40,6 +40,25 @@ export function redactProviderContinuityRefs(value, refs) {
     return output;
 }
 
+export function publicAgentView(agent) {
+    if (!agent || typeof agent !== "object" || Array.isArray(agent))
+        return agent;
+    return {
+        id: agent.id,
+        name: agent.name,
+        role: agent.role,
+        capabilities: agent.capabilities,
+        governedTools: agent.governedTools,
+        harnessKind: agent.harness?.kind,
+        maxConcurrency: agent.maxConcurrency,
+        priority: agent.priority,
+    };
+}
+
+export function publicAgentListView(agents = []) {
+    return agents.map(publicAgentView);
+}
+
 export function publicTaskView(task, refs = providerContinuityRefs([task])) {
     if (!task || typeof task !== "object" || Array.isArray(task))
         return task;
