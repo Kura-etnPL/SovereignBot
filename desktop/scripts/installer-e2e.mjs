@@ -23,6 +23,23 @@ function fail(message) {
 // The maker's output layout is an implementation detail (forge 7.11 uses
 // out/make/squirrel.windows/<arch>/); walk the make root and locate whichever directory
 // actually holds the produced Setup.exe, failing loudly with listings otherwise.
+function dumpTree(root) {
+    const lines = [];
+    const walk = (dir, prefix) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            lines.push(`${prefix}${entry.isDirectory() ? entry.name + "/" : entry.name}`);
+            if (entry.isDirectory())
+                walk(join(dir, entry.name), `${prefix}${entry.name}/`);
+        }
+    };
+    try {
+        walk(root, "");
+    }
+    catch {
+    }
+    return lines.join(" | ");
+}
+
 function findInstallerDir() {
     if (!existsSync(MAKE_ROOT))
         fail(`no make output at ${MAKE_ROOT}; run "electron-forge make" first`);
@@ -40,7 +57,7 @@ function findInstallerDir() {
     };
     visit(MAKE_ROOT, 0);
     if (found.length !== 1)
-        fail(`expected exactly one installer directory containing SovereignBot-Setup.exe under ${MAKE_ROOT}, found ${found.length}`);
+        fail(`expected exactly one installer directory containing SovereignBot-Setup.exe under ${MAKE_ROOT}, found ${found.length}. tree: ${dumpTree(MAKE_ROOT)}`);
     return found[0];
 }
 
