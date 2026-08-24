@@ -4,6 +4,7 @@ import { desktopVersion } from "./lib/desktop-version.js";
 import { installAppProtocolHandler, registerAppSchemePrivileged } from "./protocol.js";
 import { createMainWindow, appOrigin } from "./window.js";
 import { bindIpcChannels } from "./ipc.js";
+import { createOperatorBridge } from "./operator-bridge.js";
 import { startRuntimeHost } from "./runtime-host.js";
 
 // Squirrel.Windows launches the executable with --squirrel-* events during
@@ -62,8 +63,10 @@ async function main() {
     const uninstallProtocol = installAppProtocolHandler();
 
     let win;
+    let bridge;
     const start = async () => {
         win = createMainWindow();
+        bridge = createOperatorBridge(host.runtime);
         bindIpcChannels({
             win,
             handlers: {
@@ -73,6 +76,7 @@ async function main() {
                     platform: process.platform,
                     locale: app.getLocale(),
                 }),
+                ...bridge.handlers,
             },
         });
         await win.loadURL(appOrigin());
