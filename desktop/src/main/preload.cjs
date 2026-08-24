@@ -8,6 +8,19 @@ const invoke = (channel) => (payload) => ipcRenderer.invoke(channel, payload);
 
 contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
     handshake: invoke("app:handshake"),
+    firstRun: Object.freeze({
+        getStatus: invoke("firstrun:getStatus"),
+    }),
+    workspaces: Object.freeze({
+        addViaDialog: invoke("workspace:addViaDialog"),
+        list: invoke("workspace:list"),
+        setDefault: invoke("workspace:setDefault"),
+        remove: invoke("workspace:remove"),
+    }),
+    settings: Object.freeze({
+        get: invoke("settings:get"),
+        update: invoke("settings:update"),
+    }),
     operator: Object.freeze({
         getOverview: invoke("operator:getOverview"),
         getWorkers: invoke("operator:getWorkers"),
@@ -26,5 +39,7 @@ contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
         control: invoke("computer:control"),
         lifecycle: invoke("computer:lifecycle"),
         supplySecret: invoke("computer:supplySecret"),
+        browserStatus: invoke("computer:browserStatus"),
+        provisionDriver: invoke("computer:provisionDriver"),
     }),
 }));

@@ -50,6 +50,14 @@ async function loadCore() {
     return cachedCore;
 }
 
+// Provider launch resolvers are reused from the vendored Core so Desktop discovery and
+// actual harness launches can never disagree about where a provider lives.
+export async function loadCoreResolvers() {
+    const codex = await import(pathToFileURL(join(VENDOR_ROOT, "src", "codex-harness.js")).href);
+    const claude = await import(pathToFileURL(join(VENDOR_ROOT, "src", "claude-code-harness.js")).href);
+    return { resolveCodexLaunch: codex.resolveCodexLaunch, resolveClaudeCodeLaunch: claude.resolveClaudeCodeLaunch };
+}
+
 // Desktop RuntimeHost, foundation scope:
 //  - verifies the vendored Core tree fail-closed;
 //  - pins the internal Node interpreter for Core child processes;
@@ -91,6 +99,8 @@ export async function startRuntimeHost({ dataDir }) {
     return {
         runtime,
         internalNodeSource: internalNode.source,
+        dataDir,
+        coreModules: await loadCoreResolvers(),
         async close() {
             await runtime.close();
         },

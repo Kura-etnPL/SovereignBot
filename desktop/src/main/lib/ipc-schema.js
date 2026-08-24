@@ -117,6 +117,41 @@ export const IPC_CHANNELS = Object.freeze({
             value: stringField(10_000),
         }, 32 * 1024),
     }),
+    "computer:browserStatus": emptyRequest(),
+    "computer:provisionDriver": emptyRequest(),
+    "firstrun:getStatus": emptyRequest(),
+    "workspace:addViaDialog": emptyRequest(),
+    "workspace:list": emptyRequest(),
+    "workspace:setDefault": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({
+            id: idField(),
+        }, 1024),
+    }),
+    "workspace:remove": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({
+            id: idField(),
+        }, 1024),
+    }),
+    "settings:get": emptyRequest(),
+    "settings:update": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 2048,
+        validateRequest: (payload) => {
+            if (!isPlainObject(payload) || Object.keys(payload).length === 0)
+                throw new Error("settings update payload must be a non-empty object");
+            assertNoForbiddenKeys(payload);
+            const allowed = new Set(["theme", "closeBehavior", "notifications"]);
+            for (const key of Object.keys(payload)) {
+                if (!allowed.has(key))
+                    throw new Error(`unexpected settings field: ${key.slice(0, 40)}`);
+            }
+            return payload;
+        },
+    }),
 });
 
 // Any request carrying these key names is rejected regardless of channel. They name

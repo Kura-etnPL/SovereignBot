@@ -1,11 +1,13 @@
 import { join } from "node:path";
-import { app } from "electron";
+import { app, dialog } from "electron";
 import { desktopVersion } from "./lib/desktop-version.js";
 import { installAppProtocolHandler, registerAppSchemePrivileged } from "./protocol.js";
 import { createMainWindow, appOrigin } from "./window.js";
 import { bindIpcChannels } from "./ipc.js";
 import { createOperatorBridge } from "./operator-bridge.js";
 import { startRuntimeHost } from "./runtime-host.js";
+import { createDesktopServices } from "./services.js";
+import { createFirstRunService } from "./first-run.js";
 
 // Squirrel.Windows launches the executable with --squirrel-* events during
 // install/update/uninstall; none of them should boot a runtime or open a window.
@@ -77,6 +79,10 @@ async function main() {
 
     let win;
     let bridge;
+    const dataDir = defaultDataDir();
+    const services = createDesktopServices({ dataDir, dialog });
+    const firstRun = createFirstRunService({ host, services });
+
     const start = async () => {
         win = createMainWindow();
         bridge = createOperatorBridge(host.runtime);
@@ -90,6 +96,15 @@ async function main() {
                     locale: app.getLocale(),
                 }),
                 ...bridge.handlers,
+                "firstrun:getStatus": () => firstRun.getStatus(),
+                "computer:browserStatus": async () => (await firstRun.getStatus()).browsers,
+                "computer:provisionDriver": () => firstRun.provisionManagedBrowserDriver(),
+                "workspace:addViaDialog": () => services.addWorkspaceViaDialog(win),
+                "workspace:list": () => services.listWorkspaces(),
+                "workspace:setDefault": ({ id }) => ({ ok: services.setDefaultWorkspace(id) }),
+                "workspace:remove": ({ id }) => ({ removed: services.removeWorkspace(id) }),
+                "settings:get": () => services.getSettings(),
+                "settings:update": (patch) => services.updateSettings(patch),
             },
         });
         await win.loadURL(appOrigin());
