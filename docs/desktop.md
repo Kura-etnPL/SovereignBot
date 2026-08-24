@@ -10,12 +10,15 @@ development line; user-facing installation docs ship with the release.
 ```
 desktop/
   package.json            separate package; all Electron/Forge tooling lives here, never in Core
-  forge.config.js         packaging configuration (Squirrel maker lands with installer work)
-  src/main/               main process: window, protocol, IPC, RuntimeHost, internal Node
-  src/main/lib/           pure logic shared with tests (asset allowlist, IPC schema, resolvers)
+  forge.config.js         packaging configuration; Squirrel maker + postPackage fuse hook
+  src/main/               main process: window, protocol, IPC, RuntimeHost, goal controller,
+                          tray/lifecycle, internal Node
+  src/main/lib/           pure logic shared with tests (asset allowlist, IPC schema, resolvers,
+                          workspaces, safe zip, provider discovery, driver provisioning)
   src/main/preload.cjs    sandboxed contextBridge surface (enumerated API only)
   ui/                     local renderer assets served over sovereignbot://app
-  scripts/                sync-core, fetch-node, fuses, packaged smoke, secret scan
+  scripts/                sync-core, fetch-node, fuses, packaged smoke, installer E2E,
+                          release manifest, secret scan
   test/                   plain-Node unit tests (no Electron required)
   vendor/core/            build-time copy of the Core payload + SHA-256 manifest (gitignored)
   resources/node/         pinned internal node.exe (gitignored; hash-pinned by committed manifest)
@@ -69,17 +72,29 @@ npm ci                 # installs pinned Electron toolchain
 npm run fetch-node     # download + hash-verify pinned internal node.exe
 npm run sync-core      # refresh vendored Core payload
 npm run check && npm test
-npm run package        # forge package (win32-x64)
-npm run smoke:packaged # fuses + headless window/IPC/Core smoke against the packaged exe
+npm run make           # forge make (win32-x64): packages, fuses via postPackage hook,
+                       # builds Squirrel SovereignBot-Setup.exe
+npm run verify-fuses   # verify-only fuse wire assertion on the packaged exe
+npm run smoke:packaged # headless window/IPC/Core smoke against the packaged exe
+npm run installer-e2e  # silent-install the Setup.exe, then smoke the installed exe
+npm run release-manifest # write out/release-manifest.json (provenance record)
 ```
 
 Smoke mode (`--desktop-smoke`) is the only test hook in the app. It is unreachable without the
 explicit argv flag, uses a temporary dataDir, fake providers only, prints one machine-readable
 JSON result, and exits. Production builds contain no other backdoor.
 
-## Current limitations (foundation PR)
+## Installer and provenance
 
-- Home goal execution is intentionally inert until the Goal Controller work merges.
-- Tray/close semantics are minimal (window close quits); full lifecycle arrives later.
+`electron-forge make` produces `SovereignBot-Setup.exe` plus the Squirrel `RELEASES`/nupkg set.
+Fuses are flipped inside the packaging pipeline (Forge `postPackage`) — before Squirrel hashes
+the payload — and re-verified read-only afterwards. Desktop CI silently installs the produced
+Setup.exe on a clean Windows runner and runs the installed executable through the same smoke
+gate. `out/release-manifest.json` binds every artifact SHA-256 to its pinned inputs: the
+official Electron distribution zip hash, the internal Node runtime manifest, and the vendored
+Core manifest digest.
+
+## Current limitations (v1.1 line)
+
 - The packaged build is not yet signed; SmartScreen may warn. Signing status will be stated
   honestly in release notes.

@@ -27,7 +27,7 @@ Core principles:
 - **immutable policy versions with transactional Apply/Rollback and crash recovery**;
 - **verified portable installers** without global npm/admin/PATH mutation.
 
-> **Status: v0.4 feature baseline / v1.0 stabilization.** The core runtime, Codex/Claude harnesses, supervisor-worker protocol, production governed browser, governed MCP bridge, persistent repeat guard, live local Operator Console, versioned policy activation, and verified portable installer pipeline are implemented. The remaining stable-release work is operational diagnostics, backup/restore and migrations, final security review, release documentation/versioning, and an RC stress/soak gate.
+> **Status: Core v1.0.0 released; Desktop v1.1 in release engineering.** The core runtime, Codex/Claude harnesses, supervisor-worker protocol, production governed browser, governed MCP bridge, persistent repeat guard, live local Operator Console, and versioned policy activation are released as **v1.0.0** (see the GitHub Releases page). The current line is **SovereignBot Desktop v1.1**: a double-click Windows Electron product (Squirrel Setup.exe, first-run provider discovery, trusted workspaces, goal pipeline with durable conversations) moving through branch→PR→CI gates tracked in issue #48.
 
 ## Quick start from source
 
@@ -281,13 +281,16 @@ Required regression coverage includes:
 9. **No hidden live-policy mutation.** Policy simulation and policy activation are separate authority levels.
 10. **No unverified recovery.** Crash recovery requires durable state/hash/audit evidence rather than guessing.
 
-## Toward v1.0
+## Release status
 
-The v0.4 product baseline is feature-complete after versioned policy activation. Stable v1.0 still requires operational hardening: `sovereignbot doctor`, backup/restore/export, migration/crash-recovery checks, final security review, stable version/CHANGELOG/release notes, and a release-candidate stress/soak gate.
+Core v1.0.0 is published with a verified tag/release/asset chain. The active line is
+**Desktop v1.1** (`desktop/`, see [docs/desktop.md](docs/desktop.md)): an Electron front end over
+the same governed runtime, packaged as a signed-off Squirrel Setup.exe with installer E2E and a
+provenance release manifest. Desktop gates and acceptance criteria live in issue #48.
 
-Public Cloudflare/domain deployment, AG-UI, extra providers, and mandatory container/VM packaging are intentionally non-blocking post-v1.0 work.
+Public Cloudflare/domain deployment, AG-UI, extra providers, and mandatory container/VM packaging remain intentionally non-blocking future work.
 
-See [docs/roadmap.md](docs/roadmap.md) and the v1.0 release gate in GitHub issues.
+See [docs/roadmap.md](docs/roadmap.md) for the broader map.
 
 ## License
 

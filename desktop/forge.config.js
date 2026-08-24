@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { flipFusesOn, verifyFusesOn } from "./scripts/fuses-core.mjs";
 
 const rootDirname = new URL(".", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
@@ -28,5 +30,31 @@ export default {
         },
     },
     rebuildConfig: {},
-    makers: [],
+    hooks: {
+        // Fuses must be flipped on the packaged tree BEFORE Squirrel packs it into the
+        // .nupkg (Squirrel records package hashes and refuses later edits). The hook is
+        // the single fuse authority for every packaging path; the CLI script verifies.
+        postPackage: async (_config, { outputPaths }) => {
+            for (const outputPath of outputPaths) {
+                const exeName = "SovereignBot";
+                const exe = join(outputPath, `${exeName}.exe`);
+                if (!existsSync(exe))
+                    throw new Error(`postPackage: packaged executable not found at ${exe}`);
+                await flipFusesOn(exe);
+                await verifyFusesOn(exe);
+            }
+        },
+    },
+    makers: [
+        {
+            name: "@electron-forge/maker-squirrel",
+            platforms: ["win32"],
+            config: {
+                // %LOCALAPPDATA%\sovereignbot install root on end-user machines.
+                name: "sovereignbot",
+                setupExeName: "SovereignBot-Setup.exe",
+                noMsi: true,
+            },
+        },
+    ],
 };
