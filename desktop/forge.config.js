@@ -52,7 +52,6 @@ export default {
             config: {
                 // %LOCALAPPDATA%\sovereignbot install root on end-user machines.
                 name: "sovereignbot",
-                setupExeName: "SovereignBot-Setup.exe",
                 noMsi: true,
                 // Required by the generated .nuspec; kept aligned with the repo owner.
                 authors: "Kura-etnPL",

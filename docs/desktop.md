@@ -86,7 +86,8 @@ JSON result, and exits. Production builds contain no other backdoor.
 
 ## Installer and provenance
 
-`electron-forge make` produces `SovereignBot-Setup.exe` plus the Squirrel `RELEASES`/nupkg set.
+`electron-forge make` produces the Squirrel set under `out/make/squirrel.windows/<arch>/`:
+a versioned `SovereignBot-<version> Setup.exe`, the `.full.nupkg`, and the `RELEASES` index.
 Fuses are flipped inside the packaging pipeline (Forge `postPackage`) — before Squirrel hashes
 the payload — and re-verified read-only afterwards. Desktop CI silently installs the produced
 Setup.exe on a clean Windows runner and runs the installed executable through the same smoke

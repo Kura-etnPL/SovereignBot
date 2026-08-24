@@ -40,37 +40,35 @@ function dumpTree(root) {
     return lines.join(" | ");
 }
 
+// The maker's output layout/naming is an implementation detail (forge 7.11 writes
+// out/make/squirrel.windows/<arch>/<name>-<version> Setup.exe); walk the make root,
+// locate the unique Setup executable, and fail loudly with a tree dump otherwise.
 function findInstallerDir() {
     if (!existsSync(MAKE_ROOT))
         fail(`no make output at ${MAKE_ROOT}; run "electron-forge make" first`);
     const found = [];
-    const visit = (dir, depth) => {
+    const visit = (dir) => {
         for (const entry of readdirSync(dir, { withFileTypes: true })) {
-            if (!entry.isDirectory())
-                continue;
-            const child = join(dir, entry.name);
-            if (existsSync(join(child, "SovereignBot-Setup.exe")))
-                found.push(child);
-            else if (depth < 3)
-                visit(child, depth + 1);
+            if (entry.isFile() && /^SovereignBot.*Setup\.exe$/.test(entry.name))
+                found.push({ setupExe: join(dir, entry.name), dir });
+            else if (entry.isDirectory())
+                visit(join(dir, entry.name));
         }
     };
-    visit(MAKE_ROOT, 0);
+    visit(MAKE_ROOT);
     if (found.length !== 1)
-        fail(`expected exactly one installer directory containing SovereignBot-Setup.exe under ${MAKE_ROOT}, found ${found.length}. tree: ${dumpTree(MAKE_ROOT)}`);
+        fail(`expected exactly one SovereignBot*Setup.exe under ${MAKE_ROOT}, found ${found.length}. tree: ${dumpTree(MAKE_ROOT)}`);
     return found[0];
 }
 
 let SQUIRREL_DIR;
 
 function assertReleaseSet() {
-    // Initial-install product = Setup.exe embedding exactly one full nupkg. A Squirrel
-    // RELEASES index only matters for delta/auto-update channels, which Desktop v1.1
-    // deliberately does not have; its absence is recorded honestly by the manifest.
+    // Initial-install product: versioned Setup.exe + exactly one full nupkg + the
+    // Squirrel RELEASES index (confirmed produced by forge's squirrel maker).
     const names = readdirSync(SQUIRREL_DIR);
-    const setup = names.find((name) => name === "SovereignBot-Setup.exe");
-    if (!setup)
-        fail(`SovereignBot-Setup.exe not found in ${SQUIRREL_DIR}: ${names.join(", ")}`);
+    if (!names.includes("RELEASES"))
+        fail(`RELEASES index missing beside installer: ${names.join(", ")}`);
     const nupkg = names.filter((name) => name.endsWith(".full.nupkg"));
     if (nupkg.length !== 1)
         fail(`expected exactly one .full.nupkg, found: ${names.join(", ")}`);
@@ -128,9 +126,10 @@ async function waitForInstallRoot(installRoot) {
 }
 
 async function main() {
-    SQUIRREL_DIR = findInstallerDir();
+    const installer = findInstallerDir();
+    SQUIRREL_DIR = installer.dir;
     assertReleaseSet();
-    const setupExe = join(SQUIRREL_DIR, "SovereignBot-Setup.exe");
+    const setupExe = installer.setupExe;
     console.error(`[installer-e2e] silent install: ${setupExe}`);
 
     // Squirrel's --silent runs per-user without UI. The Setup.exe may exit while a

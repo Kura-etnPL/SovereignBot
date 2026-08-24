@@ -10,26 +10,23 @@ const DESKTOP_ROOT = process.cwd();
 const OUT_DIR = join(DESKTOP_ROOT, "out");
 const MAKE_ROOT = join(OUT_DIR, "make");
 
-// Same discovery contract as installer-e2e: walk the make root; never assume the maker's
-// directory layout (forge 7.11 writes out/make/squirrel.windows/<arch>/).
+// Same discovery contract as installer-e2e: walk the make root and locate the unique
+// Setup executable (forge 7.11 writes out/make/squirrel.windows/<arch>/<name>-<version> Setup.exe).
 function findInstallerDir() {
     if (!existsSync(MAKE_ROOT))
         throw new Error(`${MAKE_ROOT} not found — run "npm run make" before writing the release manifest`);
     const found = [];
-    const visit = (dir, depth) => {
+    const visit = (dir) => {
         for (const entry of readdirSync(dir, { withFileTypes: true })) {
-            if (!entry.isDirectory())
-                continue;
-            const child = join(dir, entry.name);
-            if (existsSync(join(child, "SovereignBot-Setup.exe")))
-                found.push(child);
-            else if (depth < 3)
-                visit(child, depth + 1);
+            if (entry.isFile() && /^SovereignBot.*Setup\.exe$/.test(entry.name))
+                found.push(dir);
+            else if (entry.isDirectory())
+                visit(join(dir, entry.name));
         }
     };
-    visit(MAKE_ROOT, 0);
+    visit(MAKE_ROOT);
     if (found.length !== 1)
-        throw new Error(`expected exactly one installer directory under ${MAKE_ROOT}, found ${found.length}`);
+        throw new Error(`expected exactly one SovereignBot*Setup.exe under ${MAKE_ROOT}, found ${found.length}`);
     return found[0];
 }
 
@@ -47,13 +44,15 @@ function collectInstallerArtifacts() {
     const squirrelDir = findInstallerDir();
     const relativeDir = squirrelDir.replace(DESKTOP_ROOT, "").replace(/\\/g, "/").replace(/^\//, "");
     const names = readdirSync(squirrelDir);
-    const setup = names.find((name) => name === "SovereignBot-Setup.exe");
+    const setup = names.find((name) => /^SovereignBot.*Setup\.exe$/.test(name));
     if (!setup)
-        throw new Error("SovereignBot-Setup.exe not found; run electron-forge make first");
+        throw new Error("Setup executable not found; run electron-forge make first");
+    if (!names.includes("RELEASES"))
+        throw new Error("RELEASES index missing beside installer");
     const nupkg = names.filter((name) => name.endsWith(".full.nupkg"));
     if (nupkg.length !== 1)
         throw new Error(`expected exactly one .full.nupkg, found ${nupkg.length}`);
-    const artifactNames = ["SovereignBot-Setup.exe", nupkg[0], ...names.filter((name) => name === "RELEASES")];
+    const artifactNames = [setup, nupkg[0], "RELEASES"];
     const artifacts = artifactNames.map((name) => {
         const path = join(squirrelDir, name);
         return { name, path: `${relativeDir}/${name}`, bytes: statSync(path).size, sha256: sha256File(path) };
