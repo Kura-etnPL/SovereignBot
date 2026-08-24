@@ -2,9 +2,9 @@
 
 All notable changes to SovereignBot are documented in this file.
 
-## [1.0.0] - Unreleased
+## [1.0.0] - 2026-08-24
 
-SovereignBot 1.0 is the first production release of the supported local-first core. The version remains unreleased until the final security review and RC soak gates pass; merging this changelog does not publish or tag 1.0.0.
+SovereignBot 1.0 is the first production release of the supported local-first core. The security review and dedicated Windows/Linux RC soak gates passed before this stable version freeze; publication remains bound to the reviewed main-branch CI and release workflow rather than to this changelog entry alone.
 
 ### Added
 
@@ -18,12 +18,14 @@ SovereignBot 1.0 is the first production release of the supported local-first co
 - Explicit crash-recovery inspection/quarantine for recognized atomic-write and governed-bridge leftovers.
 - Transactional v0.3 ComputerRegistry → v2 migration with marker-bound crash recovery and pre-commit rollback.
 - Deterministic portable release archive, SHA-256 manifest, and Windows PowerShell / POSIX bootstrap installers.
+- Deterministic RC soak coverage with repeated same-dataDir restart/retry/review/cancel/policy/repeat-guard cycles and three serialized full-suite rounds on both Ubuntu and Windows.
 
 ### Security
 
 - Policy remains fail-closed and hard browser/network safety denials cannot be overridden by ordinary allow rules.
 - Governed computer/MCP authority is bound to an exact running task and worker identity.
-- Operator, worker, provider-session, bridge-capability, and secret-channel authority classes remain separated and redacted from public/operator telemetry surfaces.
+- Operator, worker, provider-session, bridge-capability, and secret-channel authority classes remain separated and redacted from ordinary public/operator surfaces while required provider continuity remains internal recovery state.
+- Ordinary Operator, CLI, and loopback task APIs project provider continuity safely and do not expose raw harness environment/configuration authority.
 - Browser navigation blocks unsafe private/loopback/metadata targets by default.
 - Durable audit records are hash chained and credential-shaped fields are redacted before hashing/persistence.
 - Installer/recovery paths reject traversal, unsafe roots, symbolic links/junction escapes, special archive entries, tampered payloads, and unsupported state.
@@ -34,6 +36,7 @@ SovereignBot 1.0 is the first production release of the supported local-first co
 - Backup capture rechecks file identity/content and state membership before publication; restore validates before swap and rolls back replacement failures.
 - Supported ComputerRegistry migration converges idempotently across documented crash windows and never creates replacement credentials before migration commit.
 - Release gates exercise Ubuntu and Windows on Node 22/24, real Chrome + ChromeDriver, governed MCP → Chrome, and both portable installers.
+- The exact pre-version RC product tree passed the ordinary seven-job release matrix plus dedicated three-round Ubuntu/Windows soak jobs with no unresolved P0/P1 defect.
 
 ### Upgrade notes
 

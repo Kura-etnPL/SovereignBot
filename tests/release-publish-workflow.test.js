@@ -72,7 +72,7 @@ test("public release workflow requires stable version, reviewed notes, verified 
     assert.match(workflow, /--notes-file "\$RELEASE_NOTES"/);
 });
 
-test("v1 release documentation is reviewed and changelog ships in the declared product payload", async () => {
+test("v1 release documentation matches dev/stable package state and ships in the declared product payload", async () => {
     const [pkgRaw, changelog, migration, notes, buildScript] = await Promise.all([
         readFile("package.json", "utf8"),
         readFile("CHANGELOG.md", "utf8"),
@@ -83,7 +83,6 @@ test("v1 release documentation is reviewed and changelog ships in the declared p
     const pkg = JSON.parse(pkgRaw);
     assert.ok(pkg.files.includes("CHANGELOG.md"));
     assert.match(buildScript, /"CHANGELOG\.md"/);
-    assert.match(changelog, /## \[1\.0\.0\] - Unreleased/);
     assert.match(changelog, /docs\/v1-migration\.md/);
     assert.match(migration, /ComputerRegistry v0\.3 → v2/);
     assert.match(migration, /docs\/state-backup\.md|state-backup\.md/);
@@ -95,5 +94,10 @@ test("v1 release documentation is reviewed and changelog ships in the declared p
     if (/^\d+\.\d+\.\d+$/.test(pkg.version)) {
         const stableNotes = await readFile(`docs/releases/v${pkg.version}.md`, "utf8");
         assert.ok(stableNotes.trim().length > 0, "stable package version must have reviewed release notes");
+        assert.match(changelog, new RegExp(`## \\[${pkg.version.replaceAll(".", "\\.")}\\] - \\d{4}-\\d{2}-\\d{2}`));
+        assert.doesNotMatch(changelog, new RegExp(`## \\[${pkg.version.replaceAll(".", "\\.")}\\] - Unreleased`));
+    }
+    else {
+        assert.match(changelog, /## \[1\.0\.0\] - Unreleased/);
     }
 });

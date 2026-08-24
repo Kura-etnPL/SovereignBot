@@ -132,7 +132,7 @@ export function startServer(runtime) {
                 return;
             }
 
-            if (request.method === "GET" && url.pathname === "/health") { send(response, 200, { ok: true, name: "SovereignBot", version: "0.4-dev" }); return; }
+            if (request.method === "GET" && url.pathname === "/health") { send(response, 200, { ok: true, name: "SovereignBot", version: "1.0.0" }); return; }
             if (request.method === "GET" && url.pathname === "/agents") { send(response, 200, publicAgentListView(runtime.orchestrator.listAgents())); return; }
             if (request.method === "GET" && url.pathname === "/tasks") { send(response, 200, publicTaskListView(await runtime.orchestrator.listTasks())); return; }
             if (request.method === "POST" && url.pathname === "/tasks") { send(response, 201, await publicRuntimeTask(runtime, await runtime.orchestrator.submit(publicSubmissionSpec(await readBody(request))))); return; }
