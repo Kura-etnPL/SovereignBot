@@ -30,17 +30,19 @@ jobs:
         working-directory: desktop
         run: npm ci
 
+      - name: Sync verified Core payload
+        working-directory: desktop
+        run: npm run sync-core
+
       - name: Syntax check
         working-directory: desktop
         run: npm run check
 
+      # Unit tests import the vendored Core directly (e.g. the goal-controller
+      # end-to-end over a real Core runtime), so the verified payload must exist first.
       - name: Unit tests
         working-directory: desktop
         run: npm test
-
-      - name: Sync verified Core payload
-        working-directory: desktop
-        run: npm run sync-core
 
       - name: Fetch pinned internal Node runtime
         working-directory: desktop
