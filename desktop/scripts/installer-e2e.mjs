@@ -110,44 +110,50 @@ function runChild(command, args, { timeoutMs, onData }) {
     });
 }
 
-async function waitForInstallRoot(installRoot) {
-    const exe = join(installRoot, "SovereignBot.exe");
+// Classic Squirrel layout: the install root holds Update.exe plus an app-<version>/
+// directory containing the actual application tree. Wait for that directory to appear
+// AND its key files to reach a stable total size before launching smoke.
+async function waitForInstalledApp(installRoot) {
     const deadline = Date.now() + INSTALL_TIMEOUT_MS;
+    let lastTotal = -1;
+    let lastAppDir;
     while (Date.now() < deadline) {
         try {
-            if (statSync(exe).isFile())
-                return exe;
+            const entries = readdirSync(installRoot, { withFileTypes: true });
+            const appDirs = entries.filter((entry) => entry.isDirectory() && /^app-.+$/.test(entry.name)
+                && existsSync(join(installRoot, entry.name, "SovereignBot.exe")));
+            if (appDirs.length === 1) {
+                const appDir = join(installRoot, appDirs[0].name);
+                const required = [
+                    join(appDir, "SovereignBot.exe"),
+                    join(appDir, "resources", "app.asar"),
+                    join(installRoot, "Update.exe"),
+                ];
+                let total = 0;
+                let complete = true;
+                for (const file of required) {
+                    try {
+                        total += statSync(file).size;
+                    }
+                    catch {
+                        complete = false;
+                    }
+                }
+                if (complete && total > 0 && total === lastTotal && appDir === lastAppDir)
+                    return { appDir, exe: join(appDir, "SovereignBot.exe") };
+                lastTotal = total;
+                lastAppDir = appDir;
+            }
+            else {
+                lastTotal = -1;
+                lastAppDir = undefined;
+            }
         }
         catch {
         }
         await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    fail(`installed executable never appeared at ${exe}`);
-}
-
-// Squirrel extracts the nupkg incrementally after Setup.exe returns; wait until every
-// required file exists AND the required set's total size has stopped growing so the
-// smoke run never races the tail of the extraction.
-async function waitForInstallComplete(installRoot, requiredFiles) {
-    const deadline = Date.now() + INSTALL_TIMEOUT_MS;
-    let lastTotal = -1;
-    while (Date.now() < deadline) {
-        let total = 0;
-        let allExist = true;
-        for (const file of requiredFiles) {
-            try {
-                total += statSync(file).size;
-            }
-            catch {
-                allExist = false;
-            }
-        }
-        if (allExist && total > 0 && total === lastTotal)
-            return;
-        lastTotal = allExist ? total : -1;
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-    fail(`installation never completed under ${installRoot} (required: ${requiredFiles.join(", ")}). installed tree: ${dumpTree(installRoot).slice(0, 2000)}`);
+    fail(`installation never completed under ${installRoot}. installed tree: ${dumpTree(installRoot).slice(0, 2000)}`);
 }
 
 async function main() {
@@ -164,14 +170,8 @@ async function main() {
         fail(`installer failed: ${setupResult.reason ?? `exit ${setupResult.code}`}`);
 
     const installRoot = join(process.env.LOCALAPPDATA ?? join(tmpdir(), "fallback-localappdata"), "sovereignbot");
-    const installedExe = join(installRoot, "SovereignBot.exe");
-    console.error(`[installer-e2e] installed at ${installRoot}`);
-
-    await waitForInstallComplete(installRoot, [
-        installedExe,
-        join(installRoot, "Update.exe"),
-        join(installRoot, "resources", "app.asar"),
-    ]);
+    const { appDir, exe: installedExe } = await waitForInstalledApp(installRoot);
+    console.error(`[installer-e2e] installed app at ${appDir}`);
 
     const smokeDataDir = await mkdtemp(join(tmpdir(), "sb-installer-e2e-"));
     let smokeJson;
@@ -194,7 +194,7 @@ async function main() {
     console.log(JSON.stringify({
         installerE2e: "ok",
         setupExe: setupExe.split("\\").pop(),
-        installRoot,
+        appDir,
         version: pkg.version,
         smokeChecks: smokeJson.checks,
     }));
