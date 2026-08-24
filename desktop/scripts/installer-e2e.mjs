@@ -20,18 +20,28 @@ function fail(message) {
     process.exit(1);
 }
 
-// The maker's output directory name is an implementation detail; discover whichever
-// directory under out/make actually holds the produced Setup.exe and fail loudly with
-// full listings when it cannot be found uniquely.
+// The maker's output layout is an implementation detail (forge 7.11 uses
+// out/make/squirrel.windows/<arch>/); walk the make root and locate whichever directory
+// actually holds the produced Setup.exe, failing loudly with listings otherwise.
 function findInstallerDir() {
     if (!existsSync(MAKE_ROOT))
         fail(`no make output at ${MAKE_ROOT}; run "electron-forge make" first`);
-    const entries = readdirSync(MAKE_ROOT, { withFileTypes: true }).filter((entry) => entry.isDirectory());
-    const described = entries.map((entry) => `${entry.name}[${readdirSync(join(MAKE_ROOT, entry.name)).join(", ")}]`);
-    const candidates = entries.filter((entry) => existsSync(join(MAKE_ROOT, entry.name, "SovereignBot-Setup.exe")));
-    if (candidates.length !== 1)
-        fail(`expected exactly one out/make/* directory containing SovereignBot-Setup.exe, saw: ${described.join("; ") || "(none)"}`);
-    return join(MAKE_ROOT, candidates[0].name);
+    const found = [];
+    const visit = (dir, depth) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            if (!entry.isDirectory())
+                continue;
+            const child = join(dir, entry.name);
+            if (existsSync(join(child, "SovereignBot-Setup.exe")))
+                found.push(child);
+            else if (depth < 3)
+                visit(child, depth + 1);
+        }
+    };
+    visit(MAKE_ROOT, 0);
+    if (found.length !== 1)
+        fail(`expected exactly one installer directory containing SovereignBot-Setup.exe under ${MAKE_ROOT}, found ${found.length}`);
+    return found[0];
 }
 
 let SQUIRREL_DIR;

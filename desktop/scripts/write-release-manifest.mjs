@@ -10,16 +10,27 @@ const DESKTOP_ROOT = process.cwd();
 const OUT_DIR = join(DESKTOP_ROOT, "out");
 const MAKE_ROOT = join(OUT_DIR, "make");
 
-// Same discovery contract as installer-e2e: never assume the maker's directory name.
+// Same discovery contract as installer-e2e: walk the make root; never assume the maker's
+// directory layout (forge 7.11 writes out/make/squirrel.windows/<arch>/).
 function findInstallerDir() {
     if (!existsSync(MAKE_ROOT))
         throw new Error(`${MAKE_ROOT} not found — run "npm run make" before writing the release manifest`);
-    const candidates = readdirSync(MAKE_ROOT, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .filter((entry) => existsSync(join(MAKE_ROOT, entry.name, "SovereignBot-Setup.exe")));
-    if (candidates.length !== 1)
-        throw new Error(`expected exactly one out/make/* dir with SovereignBot-Setup.exe, found ${candidates.length}`);
-    return join(MAKE_ROOT, candidates[0].name);
+    const found = [];
+    const visit = (dir, depth) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            if (!entry.isDirectory())
+                continue;
+            const child = join(dir, entry.name);
+            if (existsSync(join(child, "SovereignBot-Setup.exe")))
+                found.push(child);
+            else if (depth < 3)
+                visit(child, depth + 1);
+        }
+    };
+    visit(MAKE_ROOT, 0);
+    if (found.length !== 1)
+        throw new Error(`expected exactly one installer directory under ${MAKE_ROOT}, found ${found.length}`);
+    return found[0];
 }
 
 function sha256File(path) {
