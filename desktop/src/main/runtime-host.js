@@ -62,7 +62,8 @@ export async function loadCoreResolvers() {
 //  - verifies the vendored Core tree fail-closed;
 //  - pins the internal Node interpreter for Core child processes;
 //  - constructs the durable Core runtime in-process (no loopback HTTP server) with an
-//    offline-safe agent set until first-run provider discovery lands.
+//    offline-safe agent set (echo supervisor + worker) until provider harnesses are
+//    attached through first-run discovery.
 export async function startRuntimeHost({ dataDir }) {
     verifyVendorCore();
     const internalNode = prepareInternalNode();
@@ -72,13 +73,22 @@ export async function startRuntimeHost({ dataDir }) {
         dataDir,
         bindHost: "127.0.0.1",
         port: 0,
-        agents: [{
-            id: "local-echo",
-            name: "Local Echo",
-            role: "worker",
-            capabilities: ["demo"],
-            harness: { kind: "echo" },
-        }],
+        agents: [
+            {
+                id: "supervisor",
+                name: "Supervisor",
+                role: "supervisor",
+                capabilities: ["planning"],
+                harness: { kind: "echo" },
+            },
+            {
+                id: "local-echo",
+                name: "Local Echo",
+                role: "worker",
+                capabilities: ["demo"],
+                harness: { kind: "echo" },
+            },
+        ],
         policy: {
             repeatWindowMs: 180000,
             rules: [
@@ -100,6 +110,7 @@ export async function startRuntimeHost({ dataDir }) {
         runtime,
         internalNodeSource: internalNode.source,
         dataDir,
+        plannerAgentId: "supervisor",
         coreModules: await loadCoreResolvers(),
         async close() {
             await runtime.close();

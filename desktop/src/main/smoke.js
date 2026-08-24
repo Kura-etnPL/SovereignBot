@@ -21,6 +21,7 @@ export async function runSmokeMode({ app }) {
         runtimeHost: false,
         operatorBridge: false,
         firstRunStatus: false,
+        goalEndToEnd: false,
         cleanQuit: false,
     };
     let dataDir;
@@ -63,6 +64,31 @@ export async function runSmokeMode({ app }) {
             && status.workspaces?.schema === "sovereignbot.desktop.workspaces.v1"
             && status.settings?.schema === "sovereignbot.desktop.settings.v1",
         );
+
+        // Full goal pipeline end-to-end against the offline echo roster: planning with
+        // fallback proposal, DAG execution, aggregation, durable conversation.
+        const { createGoalController } = await import("./goal-controller.js");
+        const wsDir = await mkdtemp(join(tmpdir(), "sovereign-smoke-ws-"));
+        services.addWorkspacePath(wsDir);
+        const goals = createGoalController({
+            runtime: host.runtime,
+            services,
+            supervisorAgentId: host.plannerAgentId,
+            persistPath: join(dataDir, "desktop-state", "goals.json"),
+        });
+        const submitted = await goals.submitGoal({ text: "smoke end-to-end goal: verify the governed pipeline" });
+        const deadline = Date.now() + 30_000;
+        let final = await goals.getGoal(submitted.id);
+        while (!["completed", "failed", "cancelled"].includes(final.status) && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            final = await goals.getGoal(submitted.id);
+        }
+        const conversation = await goals.getConversation(submitted.id);
+        checks.goalEndToEnd = final.status === "completed"
+            && typeof final.finalAnswer === "string"
+            && final.finalAnswer.includes("Goal completed")
+            && conversation.messages.some((message) => message.kind === "answer")
+            && conversation.messages.some((message) => message.kind === "plan");
 
         const uninstallProtocol = installAppProtocolHandler();
         win = createMainWindow({ smoke: true });

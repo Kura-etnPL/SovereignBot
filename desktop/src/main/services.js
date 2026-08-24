@@ -70,6 +70,12 @@ export function createDesktopServices({ dataDir, dialog }) {
             return { added: outcome.added, workspace: outcome.workspace ?? undefined, reason: outcome.reason };
         },
 
+        addWorkspacePath(path) {
+            const outcome = store.add(path, canonicalizeWorkspacePath);
+            saveJsonState(workspacesPath, store.snapshot());
+            return { added: outcome.added, workspace: outcome.workspace ?? undefined, reason: outcome.reason };
+        },
+
         removeWorkspace(id) {
             const removed = store.remove(String(id));
             saveJsonState(workspacesPath, store.snapshot());

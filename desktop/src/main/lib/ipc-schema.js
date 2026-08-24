@@ -136,6 +136,46 @@ export const IPC_CHANNELS = Object.freeze({
             id: idField(),
         }, 1024),
     }),
+    "goal:submit": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 16 * 1024,
+        validateRequest: (payload) => {
+            if (!isPlainObject(payload))
+                throw new Error("request payload must be an object");
+            assertNoForbiddenKeys(payload);
+            if (typeof payload.text !== "string" || !payload.text.trim())
+                throw new Error("missing request field: text");
+            if (payload.text.length > 8000)
+                throw new Error("text exceeds 8000 characters");
+            const out = { text: payload.text };
+            if (payload.workspaceId !== undefined) {
+                out.workspaceId = idField()(payload.workspaceId, "workspaceId");
+            }
+            return out;
+        },
+    }),
+    "goal:list": emptyRequest(),
+    "goal:getStatus": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({
+            goalId: idField(),
+        }, 1024),
+    }),
+    "goal:getConversation": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({
+            goalId: idField(),
+        }, 1024),
+    }),
+    "goal:cancel": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({
+            goalId: idField(),
+        }, 1024),
+    }),
     "settings:get": emptyRequest(),
     "settings:update": Object.freeze({
         direction: "renderer->main",
