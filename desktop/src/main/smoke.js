@@ -20,6 +20,7 @@ export async function runSmokeMode({ app }) {
         handshake: false,
         runtimeHost: false,
         operatorBridge: false,
+        firstRunStatus: false,
         cleanQuit: false,
     };
     let dataDir;
@@ -48,6 +49,20 @@ export async function runSmokeMode({ app }) {
         checks.operatorBridge = Array.isArray(overview?.tasks)
             && Array.isArray(overview?.agents)
             && Array.isArray(overview?.computers);
+
+        const { createDesktopServices } = await import("./services.js");
+        const { createFirstRunService } = await import("./first-run.js");
+        const { dialog } = await import("electron");
+        const services = createDesktopServices({ dataDir, dialog });
+        const firstRun = createFirstRunService({ host, services });
+        const status = await firstRun.getStatus();
+        checks.firstRunStatus = Boolean(
+            status.providers?.codex
+            && status.providers?.claude
+            && Array.isArray(status.browsers)
+            && status.workspaces?.schema === "sovereignbot.desktop.workspaces.v1"
+            && status.settings?.schema === "sovereignbot.desktop.settings.v1",
+        );
 
         const uninstallProtocol = installAppProtocolHandler();
         win = createMainWindow({ smoke: true });
