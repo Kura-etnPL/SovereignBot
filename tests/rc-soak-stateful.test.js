@@ -49,7 +49,9 @@ function config(dataDir, allowRuleId = "allow-echo") {
                 name: "Researcher",
                 role: "worker",
                 capabilities: ["research"],
-                harness: { kind: "echo", delayMs: 90 },
+                // Wide enough that the mid-flight cancellation below lands inside the
+                // running window even on heavily loaded CI runners.
+                harness: { kind: "echo", delayMs: 400 },
             },
             {
                 id: "writer",

@@ -87,11 +87,12 @@ export async function runSmokeMode({ app }) {
 
         uninstallProtocol();
 
-        const ok = Object.values(checks).every(Boolean);
-        process.stdout.write(`${JSON.stringify({ smoke: ok ? "ok" : "failed", checks })}\n`);
         await host.close();
         host = undefined;
         checks.cleanQuit = true;
+
+        const ok = Object.values(checks).every(Boolean);
+        process.stdout.write(`${JSON.stringify({ smoke: ok ? "ok" : "failed", checks })}\n`);
         app.exit(ok ? 0 : 1);
     }
     catch (error) {
