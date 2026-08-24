@@ -48,11 +48,13 @@ jobs:
         working-directory: desktop
         run: npm run fetch-node
 
-      - name: Package (win32-x64)
+      # One packaging pass: forge make packages (postPackage hook flips+verifies fuses
+      # before Squirrel hashes the payload) and produces the Squirrel installer.
+      - name: Make Squirrel installer (win32-x64)
         working-directory: desktop
-        run: npm run package
+        run: npm run make
 
-      - name: Flip and verify Electron fuses
+      - name: Verify Electron fuses on packaged tree
         working-directory: desktop
         run: npm run verify-fuses
 
@@ -64,6 +66,25 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path $env:SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR | Out-Null
           node scripts/run-packaged-smoke.mjs
+
+      # Installs the produced Setup.exe silently on the runner and runs the installed
+      # executable in smoke mode — the shipping artifact itself must boot and pass.
+      - name: Installer end-to-end (silent install + smoke from install dir)
+        working-directory: desktop
+        shell: pwsh
+        run: node scripts/installer-e2e.mjs
+
+      - name: Write release manifest
+        working-directory: desktop
+        run: npm run release-manifest
+
+      - name: Upload release manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-manifest
+          path: desktop/out/release-manifest.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Secret scan over packaged payload
         working-directory: desktop

@@ -4,6 +4,11 @@ SovereignBot is designed to be installable without a global npm install, adminis
 
 The current portable distribution requires **Node.js 22+** and a system `tar` command. SovereignBot itself has zero third-party Node runtime dependencies.
 
+> **SovereignBot Desktop** (Windows, v1.1 line) ships separately as a double-click
+> `SovereignBot-Setup.exe` with no Node.js prerequisite. See [desktop.md](desktop.md); the
+> installer appears on the GitHub Releases page together with its provenance manifest when
+> the Desktop release gate passes.
+
 ## Release artifacts
 
 `npm run build:release` creates deterministic artifacts under `dist/`:
