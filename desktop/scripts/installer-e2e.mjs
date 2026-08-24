@@ -11,7 +11,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 const DESKTOP_ROOT = process.cwd();
-const SQUIRREL_DIR = join(DESKTOP_ROOT, "out", "make", "squirrel-windows");
+const MAKE_ROOT = join(DESKTOP_ROOT, "out", "make");
 const INSTALL_TIMEOUT_MS = 180_000;
 const SMOKE_TIMEOUT_MS = 240_000;
 
@@ -20,14 +20,21 @@ function fail(message) {
     process.exit(1);
 }
 
-function findSetupExe() {
-    if (!existsSync(SQUIRREL_DIR))
-        fail(`squirrel output not found at ${SQUIRREL_DIR}; run "electron-forge make" first`);
-    const setup = readdirSync(SQUIRREL_DIR).find((name) => name === "SovereignBot-Setup.exe");
-    if (!setup)
-        fail(`SovereignBot-Setup.exe not found in ${SQUIRREL_DIR}: ${readdirSync(SQUIRREL_DIR).join(", ")}`);
-    return join(SQUIRREL_DIR, setup);
+// The maker's output directory name is an implementation detail; discover whichever
+// directory under out/make actually holds the produced Setup.exe and fail loudly with
+// full listings when it cannot be found uniquely.
+function findInstallerDir() {
+    if (!existsSync(MAKE_ROOT))
+        fail(`no make output at ${MAKE_ROOT}; run "electron-forge make" first`);
+    const entries = readdirSync(MAKE_ROOT, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+    const described = entries.map((entry) => `${entry.name}[${readdirSync(join(MAKE_ROOT, entry.name)).join(", ")}]`);
+    const candidates = entries.filter((entry) => existsSync(join(MAKE_ROOT, entry.name, "SovereignBot-Setup.exe")));
+    if (candidates.length !== 1)
+        fail(`expected exactly one out/make/* directory containing SovereignBot-Setup.exe, saw: ${described.join("; ") || "(none)"}`);
+    return join(MAKE_ROOT, candidates[0].name);
 }
+
+let SQUIRREL_DIR;
 
 function assertReleaseSet() {
     // Initial-install product = Setup.exe embedding exactly one full nupkg. A Squirrel
@@ -94,8 +101,9 @@ async function waitForInstallRoot(installRoot) {
 }
 
 async function main() {
+    SQUIRREL_DIR = findInstallerDir();
     assertReleaseSet();
-    const setupExe = findSetupExe();
+    const setupExe = join(SQUIRREL_DIR, "SovereignBot-Setup.exe");
     console.error(`[installer-e2e] silent install: ${setupExe}`);
 
     // Squirrel's --silent runs per-user without UI. The Setup.exe may exit while a

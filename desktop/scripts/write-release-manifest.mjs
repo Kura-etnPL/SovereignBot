@@ -8,7 +8,19 @@ import process from "node:process";
 
 const DESKTOP_ROOT = process.cwd();
 const OUT_DIR = join(DESKTOP_ROOT, "out");
-const SQUIRREL_DIR = join(OUT_DIR, "make", "squirrel-windows");
+const MAKE_ROOT = join(OUT_DIR, "make");
+
+// Same discovery contract as installer-e2e: never assume the maker's directory name.
+function findInstallerDir() {
+    if (!existsSync(MAKE_ROOT))
+        throw new Error(`${MAKE_ROOT} not found — run "npm run make" before writing the release manifest`);
+    const candidates = readdirSync(MAKE_ROOT, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .filter((entry) => existsSync(join(MAKE_ROOT, entry.name, "SovereignBot-Setup.exe")));
+    if (candidates.length !== 1)
+        throw new Error(`expected exactly one out/make/* dir with SovereignBot-Setup.exe, found ${candidates.length}`);
+    return join(MAKE_ROOT, candidates[0].name);
+}
 
 function sha256File(path) {
     return createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -21,9 +33,9 @@ function requireFile(path) {
 }
 
 function collectInstallerArtifacts() {
-    if (!existsSync(SQUIRREL_DIR))
-        throw new Error(`${SQUIRREL_DIR} not found — run "npm run make" before writing the release manifest`);
-    const names = readdirSync(SQUIRREL_DIR);
+    const squirrelDir = findInstallerDir();
+    const relativeDir = squirrelDir.replace(DESKTOP_ROOT, "").replace(/\\/g, "/").replace(/^\//, "");
+    const names = readdirSync(squirrelDir);
     const setup = names.find((name) => name === "SovereignBot-Setup.exe");
     if (!setup)
         throw new Error("SovereignBot-Setup.exe not found; run electron-forge make first");
@@ -32,8 +44,8 @@ function collectInstallerArtifacts() {
         throw new Error(`expected exactly one .full.nupkg, found ${nupkg.length}`);
     const artifactNames = ["SovereignBot-Setup.exe", nupkg[0], ...names.filter((name) => name === "RELEASES")];
     const artifacts = artifactNames.map((name) => {
-        const path = join(SQUIRREL_DIR, name);
-        return { name, path: `out/make/squirrel-windows/${name}`, bytes: statSync(path).size, sha256: sha256File(path) };
+        const path = join(squirrelDir, name);
+        return { name, path: `${relativeDir}/${name}`, bytes: statSync(path).size, sha256: sha256File(path) };
     });
     // The packaged application tree the installer was built from (fuses applied by the
     // postPackage hook before Squirrel hashed it).
