@@ -147,7 +147,7 @@ async function waitForInstallComplete(installRoot, requiredFiles) {
         lastTotal = allExist ? total : -1;
         await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    fail(`installation never completed under ${installRoot} (required: ${requiredFiles.join(", ")})`);
+    fail(`installation never completed under ${installRoot} (required: ${requiredFiles.join(", ")}). installed tree: ${dumpTree(installRoot).slice(0, 2000)}`);
 }
 
 async function main() {
