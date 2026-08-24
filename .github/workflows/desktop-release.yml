@@ -126,5 +126,5 @@ jobs:
             "desktop/out/SHA256SUMS.txt" `
             "desktop/out/release-manifest.json" `
             "desktop/out/make/squirrel.windows/x64/RELEASES" `
-            "desktop/out/make/squirrel.windows/x64/*.full.nupkg" `
+            "desktop/out/make/squirrel.windows/x64/*-full.nupkg" `
             "desktop/out/make/squirrel.windows/x64/SovereignBot-* Setup.exe"
