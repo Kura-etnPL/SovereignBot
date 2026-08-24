@@ -6,6 +6,7 @@ import { createRuntime } from "./runtime.js";
 import { startServer } from "./server.js";
 import { createStateBackup, exportState, inspectStateBackup, restoreStateBackup } from "./state-transfer.js";
 import { providerContinuityRefs, publicProgressView, publicRuntimeRecords, publicTaskGraphView, publicTaskListView, publicTaskView } from "./task-view.js";
+import { VERSION } from "./version.js";
 
 function valueAfter(args, flag) {
     const index = args.indexOf(flag);
@@ -46,7 +47,7 @@ async function publicRuntimeProgress(runtime, progress) {
 }
 
 function help() {
-    console.log(`SovereignBot 1.0.0
+    console.log(`SovereignBot ${VERSION}
 
 Usage:
   sovereignbot init [--config path]

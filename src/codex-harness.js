@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { constants, accessSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
+import { internalNodeExecutable } from "./internal-node.js";
 
 function executableExists(path) {
     try {
@@ -31,7 +32,7 @@ function resolveWindowsNpmLauncher() {
     const js = join(dirname(shim), "node_modules", "@openai", "codex", "bin", "codex.js");
     if (!existsSync(js))
         return undefined;
-    return { command: process.execPath, prefixArgs: [js], source: "npm-shim" };
+    return { command: internalNodeExecutable(), prefixArgs: [js], source: "npm-shim" };
 }
 
 export function resolveCodexLaunch(config = {}) {

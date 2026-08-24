@@ -10,3 +10,6 @@ coverage/
 Thumbs.db
 .vscode/
 .idea/
+desktop/vendor/
+desktop/resources/node/
+desktop/out/

@@ -98,6 +98,6 @@ test("v1 release documentation matches dev/stable package state and ships in the
         assert.doesNotMatch(changelog, new RegExp(`## \\[${pkg.version.replaceAll(".", "\\.")}\\] - Unreleased`));
     }
     else {
-        assert.match(changelog, /## \[1\.0\.0\] - Unreleased/);
+        assert.match(changelog, /## \[\d+\.\d+\.\d+\] - Unreleased/);
     }
 });

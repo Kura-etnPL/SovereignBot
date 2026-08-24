@@ -106,7 +106,7 @@ export class GovernedToolBridgeManager {
         const capability = token();
         const bootstrapPath = join(this.#dataDir, `${id}.bootstrap.json`);
         const claudeConfigPath = join(this.#dataDir, `${id}.claude-mcp.json`);
-        const command = process.execPath;
+        const command = internalNodeExecutable();
         const args = [MCP_SERVER_PATH, "--bootstrap", bootstrapPath];
         const lease = {
             id,

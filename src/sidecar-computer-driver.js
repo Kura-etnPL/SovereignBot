@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
+import { internalNodeExecutable } from "./internal-node.js";
 
 const SIDECAR_PROTOCOL = "sovereignbot.sidecar.v1";
 const BUNDLED_WEBDRIVER_SIDECAR = fileURLToPath(new URL("../sidecars/webdriver/server.js", import.meta.url));
@@ -182,7 +183,7 @@ export class SidecarComputerDriver {
 
     async #startProcess() {
         const transportToken = randomBytes(32).toString("base64url");
-        const command = this.#config.sidecarCommand ?? process.execPath;
+        const command = this.#config.sidecarCommand ?? internalNodeExecutable();
         const args = this.#config.sidecarArgs?.length
             ? this.#config.sidecarArgs
             : [BUNDLED_WEBDRIVER_SIDECAR];

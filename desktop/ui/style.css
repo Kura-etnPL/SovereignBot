@@ -1,0 +1,105 @@
+:root {
+  color-scheme: dark;
+  --bg: #0e1116;
+  --panel: #151a22;
+  --border: #232b37;
+  --text: #e8edf4;
+  --text-dim: #93a1b3;
+  --accent: #4da3ff;
+  --ok: #3ecf8e;
+  --warn: #f5c451;
+  --error: #ff6b6b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 15px;
+}
+
+.shell { display: flex; flex-direction: column; height: 100%; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+
+.brand-mark {
+  width: 18px; height: 18px; border-radius: 5px;
+  background: linear-gradient(135deg, var(--accent), #7c5cff);
+}
+
+.status-chips { display: flex; gap: 8px; }
+
+.chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.chip-ok { color: var(--ok); border-color: rgba(62, 207, 142, .35); }
+.chip-error { color: var(--error); border-color: rgba(255, 107, 107, .4); }
+.chip-pending { color: var(--warn); border-color: rgba(245, 196, 81, .35); }
+
+.home {
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 72px 24px 24px;
+}
+
+.home h1 { font-size: 30px; margin: 0 0 10px; letter-spacing: -.02em; }
+
+.subtitle { color: var(--text-dim); margin: 0 0 28px; line-height: 1.5; }
+
+.goal-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.goal-box textarea {
+  resize: vertical;
+  min-height: 84px;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  outline: none;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.goal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+select, button {
+  background: #10151d;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 16px;
+  font: inherit;
+}
+
+button[disabled], select[disabled], textarea[disabled] { opacity: .55; cursor: not-allowed; }
+
+button:not([disabled]):hover { border-color: var(--accent); color: var(--accent); }
+
+.note { color: var(--text-dim); font-size: 13px; }
+.hidden { display: none; }
