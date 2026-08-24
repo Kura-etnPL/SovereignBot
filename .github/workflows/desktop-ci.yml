@@ -82,7 +82,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-release-manifest
-          path: out/release-manifest.json
+          path: desktop/out/release-manifest.json
           if-no-files-found: error
           retention-days: 14
 
