@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { app, dialog } from "electron";
+import { app, dialog, Notification } from "electron";
 import { desktopVersion } from "./lib/desktop-version.js";
 import { installAppProtocolHandler, registerAppSchemePrivileged } from "./protocol.js";
 import { createMainWindow, appOrigin } from "./window.js";
@@ -9,6 +9,8 @@ import { startRuntimeHost } from "./runtime-host.js";
 import { createDesktopServices } from "./services.js";
 import { createFirstRunService } from "./first-run.js";
 import { createGoalController } from "./goal-controller.js";
+import { attachWindowLifecycle } from "./lifecycle.js";
+import { createTrayController } from "./tray.js";
 
 // Squirrel.Windows launches the executable with --squirrel-* events during
 // install/update/uninstall; none of them should boot a runtime or open a window.
@@ -80,6 +82,14 @@ async function main() {
 
     let win;
     let bridge;
+    let quitting = false;
+    const tray = createTrayController({
+        getWindow: () => win,
+        onQuit: () => {
+            quitting = true;
+            app.exit(0);
+        },
+    });
     const dataDir = defaultDataDir();
     const services = createDesktopServices({ dataDir, dialog });
     const firstRun = createFirstRunService({ host, services });
@@ -88,10 +98,26 @@ async function main() {
         services,
         supervisorAgentId: host.plannerAgentId,
         persistPath: join(dataDir, "desktop-state", "goals.json"),
+        onTerminal: (goal) => {
+            if (!services.getSettings().notifications || Notification.isSupported() === false)
+                return;
+            new Notification({
+                title: `SovereignBot goal ${goal.status}`,
+                body: goal.status === "completed" ? goal.textPreview : `${goal.textPreview} — ${goal.error ?? "did not complete"}`,
+                silent: true,
+            }).show();
+        },
     });
 
     const start = async () => {
         win = createMainWindow();
+        attachWindowLifecycle({
+            win,
+            getCloseBehavior: () => services.getSettings().closeBehavior,
+            rememberCloseBehavior: (value) => services.updateSettings({ closeBehavior: value }),
+            tray,
+            isQuitting: () => quitting,
+        });
         bridge = createOperatorBridge(host.runtime);
         bindIpcChannels({
             win,
