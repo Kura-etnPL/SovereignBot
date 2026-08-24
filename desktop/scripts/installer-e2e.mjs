@@ -30,13 +30,16 @@ function findSetupExe() {
 }
 
 function assertReleaseSet() {
-    for (const required of ["RELEASES"]) {
-        if (!existsSync(join(SQUIRREL_DIR, required)))
-            fail(`missing ${required} beside installer`);
-    }
-    const nupkg = readdirSync(SQUIRREL_DIR).filter((name) => name.endsWith(".full.nupkg"));
+    // Initial-install product = Setup.exe embedding exactly one full nupkg. A Squirrel
+    // RELEASES index only matters for delta/auto-update channels, which Desktop v1.1
+    // deliberately does not have; its absence is recorded honestly by the manifest.
+    const names = readdirSync(SQUIRREL_DIR);
+    const setup = names.find((name) => name === "SovereignBot-Setup.exe");
+    if (!setup)
+        fail(`SovereignBot-Setup.exe not found in ${SQUIRREL_DIR}: ${names.join(", ")}`);
+    const nupkg = names.filter((name) => name.endsWith(".full.nupkg"));
     if (nupkg.length !== 1)
-        fail(`expected exactly one .full.nupkg, found: ${nupkg.join(", ") || "none"}`);
+        fail(`expected exactly one .full.nupkg, found: ${names.join(", ")}`);
 }
 
 function runChild(command, args, { timeoutMs, onData }) {

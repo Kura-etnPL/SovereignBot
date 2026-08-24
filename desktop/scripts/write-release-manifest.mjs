@@ -30,7 +30,8 @@ function collectInstallerArtifacts() {
     const nupkg = names.filter((name) => name.endsWith(".full.nupkg"));
     if (nupkg.length !== 1)
         throw new Error(`expected exactly one .full.nupkg, found ${nupkg.length}`);
-    const artifacts = ["SovereignBot-Setup.exe", nupkg[0], "RELEASES"].map((name) => {
+    const artifactNames = ["SovereignBot-Setup.exe", nupkg[0], ...names.filter((name) => name === "RELEASES")];
+    const artifacts = artifactNames.map((name) => {
         const path = join(SQUIRREL_DIR, name);
         return { name, path: `out/make/squirrel-windows/${name}`, bytes: statSync(path).size, sha256: sha256File(path) };
     });
