@@ -11,6 +11,20 @@ import {
     getCurrentFuseWire,
 } from "@electron/fuses";
 
+// flipFuses consumes booleans; getCurrentFuseWire reports ASCII wire codes
+// (DISABLE=48/ENABLE=49/REMOVED=114). Keep the two vocabularies separate.
+const FLIP_V1_BOOLEANS = {
+    [FuseV1Options.RunAsNode]: false,
+    [FuseV1Options.EnableCookieEncryption]: true,
+    [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
+    [FuseV1Options.EnableNodeCliInspectArguments]: false,
+    [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
+    [FuseV1Options.OnlyLoadAppFromAsar]: true,
+    [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: false,
+    [FuseV1Options.GrantFileProtocolExtraPrivileges]: false,
+    [FuseV1Options.WasmTrapHandlers]: false,
+};
+
 const EXPECTED_V1 = new Map([
     [FuseV1Options.RunAsNode, FuseState.DISABLE],
     [FuseV1Options.EnableCookieEncryption, FuseState.ENABLE],
@@ -52,7 +66,7 @@ async function main() {
         // Force every known fuse to be defined explicitly so a newly added fuse in an
         // Electron upgrade cannot silently ship in its inherited/default state.
         strictlyRequireAllFuses: true,
-        ...Object.fromEntries(EXPECTED_V1),
+        ...FLIP_V1_BOOLEANS,
     });
 
     const wire = await getCurrentFuseWire(exePath);
