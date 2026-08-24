@@ -79,7 +79,7 @@ export function parseProposal(rawResult) {
     return { title: boundedText(candidate.title, 120) ?? "execution plan", steps };
 }
 
-export function createGoalController({ runtime, services, supervisorAgentId, persistPath, now = () => new Date().toISOString(), makeId = makeGoalId }) {
+export function createGoalController({ runtime, services, supervisorAgentId, persistPath, onTerminal, now = () => new Date().toISOString(), makeId = makeGoalId }) {
     if (!runtime?.orchestrator)
         throw new Error("goal controller requires a core runtime");
     if (!services?.workspacePath || !services?.defaultWorkspacePath)
@@ -119,6 +119,24 @@ export function createGoalController({ runtime, services, supervisorAgentId, per
         goal.status = status;
         goal.updatedAt = now();
         appendMessage(goal, "status", `goal status: ${status}`);
+    }
+
+    // Fired once per terminal transition so the main process can raise a desktop
+    // notification; listener errors must never disturb the pump.
+    function notifyTerminal(goal) {
+        if (!TERMINAL_STATUSES.has(goal.status) || typeof onTerminal !== "function")
+            return;
+        try {
+            onTerminal({
+                id: goal.id,
+                status: goal.status,
+                textPreview: slice(goal.text, 160),
+                finalAnswer: goal.finalAnswer,
+                error: goal.error,
+            });
+        }
+        catch {
+        }
     }
 
     // One background pump at a time across all goals; queued goals wait their turn.
@@ -214,6 +232,7 @@ export function createGoalController({ runtime, services, supervisorAgentId, per
             setStatus(goal, succeeded ? "completed" : "failed");
             if (!succeeded)
                 goal.error = "one or more delegated steps failed";
+            notifyTerminal(goal);
         }
         catch (error) {
             if (error instanceof PumpCancelled) {
@@ -224,6 +243,7 @@ export function createGoalController({ runtime, services, supervisorAgentId, per
             goal.error = String(error?.message ?? error).slice(0, 500);
             appendMessage(goal, "answer", `Goal failed: ${goal.error}`);
             setStatus(goal, "failed");
+            notifyTerminal(goal);
         }
         finally {
             save();
@@ -289,6 +309,7 @@ export function createGoalController({ runtime, services, supervisorAgentId, per
             appendMessage(goal, "answer", "Goal cancelled by operator.");
             setStatus(goal, "cancelled");
             save();
+            notifyTerminal(goal);
             return this.getGoal(goal.id);
         },
 
