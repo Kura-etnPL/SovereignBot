@@ -49,7 +49,7 @@ function collectInstallerArtifacts() {
         throw new Error("Setup executable not found; run electron-forge make first");
     if (!names.includes("RELEASES"))
         throw new Error("RELEASES index missing beside installer");
-    const nupkg = names.filter((name) => name.endsWith(".full.nupkg"));
+    const nupkg = names.filter((name) => name.endsWith("-full.nupkg"));
     if (nupkg.length !== 1)
         throw new Error(`expected exactly one .full.nupkg, found ${nupkg.length}`);
     const artifactNames = [setup, nupkg[0], "RELEASES"];

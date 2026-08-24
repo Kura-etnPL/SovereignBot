@@ -69,7 +69,7 @@ function assertReleaseSet() {
     const names = readdirSync(SQUIRREL_DIR);
     if (!names.includes("RELEASES"))
         fail(`RELEASES index missing beside installer: ${names.join(", ")}`);
-    const nupkg = names.filter((name) => name.endsWith(".full.nupkg"));
+    const nupkg = names.filter((name) => name.endsWith("-full.nupkg"));
     if (nupkg.length !== 1)
         fail(`expected exactly one .full.nupkg, found: ${names.join(", ")}`);
 }
