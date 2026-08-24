@@ -1,6 +1,6 @@
 {
     "name": "sovereignbot-desktop",
-    "version": "1.1.0-dev",
+    "version": "1.1.0",
     "description": "SovereignBot Windows desktop application: local-first AI coworker runtime with governed computer access.",
     "productName": "SovereignBot",
     "type": "module",
