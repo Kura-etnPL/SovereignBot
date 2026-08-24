@@ -11,13 +11,15 @@ const MANIFEST = {
 };
 
 // Platform-correct expected paths: the resolver joins with node:path, so fixtures must
-// compare against joined forms rather than literal separators.
-const PACKAGED_NODE = join("C:/app/resources", "node.exe");
+// compare against joined forms rather than literal separators. extraResource ships the
+// whole resources/node directory into the packaged app's resources dir.
+const PACKAGED_NODE = join("C:/app/resources", "node", "node.exe");
 const DEV_NODE = join("E:/dev/desktop/resources", "node", "node.exe");
 
 function makeResolver(overrides = {}) {
     return createInternalNodeResolver({
         env: {},
+        platformKey: "win32-x64",
         isPackaged: true,
         resourcesPath: "C:/app/resources",
         desktopRoot: "E:/dev/desktop",
@@ -70,13 +72,6 @@ test("dev mode falls back to system node only when execPath is genuinely Node", 
     assert.throws(() => electronDev(), /internal Node runtime is missing/);
 });
 
-test("unknown platform fails closed", () => {
-    const originalPlatform = process.platform;
-    Object.defineProperty(process, "platform", { value: "sunos", configurable: true });
-    try {
-        assert.throws(() => makeResolver()(), /no pinned internal Node runtime/);
-    }
-    finally {
-        Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
-    }
+test("undeclared platform key fails closed", () => {
+    assert.throws(() => makeResolver({ platformKey: "sunos-x64" })(), /no pinned internal Node runtime/);
 });

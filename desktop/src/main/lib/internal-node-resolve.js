@@ -12,6 +12,7 @@ import { join } from "node:path";
 //   4. otherwise fail closed.
 export function createInternalNodeResolver({
     env,
+    platformKey = `${process.platform}-${process.arch}`,
     isPackaged,
     resourcesPath,
     desktopRoot,
@@ -30,13 +31,13 @@ export function createInternalNodeResolver({
         }
 
         const manifest = readManifest();
-        const platformKey = `${process.platform}-${process.arch}`;
         const entry = manifest?.platforms?.[platformKey];
         if (!entry)
             throw new Error(`no pinned internal Node runtime declared for ${platformKey}`);
 
+        // extraResource copies the whole resources/node directory next to the executable.
         const bundledPath = isPackaged
-            ? join(resourcesPath, entry.file)
+            ? join(resourcesPath, "node", entry.file)
             : join(desktopRoot, "resources", "node", entry.file);
         if (exists(bundledPath)) {
             const actual = sha256File(bundledPath);

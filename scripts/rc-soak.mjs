@@ -22,7 +22,7 @@ for (let round = 1; round <= rounds; round += 1) {
     const startedAt = Date.now();
     const result = spawnSync(
         process.execPath,
-        ["--test", "--test-concurrency=1"],
+        ["--test", "--test-concurrency=1", "tests/*.test.js"],
         {
             stdio: "inherit",
             windowsHide: true,
