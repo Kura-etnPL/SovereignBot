@@ -125,6 +125,31 @@ async function waitForInstallRoot(installRoot) {
     fail(`installed executable never appeared at ${exe}`);
 }
 
+// Squirrel extracts the nupkg incrementally after Setup.exe returns; wait until every
+// required file exists AND the required set's total size has stopped growing so the
+// smoke run never races the tail of the extraction.
+async function waitForInstallComplete(installRoot, requiredFiles) {
+    const deadline = Date.now() + INSTALL_TIMEOUT_MS;
+    let lastTotal = -1;
+    while (Date.now() < deadline) {
+        let total = 0;
+        let allExist = true;
+        for (const file of requiredFiles) {
+            try {
+                total += statSync(file).size;
+            }
+            catch {
+                allExist = false;
+            }
+        }
+        if (allExist && total > 0 && total === lastTotal)
+            return;
+        lastTotal = allExist ? total : -1;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    fail(`installation never completed under ${installRoot} (required: ${requiredFiles.join(", ")})`);
+}
+
 async function main() {
     const installer = findInstallerDir();
     SQUIRREL_DIR = installer.dir;
@@ -139,13 +164,14 @@ async function main() {
         fail(`installer failed: ${setupResult.reason ?? `exit ${setupResult.code}`}`);
 
     const installRoot = join(process.env.LOCALAPPDATA ?? join(tmpdir(), "fallback-localappdata"), "sovereignbot");
-    const installedExe = await waitForInstallRoot(installRoot);
+    const installedExe = join(installRoot, "SovereignBot.exe");
     console.error(`[installer-e2e] installed at ${installRoot}`);
 
-    for (const required of [join(installRoot, "Update.exe"), join(installRoot, "resources", "app.asar")]) {
-        if (!existsSync(required))
-            fail(`expected installed file missing: ${required}`);
-    }
+    await waitForInstallComplete(installRoot, [
+        installedExe,
+        join(installRoot, "Update.exe"),
+        join(installRoot, "resources", "app.asar"),
+    ]);
 
     const smokeDataDir = await mkdtemp(join(tmpdir(), "sb-installer-e2e-"));
     let smokeJson;
