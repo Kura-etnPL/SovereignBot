@@ -4,6 +4,7 @@ import { desktopVersion } from "./lib/desktop-version.js";
 import { installAppProtocolHandler, registerAppSchemePrivileged } from "./protocol.js";
 import { createMainWindow, appOrigin } from "./window.js";
 import { bindIpcChannels } from "./ipc.js";
+import { createOperatorBridge } from "./operator-bridge.js";
 import { startRuntimeHost } from "./runtime-host.js";
 
 // Squirrel.Windows launches the executable with --squirrel-* events during
@@ -32,7 +33,20 @@ else {
     registerAppSchemePrivileged();
     app.enableSandbox();
     app.setAppUserModelId("com.sovereignbot.desktop");
-    app.whenReady().then(main);
+    app.whenReady().then(() => {
+        main().catch((error) => {
+            const message = String(error?.stack ?? error);
+            if (process.argv.includes("--desktop-smoke")) {
+                process.stdout.write(`${JSON.stringify({ smoke: "failed", checks: {}, error: message })}\n`);
+                app.exit(1);
+                return;
+            }
+            import("electron").then(({ dialog }) => {
+                dialog.showErrorBox("SovereignBot failed to start", message);
+                app.exit(1);
+            });
+        });
+    });
 }
 
 function defaultDataDir() {
@@ -62,8 +76,10 @@ async function main() {
     const uninstallProtocol = installAppProtocolHandler();
 
     let win;
+    let bridge;
     const start = async () => {
         win = createMainWindow();
+        bridge = createOperatorBridge(host.runtime);
         bindIpcChannels({
             win,
             handlers: {
@@ -73,6 +89,7 @@ async function main() {
                     platform: process.platform,
                     locale: app.getLocale(),
                 }),
+                ...bridge.handlers,
             },
         });
         await win.loadURL(appOrigin());

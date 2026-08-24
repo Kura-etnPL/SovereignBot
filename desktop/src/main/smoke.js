@@ -19,6 +19,7 @@ export async function runSmokeMode({ app }) {
         cspPresent: false,
         handshake: false,
         runtimeHost: false,
+        operatorBridge: false,
         cleanQuit: false,
     };
     let dataDir;
@@ -40,6 +41,13 @@ export async function runSmokeMode({ app }) {
             ?? await mkdtemp(join(tmpdir(), "sovereign-desktop-smoke-"));
         host = await startRuntimeHost({ dataDir });
         checks.runtimeHost = true;
+
+        const { createOperatorBridge } = await import("./operator-bridge.js");
+        const bridge = createOperatorBridge(host.runtime);
+        const overview = await bridge.handlers["operator:getOverview"]({});
+        checks.operatorBridge = Array.isArray(overview?.tasks)
+            && Array.isArray(overview?.agents)
+            && Array.isArray(overview?.computers);
 
         const uninstallProtocol = installAppProtocolHandler();
         win = createMainWindow({ smoke: true });
