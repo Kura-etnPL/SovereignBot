@@ -2,6 +2,15 @@
 
 All notable changes to SovereignBot are documented in this file.
 
+## [1.1.0] - Unreleased
+
+SovereignBot 1.1 adds the Windows Desktop product on top of the released local-first core: a double-click Electron application with a sandboxed renderer, bundled internal Node runtime, natural-language goal planning, durable conversations, and a polished desktop operator experience. This entry remains unreleased until the Desktop security review, RC soak, and provenance-bound publication gates pass.
+
+### Added (in development)
+
+- `desktop/` Electron package with hardened BrowserWindow defaults, enumerated IPC, secure custom protocol, and packaged smoke coverage.
+- Internal Node runtime injection (`SOVEREIGNBOT_INTERNAL_NODE`) so governed MCP bridge, WebDriver sidecar, and npm-shim provider launches keep working when `process.execPath` is no longer a Node interpreter.
+
 ## [1.0.0] - 2026-08-24
 
 SovereignBot 1.0 is the first production release of the supported local-first core. The security review and dedicated Windows/Linux RC soak gates passed before this stable version freeze; publication remains bound to the reviewed main-branch CI and release workflow rather than to this changelog entry alone.

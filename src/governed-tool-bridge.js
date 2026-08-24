@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createId } from "./id.js";
+import { internalNodeExecutable } from "./internal-node.js";
 
 const MCP_SERVER_PATH = fileURLToPath(new URL("./governed-mcp-server.js", import.meta.url));
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -106,7 +107,7 @@ export class GovernedToolBridgeManager {
         const capability = token();
         const bootstrapPath = join(this.#dataDir, `${id}.bootstrap.json`);
         const claudeConfigPath = join(this.#dataDir, `${id}.claude-mcp.json`);
-        const command = process.execPath;
+        const command = internalNodeExecutable();
         const args = [MCP_SERVER_PATH, "--bootstrap", bootstrapPath];
         const lease = {
             id,

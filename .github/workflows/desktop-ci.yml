@@ -1,0 +1,68 @@
+name: Desktop CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "src/**"
+      - "sidecars/**"
+      - ".github/workflows/desktop-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  desktop-windows:
+    # Windows is the shipping platform for Desktop v1.1 and is blocking.
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop toolchain (locked)
+        working-directory: desktop
+        run: npm ci
+
+      - name: Syntax check
+        working-directory: desktop
+        run: npm run check
+
+      - name: Unit tests
+        working-directory: desktop
+        run: npm test
+
+      - name: Sync verified Core payload
+        working-directory: desktop
+        run: npm run sync-core
+
+      - name: Fetch pinned internal Node runtime
+        working-directory: desktop
+        run: npm run fetch-node
+
+      - name: Package (win32-x64)
+        working-directory: desktop
+        run: npm run package
+
+      - name: Flip and verify Electron fuses
+        working-directory: desktop
+        run: npm run verify-fuses
+
+      - name: Packaged smoke (window, protocol, IPC, Core host)
+        working-directory: desktop
+        env:
+          SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: ${{ runner.temp }}\sb-smoke-data
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR | Out-Null
+          node scripts/run-packaged-smoke.mjs
+
+      - name: Secret scan over packaged payload
+        working-directory: desktop
+        run: npm run secret-scan

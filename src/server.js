@@ -14,6 +14,7 @@ import {
     publicTaskListView,
     publicTaskView,
 } from "./task-view.js";
+import { VERSION } from "./version.js";
 
 const UI_FILES = {
     "/ui/": { path: fileURLToPath(new URL("../ui/index.html", import.meta.url)), type: "text/html; charset=utf-8" },
@@ -132,7 +133,7 @@ export function startServer(runtime) {
                 return;
             }
 
-            if (request.method === "GET" && url.pathname === "/health") { send(response, 200, { ok: true, name: "SovereignBot", version: "1.0.0" }); return; }
+            if (request.method === "GET" && url.pathname === "/health") { send(response, 200, { ok: true, name: "SovereignBot", version: VERSION }); return; }
             if (request.method === "GET" && url.pathname === "/agents") { send(response, 200, publicAgentListView(runtime.orchestrator.listAgents())); return; }
             if (request.method === "GET" && url.pathname === "/tasks") { send(response, 200, publicTaskListView(await runtime.orchestrator.listTasks())); return; }
             if (request.method === "POST" && url.pathname === "/tasks") { send(response, 201, await publicRuntimeTask(runtime, await runtime.orchestrator.submit(publicSubmissionSpec(await readBody(request))))); return; }

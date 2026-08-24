@@ -1,0 +1,15 @@
+{
+  "runtime": "node",
+  "version": "v22.23.2",
+  "pinnedAt": "2026-08-24",
+  "source": "https://nodejs.org/dist/v22.23.2/",
+  "license": "MIT (see https://nodejs.org/dist/v22.23.2/LICENSE)",
+  "note": "Bundled interpreter for internal JS child processes (governed MCP bridge, WebDriver sidecar, npm-shim provider launchers). The binary is downloaded by scripts/fetch-node.mjs from the pinned official URL and verified against this committed manifest before use; updates require a reviewed PR that changes version + hash together.",
+  "platforms": {
+    "win32-x64": {
+      "file": "node.exe",
+      "url": "https://nodejs.org/dist/v22.23.2/win-x64/node.exe",
+      "sha256": "0d0f5e39f9f3d9587bc19f73eab3c2c9c4903fd02d6dbf9c853dd81b3d95fad4"
+    }
+  }
+}
