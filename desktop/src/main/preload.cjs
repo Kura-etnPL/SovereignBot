@@ -21,6 +21,13 @@ contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
         get: invoke("settings:get"),
         update: invoke("settings:update"),
     }),
+    goals: Object.freeze({
+        submit: invoke("goal:submit"),
+        list: invoke("goal:list"),
+        getStatus: invoke("goal:getStatus"),
+        getConversation: invoke("goal:getConversation"),
+        cancel: invoke("goal:cancel"),
+    }),
     operator: Object.freeze({
         getOverview: invoke("operator:getOverview"),
         getWorkers: invoke("operator:getWorkers"),

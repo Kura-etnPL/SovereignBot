@@ -8,6 +8,7 @@ import { createOperatorBridge } from "./operator-bridge.js";
 import { startRuntimeHost } from "./runtime-host.js";
 import { createDesktopServices } from "./services.js";
 import { createFirstRunService } from "./first-run.js";
+import { createGoalController } from "./goal-controller.js";
 
 // Squirrel.Windows launches the executable with --squirrel-* events during
 // install/update/uninstall; none of them should boot a runtime or open a window.
@@ -82,6 +83,12 @@ async function main() {
     const dataDir = defaultDataDir();
     const services = createDesktopServices({ dataDir, dialog });
     const firstRun = createFirstRunService({ host, services });
+    const goals = createGoalController({
+        runtime: host.runtime,
+        services,
+        supervisorAgentId: host.plannerAgentId,
+        persistPath: join(dataDir, "desktop-state", "goals.json"),
+    });
 
     const start = async () => {
         win = createMainWindow();
@@ -105,6 +112,11 @@ async function main() {
                 "workspace:remove": ({ id }) => ({ removed: services.removeWorkspace(id) }),
                 "settings:get": () => services.getSettings(),
                 "settings:update": (patch) => services.updateSettings(patch),
+                "goal:submit": ({ text, workspaceId }) => goals.submitGoal({ text, workspaceId }),
+                "goal:list": () => goals.listGoals(),
+                "goal:getStatus": ({ goalId }) => goals.getGoal(goalId),
+                "goal:getConversation": ({ goalId }) => goals.getConversation(goalId),
+                "goal:cancel": async ({ goalId }) => await goals.cancel(goalId),
             },
         });
         await win.loadURL(appOrigin());
