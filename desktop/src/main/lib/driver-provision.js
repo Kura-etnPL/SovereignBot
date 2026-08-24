@@ -103,7 +103,12 @@ export function findDriverDownload({ browserVersion }, metadata) {
     const target = downloads.find((download) => download.platform === "win64");
     if (!target?.url)
         throw new Error(`no win64 chromedriver download for ${best.version}`);
-    return { driverVersion: best.version, url: target.url };
+    // The version string is remote-controlled metadata and is interpolated into local
+    // filesystem paths by the provisioning step; only a strict 4-part version survives.
+    const driverVersion = String(best.version);
+    if (!/^\d+(?:\.\d+){3}$/.test(driverVersion))
+        throw new Error(`refusing unsafe driver version from metadata: ${JSON.stringify(driverVersion.slice(0, 40))}`);
+    return { driverVersion, url: target.url };
 }
 
 export async function provisionDriver({ browser, browserVersion, fetcher, writeArchive }) {

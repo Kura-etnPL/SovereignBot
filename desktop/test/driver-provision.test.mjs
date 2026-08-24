@@ -56,6 +56,18 @@ test("findDriverDownload matches the newest known-good build of the browser's ma
         () => findDriverDownload({ browserVersion: "140.0.1.1" }, { versions: metadata.versions.slice(1, 2) }),
         /no win64 chromedriver/,
     );
+
+    // A metadata entry whose version string would escape local path construction is
+    // refused even when its major prefix matches the browser.
+    const hostile = {
+        versions: [
+            {
+                version: "140.0.0.1\\..\\..\\startup",
+                downloads: { chromedriver: [{ platform: "win64", url: "https://storage.googleapis.com/x/win.zip" }] },
+            },
+        ],
+    };
+    assert.throws(() => findDriverDownload({ browserVersion: "140.0.5000.1" }, hostile), /refusing unsafe driver version/);
 });
 
 function fetcherFor({ metadataBody = JSON.stringify({ versions: [] }), driverArchive, sha256Text, statusByUrl = {} }) {

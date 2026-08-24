@@ -1,0 +1,62 @@
+name: Desktop Soak
+
+# Windows Desktop soak gate: rebuild once, then drive the packaged application through
+# three independent smoke rounds with fresh data dirs. All rounds must pass; this is the
+# flakiness/cleanliness gate for the shipping pipeline before an RC or release tag.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  soak-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install desktop toolchain (locked)
+        working-directory: desktop
+        run: npm ci
+
+      - name: Sync verified Core payload
+        working-directory: desktop
+        run: npm run sync-core
+
+      - name: Fetch pinned internal Node runtime
+        working-directory: desktop
+        run: npm run fetch-node
+
+      - name: Make Squirrel installer (win32-x64)
+        working-directory: desktop
+        run: npm run make
+
+      - name: Soak round 1 (packaged smoke, fresh data dir)
+        working-directory: desktop
+        env:
+          SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: ${{ runner.temp }}\sb-soak-r1
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR | Out-Null
+          node scripts/run-packaged-smoke.mjs
+
+      - name: Soak round 2 (packaged smoke, fresh data dir)
+        working-directory: desktop
+        env:
+          SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: ${{ runner.temp }}\sb-soak-r2
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR | Out-Null
+          node scripts/run-packaged-smoke.mjs
+
+      - name: Soak round 3 (installer E2E on clean install root)
+        working-directory: desktop
+        shell: pwsh
+        run: node scripts/installer-e2e.mjs
