@@ -1,4 +1,4 @@
-import { createOperatorFacade } from "../../../vendor/core/src/operator-facade.js";
+import { createOperatorFacade } from "../../vendor/core/src/operator-facade.js";
 
 // Desktop operator bridge: binds the vendored Core OperatorFacade (fixed desktop principal)
 // to enumerated IPC channels. Handlers receive already-validated payloads from ipc.js and
