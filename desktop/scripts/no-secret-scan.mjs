@@ -1,7 +1,7 @@
 // Blocking secret scan over the packaged Desktop payload (and the source tree as a fallback).
 // Rejects canary/credential-shaped markers in file bytes and suspicious filenames in the
 // packaged output. This is a tripwire, not a proof; runtime redaction is covered by tests.
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 
