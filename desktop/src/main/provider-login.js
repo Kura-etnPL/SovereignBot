@@ -46,7 +46,7 @@ export async function openProviderLogin({ resolver, label }) {
     if (typeof resolver !== "function")
         throw new Error(`provider ${label} has no launch resolver`);
     const launch = resolver();
-    const helpText = await collectHelp(launch.command);
+    const helpText = await collectHelp(launch.command, launch.prefixArgs ?? []);
     const candidates = findLoginCandidates(helpText).filter((candidate) => candidate !== label);
     // Fall back to opening the CLI itself when no dedicated login subcommand is
     // documented; the interactive entry point still lets the user sign in.

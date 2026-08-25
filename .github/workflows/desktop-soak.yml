@@ -38,25 +38,36 @@ jobs:
         working-directory: desktop
         run: npm run make
 
-      - name: Soak round 1 (packaged smoke, fresh data dir)
+      - name: Soak round 1 (packaged smoke + fake-provider goal E2E, fresh data dir)
         working-directory: desktop
         env:
           SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: ${{ runner.temp }}\sb-soak-r1
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-transcript-r1.jsonl
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path $env:SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR | Out-Null
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
           node scripts/run-packaged-smoke.mjs
 
-      - name: Soak round 2 (packaged smoke, fresh data dir)
+      - name: Soak round 2 (packaged smoke + fake-provider goal E2E, fresh data dir)
         working-directory: desktop
         env:
           SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: ${{ runner.temp }}\sb-soak-r2
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-transcript-r2.jsonl
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path $env:SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR | Out-Null
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
           node scripts/run-packaged-smoke.mjs
 
-      - name: Soak round 3 (installer E2E on clean install root)
+      - name: Soak round 3 (installer E2E + fake-provider goal on clean install root)
         working-directory: desktop
+        env:
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-transcript-r3.jsonl
         shell: pwsh
-        run: node scripts/installer-e2e.mjs
+        run: |
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
+          node scripts/installer-e2e.mjs

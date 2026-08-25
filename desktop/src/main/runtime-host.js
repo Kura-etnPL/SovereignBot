@@ -87,9 +87,24 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
     };
 
     async function detectProviders() {
+        // Fake-provider shims (CI/installer E2E only) go through the SAME passive
+        // probing path as real CLIs, so the E2E exercises the production detection
+        // pipeline end-to-end rather than a parallel fake branch.
         const [codex, claude] = await Promise.all([
-            describeProvider(() => coreModules.resolveCodexLaunch({}), "codex", ["--version"]),
-            describeProvider(() => coreModules.resolveClaudeCodeLaunch({}), "claude-code", ["--version"]),
+            describeProvider(
+                () => (fakeLaunchers.codex
+                    ? { command: fakeLaunchers.codex.command, prefixArgs: fakeLaunchers.codex.prefixArgs, source: "fake-shim" }
+                    : coreModules.resolveCodexLaunch({})),
+                "codex",
+                ["--version"],
+            ),
+            describeProvider(
+                () => (fakeLaunchers.claude
+                    ? { command: fakeLaunchers.claude.command, prefixArgs: fakeLaunchers.claude.prefixArgs, source: "fake-shim" }
+                    : coreModules.resolveClaudeCodeLaunch({})),
+                "claude-code",
+                ["--version"],
+            ),
         ]);
         return { codex, claude };
     }

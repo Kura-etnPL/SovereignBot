@@ -470,7 +470,6 @@ export function createGoalController({
                 const caps = task.requiredCapabilities ?? [];
                 return !caps.includes("planning") && !caps.includes("review") && !caps.includes("synthesis");
             });
-            const aggregate = await orchestrator.aggregatePlan(plan.id, supervisorAgentId);
             const allSucceeded = workTasks.every((task) => task.status === "completed");
 
             setStatus(goal, "synthesizing");
@@ -497,7 +496,7 @@ export function createGoalController({
                             resultText: typeof task.result?.text === "string" ? task.result.text.slice(0, 2000) : undefined,
                             ...(task.review?.latest ? { reviewDecision: task.review.latest.decision, reviewNotes: task.review.latest.notes } : {}),
                         })),
-                        outcome: aggregate.result?.outcome,
+                        outcome: allSucceeded ? "success" : "partial_failure",
                     },
                 }, context, supervisorAgentId);
                 goal.taskIds.push(synthesisTask.id);
@@ -511,6 +510,10 @@ export function createGoalController({
                 if (!allSucceeded)
                     finalAnswer += `\n\n(Note: some delegated steps did not complete successfully — see statuses above.)`;
             }
+
+            // The durable plan record closes only after every delegated work — including
+            // the synthesis pass itself — has finished.
+            await orchestrator.aggregatePlan(plan.id, supervisorAgentId);
 
             goal.finalAnswer = finalAnswer;
             appendMessage(goal, "answer", goal.finalAnswer);
