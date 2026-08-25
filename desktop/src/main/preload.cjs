@@ -1,7 +1,7 @@
 // Sandboxed preload. Runs with nodeIntegration disabled and sandbox enabled, so it may only
 // use the electron CJS shim (contextBridge/ipcRenderer) — never fs, child_process, or Node
-// globals. The exposed surface stays enumerated; there is no generic invoke(channel, payload)
-// escape hatch, and no channel accepts caller-chosen authority fields.
+// globals. The exposed surface stays enumerated; there is no generic invoke(channel,payload)
+// escape hatch.
 const { contextBridge, ipcRenderer } = require("electron");
 
 const invoke = (channel) => (payload) => ipcRenderer.invoke(channel, payload);
@@ -20,6 +20,21 @@ contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
     settings: Object.freeze({
         get: invoke("settings:get"),
         update: invoke("settings:update"),
+    }),
+    coworkers: Object.freeze({
+        list: invoke("coworker:list"),
+        get: invoke("coworker:get"),
+        create: invoke("coworker:create"),
+        update: invoke("coworker:update"),
+        archive: invoke("coworker:archive"),
+        restore: invoke("coworker:restore"),
+    }),
+    conversations: Object.freeze({
+        list: invoke("conversation:list"),
+        get: invoke("conversation:get"),
+        createDirect: invoke("conversation:createDirect"),
+        createTeam: invoke("conversation:createTeam"),
+        send: invoke("conversation:send"),
     }),
     goals: Object.freeze({
         submit: invoke("goal:submit"),

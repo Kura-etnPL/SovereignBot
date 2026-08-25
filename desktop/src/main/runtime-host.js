@@ -14,9 +14,6 @@ const VENDOR_MANIFEST_PATH = join(VENDOR_ROOT, "core-manifest.json");
 
 const ACTIVE_TASK_STATUSES = new Set(["queued", "accepted", "running", "awaiting_review", "changes_requested"]);
 
-// The vendored Core payload is the reviewed Core source tree copied at build time by
-// scripts/sync-core.mjs and recorded file-by-file with SHA-256s in vendor/core/core-manifest.json.
-// Startup re-verifies every file and refuses to run a stale or tampered copy.
 function readVendorManifest() {
     return JSON.parse(readFileSync(VENDOR_MANIFEST_PATH, "utf8"));
 }
@@ -55,41 +52,33 @@ async function loadCore() {
     return cachedCore;
 }
 
-// Provider launch resolvers are reused from the vendored Core so Desktop discovery and
-// actual harness launches can never disagree about where a provider lives.
 export async function loadCoreResolvers() {
     const codex = await import(pathToFileURL(join(VENDOR_ROOT, "src", "codex-harness.js")).href);
     const claude = await import(pathToFileURL(join(VENDOR_ROOT, "src", "claude-code-harness.js")).href);
     return { resolveCodexLaunch: codex.resolveCodexLaunch, resolveClaudeCodeLaunch: claude.resolveClaudeCodeLaunch };
 }
 
-// Desktop RuntimeHost (v1.1.1): the runtime is built FROM the production provider roster —
-// never "echo first, providers attached later". Startup order:
-//   verify vendored Core -> pin internal Node -> load resolvers -> passive provider
-//   detection -> settings -> roster build -> createRuntime(real roster).
-// Echo agents exist only in explicit Demo Mode; normal mode with no ready provider starts
-// with an empty roster and refuses goal submission honestly.
-export async function startRuntimeHost({ dataDir, getSettings }) {
+// V3 RuntimeHost is built from three trusted inputs: provider discovery, validated Desktop
+// settings, and the persistent Coworker Registry. Coworkers are converted into dedicated
+// provider-backed runtime agents only here; renderer messages and model output never mint
+// runtime identities or capabilities.
+export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = () => [] }) {
     if (typeof getSettings !== "function")
         throw new Error("runtime host requires a settings reader");
+    if (typeof getCoworkers !== "function")
+        throw new Error("runtime host requires a coworker reader");
     verifyVendorCore();
     const internalNode = prepareInternalNode();
 
     const { createRuntime } = await loadCore();
     const coreModules = await loadCoreResolvers();
 
-    // Test/E2E-only fake provider shims are declared exclusively through environment
-    // variables. A half-configured pair throws here instead of silently mixing fakes
-    // into production runs.
     const fakeLaunchers = {
         codex: resolveFakeProviderLaunch({ ...process.env, provider: "codex" }),
         claude: resolveFakeProviderLaunch({ ...process.env, provider: "claude" }),
     };
 
     async function detectProviders() {
-        // Fake-provider shims (CI/installer E2E only) go through the SAME passive
-        // probing path as real CLIs, so the E2E exercises the production detection
-        // pipeline end-to-end rather than a parallel fake branch.
         const [codex, claude] = await Promise.all([
             describeProvider(
                 () => (fakeLaunchers.codex
@@ -109,10 +98,6 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
         return { codex, claude };
     }
 
-    // A provisioned managed chromedriver becomes the production runtime's computer
-    // driver configuration; the worker identity only gains governed browser tooling
-    // when this returns a real executable (BLOCKER: provisioned drivers must actually
-    // reach the runtime instead of decorating the Control Center).
     function computerRuntimeConfig() {
         const record = loadJsonState(join(dataDir, "desktop-state", "drivers.json"), null);
         const exe = record?.cacheDirRelative && record?.exe
@@ -133,11 +118,21 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
         };
     }
 
+    function coworkerSnapshot() {
+        const value = getCoworkers();
+        if (Array.isArray(value))
+            return structuredClone(value);
+        if (Array.isArray(value?.coworkers))
+            return structuredClone(value.coworkers);
+        throw new Error("coworker reader must return an array or {coworkers}");
+    }
+
     function summarizeRoster(roster, discovery) {
         return {
             mode: roster.mode,
             ready: roster.ready,
             roles: { ...roster.roles },
+            coworkerBindings: structuredClone(roster.coworkerBindings ?? {}),
             agents: roster.agents.map((agent) => ({
                 id: agent.id,
                 name: agent.name,
@@ -167,8 +162,6 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
     let roster;
     let summary;
     let computerPath;
-    // Rebuilds are serialized: overlapping refresh calls must never both pass the idle
-    // checks and close each other's freshly built runtime.
     let refreshChain = Promise.resolve();
 
     async function build(initial) {
@@ -180,6 +173,7 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
             settings,
             fakeLaunchers,
             computerAvailable: Boolean(computer.path),
+            coworkers: coworkerSnapshot(),
         });
         const nextRuntime = await createRuntime({
             dataDir,
@@ -207,17 +201,21 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
 
     async function refreshProvidersOnce({ isBusy } = {}) {
         const nextDiscovery = await detectProviders();
+        const computer = computerRuntimeConfig();
         const nextRoster = buildProviderRoster({
             discovery: nextDiscovery,
             settings: getSettings(),
             fakeLaunchers,
+            computerAvailable: Boolean(computer.path),
+            coworkers: coworkerSnapshot(),
         });
         const sameShape =
             nextRoster.mode === roster.mode
             && JSON.stringify(nextRoster.roles) === JSON.stringify(roster.roles)
-            && JSON.stringify(nextRoster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind]))
-                === JSON.stringify(roster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind]))
-            && (computerRuntimeConfig().path ?? "") === (computerPath ?? "");
+            && JSON.stringify(nextRoster.coworkerBindings ?? {}) === JSON.stringify(roster.coworkerBindings ?? {})
+            && JSON.stringify(nextRoster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind, agent.governedTools ?? []]))
+                === JSON.stringify(roster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind, agent.governedTools ?? []]))
+            && (computer.path ?? "") === (computerPath ?? "");
         if (sameShape) {
             discovery = nextDiscovery;
             summary = summarizeRoster(roster, discovery);
@@ -228,8 +226,6 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
         if (await hasActiveWorkNow())
             return { applied: false, reason: "active-work" };
 
-        // Build the replacement first (so a failed build never leaves us without a
-        // runtime), then retire the old one. build() swaps the closure refs.
         const previous = runtime;
         await build(false);
         await previous.close();
@@ -237,7 +233,9 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
     }
 
     return {
-        runtime,
+        get runtime() {
+            return runtime;
+        },
         get internalNodeSource() {
             return internalNode.source;
         },
@@ -252,14 +250,9 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
         rosterSummary() {
             return structuredClone(summary);
         },
-        // True while any Core task is queued/running/awaiting review — historical terminal
-        // tasks do not block a roster rebuild.
         async hasActiveWork() {
             return hasActiveWorkNow();
         },
-        // Explicit refresh path for the Control Center button / post-login re-detection.
-        // Never hot-swaps identities under active work; returns an honest deferral reason.
-        // Calls are serialized so concurrent invocations cannot race the rebuild.
         refreshProviders({ isBusy } = {}) {
             const run = refreshChain.then(() => refreshProvidersOnce({ isBusy }));
             refreshChain = run.catch(() => {});

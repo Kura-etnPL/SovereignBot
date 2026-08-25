@@ -1,12 +1,9 @@
-// Production provider roster builder (Desktop v1.1.1 BLOCKER A/D).
+// Production provider roster builder.
 //
-// The roster is the ONLY path from passive provider discovery to real runtime agents.
-// It is constructed exclusively in the main process from: Core resolver-backed discovery
-// results, validated desktop settings, and (test/E2E only) env-declared fake-provider
-// launchers. Renderers and planner output can never mint agents, commands, or cwds.
-//
-// Normal production mode contains zero Echo agents. Echo exists only in explicit Demo
-// Mode (settings.demoMode) and in unit fixtures.
+// V3 extends the reviewed v1.1.1 role roster with persistent Coworker identities. Internal
+// planner/worker/reviewer/synthesizer agents remain orchestration machinery, while every
+// active Coworker gets a dedicated provider-backed runtime identity and a unique trusted
+// scheduling capability. Coworker product state still carries no execution authority.
 
 export const PROVIDER_ROLES = Object.freeze(["planner", "worker", "reviewer", "synthesizer"]);
 const PROVIDERS = Object.freeze(["codex", "claude"]);
@@ -94,7 +91,7 @@ function agentName(provider, role) {
     return `${providerLabel} ${roleLabel}`;
 }
 
-function harnessConfig(provider, role, fakeLaunchers) {
+function harnessConfig(provider, _role, fakeLaunchers) {
     const fake = fakeLaunchers?.[provider];
     if (fake)
         return { kind: provider === "codex" ? "codex" : "claude-code", command: fake.command, prefixArgs: [...fake.prefixArgs] };
@@ -104,14 +101,77 @@ function harnessConfig(provider, role, fakeLaunchers) {
     return provider === "codex" ? { kind: "codex", skipGitRepoCheck: true } : { kind: "claude-code" };
 }
 
-export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false } = {}) {
+export function coworkerAgentId(coworkerId) {
+    if (typeof coworkerId !== "string" || !/^coworker_[a-f0-9]{16}$/i.test(coworkerId))
+        throw new Error(`invalid coworker id for runtime binding: ${coworkerId}`);
+    return `coworker-agent-${coworkerId.slice("coworker_".length).toLowerCase()}`;
+}
+
+export function coworkerCapability(coworkerId) {
+    coworkerAgentId(coworkerId);
+    return `coworker:${coworkerId}`;
+}
+
+function chooseCoworkerProvider(coworker, usableProviders) {
+    const preference = coworker?.providerPreference ?? "auto";
+    if (preference === "codex")
+        return usableProviders.codex ? "codex" : undefined;
+    if (preference === "claude")
+        return usableProviders.claude ? "claude" : undefined;
+    // Auto favors Claude for conversational/coordination work when both are present;
+    // Coding Lead's default blueprint explicitly prefers Codex. This is a trusted product
+    // default, not a model-selected provider decision.
+    if (usableProviders.claude)
+        return "claude";
+    if (usableProviders.codex)
+        return "codex";
+    return undefined;
+}
+
+function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
+    const agents = [];
+    const bindings = {};
+    for (const coworker of Array.isArray(coworkers) ? coworkers : []) {
+        if (!coworker || coworker.state !== "active")
+            continue;
+        const provider = chooseCoworkerProvider(coworker, usableProviders);
+        if (!provider) {
+            bindings[coworker.id] = {
+                ready: false,
+                reason: coworker.providerPreference && coworker.providerPreference !== "auto"
+                    ? `preferred provider ${coworker.providerPreference} is unavailable`
+                    : "no usable provider",
+            };
+            continue;
+        }
+        const id = coworkerAgentId(coworker.id);
+        const agent = {
+            id,
+            name: `${coworker.name} · ${provider === "codex" ? "Codex" : "Claude Code"}`,
+            role: "worker",
+            capabilities: ["general", coworkerCapability(coworker.id)],
+            harness: harnessConfig(provider, "coworker", fakeLaunchers),
+            maxConcurrency: 1,
+        };
+        agents.push(agent);
+        bindings[coworker.id] = {
+            ready: true,
+            agentId: id,
+            provider,
+            harnessKind: agent.harness.kind,
+        };
+    }
+    return { agents, bindings };
+}
+
+export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false, coworkers = [] } = {}) {
     if (!discovery || typeof discovery !== "object")
         throw new Error("provider roster requires discovery results");
 
     // Explicit Demo Mode always wins: it is an operator opt-in to run Echo-only wiring
     // checks, and the UI must never mix silent Echo into a provider roster.
     if (settings?.demoMode === true)
-        return { ...buildDemoRoster(), forcedBySettings: true };
+        return { ...buildDemoRoster(), forcedBySettings: true, coworkerBindings: {} };
 
     const usableProviders = {
         codex: providerUsable(discovery.codex, settings, "codex"),
@@ -124,6 +184,9 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
             providers: usableProviders,
             roles: {},
             agents: [],
+            coworkerBindings: Object.fromEntries((Array.isArray(coworkers) ? coworkers : [])
+                .filter((entry) => entry?.state === "active")
+                .map((entry) => [entry.id, { ready: false, reason: "no usable provider" }])),
         };
     }
 
@@ -139,7 +202,7 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
     const roles = defaultRolesFor(usableProviders);
     for (const role of PROVIDER_ROLES) {
         const wanted = overrides[role];
-        if (typeof wanted === "string" && candidates[wanted])
+        if (typeof wanted === "string" && candidates[wanted]?.role === role)
             roles[role] = wanted;
     }
     // Reviewer independence is structural: an override (or a hand-edited settings file)
@@ -152,7 +215,7 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
             throw new Error("roster has no independent reviewer identity available");
     }
 
-    const agents = PROVIDER_ROLES.map((role) => {
+    const orchestrationAgents = PROVIDER_ROLES.map((role) => {
         const id = roles[role];
         const { provider } = candidates[id];
         return {
@@ -165,14 +228,18 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
     });
 
     // Governed computer access is opt-in by infrastructure, not by model request: the
-    // worker identity gains browser tooling ONLY when a managed driver is provisioned.
-    // The task-bound bridge keeps it scoped to running tasks (Core enforces this).
+    // orchestration worker identity gains browser tooling ONLY when a managed driver is
+    // provisioned. Persistent coworker computer profiles are a separate V3 grant surface.
     if (computerAvailable) {
-        const workerAgent = agents.find((agent) => agent.id === roles.worker);
+        const workerAgent = orchestrationAgents.find((agent) => agent.id === roles.worker);
         if (workerAgent && !workerAgent.capabilities.includes("browser"))
             workerAgent.capabilities.push("browser");
-        workerAgent.governedTools = ["computer"];
+        if (workerAgent)
+            workerAgent.governedTools = ["computer"];
     }
+
+    const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers });
+    const agents = [...orchestrationAgents, ...coworkerRuntime.agents];
 
     return {
         mode: "provider",
@@ -180,6 +247,7 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
         providers: usableProviders,
         roles,
         agents,
+        coworkerBindings: coworkerRuntime.bindings,
     };
 }
 
@@ -205,6 +273,7 @@ export function buildDemoRoster() {
                 harness: { kind: "echo" },
             },
         ],
+        coworkerBindings: {},
     };
 }
 
@@ -231,6 +300,11 @@ export function validateRoleAssignment(roster, { role, agentId }) {
     const agent = roster.agents.find((candidate) => candidate.id === agentId);
     if (!agent)
         throw new Error(`unknown agent id: ${agentId}`);
+    // Role selectors are allowed to choose only the trusted orchestration identity for
+    // that exact role. Persistent coworker agents can never be smuggled into the hidden
+    // planner/worker/reviewer/synthesizer machinery through UI settings.
+    if (!new RegExp(`^(?:codex|claude)-${role}$`).test(agent.id))
+        throw new Error(`${agentId} is not compatible with orchestration role ${role}`);
     if (role === "reviewer") {
         const workerId = roster.roles.worker;
         if (workerId && workerId === agentId)
