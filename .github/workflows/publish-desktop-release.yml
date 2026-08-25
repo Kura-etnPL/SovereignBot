@@ -1,0 +1,285 @@
+name: Publish Desktop Release
+
+# Provenance-bound Desktop publication (v1.1.1 BLOCKER E). Mirrors the reviewed Core
+# design: a READ-ONLY verify job re-runs every gate on the exact candidate and hands off
+# immutable verified artifacts; only the downstream publish job holds contents:write and
+# it never rebuilds anything. A candidate must be current main AND the merge commit of a
+# reviewed PR. The retired tag-triggered single-job workflow is deleted.
+
+on:
+  workflow_run:
+    workflows: ["Desktop CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sovereignbot-desktop-public-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: windows-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      publish: ${{ steps.meta.outputs.publish }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      sha: ${{ steps.meta.outputs.sha }}
+      notes: ${{ steps.meta.outputs.notes }}
+      artifact: ${{ steps.meta.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Identify and lock stable release candidate
+        id: meta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="${{ github.event.workflow_run.head_sha }}"
+          test "$(git rev-parse HEAD)" = "$sha" || {
+            echo "Checked-out commit does not match the completed Desktop CI run" >&2
+            exit 1
+          }
+
+          desktop_version="$(node -p "require('./desktop/package.json').version")"
+          root_version="$(node -p "require('./package.json').version")"
+          core_version="$(node -p "require('./src/version.js').VERSION")"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=$desktop_version" >> "$GITHUB_OUTPUT"
+
+          stable_regex='^[0-9]+\.[0-9]+\.[0-9]+$'
+          if ! [[ "$desktop_version" =~ $stable_regex ]] \
+             || ! [[ "$root_version" =~ $stable_regex ]] \
+             || ! [[ "$core_version" =~ $stable_regex ]]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Development or inconsistent versions (desktop=$desktop_version root=$root_version core=$core_version); publication is intentionally skipped."
+            exit 0
+          fi
+          test "$root_version" = "$desktop_version" || {
+            echo "Root version $root_version does not match desktop version $desktop_version" >&2
+            exit 1
+          }
+          test "$core_version" = "$desktop_version" || {
+            echo "Core version $core_version does not match desktop version $desktop_version" >&2
+            exit 1
+          }
+
+          git fetch --no-tags origin main
+          main_sha="$(git rev-parse origin/main)"
+          test "$sha" = "$main_sha" || {
+            echo "Release candidate is no longer current main HEAD" >&2
+            exit 1
+          }
+
+          merged_pr_count="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/commits/$sha/pulls" \
+            --jq "[.[] | select(.merged_at != null and .base.ref == \"main\" and .merge_commit_sha == \"$sha\")] | length")"
+          test "$merged_pr_count" -ge 1 || {
+            echo "Stable release candidate is not the merge commit of a reviewed pull request into main" >&2
+            exit 1
+          }
+
+          tag="desktop-v$desktop_version"
+          notes="docs/releases/desktop-v$desktop_version.md"
+          artifact="sovereignbot-desktop-release-$desktop_version-$sha"
+          test -s "$notes" || {
+            echo "Reviewed desktop release notes are missing or empty: $notes" >&2
+            exit 1
+          }
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "notes=$notes" >> "$GITHUB_OUTPUT"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+
+      - name: Install desktop toolchain (locked)
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        run: npm ci
+
+      - name: Sync verified Core payload
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        run: npm run sync-core
+
+      - name: Syntax check
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        run: npm run check
+
+      - name: Unit tests
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        run: npm test
+
+      - name: Fetch pinned internal Node runtime
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        run: npm run fetch-node
+
+      - name: Make Squirrel installer (win32-x64)
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        run: npm run make
+
+      - name: Verify Electron fuses on packaged tree
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        run: npm run verify-fuses
+
+      - name: Packaged smoke with fake-provider goal E2E
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        env:
+          SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: ${{ runner.temp }}\sb-rel-verify-smoke
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-transcript-rel-packaged.jsonl
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR | Out-Null
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
+          node scripts/run-packaged-smoke.mjs
+
+      - name: Installer end-to-end with fake-provider goal E2E
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        env:
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-transcript-rel-installed.jsonl
+        shell: pwsh
+        run: |
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
+          node scripts/installer-e2e.mjs
+
+      - name: Write release manifest
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: npm run release-manifest
+
+      - name: Secret scan over packaged payload
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        run: npm run secret-scan
+
+      - name: Build SHA256SUMS and stage verified artifacts
+        if: steps.meta.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path desktop/out/staging | Out-Null
+          $dir = "desktop/out/make/squirrel.windows/x64"
+          if (-not (Test-Path $dir)) { throw "missing installer dir $dir" }
+          Copy-Item "$dir/SovereignBot-* Setup.exe" desktop/out/staging/
+          Copy-Item "$dir/*-full.nupkg" desktop/out/staging/
+          Copy-Item "$dir/RELEASES" desktop/out/staging/
+          Copy-Item desktop/out/release-manifest.json desktop/out/staging/
+          $lines = Get-ChildItem desktop/out/staging -File | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          }
+          $lines | Set-Content -Encoding ascii desktop/out/staging/SHA256SUMS.txt
+          Get-Content desktop/out/staging/SHA256SUMS.txt
+
+      - name: Upload verified release payload
+        if: steps.meta.outputs.publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact }}
+          path: desktop/out/staging/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: verify
+    if: needs.verify.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.verify.outputs.artifact }}
+          path: staging
+
+      - name: Re-verify immutable release inputs
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+          RELEASE_SHA: ${{ needs.verify.outputs.sha }}
+          RELEASE_NOTES: ${{ needs.verify.outputs.notes }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(node -p "require('./desktop/package.json').version")" = "$RELEASE_VERSION"
+          test "$(node -p "require('./package.json').version")" = "$RELEASE_VERSION"
+          test "$(node -p "require('./src/version.js').VERSION")" = "$RELEASE_VERSION"
+          test -s "$RELEASE_NOTES"
+          manifest_version="$(node -p "JSON.parse(require('fs').readFileSync('staging/release-manifest.json','utf8')).version")"
+          test "$manifest_version" = "$RELEASE_VERSION"
+          (cd staging && sha256sum -c SHA256SUMS.txt)
+
+      - name: Create immutable tag and public GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+          RELEASE_SHA: ${{ needs.verify.outputs.sha }}
+          RELEASE_NOTES: ${{ needs.verify.outputs.notes }}
+        run: |
+          set -euo pipefail
+          test "$RELEASE_TAG" = "desktop-v$RELEASE_VERSION"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            git update-ref -d refs/tags/__sovereignbot_desktop_release_check 2>/dev/null || true
+            git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/__sovereignbot_desktop_release_check"
+            existing_sha="$(git rev-list -n 1 refs/tags/__sovereignbot_desktop_release_check)"
+            git update-ref -d refs/tags/__sovereignbot_desktop_release_check
+            test "$existing_sha" = "$RELEASE_SHA" || {
+              echo "Existing tag $RELEASE_TAG points to a different commit; refusing to move it" >&2
+              exit 1
+            }
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$RELEASE_TAG" "$RELEASE_SHA" -m "SovereignBot Desktop $RELEASE_VERSION"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $RELEASE_TAG already exists; refusing to overwrite it" >&2
+            exit 1
+          fi
+
+          gh release create "$RELEASE_TAG" staging/* \
+            --verify-tag \
+            --title "SovereignBot Desktop $RELEASE_VERSION" \
+            --notes-file "$RELEASE_NOTES"
