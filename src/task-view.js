@@ -84,7 +84,9 @@ export function publicTaskView(task, refs = providerContinuityRefs([task])) {
     if (!task || typeof task !== "object" || Array.isArray(task))
         return task;
     const ownContinuityRef = providerContinuityRef(task);
-    const { harnessState: _internalHarnessState, ...visible } = task;
+    // harnessState (provider session continuity) and executionContext (trusted launch
+    // cwd authority) are internal-only; neither may reach public projections.
+    const { harnessState: _internalHarnessState, executionContext: _internalExecutionContext, ...visible } = task;
     return {
         ...visible,
         ...(Object.hasOwn(visible, "result")

@@ -1,9 +1,41 @@
+import { statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { createHarness, harnessTarget } from "./harness.js";
 import { createId } from "./id.js";
 
 const TERMINAL = new Set(["completed", "failed", "blocked", "cancelled"]);
 const ACTIVE_WORK = new Set(["queued", "accepted", "running", "awaiting_review", "changes_requested"]);
 const PROGRESS_STATUSES = new Set(["accepted", "running"]);
+
+// Task-scoped execution context (Desktop BLOCKER C). This field carries real authority —
+// it decides the working directory of provider child processes — so it can never enter
+// through the public submit/delegate specs. It is stamped exclusively by delegateTrusted
+// after strict validation, and public projections strip it (see task-view.js).
+function validateTrustedExecutionContext(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new Error("trusted execution context must be an object");
+    const keys = Object.keys(value).sort();
+    if (keys.length !== 2 || keys[0] !== "cwd" || keys[1] !== "workspaceId")
+        throw new Error("trusted execution context accepts exactly workspaceId and cwd");
+    const workspaceId = value.workspaceId;
+    if (typeof workspaceId !== "string" || !/^[A-Za-z0-9][\w:-]{0,63}$/.test(workspaceId))
+        throw new Error("trusted execution context workspaceId must be an identifier");
+    const cwd = value.cwd;
+    if (typeof cwd !== "string" || !cwd || cwd.includes("\0"))
+        throw new Error("trusted execution context cwd must be a non-empty path without NUL bytes");
+    if (!isAbsolute(cwd) || /(^|[\\/])\.{1,2}(?:[\\/]|$)/.test(cwd))
+        throw new Error("trusted execution context cwd must be an absolute canonical path");
+    let stats;
+    try {
+        stats = statSync(cwd);
+    }
+    catch {
+        throw new Error(`trusted execution context cwd must exist: ${cwd}`);
+    }
+    if (!stats.isDirectory())
+        throw new Error(`trusted execution context cwd must be a directory: ${cwd}`);
+    return { workspaceId, cwd };
+}
 
 function normalizeReview(review) {
     if (!review?.required)
@@ -60,16 +92,20 @@ export class Orchestrator {
                 throw new Error(`dependency task not found: ${dependencyId}`);
         }
 
+        // Execution context carries launch authority and is only ever stamped by
+        // delegateTrusted; any value arriving through a public spec is dropped here.
+        const { executionContext: _smuggled, ...publicSpec } = spec;
+
         const now = new Date().toISOString();
         const task = {
-            ...spec,
+            ...publicSpec,
             id: createId("task"),
-            kind: spec.kind ?? "work",
+            kind: publicSpec.kind ?? "work",
             status: "queued",
-            attempt: spec.attempt ?? 0,
-            requiredCapabilities: spec.requiredCapabilities ?? [],
-            dependencyIds: spec.dependencyIds ?? [],
-            review: normalizeReview(spec.review),
+            attempt: publicSpec.attempt ?? 0,
+            requiredCapabilities: publicSpec.requiredCapabilities ?? [],
+            dependencyIds: publicSpec.dependencyIds ?? [],
+            review: normalizeReview(publicSpec.review),
             createdAt: now,
             updatedAt: now,
         };
@@ -160,6 +196,30 @@ export class Orchestrator {
             data: { childTaskId: task.id, dependencyIds: task.dependencyIds },
         });
         return task;
+    }
+
+    // INTERNAL-ONLY launch-authority channel for trusted runtime code (Desktop goal
+    // controller). The renderer, HTTP API, and planner proposals have no path here; the
+    // public submit()/delegate() strip executionContext from their specs. The trusted
+    // context is strictly validated and stamped after delegation so provider harnesses
+    // can bind the real child-process cwd to a registry-vetted workspace.
+    async delegateTrusted(parentTaskId, spec, trustedContext, actorAgentId) {
+        const task = await this.delegate(parentTaskId, spec, actorAgentId);
+        const context = validateTrustedExecutionContext(trustedContext);
+        const stamped = await this.patch(task, { executionContext: { ...context } });
+        await this.taskEvents.append({
+            taskId: task.id,
+            type: "task.execution_context_bound",
+            actor: actorAgentId,
+            data: { workspaceId: context.workspaceId },
+        });
+        await this.audit.append({
+            type: "task.execution_context_bound",
+            actor: actorAgentId,
+            subject: task.id,
+            data: { workspaceId: context.workspaceId },
+        });
+        return stamped;
     }
 
     async listTasks() {
@@ -625,6 +685,9 @@ export class Orchestrator {
                 signal: controller.signal,
                 updateHarnessState,
                 reportProgress,
+                executionContext: latest.executionContext
+                    ? { ...latest.executionContext }
+                    : undefined,
             });
             const afterRun = await this.requireTask(task.id);
             if (afterRun.status === "cancelled")
