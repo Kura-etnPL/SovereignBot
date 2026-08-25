@@ -142,10 +142,15 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
         if (typeof wanted === "string" && candidates[wanted])
             roles[role] = wanted;
     }
-
-    // Reviewer independence is structural: it must be a different identity than the worker.
-    if (roles.reviewer === roles.worker)
-        throw new Error("roster reviewer and worker must be distinct identities");
+    // Reviewer independence is structural: an override (or a hand-edited settings file)
+    // that collapses reviewer onto the worker falls back to defaults instead of bricking
+    // startup or weakening the review gate.
+    if (roles.reviewer === roles.worker) {
+        const defaults = defaultRolesFor(usableProviders);
+        roles.reviewer = defaults.reviewer;
+        if (roles.worker === roles.reviewer)
+            throw new Error("roster has no independent reviewer identity available");
+    }
 
     const agents = PROVIDER_ROLES.map((role) => {
         const id = roles[role];

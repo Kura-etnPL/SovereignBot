@@ -426,7 +426,7 @@ export function createGoalController({
                     const dependencyResults = step.dependsOn
                         .map((key) => publicResults.get(key))
                         .filter(Boolean)
-                        .map((record) => ({ stepKey: record.stepKey, status: record.status, text: record.text }));
+                        .map((record) => ({ stepKey: record.stepKey, status: record.status, text: typeof record.text === "string" ? record.text.slice(0, 4000) : undefined }));
                     const task = await orchestrator.delegateTrusted(plan.id, {
                         title: `step ${proposal.steps.indexOf(step) + 1}: ${step.title}`,
                         requiredCapabilities,
@@ -506,7 +506,7 @@ export function createGoalController({
                 const finishedSynth = (await orchestrator.listTasks()).find((task) => task.id === synthesisTask.id);
                 if (finishedSynth?.status !== "completed" || typeof finishedSynth.result?.text !== "string" || !finishedSynth.result.text.trim())
                     throw new Error("synthesis failed; the honest work summary is available in the activity log");
-                finalAnswer = finishedSynth.result.text.trim();
+                finalAnswer = finishedSynth.result.text.trim().slice(0, 20_000);
                 if (!allSucceeded)
                     finalAnswer += `\n\n(Note: some delegated steps did not complete successfully — see statuses above.)`;
             }
