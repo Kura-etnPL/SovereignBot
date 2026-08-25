@@ -1,7 +1,7 @@
 // V3 Coworker OS IPC additions. Kept separate from the stable v1.x schema while the V3
 // product surface is moving quickly, but bound through the same sender-validated IPC layer.
-// Messages/coworker metadata are data only: renderer payloads cannot carry execution
-// authority, provider continuity or secrets.
+// Messages/coworker/artifact metadata are data only: renderer payloads cannot carry
+// execution authority, provider continuity or secrets.
 
 const FORBIDDEN = [
     "actor", "owneragentid", "assignedagentid", "harnessstate", "sessionid", "bearer",
@@ -82,6 +82,12 @@ function exact(value, allowed) {
         if (!allowed.has(key))
             throw new Error(`unexpected request field: ${key}`);
     }
+}
+
+function positiveInteger(value, name, min, max) {
+    if (!Number.isInteger(value) || value < min || value > max)
+        throw new Error(`${name} must be an integer from ${min} to ${max}`);
+    return value;
 }
 
 function coworkerShape(value, { patch = false } = {}) {
@@ -196,6 +202,34 @@ export const V3_IPC_CHANNELS = Object.freeze({
         if (value.clientMessageId !== undefined)
             out.clientMessageId = string(value.clientMessageId, "clientMessageId", 128);
         return out;
+    }),
+    "artifact:list": spec(2048, (payload) => {
+        if (payload === undefined || payload === null)
+            return { limit: 100 };
+        const value = objectPayload(payload);
+        exact(value, new Set(["conversationId", "coworkerId", "limit"]));
+        const out = {};
+        if (value.conversationId !== undefined)
+            out.conversationId = identifier(value.conversationId, "conversationId");
+        if (value.coworkerId !== undefined)
+            out.coworkerId = identifier(value.coworkerId, "coworkerId");
+        out.limit = value.limit === undefined ? 100 : positiveInteger(value.limit, "limit", 1, 500);
+        return out;
+    }),
+    "artifact:get": spec(1024, (payload) => {
+        const value = objectPayload(payload);
+        exact(value, new Set(["artifactId"]));
+        return { artifactId: identifier(value.artifactId, "artifactId") };
+    }),
+    "artifact:preview": spec(1024, (payload) => {
+        const value = objectPayload(payload);
+        exact(value, new Set(["artifactId"]));
+        return { artifactId: identifier(value.artifactId, "artifactId") };
+    }),
+    "artifact:reveal": spec(1024, (payload) => {
+        const value = objectPayload(payload);
+        exact(value, new Set(["artifactId"]));
+        return { artifactId: identifier(value.artifactId, "artifactId") };
     }),
 });
 
