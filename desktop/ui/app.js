@@ -1,590 +1,305 @@
 "use strict";
 
-// Renderer entry point. The renderer is fully sandboxed: no Node, no fs, no child_process.
-// The only privileged surface is window.sovereignbot exposed by the preload through
-// contextBridge, and every call goes to an enumerated IPC channel. All dynamic content
-// reaches the DOM through textContent — never innerHTML — because agent output is data.
-
-const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
-const ROLE_LABELS = { planner: "Planner", worker: "Worker", reviewer: "Reviewer", synthesizer: "Synthesizer" };
 const state = {
-    handshake: undefined,
-    workspaces: { workspaces: [], defaultWorkspaceId: undefined },
-    goals: [],
-    selectedGoalId: undefined,
-    conversationCache: new Map(),
-    pollTimer: undefined,
-    roster: undefined,
+  coworkers: [], conversations: [], activeConversationId: undefined, activeConversation: undefined,
+  handshake: undefined, roster: undefined, poll: undefined, busy: false,
 };
+const $ = (id) => document.getElementById(id);
+const show = (el) => el?.classList.remove("hidden");
+const hide = (el) => el?.classList.add("hidden");
+const cleanError = (error) => String(error?.message ?? error).replace(/^.*Error: /, "").slice(0, 500);
 
-function $(id) {
-    return document.getElementById(id);
+function avatarText(coworker) { return coworker?.avatar || coworker?.name?.slice(0, 1)?.toUpperCase() || "✦"; }
+function coworkerById(id) { return state.coworkers.find((entry) => entry.id === id); }
+function formatTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
+}
+function node(tag, className, text) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+function avatar(coworker, large = false) {
+  const el = node("div", `avatar${large ? " avatar-large" : ""}`, avatarText(coworker));
+  return el;
 }
 
-function show(el) {
-    el.classList.remove("hidden");
+async function loadCoreState() {
+  const [coworkerResult, conversationResult, roster] = await Promise.all([
+    window.sovereignbot.coworkers.list({}),
+    window.sovereignbot.conversations.list({}),
+    window.sovereignbot.providers.getRoster().catch(() => undefined),
+  ]);
+  state.coworkers = coworkerResult?.coworkers ?? [];
+  state.conversations = conversationResult?.conversations ?? [];
+  state.roster = roster;
+  renderSidebar();
+  renderWelcome();
 }
 
-function hide(el) {
-    el.classList.add("hidden");
+function entityButton({ label, detail, icon, active, onClick, conversation = false }) {
+  const button = node("button", `entity-button${active ? " active" : ""}`);
+  button.type = "button";
+  const iconEl = conversation ? node("span", "conversation-dot") : node("div", "avatar", icon);
+  const copy = node("span", "entity-copy");
+  copy.append(node("strong", "", label), node("span", "", detail || ""));
+  button.append(iconEl, copy);
+  button.addEventListener("click", onClick);
+  return button;
 }
 
-function setChip(el, text, kind) {
-    el.textContent = text;
-    el.className = `chip chip-${kind}`;
+function renderSidebar() {
+  const coworkers = $("coworker-list"); coworkers.textContent = "";
+  for (const coworker of state.coworkers.filter((entry) => entry.state !== "archived")) {
+    coworkers.append(entityButton({
+      label: coworker.name,
+      detail: coworker.role,
+      icon: avatarText(coworker),
+      onClick: () => openDirectConversation(coworker.id),
+    }));
+  }
+  const conversations = $("conversation-list"); conversations.textContent = "";
+  for (const conversation of [...state.conversations].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))) {
+    const coworkerNames = (conversation.participants ?? []).filter((id) => id !== "user").map((id) => coworkerById(id)?.name).filter(Boolean);
+    conversations.append(entityButton({
+      label: conversation.title || (conversation.kind === "team" ? "Team" : coworkerNames[0] || "Conversation"),
+      detail: conversation.lastMessage?.textPreview || coworkerNames.join(", "),
+      active: conversation.id === state.activeConversationId,
+      conversation: true,
+      onClick: () => openConversation(conversation.id),
+    }));
+  }
 }
 
-function statusChipKind(status) {
-    if (status === "completed")
-        return "ok";
-    if (status === "failed" || status === "cancelled")
-        return "error";
-    return "pending";
+function renderWelcome() {
+  const grid = $("welcome-coworkers"); grid.textContent = "";
+  for (const coworker of state.coworkers.filter((entry) => entry.state === "active").slice(0, 6)) {
+    const card = node("button", "welcome-card"); card.type = "button";
+    card.append(avatar(coworker), node("strong", "", coworker.name), node("p", "", coworker.role));
+    card.addEventListener("click", () => openDirectConversation(coworker.id));
+    grid.append(card);
+  }
 }
 
-function switchView(name) {
-    for (const view of document.querySelectorAll(".view"))
-        hide(view);
-    show($(`view-${name}`));
-    for (const button of document.querySelectorAll(".nav-btn"))
-        button.classList.remove("active");
-    if (name === "home" || name === "conversation") {
-        $("nav-home").classList.add("active");
-    }
-    else {
-        $("nav-control").classList.add("active");
-    }
+async function openDirectConversation(coworkerId) {
+  try {
+    const summary = await window.sovereignbot.conversations.createDirect({ coworkerId });
+    await loadCoreState();
+    await openConversation(summary.id);
+  } catch (error) { showToast(cleanError(error), true); }
 }
 
-/* ---------------- Home ---------------- */
-
-function renderWorkspaces() {
-    const select = $("workspace-select");
-    select.textContent = "";
-    const list = state.workspaces.workspaces ?? [];
-    if (!list.length) {
-        const option = document.createElement("option");
-        option.value = "";
-        option.textContent = "no workspace registered — add one in Control Center";
-        select.append(option);
-        return;
-    }
-    for (const workspace of list) {
-        const option = document.createElement("option");
-        option.value = workspace.id;
-        option.textContent = `${workspace.path}${workspace.id === state.workspaces.defaultWorkspaceId ? "  (default)" : ""}`;
-        if (workspace.id === state.workspaces.defaultWorkspaceId)
-            option.selected = true;
-        select.append(option);
-    }
+function currentRecipientsWithPending(conversation) {
+  const last = conversation?.messages?.at(-1);
+  if (!last || last.senderId !== "user") return [];
+  return Object.entries(last.delivery ?? {}).filter(([, value]) => value?.status === "pending").map(([id]) => id);
 }
 
-function renderGoals() {
-    const list = $("goals-list");
-    list.textContent = "";
-    const goals = [...state.goals].reverse();
-    hide($("goals-empty"));
-    if (!goals.length)
-        show($("goals-empty"));
-    for (const goal of goals) {
-        const item = document.createElement("li");
-        item.className = "goal-item";
-        const chip = document.createElement("span");
-        setChip(chip, goal.status, statusChipKind(goal.status));
-        const title = document.createElement("button");
-        title.type = "button";
-        title.className = "goal-link";
-        title.textContent = goal.textPreview || "(empty)";
-        title.addEventListener("click", () => openConversation(goal.id));
-        const when = document.createElement("time");
-        when.className = "goal-when";
-        when.textContent = String(goal.updatedAt ?? "").replace("T", " ").slice(0, 19);
-        item.append(chip, title, when);
-        list.append(item);
-    }
+async function openConversation(conversationId) {
+  state.activeConversationId = conversationId;
+  await refreshActiveConversation();
+  hide($("welcome-view")); show($("chat-view")); show($("detail-content")); hide($("detail-empty"));
+  renderSidebar();
+  clearTimeout(state.poll);
+  state.poll = setTimeout(pollConversation, 900);
 }
 
-async function refreshGoals() {
-    try {
-        const result = await window.sovereignbot.goals.list();
-        state.goals = result?.goals ?? [];
-        renderGoals();
-    }
-    catch {
-        // Transient IPC hiccups must not blank the UI; next tick retries.
-    }
+async function pollConversation() {
+  if (!state.activeConversationId) return;
+  try { await refreshActiveConversation(); } catch {}
+  clearTimeout(state.poll);
+  state.poll = setTimeout(pollConversation, currentRecipientsWithPending(state.activeConversation).length ? 700 : 1600);
 }
 
-async function submitGoal(event) {
-    event.preventDefault();
-    const errorEl = $("goal-error");
-    hide(errorEl);
-    const text = $("goal-input").value.trim();
-    if (!text) {
-        errorEl.textContent = "Describe what you want done first.";
-        show(errorEl);
-        return;
-    }
-    const workspaceId = $("workspace-select").value || undefined;
-    try {
-        $("goal-submit").disabled = true;
-        const goal = await window.sovereignbot.goals.submit({ text, workspaceId });
-        $("goal-input").value = "";
-        await refreshGoals();
-        openConversation(goal.id);
-    }
-    catch (error) {
-        errorEl.textContent = String(error?.message ?? error).replace(/^.*Error: /, "");
-        show(errorEl);
-    }
-    finally {
-        $("goal-submit").disabled = false;
-    }
+async function refreshActiveConversation() {
+  if (!state.activeConversationId) return;
+  const conversation = await window.sovereignbot.conversations.get({ conversationId: state.activeConversationId });
+  if (conversation.id !== state.activeConversationId) return;
+  state.activeConversation = conversation;
+  renderConversation(conversation);
 }
 
-/* ---------------- Providers / roster ---------------- */
-
-function renderRoster(roster) {
-    state.roster = roster;
-    const rolesEl = $("roster-roles");
-    rolesEl.textContent = "";
-    for (const [role, label] of Object.entries(ROLE_LABELS)) {
-        const item = document.createElement("li");
-        const name = document.createElement("strong");
-        name.textContent = label;
-        const detail = document.createElement("span");
-        const agent = (roster.agents ?? []).find((candidate) => candidate.id === roster.roles?.[role]);
-        if (agent) {
-            detail.textContent = ` ${agent.name} (${agent.capabilities.join(", ")})`;
-            item.className = "provider provider-ok";
-        }
-        else {
-            detail.textContent = " not assigned";
-            item.className = "provider provider-missing";
-        }
-        item.append(name, detail);
-        rolesEl.append(item);
-    }
-
-    const ready = Boolean(roster.ready);
-    $("demo-banner").classList.toggle("hidden", roster.mode !== "demo");
-    $("goal-gate-hint").classList.toggle("hidden", ready || roster.mode === "demo");
-    $("goal-submit").disabled = !ready && roster.mode !== "demo";
+function renderConversation(conversation) {
+  const participantIds = (conversation.participants ?? []).filter((id) => id !== "user");
+  const participantCoworkers = participantIds.map(coworkerById).filter(Boolean);
+  const primary = participantCoworkers[0];
+  $("chat-title").textContent = conversation.title || primary?.name || "Conversation";
+  $("chat-kind").textContent = conversation.kind;
+  $("chat-avatar").textContent = conversation.kind === "team" ? "◇" : avatarText(primary);
+  $("chat-subtitle").textContent = conversation.kind === "team"
+    ? participantCoworkers.map((entry) => entry.name).join(" · ")
+    : `${primary?.role ?? "Persistent coworker"} · ${primary?.providerPreference ?? "auto"}`;
+  const pending = currentRecipientsWithPending(conversation);
+  $("chat-presence").lastChild.textContent = pending.length ? ` ${pending.length} working` : " ready";
+  $("typing-state").classList.toggle("hidden", pending.length === 0);
+  renderMessages(conversation.messages ?? []);
+  renderDetail(participantCoworkers);
 }
 
-async function refreshProviders() {
-    try {
-        renderRoster(await window.sovereignbot.providers.getRoster());
-    }
-    catch {
-        // Smoke mode or channel hiccup: leave the last known roster on screen.
-    }
+function messageAvatar(senderId) {
+  if (senderId === "user") return undefined;
+  return avatar(coworkerById(senderId));
+}
+function deliveryText(message) {
+  if (message.senderId !== "user") return "";
+  const values = Object.values(message.delivery ?? {});
+  if (!values.length) return "sent";
+  if (values.some((entry) => entry.status === "pending")) return "working…";
+  if (values.some((entry) => entry.status === "failed")) return "attention needed";
+  return "delivered";
+}
+function renderMessages(messages) {
+  const stack = $("messages");
+  const nearBottom = $("message-scroll").scrollHeight - $("message-scroll").scrollTop - $("message-scroll").clientHeight < 120;
+  stack.textContent = "";
+  for (const message of messages) {
+    const row = node("article", `chat-message${message.senderId === "user" ? " user" : ""}`);
+    const av = messageAvatar(message.senderId); if (av) row.append(av);
+    const wrap = node("div", "message-content");
+    const author = node("div", "message-author");
+    author.append(node("strong", "", message.senderId === "user" ? "You" : coworkerById(message.senderId)?.name || "Coworker"), node("time", "", formatTime(message.createdAt)));
+    const bubble = node("div", "bubble", message.text);
+    wrap.append(author, bubble);
+    const delivery = deliveryText(message); if (delivery) wrap.append(node("div", "delivery", delivery));
+    row.append(wrap); stack.append(row);
+  }
+  if (nearBottom) requestAnimationFrame(() => { $("message-scroll").scrollTop = $("message-scroll").scrollHeight; });
 }
 
-function providerActionFeedback(text, isError = false) {
-    const el = $("provider-action-result");
-    el.textContent = text;
-    el.classList.toggle("form-error", isError);
+function renderDetail(coworkers) {
+  const list = $("detail-participants"); list.textContent = "";
+  for (const coworker of coworkers) {
+    const row = node("div", "participant"); row.append(avatar(coworker), node("span", "", coworker.name)); list.append(row);
+  }
+  const workspaceIds = [...new Set(coworkers.flatMap((entry) => entry.workspaceIds ?? []))];
+  $("workspace-summary").textContent = workspaceIds.length ? `${workspaceIds.length} trusted workspace binding${workspaceIds.length > 1 ? "s" : ""}` : "Private coworker workspace";
 }
 
-/* ---------------- Conversation ---------------- */
-
-async function openConversation(goalId) {
-    state.selectedGoalId = goalId;
-    switchView("conversation");
-    await refreshConversation();
+async function sendMessage(event) {
+  event?.preventDefault();
+  if (!state.activeConversationId || state.busy) return;
+  const input = $("composer-input"); const text = input.value.trim(); if (!text) return;
+  state.busy = true; $("send-message").disabled = true; hide($("composer-error"));
+  try {
+    await window.sovereignbot.conversations.send({
+      conversationId: state.activeConversationId,
+      text,
+      clientMessageId: `ui-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    });
+    input.value = "";
+    await Promise.all([refreshActiveConversation(), refreshConversationSummaries()]);
+  } catch (error) {
+    $("composer-error").textContent = cleanError(error); show($("composer-error"));
+  } finally { state.busy = false; $("send-message").disabled = false; input.focus(); }
 }
 
-function renderMessage(message) {
-    const item = document.createElement("li");
-    item.className = `message message-${message.role} message-${message.kind}`;
-    if (message.kind === "status")
-        item.classList.add("muted");
-    const meta = document.createElement("div");
-    meta.className = "message-meta";
-    meta.textContent = `${message.role} · ${message.kind} · ${String(message.at).replace("T", " ").slice(0, 19)}`;
-    const body = document.createElement("div");
-    body.className = "message-body";
-    body.textContent = message.text;
-    item.append(meta, body);
-    return item;
+async function refreshConversationSummaries() {
+  const result = await window.sovereignbot.conversations.list({});
+  state.conversations = result?.conversations ?? [];
+  renderSidebar();
 }
 
-async function refreshConversation() {
-    const goalId = state.selectedGoalId;
-    if (!goalId)
-        return;
-    let goal;
-    let conversation;
-    try {
-        [goal, conversation] = await Promise.all([
-            window.sovereignbot.goals.getStatus({ goalId }),
-            window.sovereignbot.goals.getConversation({ goalId }),
-        ]);
-    }
-    catch {
-        return;
-    }
-    if (state.selectedGoalId !== goalId)
-        return;
-
-    setChip($("conversation-status"), goal.status, statusChipKind(goal.status));
-    $("conversation-demo-badge").classList.toggle("hidden", goal.mode !== "demo");
-    $("conversation-workspace").textContent = goal.workspacePath ?? "";
-    const terminal = TERMINAL_STATUSES.includes(goal.status);
-    if (terminal)
-        hide($("cancel-goal"));
-    else
-        show($("cancel-goal"));
-
-    const messagesEl = $("conversation-messages");
-    const signature = JSON.stringify(conversation.messages);
-    if (state.conversationCache.get(goalId) !== signature) {
-        state.conversationCache.set(goalId, signature);
-        messagesEl.textContent = "";
-        for (const message of conversation.messages)
-            messagesEl.append(renderMessage(message));
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-    }
-
-    clearTimeout(state.pollTimer);
-    if (!terminal && !$("view-conversation").classList.contains("hidden")) {
-        state.pollTimer = setTimeout(refreshConversation, 1000);
-    }
+function openModal(title, contentBuilder) {
+  $("modal-title").textContent = title; const body = $("modal-body"); body.textContent = ""; contentBuilder(body); show($("modal-backdrop"));
+}
+function closeModal() { hide($("modal-backdrop")); $("modal-body").textContent = ""; }
+function modalForm(fields, submitLabel, onSubmit) {
+  const form = node("form", "form-grid");
+  const controls = {};
+  for (const field of fields) {
+    const label = node("label", "", field.label);
+    let input;
+    if (field.type === "textarea") input = node("textarea");
+    else if (field.type === "select") { input = node("select"); for (const option of field.options) { const el = node("option", "", option.label); el.value = option.value; input.append(el); } }
+    else input = node("input");
+    input.name = field.name; if (field.placeholder) input.placeholder = field.placeholder; if (field.required) input.required = true; if (field.maxLength) input.maxLength = field.maxLength;
+    controls[field.name] = input; label.append(input); form.append(label);
+  }
+  const error = node("p", "error-text hidden"); const actions = node("div", "modal-actions");
+  const cancel = node("button", "secondary-action", "Cancel"); cancel.type = "button"; cancel.addEventListener("click", closeModal);
+  const submit = node("button", "send-button", submitLabel); submit.type = "submit"; actions.append(cancel, submit); form.append(error, actions);
+  form.addEventListener("submit", async (event) => { event.preventDefault(); submit.disabled = true; try { await onSubmit(controls); closeModal(); await loadCoreState(); } catch (e) { error.textContent = cleanError(e); show(error); } finally { submit.disabled = false; } });
+  return form;
 }
 
-async function cancelSelectedGoal() {
-    if (!state.selectedGoalId)
-        return;
-    $("cancel-goal").disabled = true;
-    try {
-        await window.sovereignbot.goals.cancel({ goalId: state.selectedGoalId });
-    }
-    finally {
-        $("cancel-goal").disabled = false;
-        await refreshConversation();
-        await refreshGoals();
-    }
+function createCoworkerModal() {
+  openModal("Create coworker", (body) => body.append(modalForm([
+    { name:"name", label:"Name", placeholder:"e.g. Growth Lead", required:true, maxLength:80 },
+    { name:"role", label:"Role", placeholder:"What this coworker owns", required:true, maxLength:120 },
+    { name:"instructions", label:"Working style & instructions", type:"textarea", placeholder:"How should this coworker operate?", maxLength:12000 },
+    { name:"provider", label:"Preferred intelligence", type:"select", options:[{value:"auto",label:"Automatic"},{value:"codex",label:"Codex"},{value:"claude",label:"Claude Code"}] },
+  ], "Create", async (c) => {
+    await window.sovereignbot.coworkers.create({ coworker:{ name:c.name.value, role:c.role.value, instructions:c.instructions.value, providerPreference:c.provider.value } });
+  })));
 }
 
-/* ---------------- Control Center ---------------- */
-
-function renderSettings(settings) {
-    $("setting-theme").value = settings.theme ?? "system";
-    document.body.dataset.theme = settings.theme ?? "system";
-    $("setting-close").value = settings.closeBehavior ?? "ask";
-    $("setting-notifications").checked = settings.notifications !== false;
-    $("setting-demo-mode").checked = settings.demoMode === true;
-    $("provider-codex-enabled").checked = settings.providers?.codex?.enabled !== false;
-    $("provider-claude-enabled").checked = settings.providers?.claude?.enabled !== false;
+function createTeamModal() {
+  const active = state.coworkers.filter((entry) => entry.state === "active");
+  openModal("New team conversation", (body) => {
+    const form = node("form", "form-grid");
+    const titleLabel = node("label", "", "Team name"); const title = node("input"); title.maxLength = 120; title.placeholder = "e.g. Product Team"; titleLabel.append(title); form.append(titleLabel);
+    const peopleLabel = node("label", "", "Coworkers (choose at least two)"); const choices = node("div", "participants");
+    const selected = new Set();
+    for (const coworker of active) {
+      const row = node("label", "participant"); const box = node("input"); box.type = "checkbox"; box.addEventListener("change", () => box.checked ? selected.add(coworker.id) : selected.delete(coworker.id)); row.append(box, avatar(coworker), node("span", "", coworker.name)); choices.append(row);
+    }
+    peopleLabel.append(choices); form.append(peopleLabel);
+    const error = node("p", "error-text hidden"); const actions = node("div", "modal-actions"); const cancel = node("button", "secondary-action", "Cancel"); cancel.type="button"; cancel.addEventListener("click",closeModal); const submit=node("button","send-button","Create team"); submit.type="submit"; actions.append(cancel,submit); form.append(error,actions);
+    form.addEventListener("submit", async (event) => { event.preventDefault(); if (selected.size < 2) { error.textContent="Choose at least two coworkers."; show(error); return; } submit.disabled=true; try { const conv=await window.sovereignbot.conversations.createTeam({ title:title.value.trim() || undefined, coworkerIds:[...selected] }); closeModal(); await loadCoreState(); await openConversation(conv.id); } catch(e){ error.textContent=cleanError(e); show(error); } finally {submit.disabled=false;} });
+    body.append(form);
+  });
 }
 
-function renderRoleOptions(roster) {
-    const agentIds = (roster.agents ?? []).map((agent) => ({ id: agent.id, name: agent.name }));
-    for (const role of Object.keys(ROLE_LABELS)) {
-        const select = $(`role-${role}`);
-        select.textContent = "";
-        const auto = document.createElement("option");
-        auto.value = "";
-        auto.textContent = "Automatic";
-        select.append(auto);
-        for (const agent of agentIds) {
-            const option = document.createElement("option");
-            option.value = agent.id;
-            option.textContent = agent.name;
-            select.append(option);
-        }
-        select.value = roster.roles?.[role] ?? "";
-        if (select.value && !agentIds.some((agent) => agent.id === select.value))
-            select.value = "";
+async function renderControlCenter() {
+  try {
+    const [status, workspaces] = await Promise.all([window.sovereignbot.firstRun.getStatus(), window.sovereignbot.workspaces.list()]);
+    const providerList = $("provider-list"); providerList.textContent = "";
+    for (const [name, provider] of Object.entries(status.providers ?? {})) {
+      const row=node("div","provider-row"); row.append(node("strong","",name === "claude" ? "Claude Code" : "Codex"),node("span","",provider.found ? `${provider.version ?? "detected"} · ${provider.auth?.state ?? "auth unverified"}` : "Not found")); providerList.append(row);
     }
+    const workspaceList=$("workspace-list"); workspaceList.textContent=""; for(const workspace of workspaces.workspaces ?? []) { const row=node("div","workspace-row"); row.append(node("strong","",workspace.path),node("span","",workspace.id===workspaces.defaultWorkspaceId?"Default trusted workspace":"Trusted workspace")); workspaceList.append(row); }
+  } catch (error) { $("provider-feedback").textContent=cleanError(error); }
 }
-
-function renderProviderList(el, providers) {
-    el.textContent = "";
-    for (const [key, provider] of Object.entries(providers ?? {})) {
-        const item = document.createElement("li");
-        const name = document.createElement("strong");
-        name.textContent = key;
-        const detail = document.createElement("span");
-        if (provider.found) {
-            detail.textContent = ` found · ${provider.version ?? "version unknown"} · auth: ${provider.auth?.state ?? "unknown"}`;
-            item.className = "provider provider-ok";
-        }
-        else {
-            detail.textContent = ` not found${provider.reason ? ` (${provider.reason})` : ""}`;
-            item.className = "provider provider-missing";
-        }
-        item.append(name, detail);
-        el.append(item);
-    }
-    if (!el.children.length) {
-        const empty = document.createElement("li");
-        empty.className = "note";
-        empty.textContent = "Nothing detected yet.";
-        el.append(empty);
-    }
-}
-
-async function refreshControlCenter() {
-    try {
-        const [settings, workspaces, firstRun] = await Promise.all([
-            window.sovereignbot.settings.get(),
-            window.sovereignbot.workspaces.list(),
-            window.sovereignbot.firstRun.getStatus().catch(() => undefined),
-        ]);
-        renderSettings(settings);
-        state.workspaces = workspaces;
-        renderWorkspaces();
-    }
-    catch {
-        // Channel not bound (e.g. smoke mode): leave defaults on screen.
-        return;
-    }
-
-    const manager = $("workspace-manager-list");
-    manager.textContent = "";
-    for (const workspace of workspaces.workspaces ?? []) {
-        const item = document.createElement("li");
-        const radio = document.createElement("input");
-        radio.type = "radio";
-        radio.name = "default-workspace";
-        radio.checked = workspace.id === workspaces.defaultWorkspaceId;
-        radio.title = "Make default workspace";
-        radio.addEventListener("change", async () => {
-            await window.sovereignbot.workspaces.setDefault({ id: workspace.id });
-            await refreshControlCenter();
-        });
-        const path = document.createElement("code");
-        path.textContent = workspace.path;
-        const removeBtn = document.createElement("button");
-        removeBtn.type = "button";
-        removeBtn.className = "danger-btn small";
-        removeBtn.textContent = "Remove";
-        removeBtn.addEventListener("click", async () => {
-            await window.sovereignbot.workspaces.remove({ id: workspace.id });
-            await refreshControlCenter();
-        });
-        item.append(radio, path, removeBtn);
-        manager.append(item);
-    }
-    if (!(workspaces.workspaces ?? []).length) {
-        const empty = document.createElement("li");
-        empty.className = "note";
-        empty.textContent = "No workspaces registered. Add a folder to enable goal runs.";
-        manager.append(empty);
-    }
-
-    if (firstRun) {
-        renderProviderList($("providers-list"), firstRun.providers);
-        if (firstRun.roster)
-            renderRoleOptions(firstRun.roster);
-
-        const browsersEl = $("browsers-list");
-        browsersEl.textContent = "";
-        for (const browser of firstRun.browsers ?? []) {
-            const item = document.createElement("li");
-            item.className = "provider provider-ok";
-            const name = document.createElement("strong");
-            name.textContent = browser.browser;
-            const detail = document.createElement("span");
-            detail.textContent = ` ${browser.version}`;
-            item.append(name, detail);
-            browsersEl.append(item);
-        }
-        if (!$("browsers-list").children.length) {
-            const empty = document.createElement("li");
-            empty.className = "note";
-            empty.textContent = "No Chrome-family browser detected on this machine.";
-            browsersEl.append(empty);
-        }
-    }
-}
-
-async function provisionDriver() {
-    const resultEl = $("driver-result");
-    resultEl.textContent = "Downloading…";
-    try {
-        const result = await window.sovereignbot.computer.provisionDriver({});
-        resultEl.textContent = `Installed chromedriver ${result.driverVersion}${result.digestVerified ? " (vendor digest verified)" : " (digest unavailable — recorded unverified)"}`;
-    }
-    catch (error) {
-        resultEl.textContent = `Failed: ${String(error?.message ?? error).replace(/^.*Error: /, "")}`;
-    }
-}
-
-/* ---------------- Activity drawer ---------------- */
 
 async function refreshActivity() {
-    try {
-        const overview = await window.sovereignbot.operator.getOverview();
-        const agents = (overview.agents ?? []).map((agent) =>
-            `${agent.id} [${agent.role}] ${agent.status ?? ""} caps:${(agent.capabilities ?? []).join(",")}`);
-        const computers = (overview.computers ?? []).map((computer) => `${computer.agentId}: ${computer.status ?? ""}`);
-        const tasks = overview.tasks ?? [];
-        const counts = {};
-        for (const task of tasks)
-            counts[task.status] = (counts[task.status] ?? 0) + 1;
-        $("overview-block").textContent =
-            `agents:\n${agents.join("\n") || "-"}\n\ncomputers:\n${computers.join("\n") || "-"}\n\ntasks (${tasks.length}): ${JSON.stringify(counts)}`;
-
-        const audit = await window.sovereignbot.operator.getAudit({ limit: 12 });
-        $("audit-block").textContent = (audit.entries ?? [])
-            .map((entry) => `${entry.at ?? ""} ${entry.type} ${entry.subject ?? ""}`)
-            .reverse()
-            .join("\n") || "(no audit entries)";
-    }
-    catch {
-        $("overview-block").textContent = "overview unavailable";
-        $("audit-block").textContent = "";
-    }
+  try {
+    const [overview,audit]=await Promise.all([window.sovereignbot.operator.getOverview(),window.sovereignbot.operator.getAudit({limit:80})]);
+    $("overview-block").textContent=JSON.stringify({agents:overview.agents?.map((a)=>({name:a.name,id:a.id,status:a.status,kind:a.harnessKind})),tasks:overview.tasks?.slice(-20),computers:overview.computers},null,2);
+    $("audit-block").textContent=JSON.stringify(audit?.records ?? audit,null,2);
+  } catch(error){ $("overview-block").textContent=cleanError(error); }
 }
 
-/* ---------------- Bootstrap ---------------- */
-
-function bindStaticEvents() {
-    $("nav-home").addEventListener("click", () => {
-        switchView("home");
-        refreshGoals();
-    });
-    $("nav-control").addEventListener("click", () => {
-        switchView("control");
-        refreshControlCenter();
-    });
-    $("toggle-drawer").addEventListener("click", () => {
-        const drawer = $("activity-drawer");
-        drawer.classList.toggle("hidden");
-        if (!drawer.classList.contains("hidden"))
-            refreshActivity();
-    });
-    $("close-drawer").addEventListener("click", () => hide($("activity-drawer")));
-    $("goal-form").addEventListener("submit", submitGoal);
-    $("back-to-home").addEventListener("click", () => {
-        clearTimeout(state.pollTimer);
-        switchView("home");
-        refreshGoals();
-    });
-    $("cancel-goal").addEventListener("click", cancelSelectedGoal);
-    $("setting-theme").addEventListener("change", saveSetting("theme", (value) => value));
-    $("setting-close").addEventListener("change", saveSetting("closeBehavior", (value) => value));
-    $("setting-notifications").addEventListener("change", saveSetting("notifications", (_, el) => el.checked));
-    $("setting-demo-mode").addEventListener("change", async (event) => {
-        try {
-            const updated = await window.sovereignbot.settings.update({ demoMode: event.target.checked });
-            renderSettings(updated);
-            await applyProviderRefresh(await window.sovereignbot.providers.refresh());
-        }
-        catch (error) {
-            console.error("demo mode rejected:", error);
-        }
-    });
-    for (const provider of ["codex", "claude"]) {
-        $(`provider-${provider}-enabled`).addEventListener("change", async (event) => {
-            try {
-                const updated = await window.sovereignbot.settings.update({
-                    providers: { [provider]: { enabled: event.target.checked } },
-                });
-                renderSettings(updated);
-                await applyProviderRefresh(await window.sovereignbot.providers.refresh());
-            }
-            catch (error) {
-                console.error("provider toggle rejected:", error);
-            }
-        });
-    }
-    for (const role of Object.keys(ROLE_LABELS)) {
-        $(`role-${role}`).addEventListener("change", async (event) => {
-            const agentId = event.target.value;
-            try {
-                if (!agentId) {
-                    await window.sovereignbot.settings.update({ roles: { [role]: null } });
-                }
-                else {
-                    await window.sovereignbot.providers.setRoleAssignment({ role, agentId });
-                }
-                await applyProviderRefresh(await window.sovereignbot.providers.refresh());
-            }
-            catch (error) {
-                providerActionFeedback(String(error?.message ?? error).replace(/^.*Error: /, ""), true);
-            }
-        });
-    }
-    $("refresh-providers").addEventListener("click", async () => {
-        providerActionFeedback("Refreshing…");
-        try {
-            const result = await window.sovereignbot.providers.refresh();
-            await applyProviderRefresh(result);
-            providerActionFeedback(result.applied
-                ? "Provider roster updated."
-                : result.reason === "active-work"
-                    ? "Changes apply after current work finishes."
-                    : "No roster change detected.");
-        }
-        catch (error) {
-            providerActionFeedback(String(error?.message ?? error).replace(/^.*Error: /, ""), true);
-        }
-    });
-    for (const [buttonId, provider] of [["open-login-codex", "codex"], ["open-login-claude", "claude"]]) {
-        $(buttonId).addEventListener("click", async () => {
-            providerActionFeedback(`Opening ${provider} sign-in window…`);
-            try {
-                const result = await window.sovereignbot.providers.openLogin({ provider });
-                if (!result.login?.launched)
-                    providerActionFeedback(result.login?.reason ?? "Sign-in could not be started.", true);
-                else
-                    providerActionFeedback("Complete the sign-in in the opened window; the roster refreshes automatically.");
-                await applyProviderRefresh(result.refresh ?? {});
-            }
-            catch (error) {
-                providerActionFeedback(String(error?.message ?? error).replace(/^.*Error: /, ""), true);
-            }
-        });
-    }
-    $("add-workspace").addEventListener("click", async () => {
-        await window.sovereignbot.workspaces.addViaDialog({});
-        await refreshControlCenter();
-    });
-    $("provision-driver").addEventListener("click", provisionDriver);
-}
-
-function saveSetting(key, pick) {
-    return async (event) => {
-        try {
-            const updated = await window.sovereignbot.settings.update({ [key]: pick(event.target.value, event.target) });
-            renderSettings(updated);
-        }
-        catch (error) {
-            console.error("setting rejected:", error);
-        }
-    };
-}
-
-async function applyProviderRefresh(result) {
-    if (result?.roster)
-        renderRoster(result.roster);
-    else
-        await refreshProviders();
+function showToast(text, error=false) { $("provider-feedback").textContent=text; $("provider-feedback").style.color=error?"var(--error)":"var(--muted)"; }
+function bindEvents() {
+  $("composer").addEventListener("submit", sendMessage);
+  $("composer-input").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); } });
+  $("refresh-chat").addEventListener("click", () => refreshActiveConversation());
+  $("new-coworker").addEventListener("click", createCoworkerModal);
+  $("new-team").addEventListener("click", createTeamModal);
+  $("new-chat").addEventListener("click", () => { if (state.coworkers[0]) openDirectConversation(state.coworkers[0].id); else createCoworkerModal(); });
+  $("modal-close").addEventListener("click", closeModal); $("modal-backdrop").addEventListener("click", (event) => { if (event.target === $("modal-backdrop")) closeModal(); });
+  $("open-activity").addEventListener("click", async()=>{await refreshActivity();show($("activity-drawer"));}); $("close-activity").addEventListener("click",()=>hide($("activity-drawer")));
+  $("open-control").addEventListener("click",async()=>{await renderControlCenter();show($("control-drawer"));}); $("open-settings").addEventListener("click",async()=>{await renderControlCenter();show($("control-drawer"));}); $("close-control").addEventListener("click",()=>hide($("control-drawer")));
+  $("provider-refresh").addEventListener("click",async()=>{try{await window.sovereignbot.providers.refresh({});await loadCoreState();await renderControlCenter();showToast("Provider roster refreshed.");}catch(e){showToast(cleanError(e),true);}});
+  $("login-codex").addEventListener("click",async()=>{try{await window.sovereignbot.providers.openLogin({provider:"codex"});await renderControlCenter();}catch(e){showToast(cleanError(e),true);}});
+  $("login-claude").addEventListener("click",async()=>{try{await window.sovereignbot.providers.openLogin({provider:"claude"});await renderControlCenter();}catch(e){showToast(cleanError(e),true);}});
+  $("add-workspace").addEventListener("click",async()=>{try{await window.sovereignbot.workspaces.addViaDialog({});await renderControlCenter();}catch(e){showToast(cleanError(e),true);}});
+  $("provision-driver").addEventListener("click",async()=>{const el=$("driver-feedback");el.textContent="Provisioning…";try{const r=await window.sovereignbot.computer.provisionDriver({});el.textContent=`Ready: ${r.driverVersion ?? "managed driver"}`;}catch(e){el.textContent=cleanError(e);}});
+  $("close-detail").addEventListener("click",()=>hide($("detail-panel")));
+  $("computer-action").addEventListener("click",()=>{void refreshActivity();show($("activity-drawer"));});
 }
 
 async function main() {
-    bindStaticEvents();
-
-    let handshake;
-    try {
-        handshake = await window.sovereignbot.handshake();
-    }
-    catch {
-        setChip($("chip-version"), "desktop unavailable", "error");
-        return;
-    }
-    if (!handshake?.ok) {
-        setChip($("chip-version"), "runtime error", "error");
-        return;
-    }
-    state.handshake = handshake;
-    setChip($("chip-version"), `${handshake.version} · ${handshake.platform}`, "ok");
-
-    await Promise.all([refreshGoals(), refreshControlCenter(), refreshProviders()]);
+  bindEvents();
+  state.handshake = await window.sovereignbot.handshake({});
+  $("version-label").textContent = `Desktop ${state.handshake.version}`;
+  await loadCoreState();
 }
 
-main();
+main().catch((error) => {
+  hide($("chat-view")); show($("welcome-view"));
+  $("welcome-view").querySelector("p").textContent = `SovereignBot could not initialize the coworker workspace: ${cleanError(error)}`;
+});
