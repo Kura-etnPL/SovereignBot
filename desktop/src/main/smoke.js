@@ -93,6 +93,7 @@ export async function runSmokeMode({ app }) {
                 runtime: host.runtime,
                 services,
                 supervisorAgentId: "unavailable-without-providers",
+                roster: () => host.rosterSummary(),
                 readiness: () => ({ allowed: false, reason: "Connect at least one AI provider to run goals." }),
                 persistPath: join(dataDir, "desktop-state", "goals.json"),
             });
@@ -115,6 +116,7 @@ export async function runSmokeMode({ app }) {
                     services,
                     supervisorAgentId: host.plannerAgentId,
                     readiness: () => ({ allowed: true }),
+                    roster: () => host.rosterSummary(),
                     persistPath: join(dataDir, "desktop-state", "goals.json"),
                 });
                 services.addWorkspacePath(await mkdtemp(join(tmpdir(), "sovereign-smoke-ws-")));
