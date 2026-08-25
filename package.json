@@ -1,36 +1,36 @@
 {
-  "name": "sovereignbot",
-  "version": "1.1.0-dev",
-  "description": "Local-first AI coworker runtime with durable memory, governed actions, and multi-agent orchestration.",
-  "type": "module",
-  "private": false,
-  "license": "MIT",
-  "engines": {
-    "node": ">=22"
-  },
-  "bin": {
-    "sovereignbot": "src/cli.js"
-  },
-  "exports": {
-    ".": "./src/index.js"
-  },
-  "files": [
-    "src",
-    "sidecars",
-    "ui",
-    "docs",
-    "examples",
-    "README.md",
-    "CHANGELOG.md",
-    "LICENSE",
-    "SECURITY.md"
-  ],
-  "scripts": {
-    "check": "node scripts/check.mjs",
-    "test": "node --test \"tests/*.test.js\"",
-    "test:soak": "node scripts/rc-soak.mjs",
-    "test:browser": "node tests/webdriver-real-browser.mjs && node tests/mcp-real-browser.mjs",
-    "build:release": "node scripts/build-release.mjs",
-    "start": "node src/cli.js serve"
-  }
+    "name": "sovereignbot",
+    "version": "1.1.1",
+    "description": "Local-first AI coworker runtime with durable memory, governed actions, and multi-agent orchestration.",
+    "type": "module",
+    "private": false,
+    "license": "MIT",
+    "engines": {
+        "node": ">=22"
+    },
+    "bin": {
+        "sovereignbot": "src/cli.js"
+    },
+    "exports": {
+        ".": "./src/index.js"
+    },
+    "files": [
+        "src",
+        "sidecars",
+        "ui",
+        "docs",
+        "examples",
+        "README.md",
+        "CHANGELOG.md",
+        "LICENSE",
+        "SECURITY.md"
+    ],
+    "scripts": {
+        "check": "node scripts/check.mjs",
+        "test": "node --test \"tests/*.test.js\"",
+        "test:soak": "node scripts/rc-soak.mjs",
+        "test:browser": "node tests/webdriver-real-browser.mjs && node tests/mcp-real-browser.mjs",
+        "build:release": "node scripts/build-release.mjs",
+        "start": "node src/cli.js serve"
+    }
 }

@@ -2,11 +2,28 @@
 
 All notable changes to SovereignBot are documented in this file.
 
-## [1.1.0] - Unreleased
+## [1.1.1] - 2026-08-25
 
-SovereignBot 1.1 adds the Windows Desktop product on top of the released local-first core: a double-click Electron application with a sandboxed renderer, bundled internal Node runtime, natural-language goal planning, durable conversations, and a polished desktop operator experience. This entry remains unreleased until the Desktop security review, RC soak, and provenance-bound publication gates pass.
+SovereignBot 1.1.1 is the corrective Desktop release: v1.1.1 corrects the Desktop provider wiring and release provenance gaps in v1.1.0. The published `desktop-v1.1.0` tag and assets remain immutable as history; this version makes the product claims true — real Codex/Claude execution in normal mode, trusted workspace-bound provider processes, independent model review, model synthesis, and a read-only-verify → downstream-publish release chain.
 
-### Added (in development)
+### Fixed
+
+- Desktop normal mode no longer contains Echo agents: the runtime roster is built from passive provider discovery plus validated settings (per-provider enable flags, role assignment constrained to main-generated identities), and Demo Mode is the only explicit Echo path.
+- Goal pipeline runs a real planner agent; untrusted proposals are strictly validated (unknown capabilities, duplicate keys, missing instructions, forward dependencies, oversize, and any authority-bearing field reject the whole proposal) with bounded planner-driven repair instead of a silent single-step fallback.
+- Worker steps carry concrete instructions and public dependency results; reviewRequired steps get an independent reviewer identity whose strict `{decision, notes}` output drives Core review, with bounded changes_requested retry that resumes the same provider session.
+- Final synthesis is produced by a real synthesizer task over public results only; partial failures remain visible.
+- Selected workspaces are now bound to execution: an internal-only `delegateTrusted` channel stamps a validated execution context, Codex/Claude child processes run with the trusted canonical cwd (`--cd` for Codex), public projections strip it, and public submit/delegate paths can never smuggle one.
+- A verified provisioned ChromeDriver reaches the production runtime computer configuration; only the worker identity gains governed browser tooling.
+- Central graceful shutdown cancels active goals within bounds, closes governed bridges and the managed driver factory, and leaves no orphan provider children.
+- Desktop publication now requires current-main + merged-PR provenance through a read-only verify job; the downstream publish job holds write authority but never rebuilds, refuses moved tags and release overwrites.
+
+### Added
+
+- Fake-provider contract shims drive the packaged/installed end-to-end gate: planner → workers → independent review (one changes_requested cycle) → synthesis must complete inside the installed app with transcript canaries proving phase coverage, trusted-cwd equality, session-resume continuity, zero Echo participation, and no raw session id in public surfaces.
+- Provider sign-in helper launches fixed, help-derived CLI login commands in a visible console; renderer may pass only the provider name.
+- Version freeze across root package, core version module, CLI banner, /health, desktop package, About/handshake, changelog, and release notes at stable `1.1.1`.
+
+### Added (Desktop foundation, shipped experimentally in 1.1.0)
 
 - `desktop/` Electron package with hardened BrowserWindow defaults, enumerated IPC, secure custom protocol, and packaged smoke coverage.
 - Internal Node runtime injection (`SOVEREIGNBOT_INTERNAL_NODE`) so governed MCP bridge, WebDriver sidecar, and npm-shim provider launches keep working when `process.execPath` is no longer a Node interpreter.
