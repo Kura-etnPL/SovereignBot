@@ -58,21 +58,33 @@ jobs:
         working-directory: desktop
         run: npm run verify-fuses
 
-      - name: Packaged smoke (window, protocol, IPC, Core host)
+      # Fake-provider contract shims: the packaged smoke and installer E2E drive the FULL
+      # goal pipeline (planner/worker/reviewer/synthesizer) through provider harnesses
+      # without any real API, quota, or account. Env-declared only; renderer cannot see it.
+      - name: Packaged smoke (window, protocol, IPC, Core host, fake-provider goal E2E)
         working-directory: desktop
         env:
           SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: ${{ runner.temp }}\sb-smoke-data
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-provider-transcript-packaged.jsonl
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path $env:SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR | Out-Null
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
           node scripts/run-packaged-smoke.mjs
 
       # Installs the produced Setup.exe silently on the runner and runs the installed
-      # executable in smoke mode — the shipping artifact itself must boot and pass.
-      - name: Installer end-to-end (silent install + smoke from install dir)
+      # executable in smoke mode — the shipping artifact itself must boot AND complete a
+      # full fake-provider goal with trusted-cwd + no-echo + session-redaction canaries.
+      - name: Installer end-to-end (silent install + fake-provider goal E2E from install dir)
         working-directory: desktop
+        env:
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-provider-transcript-installed.jsonl
         shell: pwsh
-        run: node scripts/installer-e2e.mjs
+        run: |
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
+          node scripts/installer-e2e.mjs
 
       - name: Write release manifest
         working-directory: desktop

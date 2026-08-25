@@ -23,6 +23,11 @@ export async function runSmokeMode({ app }) {
         firstRunStatus: false,
         rosterShape: false,
         goalGateHonest: false,
+        fakePipeline: false,
+        trustedCwd: false,
+        resumeContinuity: false,
+        noEchoNormalMode: false,
+        noSessionLeak: false,
         cleanQuit: false,
     };
     let dataDir;
@@ -71,14 +76,15 @@ export async function runSmokeMode({ app }) {
             && status.settings?.schema === "sovereignbot.desktop.settings.v1",
         );
 
-        // Roster shape (BLOCKER A): normal mode must expose a provider roster summary and
-        // must never silently fall back to Echo. Echo exists only in explicit Demo Mode.
+        // Roster shape (BLOCKER A): provider mode never contains echo agents; Demo Mode
+        // is the only place they may exist. An empty roster means not-ready, not Echo.
         const roster = host.rosterSummary();
         const echoAgents = roster.agents.filter((agent) => agent.harnessKind === "echo");
         checks.rosterShape = Boolean(
             ["provider", "demo"].includes(roster.mode)
             && (
-                (roster.mode === "provider" && !roster.ready && echoAgents.length === 0 && roster.agents.length === 0)
+                (roster.mode === "provider" && echoAgents.length === 0
+                    && (roster.ready ? roster.agents.length >= 4 : roster.agents.length === 0))
                 || (roster.mode === "demo" && echoAgents.length > 0)
             ),
         );
@@ -130,7 +136,65 @@ export async function runSmokeMode({ app }) {
                 checks.goalGateHonest = final.status === "completed";
             }
             else {
-                checks.goalGateHonest = true;
+                // Provider mode with a ready roster inside the PACKAGED app is only
+                // reachable through the fake-provider E2E contract (real CLIs are never
+                // invoked by smoke, so no quota is ever burned). Run the full goal
+                // pipeline: planner -> workers -> independent review with one
+                // changes_requested cycle -> synthesizer, then verify the canary.
+                const { readFile } = await import("node:fs/promises");
+                const transcriptPath = process.env.FAKE_PROVIDER_TRANSCRIPT
+                    ?? join(dataDir, "fake-provider-transcript.jsonl");
+                const goals = createGoalController({
+                    runtime: host.runtime,
+                    services,
+                    supervisorAgentId: host.plannerAgentId,
+                    readiness: () => ({ allowed: true }),
+                    roster: () => host.rosterSummary(),
+                    persistPath: join(dataDir, "desktop-state", "goals.json"),
+                });
+                const wsDir = await mkdtemp(join(tmpdir(), "sovereign-fake-ws-"));
+                const workspace = services.addWorkspacePath(wsDir).workspace;
+                const submitted = await goals.submitGoal({
+                    text: "fix the login validation bug end to end",
+                    workspaceId: workspace.id,
+                });
+                const deadline = Date.now() + 120_000;
+                let final = await goals.getGoal(submitted.id);
+                while (!["completed", "failed", "cancelled"].includes(final.status) && Date.now() < deadline) {
+                    await new Promise((resolve) => setTimeout(resolve, 300));
+                    final = await goals.getGoal(submitted.id);
+                }
+
+                let entries = [];
+                try {
+                    entries = (await readFile(transcriptPath, "utf8"))
+                        .split(/\r?\n/)
+                        .filter(Boolean)
+                        .map((line) => JSON.parse(line));
+                }
+                catch {
+                }
+                const phases = new Set(entries.map((entry) => entry.phase));
+                const conversation = JSON.stringify(goals.getConversation(submitted.id).messages);
+                const overviewJson = JSON.stringify(await bridge.handlers["operator:getOverview"]({}));
+                const sessionIds = [...new Set(entries.map((entry) => entry.sessionId).filter(Boolean))];
+
+                checks.goalGateHonest = final.status === "completed";
+                checks.fakePipeline =
+                    phases.has("planning") && phases.has("work") && phases.has("review") && phases.has("synthesis")
+                    && typeof final.finalAnswer === "string"
+                    && final.finalAnswer.startsWith("SYNTHESIS(fake)");
+                // Every provider child ran inside the trusted workspace cwd.
+                checks.trustedCwd = entries.length > 0
+                    && entries.every((entry) => entry.cwd && entry.cwd.toLowerCase() === wsDir.toLowerCase());
+                // The review retry resumed an existing provider session at least once.
+                checks.resumeContinuity = entries.some((entry) => entry.resumed === true);
+                // No echo agent existed anywhere in a provider-mode roster.
+                checks.noEchoNormalMode = roster.agents.every((agent) => agent.harnessKind !== "echo");
+                // Raw provider session ids stay internal: never in public surfaces.
+                checks.noSessionLeak = sessionIds.length > 0
+                    && sessionIds.every((sessionId) => !conversation.includes(sessionId))
+                    && sessionIds.every((sessionId) => !overviewJson.includes(sessionId));
             }
         }
 

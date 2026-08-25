@@ -72,8 +72,8 @@ export function findAuthStatusCandidates(helpText) {
     return [...new Set(candidates)].slice(0, 4);
 }
 
-async function collectHelp(command) {
-    const result = await probeOnce({ command, args: ["--help"] });
+async function collectHelp(command, prefixArgs = []) {
+    const result = await probeOnce({ command, args: [...prefixArgs, "--help"] });
     if (!result.ok || result.code !== 0)
         return "";
     return `${result.stdout}\n${result.stderr}`;
@@ -81,17 +81,17 @@ async function collectHelp(command) {
 
 export { collectHelp };
 
-async function readVersionLine(command, versionArgs) {
-    const result = await probeOnce({ command, args: versionArgs });
+async function readVersionLine(command, prefixArgs, versionArgs) {
+    const result = await probeOnce({ command, args: [...prefixArgs, ...versionArgs] });
     if (!result.ok)
         return undefined;
     const line = `${result.stdout}\n${result.stderr}`.split(/\r?\n/).map((entry) => entry.trim()).find(Boolean);
     return line ? redact(line.slice(0, 120)) : undefined;
 }
 
-async function determineAuthStatus(command, helpText) {
+async function determineAuthStatus(command, prefixArgs, helpText) {
     for (const candidate of findAuthStatusCandidates(helpText)) {
-        const result = await probeOnce({ command, args: candidate.split(" ") });
+        const result = await probeOnce({ command, args: [...prefixArgs, ...candidate.split(" ")] });
         if (!result.ok)
             continue;
         const combined = `${result.stdout}\n${result.stderr}`.toLowerCase();
@@ -108,10 +108,11 @@ async function determineAuthStatus(command, helpText) {
 export async function describeProvider(resolver, label, versionArgs) {
     try {
         const launch = resolver();
-        const helpText = await collectHelp(launch.command);
+        const prefixArgs = Array.isArray(launch.prefixArgs) ? [...launch.prefixArgs] : [];
+        const helpText = await collectHelp(launch.command, prefixArgs);
         const [versionLine, auth] = await Promise.all([
-            readVersionLine(launch.command, versionArgs),
-            determineAuthStatus(launch.command, helpText),
+            readVersionLine(launch.command, prefixArgs, versionArgs),
+            determineAuthStatus(launch.command, prefixArgs, helpText),
         ]);
         return {
             provider: label,
