@@ -242,7 +242,9 @@ jobs:
           test "$(node -p "require('./package.json').version")" = "$RELEASE_VERSION"
           test "$(node -p "require('./src/version.js').VERSION")" = "$RELEASE_VERSION"
           test -s "$RELEASE_NOTES"
-          manifest_version="$(node -p "JSON.parse(require('fs').readFileSync('staging/release-manifest.json','utf8')).version")"
+          # release-manifest.json carries the version under .desktop.version (written by
+          # the verified build in the verify job).
+          manifest_version="$(node -p "JSON.parse(require('fs').readFileSync('staging/release-manifest.json','utf8')).desktop.version")"
           test "$manifest_version" = "$RELEASE_VERSION"
           (cd staging && sha256sum -c SHA256SUMS.txt)
 
