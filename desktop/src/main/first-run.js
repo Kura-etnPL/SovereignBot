@@ -74,6 +74,7 @@ export function createFirstRunService({ host, services }) {
             return {
                 core: { ok: true },
                 providers,
+                roster: typeof host.rosterSummary === "function" ? host.rosterSummary() : undefined,
                 browsers: browserStatus(),
                 driver: driverRecord(),
                 workspaces: services.listWorkspaces(),

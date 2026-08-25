@@ -73,3 +73,35 @@ test("secret supply binds to a pending request id with bounded plaintext", () =>
         /exceeds 10000 characters/,
     );
 });
+
+test("provider channels accept only provider names and roster-legal role assignments", () => {
+    assert.deepEqual(validateIpcRequest("provider:getRoster"), {});
+    assert.deepEqual(validateIpcRequest("provider:refresh"), {});
+    assert.deepEqual(validateIpcRequest("provider:openLogin", { provider: "codex" }), { provider: "codex" });
+    assert.throws(() => validateIpcRequest("provider:openLogin", { provider: "gemini" }), /must be one of/);
+    // No renderer-supplied launch authority through the login channel.
+    assert.throws(
+        () => validateIpcRequest("provider:openLogin", { provider: "codex", command: "evil.exe" }),
+        /not accepted from the renderer/,
+    );
+
+    const assignment = { role: "reviewer", agentId: "claude-reviewer" };
+    assert.deepEqual(validateIpcRequest("provider:setRoleAssignment", assignment), assignment);
+    assert.throws(
+        () => validateIpcRequest("provider:setRoleAssignment", { role: "boss", agentId: "x" }),
+        /must be one of/,
+    );
+});
+
+test("settings updates validate the extended demo/provider/role shapes", () => {
+    assert.deepEqual(
+        validateIpcRequest("settings:update", { providers: { codex: { enabled: false } } }),
+        { providers: { codex: { enabled: false } } },
+    );
+    assert.deepEqual(validateIpcRequest("settings:update", { roles: { worker: null } }), { roles: { worker: null } });
+    assert.deepEqual(validateIpcRequest("settings:update", { demoMode: true }), { demoMode: true });
+    assert.throws(() => validateIpcRequest("settings:update", { providers: { gemini: { enabled: true } } }), /unknown provider/);
+    assert.throws(() => validateIpcRequest("settings:update", { providers: { codex: { enabled: "yes" } } }), /boolean/);
+    assert.throws(() => validateIpcRequest("settings:update", { roles: { boss: "x" } }), /unknown role/);
+    assert.throws(() => validateIpcRequest("settings:update", { roles: { worker: "../evil" } }), /identifier/);
+});

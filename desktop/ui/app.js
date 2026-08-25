@@ -6,6 +6,7 @@
 // reaches the DOM through textContent — never innerHTML — because agent output is data.
 
 const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
+const ROLE_LABELS = { planner: "Planner", worker: "Worker", reviewer: "Reviewer", synthesizer: "Synthesizer" };
 const state = {
     handshake: undefined,
     workspaces: { workspaces: [], defaultWorkspaceId: undefined },
@@ -13,6 +14,7 @@ const state = {
     selectedGoalId: undefined,
     conversationCache: new Map(),
     pollTimer: undefined,
+    roster: undefined,
 };
 
 function $(id) {
@@ -140,6 +142,51 @@ async function submitGoal(event) {
     }
 }
 
+/* ---------------- Providers / roster ---------------- */
+
+function renderRoster(roster) {
+    state.roster = roster;
+    const rolesEl = $("roster-roles");
+    rolesEl.textContent = "";
+    for (const [role, label] of Object.entries(ROLE_LABELS)) {
+        const item = document.createElement("li");
+        const name = document.createElement("strong");
+        name.textContent = label;
+        const detail = document.createElement("span");
+        const agent = (roster.agents ?? []).find((candidate) => candidate.id === roster.roles?.[role]);
+        if (agent) {
+            detail.textContent = ` ${agent.name} (${agent.capabilities.join(", ")})`;
+            item.className = "provider provider-ok";
+        }
+        else {
+            detail.textContent = " not assigned";
+            item.className = "provider provider-missing";
+        }
+        item.append(name, detail);
+        rolesEl.append(item);
+    }
+
+    const ready = Boolean(roster.ready);
+    $("demo-banner").classList.toggle("hidden", roster.mode !== "demo");
+    $("goal-gate-hint").classList.toggle("hidden", ready || roster.mode === "demo");
+    $("goal-submit").disabled = !ready && roster.mode !== "demo";
+}
+
+async function refreshProviders() {
+    try {
+        renderRoster(await window.sovereignbot.providers.getRoster());
+    }
+    catch {
+        // Smoke mode or channel hiccup: leave the last known roster on screen.
+    }
+}
+
+function providerActionFeedback(text, isError = false) {
+    const el = $("provider-action-result");
+    el.textContent = text;
+    el.classList.toggle("form-error", isError);
+}
+
 /* ---------------- Conversation ---------------- */
 
 async function openConversation(goalId) {
@@ -226,6 +273,30 @@ function renderSettings(settings) {
     document.body.dataset.theme = settings.theme ?? "system";
     $("setting-close").value = settings.closeBehavior ?? "ask";
     $("setting-notifications").checked = settings.notifications !== false;
+    $("setting-demo-mode").checked = settings.demoMode === true;
+    $("provider-codex-enabled").checked = settings.providers?.codex?.enabled !== false;
+    $("provider-claude-enabled").checked = settings.providers?.claude?.enabled !== false;
+}
+
+function renderRoleOptions(roster) {
+    const agentIds = (roster.agents ?? []).map((agent) => ({ id: agent.id, name: agent.name }));
+    for (const role of Object.keys(ROLE_LABELS)) {
+        const select = $(`role-${role}`);
+        select.textContent = "";
+        const auto = document.createElement("option");
+        auto.value = "";
+        auto.textContent = "Automatic";
+        select.append(auto);
+        for (const agent of agentIds) {
+            const option = document.createElement("option");
+            option.value = agent.id;
+            option.textContent = agent.name;
+            select.append(option);
+        }
+        select.value = roster.roles?.[role] ?? "";
+        if (select.value && !agentIds.some((agent) => agent.id === select.value))
+            select.value = "";
+    }
 }
 
 function renderProviderList(el, providers) {
@@ -305,6 +376,8 @@ async function refreshControlCenter() {
 
     if (firstRun) {
         renderProviderList($("providers-list"), firstRun.providers);
+        if (firstRun.roster)
+            renderRoleOptions(firstRun.roster);
 
         const browsersEl = $("browsers-list");
         browsersEl.textContent = "";
@@ -394,6 +467,78 @@ function bindStaticEvents() {
     $("setting-theme").addEventListener("change", saveSetting("theme", (value) => value));
     $("setting-close").addEventListener("change", saveSetting("closeBehavior", (value) => value));
     $("setting-notifications").addEventListener("change", saveSetting("notifications", (_, el) => el.checked));
+    $("setting-demo-mode").addEventListener("change", async (event) => {
+        try {
+            const updated = await window.sovereignbot.settings.update({ demoMode: event.target.checked });
+            renderSettings(updated);
+            await applyProviderRefresh(await window.sovereignbot.providers.refresh());
+        }
+        catch (error) {
+            console.error("demo mode rejected:", error);
+        }
+    });
+    for (const provider of ["codex", "claude"]) {
+        $(`provider-${provider}-enabled`).addEventListener("change", async (event) => {
+            try {
+                const updated = await window.sovereignbot.settings.update({
+                    providers: { [provider]: { enabled: event.target.checked } },
+                });
+                renderSettings(updated);
+                await applyProviderRefresh(await window.sovereignbot.providers.refresh());
+            }
+            catch (error) {
+                console.error("provider toggle rejected:", error);
+            }
+        });
+    }
+    for (const role of Object.keys(ROLE_LABELS)) {
+        $(`role-${role}`).addEventListener("change", async (event) => {
+            const agentId = event.target.value;
+            try {
+                if (!agentId) {
+                    await window.sovereignbot.settings.update({ roles: { [role]: null } });
+                }
+                else {
+                    await window.sovereignbot.providers.setRoleAssignment({ role, agentId });
+                }
+                await applyProviderRefresh(await window.sovereignbot.providers.refresh());
+            }
+            catch (error) {
+                providerActionFeedback(String(error?.message ?? error).replace(/^.*Error: /, ""), true);
+            }
+        });
+    }
+    $("refresh-providers").addEventListener("click", async () => {
+        providerActionFeedback("Refreshing…");
+        try {
+            const result = await window.sovereignbot.providers.refresh();
+            await applyProviderRefresh(result);
+            providerActionFeedback(result.applied
+                ? "Provider roster updated."
+                : result.reason === "active-work"
+                    ? "Changes apply after current work finishes."
+                    : "No roster change detected.");
+        }
+        catch (error) {
+            providerActionFeedback(String(error?.message ?? error).replace(/^.*Error: /, ""), true);
+        }
+    });
+    for (const [buttonId, provider] of [["open-login-codex", "codex"], ["open-login-claude", "claude"]]) {
+        $(buttonId).addEventListener("click", async () => {
+            providerActionFeedback(`Opening ${provider} sign-in window…`);
+            try {
+                const result = await window.sovereignbot.providers.openLogin({ provider });
+                if (!result.login?.launched)
+                    providerActionFeedback(result.login?.reason ?? "Sign-in could not be started.", true);
+                else
+                    providerActionFeedback("Complete the sign-in in the opened window; the roster refreshes automatically.");
+                await applyProviderRefresh(result.refresh ?? {});
+            }
+            catch (error) {
+                providerActionFeedback(String(error?.message ?? error).replace(/^.*Error: /, ""), true);
+            }
+        });
+    }
     $("add-workspace").addEventListener("click", async () => {
         await window.sovereignbot.workspaces.addViaDialog({});
         await refreshControlCenter();
@@ -411,6 +556,13 @@ function saveSetting(key, pick) {
             console.error("setting rejected:", error);
         }
     };
+}
+
+async function applyProviderRefresh(result) {
+    if (result?.roster)
+        renderRoster(result.roster);
+    else
+        await refreshProviders();
 }
 
 async function main() {
@@ -431,7 +583,7 @@ async function main() {
     state.handshake = handshake;
     setChip($("chip-version"), `${handshake.version} · ${handshake.platform}`, "ok");
 
-    await Promise.all([refreshGoals(), refreshControlCenter()]);
+    await Promise.all([refreshGoals(), refreshControlCenter(), refreshProviders()]);
 }
 
 main();

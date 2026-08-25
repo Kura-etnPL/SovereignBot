@@ -79,13 +79,15 @@ export function parseProposal(rawResult) {
     return { title: boundedText(candidate.title, 120) ?? "execution plan", steps };
 }
 
-export function createGoalController({ runtime, services, supervisorAgentId, persistPath, onTerminal, now = () => new Date().toISOString(), makeId = makeGoalId }) {
+export function createGoalController({ runtime, services, supervisorAgentId, readiness, persistPath, onTerminal, now = () => new Date().toISOString(), makeId = makeGoalId }) {
     if (!runtime?.orchestrator)
         throw new Error("goal controller requires a core runtime");
     if (!services?.workspacePath || !services?.defaultWorkspacePath)
         throw new Error("goal controller requires desktop workspace services");
     if (!supervisorAgentId)
         throw new Error("goal controller requires a supervisor agent id");
+    if (readiness && typeof readiness !== "function")
+        throw new Error("goal controller readiness must be a function");
 
     const orchestrator = runtime.orchestrator;
     const workerAgents = (runtime.config.agents ?? []).filter((agent) => agent.id !== supervisorAgentId);
@@ -264,6 +266,14 @@ export function createGoalController({ runtime, services, supervisorAgentId, per
                 throw new Error("goal text is required");
             if (value.length > MAX_GOAL_TEXT)
                 throw new Error(`goal text exceeds ${MAX_GOAL_TEXT} characters`);
+            // Normal production mode refuses to run goals without a real provider roster;
+            // Echo is only reachable through explicit Demo Mode. The refusal is loud and
+            // actionable — never a silent downgrade.
+            if (readiness) {
+                const status = readiness();
+                if (!status?.allowed)
+                    throw new Error(status?.reason ?? "Connect at least one AI provider to run goals.");
+            }
             const workspacePath = workspaceId !== undefined
                 ? services.workspacePath(workspaceId)
                 : services.defaultWorkspacePath();

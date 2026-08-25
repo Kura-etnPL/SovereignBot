@@ -28,8 +28,20 @@
     <main class="views">
       <!-- HOME -->
       <section id="view-home" class="view">
+        <div id="demo-banner" class="banner banner-demo hidden">DEMO — no real AI provider is being used</div>
         <h1>What do you want me to do?</h1>
         <p class="subtitle">Describe a goal in plain language. SovereignBot plans the work, runs governed workers, and reports back.</p>
+        <section id="roster-block" class="panel">
+          <h2>AI workers</h2>
+          <ul id="roster-roles" class="provider-list"></ul>
+          <p id="goal-gate-hint" class="note hidden">Connect at least one AI provider to run goals.</p>
+          <div class="field-row">
+            <button id="refresh-providers" type="button" class="secondary-btn">Refresh providers</button>
+            <button id="open-login-codex" type="button" class="secondary-btn">Open Codex sign-in</button>
+            <button id="open-login-claude" type="button" class="secondary-btn">Open Claude sign-in</button>
+            <span id="provider-action-result" class="note"></span>
+          </div>
+        </section>
         <form id="goal-form" class="goal-box" autocomplete="off">
           <textarea id="goal-input" rows="3" placeholder="Example: check this project, find the most valuable fix, implement it, and review the change." maxlength="8000"></textarea>
           <div class="goal-actions">
@@ -95,6 +107,34 @@
         <section class="panel">
           <h2>Providers</h2>
           <ul id="providers-list" class="provider-list"></ul>
+          <div class="field-row role-row">
+            <label>Planner
+              <select id="role-planner" aria-label="Planner agent"></select>
+            </label>
+            <label>Worker
+              <select id="role-worker" aria-label="Worker agent"></select>
+            </label>
+            <label>Reviewer
+              <select id="role-reviewer" aria-label="Reviewer agent"></select>
+            </label>
+            <label>Synthesizer
+              <select id="role-synthesizer" aria-label="Synthesizer agent"></select>
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="checkbox-label">
+              <input type="checkbox" id="provider-codex-enabled">
+              Enable Codex
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="provider-claude-enabled">
+              Enable Claude Code
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="setting-demo-mode">
+              Demo Mode (Echo only — no real AI)
+            </label>
+          </div>
         </section>
 
         <section class="panel">
