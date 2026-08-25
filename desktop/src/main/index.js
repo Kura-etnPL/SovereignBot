@@ -122,6 +122,7 @@ async function main() {
             services,
             supervisorAgentId: host.plannerAgentId,
             readiness: goalReadiness,
+            roster: () => host.rosterSummary(),
             persistPath: join(dataDir, "desktop-state", "goals.json"),
             onTerminal: (goal) => {
                 if (!services.getSettings().notifications || Notification.isSupported() === false)
