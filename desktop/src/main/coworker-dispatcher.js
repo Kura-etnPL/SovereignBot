@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
+import { artifactPromptInstruction, extractArtifactManifest } from "./lib/artifact-manifest.js";
 import { coworkerAgentId, coworkerCapability } from "./provider-roster.js";
 
 const DISPATCH_SCHEMA = "sovereignbot.desktop.coworker-dispatch.v1";
@@ -43,6 +44,7 @@ export function createCoworkerDispatcher({
     roster,
     coworkerStore,
     conversationStore,
+    artifactStore,
     services,
     persistPath = join(dataDir, "desktop-state", "coworker-dispatch.json"),
     now = () => new Date().toISOString(),
@@ -51,6 +53,8 @@ export function createCoworkerDispatcher({
         throw new Error("coworker dispatcher requires dataDir, runtime and roster reader");
     if (!coworkerStore?.get || !conversationStore?.get || !services?.workspacePath)
         throw new Error("coworker dispatcher requires coworker, conversation and workspace services");
+    if (artifactStore !== undefined && typeof artifactStore?.ingestWorkspaceFile !== "function")
+        throw new Error("coworker dispatcher artifactStore must support ingestWorkspaceFile");
 
     const persisted = loadJsonState(persistPath, null);
     const state = persisted?.schema === DISPATCH_SCHEMA && persisted.turns && typeof persisted.turns === "object"
@@ -83,8 +87,6 @@ export function createCoworkerDispatcher({
             }
             throw new Error(`${coworker.name} has configured workspaces, but none are currently available`);
         }
-        // A coworker with no project workspace gets a private Desktop-owned scratch folder,
-        // so ordinary conversation does not force the user to pick a repository first.
         const cwd = join(dataDir, "coworker-workspaces", coworker.id);
         mkdirSync(cwd, { recursive: true });
         return { workspaceId: `coworker:${coworker.id}`, cwd };
@@ -100,9 +102,6 @@ export function createCoworkerDispatcher({
         const continuity = safeSessionState(previous.harnessState, expectedKind);
         if (!continuity)
             return task;
-        // `patch` is an internal Orchestrator primitive; no HTTP/IPC surface exposes it.
-        // We validate both agent identity and provider kind before copying continuity, and
-        // audit only the fact of resumption — never the provider session id itself.
         runtime.orchestrator.requireAgent(agentId);
         const updated = await runtime.orchestrator.patch(task, {
             harnessState: continuity,
@@ -115,6 +114,52 @@ export function createCoworkerDispatcher({
             data: { coworkerAgentId: agentId, resumed: true, providerKind: continuity.kind },
         });
         return updated;
+    }
+
+    async function ingestDeclaredArtifacts({ rawText, context, coworkerId, conversationId, sourceMessageId, taskId }) {
+        const parsed = extractArtifactManifest(rawText);
+        if (parsed.invalidManifest) {
+            await runtime.audit.append({
+                type: "coworker.artifact_manifest_rejected",
+                actor: coworkerAgentId(coworkerId),
+                subject: taskId,
+                data: { reason: "invalid artifact manifest" },
+            });
+            return { text: parsed.text, artifactIds: [] };
+        }
+        if (!artifactStore || !parsed.declarations.length)
+            return { text: parsed.text, artifactIds: [] };
+
+        const artifactIds = [];
+        for (const declaration of parsed.declarations) {
+            try {
+                const artifact = artifactStore.ingestWorkspaceFile({
+                    workspaceId: context.workspaceId,
+                    workspacePath: context.cwd,
+                    relativePath: declaration.path,
+                    title: declaration.title,
+                    createdByCoworkerId: coworkerId,
+                    conversationId,
+                    sourceMessageId,
+                });
+                artifactIds.push(artifact.id);
+                await runtime.audit.append({
+                    type: "coworker.artifact_ingested",
+                    actor: coworkerAgentId(coworkerId),
+                    subject: artifact.id,
+                    data: { taskId, conversationId, workspaceId: context.workspaceId, sha256: artifact.sha256, size: artifact.size },
+                });
+            }
+            catch (error) {
+                await runtime.audit.append({
+                    type: "coworker.artifact_rejected",
+                    actor: coworkerAgentId(coworkerId),
+                    subject: taskId,
+                    data: { path: declaration.path, reason: String(error?.message ?? error).slice(0, 300) },
+                });
+            }
+        }
+        return { text: parsed.text, artifactIds };
     }
 
     async function executeDelivery(conversationId, messageId, coworkerId) {
@@ -150,6 +195,7 @@ export function createCoworkerDispatcher({
                     `Role: ${coworker.role}`,
                     coworker.instructions ? `Working instructions: ${coworker.instructions}` : "",
                     "Respond to the newest message as this persistent coworker. Preserve continuity with the conversation, be action-oriented, and do not claim work you did not actually complete.",
+                    artifactStore ? artifactPromptInstruction() : "",
                 ].filter(Boolean).join("\n"),
                 conversation: publicConversationContext(conversation, coworkerId),
                 newestMessageId: source.id,
@@ -162,33 +208,35 @@ export function createCoworkerDispatcher({
         if (finished?.status !== "completed") {
             const detail = String(finished?.error ?? `coworker turn ended as ${finished?.status ?? "unknown"}`).slice(0, 500);
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail);
-            state.turns[stateKey(conversationId, coworkerId)] = {
-                lastTaskId: task.id,
-                provider: binding.provider,
-                updatedAt: now(),
-            };
+            state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, updatedAt: now() };
             save();
             return { ok: false, taskId: task.id, error: detail };
         }
 
-        const text = typeof finished.result?.text === "string" ? finished.result.text.trim().slice(0, MAX_REPLY_TEXT) : "";
-        if (!text) {
+        const rawText = typeof finished.result?.text === "string" ? finished.result.text.trim().slice(0, MAX_REPLY_TEXT) : "";
+        if (!rawText) {
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "provider returned no text reply");
             return { ok: false, taskId: task.id, error: "provider returned no text reply" };
         }
 
+        const artifactResult = await ingestDeclaredArtifacts({
+            rawText,
+            context,
+            coworkerId,
+            conversationId,
+            sourceMessageId: source.id,
+            taskId: task.id,
+        });
+        const visibleText = artifactResult.text || (artifactResult.artifactIds.length ? `Created ${artifactResult.artifactIds.length} artifact${artifactResult.artifactIds.length === 1 ? "" : "s"}.` : "Completed the requested work.");
         const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, {
-            text,
+            text: visibleText.slice(0, MAX_REPLY_TEXT),
             replyTo: source.id,
+            ...(artifactResult.artifactIds.length ? { artifactIds: artifactResult.artifactIds } : {}),
         });
         conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
-        state.turns[stateKey(conversationId, coworkerId)] = {
-            lastTaskId: task.id,
-            provider: binding.provider,
-            updatedAt: now(),
-        };
+        state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, updatedAt: now() };
         save();
-        return { ok: true, taskId: task.id, reply };
+        return { ok: true, taskId: task.id, reply, artifacts: artifactResult.artifactIds };
     }
 
     function scheduleDelivery(conversationId, messageId, coworkerId) {
@@ -198,11 +246,7 @@ export function createCoworkerDispatcher({
             .then(() => executeDelivery(conversationId, messageId, coworkerId))
             .catch((error) => {
                 const detail = String(error?.message ?? error).slice(0, 500);
-                try {
-                    conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail);
-                }
-                catch {
-                }
+                try { conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail); } catch {}
                 return { ok: false, error: detail };
             });
         chains.set(key, run);
@@ -224,11 +268,9 @@ export function createCoworkerDispatcher({
                 .map(([coworkerId]) => coworkerId);
             return recipients.map((coworkerId) => scheduleDelivery(conversationId, messageId, coworkerId));
         },
-
         async flush() {
             await Promise.allSettled([...chains.values()]);
         },
-
         stateSnapshot() {
             return structuredClone(state);
         },
