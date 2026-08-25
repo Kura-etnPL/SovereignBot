@@ -177,22 +177,68 @@ export const IPC_CHANNELS = Object.freeze({
         }, 1024),
     }),
     "settings:get": emptyRequest(),
+    "provider:getRoster": emptyRequest(),
+    "provider:refresh": emptyRequest(),
+    "provider:openLogin": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({
+            provider: enumField(["codex", "claude"]),
+        }, 1024),
+    }),
+    "provider:setRoleAssignment": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({
+            role: enumField(["planner", "worker", "reviewer", "synthesizer"]),
+            agentId: idField(),
+        }, 1024),
+    }),
     "settings:update": Object.freeze({
         direction: "renderer->main",
-        maxPayloadBytes: 2048,
+        maxPayloadBytes: 4096,
         validateRequest: (payload) => {
             if (!isPlainObject(payload) || Object.keys(payload).length === 0)
                 throw new Error("settings update payload must be a non-empty object");
             assertNoForbiddenKeys(payload);
-            const allowed = new Set(["theme", "closeBehavior", "notifications"]);
+            const allowed = new Set(["theme", "closeBehavior", "notifications", "demoMode", "providers", "roles"]);
             for (const key of Object.keys(payload)) {
                 if (!allowed.has(key))
                     throw new Error(`unexpected settings field: ${key.slice(0, 40)}`);
             }
+            if (payload.providers !== undefined)
+                validateProvidersShape(payload.providers);
+            if (payload.roles !== undefined)
+                validateRolesShape(payload.roles);
             return payload;
         },
     }),
 });
+
+function validateProvidersShape(value) {
+    if (!isPlainObject(value) || Object.keys(value).length === 0)
+        throw new Error("providers must be a non-empty object");
+    for (const [provider, entry] of Object.entries(value)) {
+        if (!["codex", "claude"].includes(provider))
+            throw new Error(`unknown provider: ${String(provider).slice(0, 20)}`);
+        if (!isPlainObject(entry))
+            throw new Error(`${provider} settings must be an object`);
+        if (entry.enabled !== undefined && typeof entry.enabled !== "boolean")
+            throw new Error(`${provider}.enabled must be a boolean`);
+    }
+}
+
+function validateRolesShape(value) {
+    if (!isPlainObject(value) || Object.keys(value).length === 0)
+        throw new Error("roles must be a non-empty object");
+    const identifier = idField();
+    for (const [role, agentId] of Object.entries(value)) {
+        if (!["planner", "worker", "reviewer", "synthesizer"].includes(role))
+            throw new Error(`unknown role: ${String(role).slice(0, 20)}`);
+        if (agentId !== null)
+            identifier(agentId, role);
+    }
+}
 
 // Any request carrying these key names is rejected regardless of channel. They name
 // authority or continuity concepts the renderer must never influence.

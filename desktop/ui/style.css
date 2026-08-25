@@ -306,3 +306,16 @@ body[data-theme="light"] select, body[data-theme="light"] .workspace-label selec
     max-height: 280px;
     overflow-y: auto;
 }
+
+.banner {
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    font-weight: 600;
+}
+
+.banner-demo {
+    background: rgba(250, 179, 63, 0.16);
+    border: 1px solid rgba(250, 179, 63, 0.55);
+    color: var(--warning-fg, #d98a00);
+}

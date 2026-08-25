@@ -49,4 +49,10 @@ contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
         browserStatus: invoke("computer:browserStatus"),
         provisionDriver: invoke("computer:provisionDriver"),
     }),
+    providers: Object.freeze({
+        getRoster: invoke("provider:getRoster"),
+        refresh: invoke("provider:refresh"),
+        openLogin: invoke("provider:openLogin"),
+        setRoleAssignment: invoke("provider:setRoleAssignment"),
+    }),
 }));

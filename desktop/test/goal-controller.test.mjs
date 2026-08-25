@@ -223,3 +223,31 @@ test("submitGoal validates text and workspace before any side effect", async () 
         assert.equal(existsSync(join(dir, "goals.json")), false); // nothing persisted for rejected goals
     });
 });
+
+test("normal mode without a ready provider roster refuses goals instead of echoing", async () => {
+    await withTempDir("sovereign-goal-gate-", async (dir) => {
+        const controller = createGoalController({
+            runtime: fakeRuntime(),
+            services: { workspacePath: () => join(dir, "ws"), defaultWorkspacePath: () => join(dir, "ws") },
+            supervisorAgentId: "supervisor",
+            readiness: () => ({ allowed: false, reason: "Connect at least one AI provider to run goals." }),
+            persistPath: join(dir, "goals.json"),
+        });
+        await assert.rejects(
+            () => controller.submitGoal({ text: "should be refused" }),
+            /Connect at least one AI provider/,
+        );
+        assert.equal(controller.listGoals().goals.length, 0); // nothing queued behind the gate
+
+        // Demo mode opens the same gate explicitly.
+        const demo = createGoalController({
+            runtime: fakeRuntime(),
+            services: { workspacePath: () => join(dir, "ws"), defaultWorkspacePath: () => join(dir, "ws") },
+            supervisorAgentId: "supervisor",
+            readiness: () => ({ allowed: true }),
+            persistPath: join(dir, "demo-goals.json"),
+        });
+        const goal = await demo.submitGoal({ text: "demo wiring check" });
+        assert.ok(goal.id);
+    });
+});

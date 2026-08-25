@@ -79,6 +79,8 @@ async function collectHelp(command) {
     return `${result.stdout}\n${result.stderr}`;
 }
 
+export { collectHelp };
+
 async function readVersionLine(command, versionArgs) {
     const result = await probeOnce({ command, args: versionArgs });
     if (!result.ok)

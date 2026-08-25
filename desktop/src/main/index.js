@@ -9,6 +9,8 @@ import { startRuntimeHost } from "./runtime-host.js";
 import { createDesktopServices } from "./services.js";
 import { createFirstRunService } from "./first-run.js";
 import { createGoalController } from "./goal-controller.js";
+import { openProviderLogin } from "./provider-login.js";
+import { validateRoleAssignment } from "./provider-roster.js";
 import { attachWindowLifecycle } from "./lifecycle.js";
 import { createTrayController } from "./tray.js";
 
@@ -65,13 +67,18 @@ async function main() {
         return;
     }
 
+    const dataDir = defaultDataDir();
+    const services = createDesktopServices({ dataDir, dialog });
+
     let host;
     try {
-        host = await startRuntimeHost({ dataDir: defaultDataDir() });
+        host = await startRuntimeHost({
+            dataDir,
+            getSettings: () => services.getSettings(),
+        });
     }
     catch (error) {
-        // Foundation scope: fail visibly instead of silently degrading. First-run UX with
-        // repair/inspect flows arrives with the full Desktop onboarding work.
+        // Fail visibly instead of silently degrading: no roster, no runtime, no Echo.
         const { dialog } = await import("electron");
         dialog.showErrorBox("SovereignBot failed to start", String(error?.stack ?? error));
         app.exit(1);
@@ -82,6 +89,7 @@ async function main() {
 
     let win;
     let bridge;
+    let goals;
     let quitting = false;
     const tray = createTrayController({
         getWindow: () => win,
@@ -90,35 +98,55 @@ async function main() {
             app.exit(0);
         },
     });
-    const dataDir = defaultDataDir();
-    const services = createDesktopServices({ dataDir, dialog });
-    const firstRun = createFirstRunService({ host, services });
-    const goals = createGoalController({
-        runtime: host.runtime,
-        services,
-        supervisorAgentId: host.plannerAgentId,
-        persistPath: join(dataDir, "desktop-state", "goals.json"),
-        onTerminal: (goal) => {
-            if (!services.getSettings().notifications || Notification.isSupported() === false)
-                return;
-            new Notification({
-                title: `SovereignBot goal ${goal.status}`,
-                body: goal.status === "completed" ? goal.textPreview : `${goal.textPreview} — ${goal.error ?? "did not complete"}`,
-                silent: true,
-            }).show();
-        },
-    });
 
-    const start = async () => {
-        win = createMainWindow();
-        attachWindowLifecycle({
-            win,
-            getCloseBehavior: () => services.getSettings().closeBehavior,
-            rememberCloseBehavior: (value) => services.updateSettings({ closeBehavior: value }),
-            tray,
-            isQuitting: () => quitting,
-        });
+    function goalReadiness() {
+        if (!host)
+            return { allowed: false, reason: "runtime is starting" };
+        if (host.mode === "demo")
+            return { allowed: true };
+        const roster = host.rosterSummary();
+        return roster.ready
+            ? { allowed: true }
+            : { allowed: false, reason: "Connect at least one AI provider to run goals." };
+    }
+
+    const GOAL_TERMINAL = new Set(["completed", "failed", "cancelled"]);
+    const goalsBusy = () => goals
+        ? goals.listGoals().goals.some((goal) => !GOAL_TERMINAL.has(goal.status))
+        : false;
+
+    function rebuildRuntimeBoundServices() {
         bridge = createOperatorBridge(host.runtime);
+        goals = createGoalController({
+            runtime: host.runtime,
+            services,
+            supervisorAgentId: host.plannerAgentId,
+            readiness: goalReadiness,
+            persistPath: join(dataDir, "desktop-state", "goals.json"),
+            onTerminal: (goal) => {
+                if (!services.getSettings().notifications || Notification.isSupported() === false)
+                    return;
+                new Notification({
+                    title: `SovereignBot goal ${goal.status}`,
+                    body: goal.status === "completed" ? goal.textPreview : `${goal.textPreview} — ${goal.error ?? "did not complete"}`,
+                    silent: true,
+                }).show();
+            },
+        });
+    }
+
+    const firstRun = createFirstRunService({ host, services });
+    rebuildRuntimeBoundServices();
+
+    async function applyProviderRefresh(refresh) {
+        if (refresh.applied) {
+            rebuildRuntimeBoundServices();
+            bindHandlers();
+        }
+        return { ...refresh, roster: host.rosterSummary() };
+    }
+
+    function bindHandlers() {
         bindIpcChannels({
             win,
             handlers: {
@@ -138,6 +166,21 @@ async function main() {
                 "workspace:remove": ({ id }) => ({ removed: services.removeWorkspace(id) }),
                 "settings:get": () => services.getSettings(),
                 "settings:update": (patch) => services.updateSettings(patch),
+                "provider:getRoster": () => host.rosterSummary(),
+                "provider:refresh": async () => applyProviderRefresh(await host.refreshProviders({ isBusy: goalsBusy })),
+                "provider:openLogin": async ({ provider }) => {
+                    const resolver = provider === "codex"
+                        ? () => host.coreModules.resolveCodexLaunch({})
+                        : () => host.coreModules.resolveClaudeCodeLaunch({});
+                    const login = await openProviderLogin({ resolver, label: provider });
+                    const refresh = applyProviderRefresh(await host.refreshProviders({ isBusy: goalsBusy }));
+                    return { login, refresh: await refresh };
+                },
+                "provider:setRoleAssignment": async ({ role, agentId }) => {
+                    validateRoleAssignment(host.rosterSummary(), { role, agentId });
+                    services.updateSettings({ roles: { [role]: agentId } });
+                    return applyProviderRefresh(await host.refreshProviders({ isBusy: goalsBusy }));
+                },
                 "goal:submit": ({ text, workspaceId }) => goals.submitGoal({ text, workspaceId }),
                 "goal:list": () => goals.listGoals(),
                 "goal:getStatus": ({ goalId }) => goals.getGoal(goalId),
@@ -145,6 +188,18 @@ async function main() {
                 "goal:cancel": async ({ goalId }) => await goals.cancel(goalId),
             },
         });
+    }
+
+    const start = async () => {
+        win = createMainWindow();
+        attachWindowLifecycle({
+            win,
+            getCloseBehavior: () => services.getSettings().closeBehavior,
+            rememberCloseBehavior: (value) => services.updateSettings({ closeBehavior: value }),
+            tray,
+            isQuitting: () => quitting,
+        });
+        bindHandlers();
         await win.loadURL(appOrigin());
         win.on("closed", () => (win = undefined));
     };
