@@ -229,6 +229,7 @@ async function refreshConversation() {
         return;
 
     setChip($("conversation-status"), goal.status, statusChipKind(goal.status));
+    $("conversation-demo-badge").classList.toggle("hidden", goal.mode !== "demo");
     $("conversation-workspace").textContent = goal.workspacePath ?? "";
     const terminal = TERMINAL_STATUSES.includes(goal.status);
     if (terminal)

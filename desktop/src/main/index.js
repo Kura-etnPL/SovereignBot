@@ -91,17 +91,59 @@ async function main() {
     let bridge;
     let goals;
     let quitting = false;
+    let shutdownStarted = false;
+
+    const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    // Central graceful shutdown: refuse new goals, cancel active ones, wait for the
+    // pump within a bound, close the runtime (which closes governed bridges and the
+    // managed driver factory), then tear down protocol and tray. No provider child
+    // survives: task cancellation aborts its harness controller.
+    async function requestQuit(reason) {
+        if (shutdownStarted)
+            return;
+        shutdownStarted = true;
+        quitting = true;
+        try {
+            if (goals) {
+                for (const goal of goals.listGoals().goals) {
+                    if (!["completed", "failed", "cancelled"].includes(goal.status)) {
+                        try {
+                            await goals.cancel(goal.id);
+                        }
+                        catch {
+                        }
+                    }
+                }
+                await Promise.race([goals.flush(), delay(15_000)]);
+            }
+            await Promise.race([host?.close(), delay(15_000)]);
+        }
+        finally {
+            try {
+                uninstallProtocol();
+            }
+            catch {
+            }
+            try {
+                tray?.destroy();
+            }
+            catch {
+            }
+            app.exit(0);
+        }
+    }
+
     const tray = createTrayController({
         getWindow: () => win,
-        onQuit: () => {
-            quitting = true;
-            app.exit(0);
-        },
+        onQuit: () => void requestQuit("tray-quit"),
     });
 
     function goalReadiness() {
         if (!host)
             return { allowed: false, reason: "runtime is starting" };
+        if (quitting)
+            return { allowed: false, reason: "SovereignBot is shutting down; new goals are not accepted." };
         if (host.mode === "demo")
             return { allowed: true };
         const roster = host.rosterSummary();
@@ -160,7 +202,14 @@ async function main() {
                 ...bridge.handlers,
                 "firstrun:getStatus": () => firstRun.getStatus(),
                 "computer:browserStatus": async () => (await firstRun.getStatus()).browsers,
-                "computer:provisionDriver": () => firstRun.provisionManagedBrowserDriver(),
+                "computer:provisionDriver": async () => {
+                    const result = await firstRun.provisionManagedBrowserDriver();
+                    // A newly provisioned driver must reach the runtime: refresh applies
+                    // the new computer config + worker browser capability when idle.
+                    const refresh = await host.refreshProviders({ isBusy: goalsBusy });
+                    await applyProviderRefresh(refresh);
+                    return { ...result, refresh };
+                },
                 "workspace:addViaDialog": () => services.addWorkspaceViaDialog(win),
                 "workspace:list": () => services.listWorkspaces(),
                 "workspace:setDefault": ({ id }) => ({ ok: services.setDefaultWorkspace(id) }),
@@ -214,13 +263,7 @@ async function main() {
         win.focus();
     });
 
-    app.on("window-all-closed", async () => {
-        uninstallProtocol();
-        try {
-            await host?.close();
-        }
-        finally {
-            app.exit(0);
-        }
+    app.on("window-all-closed", () => {
+        void requestQuit("window-closed");
     });
 }

@@ -104,7 +104,7 @@ function harnessConfig(provider, role, fakeLaunchers) {
     return provider === "codex" ? { kind: "codex", skipGitRepoCheck: true } : { kind: "claude-code" };
 }
 
-export function buildProviderRoster({ discovery, settings, fakeLaunchers } = {}) {
+export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false } = {}) {
     if (!discovery || typeof discovery !== "object")
         throw new Error("provider roster requires discovery results");
 
@@ -158,6 +158,16 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers } = {})
             harness: harnessConfig(provider, role, fakeLaunchers),
         };
     });
+
+    // Governed computer access is opt-in by infrastructure, not by model request: the
+    // worker identity gains browser tooling ONLY when a managed driver is provisioned.
+    // The task-bound bridge keeps it scoped to running tasks (Core enforces this).
+    if (computerAvailable) {
+        const workerAgent = agents.find((agent) => agent.id === roles.worker);
+        if (workerAgent && !workerAgent.capabilities.includes("browser"))
+            workerAgent.capabilities.push("browser");
+        workerAgent.governedTools = ["computer"];
+    }
 
     return {
         mode: "provider",

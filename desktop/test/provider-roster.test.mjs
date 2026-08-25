@@ -165,3 +165,20 @@ test("fake-provider shims are configured through explicit env-provided node and 
     const reviewer = shimmed.agents.find((agent) => agent.id === "claude-reviewer");
     assert.equal(reviewer.harness.command, undefined);
 });
+
+test("a provisioned verified driver grants the worker governed browser tooling only", () => {
+    const withComputer = buildProviderRoster({
+        discovery: discovery(),
+        settings: {},
+        computerAvailable: true,
+    });
+    const worker = withComputer.agents.find((agent) => agent.id === "codex-worker");
+    assert.deepEqual(worker.governedTools, ["computer"]);
+    assert.ok(worker.capabilities.includes("browser"));
+    // Planner/reviewer/synthesizer stay free of computer tooling (least privilege).
+    for (const agent of withComputer.agents.filter((entry) => entry.id !== "codex-worker"))
+        assert.equal(agent.governedTools, undefined);
+
+    const without = buildProviderRoster({ discovery: discovery(), settings: {} });
+    assert.equal(without.agents.find((agent) => agent.id === "codex-worker").governedTools, undefined);
+});

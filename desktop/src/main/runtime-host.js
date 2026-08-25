@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { verifyVendorTree } from "./lib/vendor-integrity.js";
 import { describeProvider } from "./lib/provider-discovery.js";
+import { loadJsonState } from "./lib/desktop-state.js";
 import { buildPolicyRules, buildProviderRoster, resolveFakeProviderLaunch } from "./provider-roster.js";
 import { prepareInternalNode } from "./internal-node.js";
 
@@ -93,6 +94,30 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
         return { codex, claude };
     }
 
+    // A provisioned managed chromedriver becomes the production runtime's computer
+    // driver configuration; the worker identity only gains governed browser tooling
+    // when this returns a real executable (BLOCKER: provisioned drivers must actually
+    // reach the runtime instead of decorating the Control Center).
+    function computerRuntimeConfig() {
+        const record = loadJsonState(join(dataDir, "desktop-state", "drivers.json"), null);
+        const exe = record?.cacheDirRelative && record?.exe
+            ? join(dataDir, "desktop-state", record.cacheDirRelative, record.exe)
+            : undefined;
+        if (!exe || !existsSync(exe) || !record.digestVerified)
+            return { path: undefined };
+        return {
+            path: exe,
+            config: {
+                driver: {
+                    kind: "webdriver-sidecar",
+                    browser: record.browser === "edge" ? "edge" : "chrome",
+                    webdriverCommand: exe,
+                    headless: true,
+                },
+            },
+        };
+    }
+
     function summarizeRoster(roster, discovery) {
         return {
             mode: roster.mode,
@@ -126,20 +151,24 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
     let discovery;
     let roster;
     let summary;
+    let computerPath;
 
     async function build(initial) {
         const settings = getSettings();
         const nextDiscovery = initial ? await detectProviders() : discovery;
+        const computer = computerRuntimeConfig();
         const nextRoster = buildProviderRoster({
             discovery: nextDiscovery,
             settings,
             fakeLaunchers,
+            computerAvailable: Boolean(computer.path),
         });
         const nextRuntime = await createRuntime({
             dataDir,
             bindHost: "127.0.0.1",
             port: 0,
             agents: nextRoster.agents,
+            ...(computer.config ? { computer: computer.config } : {}),
             policy: {
                 repeatWindowMs: 180000,
                 rules: buildPolicyRules(nextRoster.agents),
@@ -148,6 +177,7 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
         discovery = nextDiscovery;
         roster = nextRoster;
         summary = summarizeRoster(roster, discovery);
+        computerPath = computer.path;
         return nextRuntime;
     }
 
@@ -187,7 +217,8 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
                 nextRoster.mode === roster.mode
                 && JSON.stringify(nextRoster.roles) === JSON.stringify(roster.roles)
                 && JSON.stringify(nextRoster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind]))
-                    === JSON.stringify(roster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind]));
+                    === JSON.stringify(roster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind]))
+                && (computerRuntimeConfig().path ?? "") === (computerPath ?? "");
             if (sameShape) {
                 discovery = nextDiscovery;
                 summary = summarizeRoster(roster, discovery);
