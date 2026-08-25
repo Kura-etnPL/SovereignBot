@@ -194,8 +194,18 @@ export function createCoworkerDispatcher({
     function scheduleDelivery(conversationId, messageId, coworkerId) {
         const key = stateKey(conversationId, coworkerId);
         const previous = chains.get(key) ?? Promise.resolve();
-        const run = previous.then(() => executeDelivery(conversationId, messageId, coworkerId));
-        chains.set(key, run.catch(() => {}));
+        const run = previous
+            .then(() => executeDelivery(conversationId, messageId, coworkerId))
+            .catch((error) => {
+                const detail = String(error?.message ?? error).slice(0, 500);
+                try {
+                    conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail);
+                }
+                catch {
+                }
+                return { ok: false, error: detail };
+            });
+        chains.set(key, run);
         run.finally(() => {
             if (chains.get(key) === run)
                 chains.delete(key);
