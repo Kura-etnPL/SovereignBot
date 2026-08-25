@@ -167,6 +167,9 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
     let roster;
     let summary;
     let computerPath;
+    // Rebuilds are serialized: overlapping refresh calls must never both pass the idle
+    // checks and close each other's freshly built runtime.
+    let refreshChain = Promise.resolve();
 
     async function build(initial) {
         const settings = getSettings();
@@ -198,6 +201,41 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
 
     runtime = await build(true);
 
+    async function hasActiveWorkNow() {
+        return (await runtime.orchestrator.listTasks()).some((task) => ACTIVE_TASK_STATUSES.has(task.status));
+    }
+
+    async function refreshProvidersOnce({ isBusy } = {}) {
+        const nextDiscovery = await detectProviders();
+        const nextRoster = buildProviderRoster({
+            discovery: nextDiscovery,
+            settings: getSettings(),
+            fakeLaunchers,
+        });
+        const sameShape =
+            nextRoster.mode === roster.mode
+            && JSON.stringify(nextRoster.roles) === JSON.stringify(roster.roles)
+            && JSON.stringify(nextRoster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind]))
+                === JSON.stringify(roster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind]))
+            && (computerRuntimeConfig().path ?? "") === (computerPath ?? "");
+        if (sameShape) {
+            discovery = nextDiscovery;
+            summary = summarizeRoster(roster, discovery);
+            return { applied: false, reason: "unchanged" };
+        }
+        if (typeof isBusy === "function" && isBusy())
+            return { applied: false, reason: "goal-in-progress" };
+        if (await hasActiveWorkNow())
+            return { applied: false, reason: "active-work" };
+
+        // Build the replacement first (so a failed build never leaves us without a
+        // runtime), then retire the old one. build() swaps the closure refs.
+        const previous = runtime;
+        await build(false);
+        await previous.close();
+        return { applied: true };
+    }
+
     return {
         runtime,
         get internalNodeSource() {
@@ -217,39 +255,15 @@ export async function startRuntimeHost({ dataDir, getSettings }) {
         // True while any Core task is queued/running/awaiting review — historical terminal
         // tasks do not block a roster rebuild.
         async hasActiveWork() {
-            return (await runtime.orchestrator.listTasks()).some((task) => ACTIVE_TASK_STATUSES.has(task.status));
+            return hasActiveWorkNow();
         },
         // Explicit refresh path for the Control Center button / post-login re-detection.
         // Never hot-swaps identities under active work; returns an honest deferral reason.
-        async refreshProviders({ isBusy } = {}) {
-            const nextDiscovery = await detectProviders();
-            const nextRoster = buildProviderRoster({
-                discovery: nextDiscovery,
-                settings: getSettings(),
-                fakeLaunchers,
-            });
-            const sameShape =
-                nextRoster.mode === roster.mode
-                && JSON.stringify(nextRoster.roles) === JSON.stringify(roster.roles)
-                && JSON.stringify(nextRoster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind]))
-                    === JSON.stringify(roster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind]))
-                && (computerRuntimeConfig().path ?? "") === (computerPath ?? "");
-            if (sameShape) {
-                discovery = nextDiscovery;
-                summary = summarizeRoster(roster, discovery);
-                return { applied: false, reason: "unchanged" };
-            }
-            if (typeof isBusy === "function" && isBusy())
-                return { applied: false, reason: "goal-in-progress" };
-            if (await this.hasActiveWork())
-                return { applied: false, reason: "active-work" };
-
-            // Build the replacement first (so a failed build never leaves us without a
-            // runtime), then retire the old one. build() swaps the closure refs.
-            const previous = runtime;
-            await build(false);
-            await previous.close();
-            return { applied: true };
+        // Calls are serialized so concurrent invocations cannot race the rebuild.
+        refreshProviders({ isBusy } = {}) {
+            const run = refreshChain.then(() => refreshProvidersOnce({ isBusy }));
+            refreshChain = run.catch(() => {});
+            return run;
         },
         async close() {
             await runtime.close();
