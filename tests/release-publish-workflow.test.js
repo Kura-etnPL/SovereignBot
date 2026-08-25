@@ -66,7 +66,10 @@ test("public release workflow requires stable version, reviewed notes, verified 
     assert.doesNotMatch(workflow, /git tag\s+-f/);
     assert.doesNotMatch(workflow, /git push\s+--force/);
     assert.match(workflow, /gh release view "\$RELEASE_TAG"/);
-    assert.match(workflow, /refusing to overwrite it/);
+    // Idempotent guard: existing release at the SAME verified sha is a no-op; the
+    // tag-move refusal above still protects immutability.
+    assert.match(workflow, /already exists at \$RELEASE_SHA; nothing to publish/);
+    assert.match(workflow, /points to a different commit; refusing to move it/);
     assert.match(workflow, /gh release create "\$RELEASE_TAG" dist\/\*/);
     assert.match(workflow, /--verify-tag/);
     assert.match(workflow, /--notes-file "\$RELEASE_NOTES"/);

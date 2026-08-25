@@ -185,8 +185,11 @@ jobs:
           fi
 
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "GitHub Release $RELEASE_TAG already exists; refusing to overwrite it" >&2
-            exit 1
+            # Idempotent republication guard: an existing release whose immutable tag
+            # already points at this exact verified sha is a completed publication,
+            # not a conflict. The tag-equality check above still refuses any move.
+            echo "GitHub Release $RELEASE_TAG already exists at $RELEASE_SHA; nothing to publish."
+            exit 0
           fi
 
           gh release create "$RELEASE_TAG" dist/* \

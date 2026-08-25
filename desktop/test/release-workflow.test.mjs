@@ -70,7 +70,7 @@ test("publish job holds write authority but never rebuilds or re-installs", asyn
     assert.match(publish, /actions\/download-artifact@v4/);
     assert.match(publish, /sha256sum -c SHA256SUMS\.txt/);
     assert.match(publish, /Existing tag \$RELEASE_TAG points to a different commit; refusing to move it/);
-    assert.match(publish, /already exists; refusing to overwrite it/);
+    assert.match(publish, /already exists at \$RELEASE_SHA; nothing to publish/);
     assert.match(publish, /git tag -a "\$RELEASE_TAG" "\$RELEASE_SHA"/);
 
     // Publish consumes verified artifacts only: no dependency install, no build, no tests.
