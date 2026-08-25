@@ -29,7 +29,6 @@ test("normal mode roster is built from ready providers and contains zero echo ag
     assert.equal(agents.length, 4);
     for (const agent of agents)
         assert.ok(["codex", "claude-code"].includes(agent.harness.kind), `${agent.id} must be a real provider harness`);
-    // Default split: Claude plans/reviews/synthesizes, Codex codes.
     assert.deepEqual(roles, {
         planner: "claude-planner",
         worker: "codex-worker",
@@ -72,7 +71,6 @@ test("no usable provider means an empty roster unless Demo Mode is explicitly on
     assert.equal(off.agents.length, 0);
     assert.equal(off.mode, "provider");
 
-    // Signed-out providers are not usable even when detected and enabled.
     const signedOut = buildProviderRoster({
         discovery: discovery(READY({ auth: { state: "signed-out" } }), { found: false }),
         settings: {},
@@ -88,7 +86,6 @@ test("no usable provider means an empty roster unless Demo Mode is explicitly on
     for (const agent of demo.agents)
         assert.equal(agent.harness.kind, "echo");
 
-    // Explicit Demo Mode forces the Echo roster even when providers are usable.
     const forcedDemo = buildProviderRoster({
         discovery: discovery(),
         settings: { demoMode: true },
@@ -124,7 +121,7 @@ test("policy authorizes exactly the roster identities after the runaway guard", 
     }
 });
 
-test("role assignment validation refuses unknown roles, ghost agents, and self-review setups", () => {
+test("role assignment validation refuses unknown roles, ghost agents, and invalid cross-role/self-review setups", () => {
     const roster = {
         agents: [
             { id: "codex-worker", role: "worker" },
@@ -136,7 +133,7 @@ test("role assignment validation refuses unknown roles, ghost agents, and self-r
     assert.throws(() => validateRoleAssignment(roster, { role: "worker", agentId: "ghost" }), /unknown agent/);
     assert.throws(
         () => validateRoleAssignment(roster, { role: "reviewer", agentId: "codex-worker" }),
-        /independent/,
+        /independent|not compatible/,
     );
     assert.equal(validateRoleAssignment(roster, { role: "worker", agentId: "codex-worker" }).ok, true);
 });
@@ -175,7 +172,6 @@ test("a provisioned verified driver grants the worker governed browser tooling o
     const worker = withComputer.agents.find((agent) => agent.id === "codex-worker");
     assert.deepEqual(worker.governedTools, ["computer"]);
     assert.ok(worker.capabilities.includes("browser"));
-    // Planner/reviewer/synthesizer stay free of computer tooling (least privilege).
     for (const agent of withComputer.agents.filter((entry) => entry.id !== "codex-worker"))
         assert.equal(agent.governedTools, undefined);
 
