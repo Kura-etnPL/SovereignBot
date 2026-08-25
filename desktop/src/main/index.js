@@ -9,13 +9,14 @@ import { startRuntimeHost } from "./runtime-host.js";
 import { createDesktopServices } from "./services.js";
 import { createFirstRunService } from "./first-run.js";
 import { createGoalController } from "./goal-controller.js";
+import { createCoworkerStore } from "./coworker-store.js";
+import { createConversationStore } from "./conversation-store.js";
+import { createCoworkerDispatcher } from "./coworker-dispatcher.js";
 import { openProviderLogin } from "./provider-login.js";
 import { validateRoleAssignment } from "./provider-roster.js";
 import { attachWindowLifecycle } from "./lifecycle.js";
 import { createTrayController } from "./tray.js";
 
-// Squirrel.Windows launches the executable with --squirrel-* events during
-// install/update/uninstall; none of them should boot a runtime or open a window.
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
     "--squirrel-updated",
@@ -29,14 +30,12 @@ function argvHasSquirrelFlag(argv) {
 }
 
 if (!app.requestSingleInstanceLock()) {
-    // A second launcher must never start a second runtime against the same dataDir.
     app.quit();
 }
 else if (argvHasSquirrelFlag(process.argv)) {
     app.quit();
 }
 else {
-    // Privileged scheme registration must happen before app.ready.
     registerAppSchemePrivileged();
     app.enableSandbox();
     app.setAppUserModelId("com.sovereignbot.desktop");
@@ -69,16 +68,24 @@ async function main() {
 
     const dataDir = defaultDataDir();
     const services = createDesktopServices({ dataDir, dialog });
+    const coworkerStore = createCoworkerStore({
+        persistPath: join(dataDir, "desktop-state", "coworkers.json"),
+    });
+    coworkerStore.ensureDefaults();
+    const conversationStore = createConversationStore({
+        persistPath: join(dataDir, "desktop-state", "conversations.json"),
+        coworkerStore,
+    });
 
     let host;
     try {
         host = await startRuntimeHost({
             dataDir,
             getSettings: () => services.getSettings(),
+            getCoworkers: () => coworkerStore.list().coworkers,
         });
     }
     catch (error) {
-        // Fail visibly instead of silently degrading: no roster, no runtime, no Echo.
         const { dialog } = await import("electron");
         dialog.showErrorBox("SovereignBot failed to start", String(error?.stack ?? error));
         app.exit(1);
@@ -90,21 +97,19 @@ async function main() {
     let win;
     let bridge;
     let goals;
+    let coworkerDispatcher;
     let quitting = false;
     let shutdownStarted = false;
 
     const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    // Central graceful shutdown: refuse new goals, cancel active ones, wait for the
-    // pump within a bound, close the runtime (which closes governed bridges and the
-    // managed driver factory), then tear down protocol and tray. No provider child
-    // survives: task cancellation aborts its harness controller.
     async function requestQuit(reason) {
         if (shutdownStarted)
             return;
         shutdownStarted = true;
         quitting = true;
         try {
+            await Promise.race([coworkerDispatcher?.flush?.() ?? Promise.resolve(), delay(15_000)]);
             if (goals) {
                 for (const goal of goals.listGoals().goals) {
                     if (!["completed", "failed", "cancelled"].includes(goal.status)) {
@@ -176,6 +181,14 @@ async function main() {
                 }).show();
             },
         });
+        coworkerDispatcher = createCoworkerDispatcher({
+            dataDir,
+            runtime: host.runtime,
+            roster: () => host.rosterSummary(),
+            coworkerStore,
+            conversationStore,
+            services,
+        });
     }
 
     const firstRun = createFirstRunService({ host, services });
@@ -187,6 +200,10 @@ async function main() {
             bindHandlers();
         }
         return { ...refresh, roster: host.rosterSummary() };
+    }
+
+    async function refreshCoworkerRuntime() {
+        return applyProviderRefresh(await host.refreshProviders({ isBusy: goalsBusy }));
     }
 
     function bindHandlers() {
@@ -204,8 +221,6 @@ async function main() {
                 "computer:browserStatus": async () => (await firstRun.getStatus()).browsers,
                 "computer:provisionDriver": async () => {
                     const result = await firstRun.provisionManagedBrowserDriver();
-                    // A newly provisioned driver must reach the runtime: refresh applies
-                    // the new computer config + worker browser capability when idle.
                     const refresh = await host.refreshProviders({ isBusy: goalsBusy });
                     await applyProviderRefresh(refresh);
                     return { ...result, refresh };
@@ -230,6 +245,39 @@ async function main() {
                     validateRoleAssignment(host.rosterSummary(), { role, agentId });
                     services.updateSettings({ roles: { [role]: agentId } });
                     return applyProviderRefresh(await host.refreshProviders({ isBusy: goalsBusy }));
+                },
+                "coworker:list": ({ includeArchived }) => coworkerStore.list({ includeArchived }),
+                "coworker:get": ({ coworkerId }) => coworkerStore.get(coworkerId),
+                "coworker:create": async ({ coworker }) => {
+                    const created = coworkerStore.create(coworker);
+                    return { coworker: created, refresh: await refreshCoworkerRuntime() };
+                },
+                "coworker:update": async ({ coworkerId, patch }) => {
+                    const updated = coworkerStore.update(coworkerId, patch);
+                    return { coworker: updated, refresh: await refreshCoworkerRuntime() };
+                },
+                "coworker:archive": async ({ coworkerId }) => {
+                    const updated = coworkerStore.archive(coworkerId);
+                    return { coworker: updated, refresh: await refreshCoworkerRuntime() };
+                },
+                "coworker:restore": async ({ coworkerId }) => {
+                    const updated = coworkerStore.restore(coworkerId);
+                    return { coworker: updated, refresh: await refreshCoworkerRuntime() };
+                },
+                "conversation:list": () => conversationStore.list(),
+                "conversation:get": ({ conversationId }) => conversationStore.get(conversationId),
+                "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
+                "conversation:createTeam": ({ title, coworkerIds }) => conversationStore.createTeam({ title, coworkerIds }),
+                "conversation:send": ({ conversationId, text, mentions, replyTo, artifactIds, clientMessageId }) => {
+                    const message = conversationStore.postUserMessage(conversationId, {
+                        text,
+                        mentions,
+                        replyTo,
+                        artifactIds,
+                        clientMessageId,
+                    });
+                    const deliveries = coworkerDispatcher.dispatchMessage(conversationId, message.id);
+                    return { message, scheduledRecipients: deliveries.length };
                 },
                 "goal:submit": ({ text, workspaceId }) => goals.submitGoal({ text, workspaceId }),
                 "goal:list": () => goals.listGoals(),
