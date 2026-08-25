@@ -122,11 +122,15 @@ export class CodexHarness {
         }
 
         const existingSessionId = context.task.harnessState?.sessionId;
+        // A trusted task-scoped execution context (stamped only by the orchestrator's
+        // internal delegateTrusted channel) overrides any static harness cwd, so the
+        // provider child process really runs inside the operator's chosen workspace.
+        const effectiveCwd = context.executionContext?.cwd ?? this.config.cwd;
         const args = [...launch.prefixArgs, "exec", "--json"];
         if (this.config.model)
             args.push("--model", this.config.model);
-        if (this.config.cwd)
-            args.push("--cd", this.config.cwd);
+        if (effectiveCwd)
+            args.push("--cd", effectiveCwd);
         if (this.config.skipGitRepoCheck)
             args.push("--skip-git-repo-check");
         if (this.config.sandbox)
@@ -161,7 +165,7 @@ export class CodexHarness {
         try {
             child = spawn(launch.command, args, {
                 shell: false,
-                cwd: this.config.cwd,
+                cwd: effectiveCwd,
                 env: this.config.inheritEnv === false
                     ? { ...this.config.env }
                     : { ...process.env, ...this.config.env },

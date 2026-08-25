@@ -143,6 +143,9 @@ export class ClaudeCodeHarness {
         }
 
         const existingSessionId = context.task.harnessState?.sessionId;
+        // Trusted task-scoped execution context (internal delegateTrusted channel only)
+        // overrides any static harness cwd so the child process runs in the workspace.
+        const effectiveCwd = context.executionContext?.cwd ?? this.config.cwd;
         const args = [
             ...launch.prefixArgs,
             "-p",
@@ -198,7 +201,7 @@ export class ClaudeCodeHarness {
         try {
             child = spawn(launch.command, args, {
                 shell: false,
-                cwd: this.config.cwd,
+                cwd: effectiveCwd,
                 env: this.config.inheritEnv === false
                     ? { ...this.config.env }
                     : { ...process.env, ...this.config.env },
