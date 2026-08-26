@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SovereignBot</title>
   <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./artifacts.css">
 </head>
 <body data-theme="system">
   <div class="app-shell">
@@ -64,7 +65,7 @@
         </div>
         <form id="composer-form" class="composer-shell" autocomplete="off">
           <div id="mention-row" class="mention-row hidden"></div>
-          <div class="composer-box"><textarea id="composer-input" rows="1" maxlength="12000" placeholder="Message your coworker…"></textarea><div class="composer-bottom"><div class="composer-tools"><button id="composer-add" class="composer-tool" type="button" title="Artifacts coming in V3">＋</button><span id="composer-hint">Enter to send · Shift+Enter for a new line</span></div><button id="composer-send" class="send-button" type="submit">↑</button></div></div>
+          <div class="composer-box"><textarea id="composer-input" rows="1" maxlength="12000" placeholder="Message your coworker…"></textarea><div class="composer-bottom"><div class="composer-tools"><button id="composer-add" class="composer-tool" type="button" title="Attach files — coming next">＋</button><span id="composer-hint">Enter to send · Shift+Enter for a new line</span></div><button id="composer-send" class="send-button" type="submit">↑</button></div></div>
           <p id="composer-error" class="inline-error hidden"></p>
         </form>
       </section>
@@ -99,5 +100,6 @@
   <dialog id="team-dialog" class="modal"><form id="team-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span class="eyebrow">NEW TEAM</span><h2>Bring coworkers together</h2></div><button class="modal-x" data-close-dialog="team-dialog" type="button">×</button></div><label>Team name<input id="team-name" maxlength="120" placeholder="e.g. Product Team" required></label><div><span class="form-label">Coworkers</span><div id="team-member-picker" class="member-picker"></div></div><p id="team-form-error" class="inline-error hidden"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="team-dialog" type="button">Cancel</button><button id="team-save" class="hero-action" type="submit">Create team</button></div></form></dialog>
 
   <script src="./app.js"></script>
+  <script src="./artifacts-ui.js"></script>
 </body>
 </html>
