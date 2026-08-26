@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
     computer: Object.freeze({
         control: invoke("computer:control"),
         lifecycle: invoke("computer:lifecycle"),
+        frame: invoke("computer:frame"),
         supplySecret: invoke("computer:supplySecret"),
         browserStatus: invoke("computer:browserStatus"),
         provisionDriver: invoke("computer:provisionDriver"),
