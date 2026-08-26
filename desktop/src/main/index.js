@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { app, dialog, Notification } from "electron";
+import { app, dialog, Notification, shell } from "electron";
 import { desktopVersion } from "./lib/desktop-version.js";
 import { installAppProtocolHandler, registerAppSchemePrivileged } from "./protocol.js";
 import { createMainWindow, appOrigin } from "./window.js";
@@ -11,6 +11,7 @@ import { createFirstRunService } from "./first-run.js";
 import { createGoalController } from "./goal-controller.js";
 import { createCoworkerStore } from "./coworker-store.js";
 import { createConversationStore } from "./conversation-store.js";
+import { createArtifactStore } from "./artifact-store.js";
 import { createCoworkerDispatcher } from "./coworker-dispatcher.js";
 import { openProviderLogin } from "./provider-login.js";
 import { validateRoleAssignment } from "./provider-roster.js";
@@ -68,14 +69,13 @@ async function main() {
 
     const dataDir = defaultDataDir();
     const services = createDesktopServices({ dataDir, dialog });
-    const coworkerStore = createCoworkerStore({
-        persistPath: join(dataDir, "desktop-state", "coworkers.json"),
-    });
+    const coworkerStore = createCoworkerStore({ persistPath: join(dataDir, "desktop-state", "coworkers.json") });
     coworkerStore.ensureDefaults();
     const conversationStore = createConversationStore({
         persistPath: join(dataDir, "desktop-state", "conversations.json"),
         coworkerStore,
     });
+    const artifactStore = createArtifactStore({ dataDir });
 
     let host;
     try {
@@ -93,14 +93,12 @@ async function main() {
     }
 
     const uninstallProtocol = installAppProtocolHandler();
-
     let win;
     let bridge;
     let goals;
     let coworkerDispatcher;
     let quitting = false;
     let shutdownStarted = false;
-
     const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
     async function requestQuit(reason) {
@@ -113,11 +111,7 @@ async function main() {
             if (goals) {
                 for (const goal of goals.listGoals().goals) {
                     if (!["completed", "failed", "cancelled"].includes(goal.status)) {
-                        try {
-                            await goals.cancel(goal.id);
-                        }
-                        catch {
-                        }
+                        try { await goals.cancel(goal.id); } catch {}
                     }
                 }
                 await Promise.race([goals.flush(), delay(15_000)]);
@@ -125,16 +119,8 @@ async function main() {
             await Promise.race([host?.close(), delay(15_000)]);
         }
         finally {
-            try {
-                uninstallProtocol();
-            }
-            catch {
-            }
-            try {
-                tray?.destroy();
-            }
-            catch {
-            }
+            try { uninstallProtocol(); } catch {}
+            try { tray?.destroy(); } catch {}
             app.exit(0);
         }
     }
@@ -152,9 +138,7 @@ async function main() {
         if (host.mode === "demo")
             return { allowed: true };
         const roster = host.rosterSummary();
-        return roster.ready
-            ? { allowed: true }
-            : { allowed: false, reason: "Connect at least one AI provider to run goals." };
+        return roster.ready ? { allowed: true } : { allowed: false, reason: "Connect at least one AI provider to run goals." };
     }
 
     const GOAL_TERMINAL = new Set(["completed", "failed", "cancelled"]);
@@ -187,6 +171,7 @@ async function main() {
             roster: () => host.rosterSummary(),
             coworkerStore,
             conversationStore,
+            artifactStore,
             services,
         });
     }
@@ -210,12 +195,7 @@ async function main() {
         bindIpcChannels({
             win,
             handlers: {
-                "app:handshake": async () => ({
-                    ok: true,
-                    version: desktopVersion(),
-                    platform: process.platform,
-                    locale: app.getLocale(),
-                }),
+                "app:handshake": async () => ({ ok: true, version: desktopVersion(), platform: process.platform, locale: app.getLocale() }),
                 ...bridge.handlers,
                 "firstrun:getStatus": () => firstRun.getStatus(),
                 "computer:browserStatus": async () => (await firstRun.getStatus()).browsers,
@@ -269,15 +249,16 @@ async function main() {
                 "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
                 "conversation:createTeam": ({ title, coworkerIds }) => conversationStore.createTeam({ title, coworkerIds }),
                 "conversation:send": ({ conversationId, text, mentions, replyTo, artifactIds, clientMessageId }) => {
-                    const message = conversationStore.postUserMessage(conversationId, {
-                        text,
-                        mentions,
-                        replyTo,
-                        artifactIds,
-                        clientMessageId,
-                    });
+                    const message = conversationStore.postUserMessage(conversationId, { text, mentions, replyTo, artifactIds, clientMessageId });
                     const deliveries = coworkerDispatcher.dispatchMessage(conversationId, message.id);
                     return { message, scheduledRecipients: deliveries.length };
+                },
+                "artifact:list": ({ conversationId, coworkerId, limit }) => artifactStore.list({ conversationId, coworkerId, limit }),
+                "artifact:get": ({ artifactId }) => artifactStore.get(artifactId),
+                "artifact:preview": ({ artifactId }) => artifactStore.previewText(artifactId),
+                "artifact:reveal": ({ artifactId }) => {
+                    shell.showItemInFolder(artifactStore.managedPath(artifactId));
+                    return { ok: true };
                 },
                 "goal:submit": ({ text, workspaceId }) => goals.submitGoal({ text, workspaceId }),
                 "goal:list": () => goals.listGoals(),
@@ -311,7 +292,5 @@ async function main() {
         win.focus();
     });
 
-    app.on("window-all-closed", () => {
-        void requestQuit("window-closed");
-    });
+    app.on("window-all-closed", () => { void requestQuit("window-closed"); });
 }

@@ -8,19 +8,14 @@ const invoke = (channel) => (payload) => ipcRenderer.invoke(channel, payload);
 
 contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
     handshake: invoke("app:handshake"),
-    firstRun: Object.freeze({
-        getStatus: invoke("firstrun:getStatus"),
-    }),
+    firstRun: Object.freeze({ getStatus: invoke("firstrun:getStatus") }),
     workspaces: Object.freeze({
         addViaDialog: invoke("workspace:addViaDialog"),
         list: invoke("workspace:list"),
         setDefault: invoke("workspace:setDefault"),
         remove: invoke("workspace:remove"),
     }),
-    settings: Object.freeze({
-        get: invoke("settings:get"),
-        update: invoke("settings:update"),
-    }),
+    settings: Object.freeze({ get: invoke("settings:get"), update: invoke("settings:update") }),
     coworkers: Object.freeze({
         list: invoke("coworker:list"),
         get: invoke("coworker:get"),
@@ -35,6 +30,12 @@ contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
         createDirect: invoke("conversation:createDirect"),
         createTeam: invoke("conversation:createTeam"),
         send: invoke("conversation:send"),
+    }),
+    artifacts: Object.freeze({
+        list: invoke("artifact:list"),
+        get: invoke("artifact:get"),
+        preview: invoke("artifact:preview"),
+        reveal: invoke("artifact:reveal"),
     }),
     goals: Object.freeze({
         submit: invoke("goal:submit"),
