@@ -4,6 +4,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { startEgressProxy, resolveEgressTarget } from "./egress-proxy.js";
+import { captureWebDriverFrame } from "./screenshot.js";
 import { WebDriverClient } from "./webdriver-client.js";
 import { startWebDriverProcess } from "./webdriver-process.js";
 
@@ -145,8 +146,6 @@ async function main() {
             headless: config.headless,
             proxyUrl: proxy.url,
             browserBinary: config.browserBinary,
-            // Creating a browser session is part of sidecar startup. Do not let a shorter
-            // steady-state request timeout abort Chrome before startupTimeoutMs has elapsed.
             timeoutMs: Math.max(config.requestTimeoutMs, config.startupTimeoutMs),
         });
         await client.start();
@@ -209,6 +208,25 @@ async function main() {
                     sessionActive: Boolean(client?.sessionId),
                     browser: config.browser,
                     webdriverExternal: webdriver.external,
+                });
+                return;
+            }
+
+            if (request.method === "GET" && url.pathname === "/frame") {
+                if (!client?.sessionId || !sessionLease) {
+                    send(response, 409, { error: "computer browser session is not running" });
+                    return;
+                }
+                const frame = await captureWebDriverFrame({
+                    endpoint: webdriver.endpoint,
+                    sessionId: client.sessionId,
+                    timeoutMs: Math.min(config.requestTimeoutMs, 15_000),
+                });
+                send(response, 200, {
+                    ...frame,
+                    leaseId: sessionLease,
+                    url: await client.currentUrl(),
+                    capturedAt: new Date().toISOString(),
                 });
                 return;
             }

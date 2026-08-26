@@ -1,8 +1,5 @@
 import { createOperatorFacade } from "../../vendor/core/src/operator-facade.js";
 
-// Desktop operator bridge: binds the vendored Core OperatorFacade (fixed desktop principal)
-// to enumerated IPC channels. Handlers receive already-validated payloads from ipc.js and
-// never accept caller-chosen identities — the facade's actor is fixed at construction.
 export function createOperatorBridge(runtime) {
     const facade = createOperatorFacade(runtime, { actor: "desktop-operator" });
     return {
@@ -22,7 +19,9 @@ export function createOperatorBridge(runtime) {
             "operator:getTaskEvents": ({ taskId }) => facade.getTaskEvents(taskId),
             "computer:control": ({ agentId, action }) => facade.computerControl(agentId, action),
             "computer:lifecycle": ({ agentId, action }) => facade.computerLifecycle(agentId, action),
-            // Plaintext crosses once into the facade; rejections are sanitized there.
+            // Read-only observation is bound to the current runtime directly so `npm start`
+            // does not depend on a prior vendored-Core sync. Packaging still syncs Core as usual.
+            "computer:frame": ({ agentId }) => runtime.computerLifecycle.frame(agentId),
             "computer:supplySecret": async ({ agentId, requestId, value }) => {
                 await facade.supplySecret(agentId, requestId, value);
                 return { supplied: true };

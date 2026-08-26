@@ -57,6 +57,22 @@ export class SidecarComputerDriver {
         return result;
     }
 
+    async frame() {
+        if (!this.#child || !this.#endpoint || this.#child.exitCode !== null)
+            throw new Error("computer browser is not running");
+        const result = await this.#requestRaw("GET", "/frame", undefined, { timeoutMs: 15_000 });
+        if (result.leaseId)
+            this.#sessionLease = result.leaseId;
+        if (result.mimeType !== "image/png" || typeof result.data !== "string")
+            throw new Error("computer sidecar returned an invalid live frame");
+        return {
+            mimeType: "image/png",
+            data: result.data,
+            url: result.url,
+            capturedAt: result.capturedAt,
+        };
+    }
+
     async snapshot() {
         const result = await this.#request("POST", "/snapshot", {});
         if (!result.leaseId)
@@ -211,9 +227,6 @@ export class SidecarComputerDriver {
             },
             stdio: ["pipe", "pipe", "pipe"],
         });
-        // The private transport credential crosses exactly once over an inherited pipe. It is not in
-        // the child/browser environment or command line, so sibling same-user processes cannot obtain
-        // it through the common /proc/<pid>/environ shortcut.
         child.stdin.on("error", () => {});
         child.stdin.end(JSON.stringify({ protocol: SIDECAR_PROTOCOL, token: transportToken }));
 
@@ -353,20 +366,14 @@ export class SidecarComputerDriver {
             return;
         await new Promise((resolve) => {
             const timeout = setTimeout(() => {
-                try {
-                    child.kill("SIGKILL");
-                }
-                catch {
-                }
+                try { child.kill("SIGKILL"); } catch {}
                 resolve();
             }, 2500);
             child.once("exit", () => {
                 clearTimeout(timeout);
                 resolve();
             });
-            try {
-                child.kill("SIGTERM");
-            }
+            try { child.kill("SIGTERM"); }
             catch {
                 clearTimeout(timeout);
                 resolve();

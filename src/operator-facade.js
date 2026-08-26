@@ -2,12 +2,6 @@ import { dryRunPolicy, validatePolicyDraft } from "./policy-dry-run.js";
 import { publicMemoryRecords, publicRuntimeRecords, publicTaskGraphView, publicTaskListView } from "./task-view.js";
 import { collectWorkerTelemetry } from "./worker-telemetry.js";
 
-// Transport-neutral authenticated-operator business layer.
-//
-// The loopback HTTP console authenticates short-lived bearer sessions and then calls this
-// facade; the Desktop validates IPC senders and calls the same facade. Authorization-relevant
-// identity is FIXED at construction time — callers cannot pass or forge an actor principal,
-// and every mutating operation records the facade's actor in audit exactly as before.
 export const OPERATOR_ACTORS = Object.freeze({
     console: "operator-console",
     desktop: "desktop-operator",
@@ -137,9 +131,10 @@ export function createOperatorFacade(runtime, { actor }) {
             return runtime.computerLifecycle[action](boundedText(agentId, 120), actor);
         },
 
-        // Secret plaintext crosses this boundary exactly once and never lands in logs,
-        // results, or errors: failures surface as a fixed sanitized error that transports
-        // may pass through verbatim.
+        async computerFrame(agentId) {
+            return runtime.computerLifecycle.frame(boundedText(agentId, 120));
+        },
+
         async supplySecret(agentId, requestId, value) {
             try {
                 return await runtime.computer.supplySecret(boundedText(agentId, 120), actor, boundedText(requestId, 120), String(value ?? ""));

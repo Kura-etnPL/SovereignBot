@@ -14,8 +14,6 @@ export class ComputerLifecycleManager {
         if (!this.#driverFactory)
             return { agentId, managed: false, running: false };
 
-        // A status read must never instantiate/start a browser. Bundled managed factories expose
-        // `get()` specifically so the operator UI can inspect whether a driver object already exists.
         if (typeof this.#driverFactory.get === "function") {
             const existing = this.#driverFactory.get(agentId);
             return {
@@ -33,6 +31,16 @@ export class ComputerLifecycleManager {
         if (typeof driver.health !== "function")
             return { ok: true, managed: false, agentId };
         return { agentId, ...(await driver.health()) };
+    }
+
+    async frame(agentId) {
+        await this.#registry.ensure(agentId);
+        if (!this.#driverFactory || typeof this.#driverFactory.get !== "function")
+            throw new Error(`live screen is unavailable for ${agentId}`);
+        const driver = this.#driverFactory.get(agentId);
+        if (!driver || typeof driver.frame !== "function")
+            throw new Error(`computer browser is not running for ${agentId}`);
+        return { agentId, ...(await driver.frame()) };
     }
 
     async start(agentId, actorId) {
