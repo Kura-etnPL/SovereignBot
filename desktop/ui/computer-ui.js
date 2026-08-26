@@ -51,18 +51,22 @@
     actions.insertBefore(button, details);
   }
 
+  function isKnownStopped(computer) {
+    return computer?.lifecycle?.running === false && computer?.lifecycle?.instantiated !== true;
+  }
+
   function statusLabel(computer) {
     const lifecycle = computer?.lifecycle;
     if (!lifecycle?.managed) return "Not configured";
-    if (!lifecycle.running) return "Stopped";
+    if (isKnownStopped(computer)) return "Stopped";
     if (computer?.control?.mode === "human") return "You have control";
     if (computer?.control?.mode === "requested") return "Needs you";
-    return "Working computer";
+    if (lifecycle?.instantiated === true) return "Computer active";
+    return "Computer ready";
   }
 
   function statusClass(computer) {
-    if (!computer?.lifecycle?.managed) return "offline";
-    if (!computer.lifecycle.running) return "offline";
+    if (!computer?.lifecycle?.managed || isKnownStopped(computer)) return "offline";
     if (computer?.control?.mode === "requested") return "attention";
     if (computer?.control?.mode === "human") return "human";
     return "ready";
@@ -176,9 +180,13 @@
     const control = document.createElement("span");
     control.textContent = `Control: ${computer.control?.mode || "agent"}`;
     const runtime = document.createElement("span");
-    runtime.textContent = computer.lifecycle?.managed
-      ? (computer.lifecycle.running ? "Browser runtime running" : "Browser runtime stopped")
-      : "Managed browser not configured";
+    runtime.textContent = !computer.lifecycle?.managed
+      ? "Managed browser not configured"
+      : isKnownStopped(computer)
+        ? "Browser runtime stopped"
+        : computer.lifecycle?.instantiated === true
+          ? "Browser runtime active"
+          : "Browser runtime ready";
     details.append(control, runtime);
     card.append(details);
 
@@ -188,7 +196,7 @@
       const setup = makeButton("Set up browser");
       setup.addEventListener("click", () => switchView("settings"));
       actions.append(setup);
-    } else if (!computer.lifecycle.running) {
+    } else if (isKnownStopped(computer)) {
       const start = makeButton("Start computer", "computer-action primary");
       start.addEventListener("click", () => runAction(start, () => window.sovereignbot.computer.lifecycle({ agentId: binding.agentId, action: "start" }), refresh));
       actions.append(start);
