@@ -19,7 +19,9 @@ export function createOperatorBridge(runtime) {
             "operator:getTaskEvents": ({ taskId }) => facade.getTaskEvents(taskId),
             "computer:control": ({ agentId, action }) => facade.computerControl(agentId, action),
             "computer:lifecycle": ({ agentId, action }) => facade.computerLifecycle(agentId, action),
-            "computer:frame": ({ agentId }) => facade.computerFrame(agentId),
+            // Read-only observation is bound to the current runtime directly so `npm start`
+            // does not depend on a prior vendored-Core sync. Packaging still syncs Core as usual.
+            "computer:frame": ({ agentId }) => runtime.computerLifecycle.frame(agentId),
             "computer:supplySecret": async ({ agentId, requestId, value }) => {
                 await facade.supplySecret(agentId, requestId, value);
                 return { supplied: true };
