@@ -1,10 +1,11 @@
 "use strict";
 
 (() => {
-  if (!window.sovereignbot?.skills || !window.sovereignbot?.conversations) return;
+  if (!window.sovereignbot?.skills || !window.sovereignbot?.conversations || !window.sovereignbot?.artifacts?.attachViaDialog) return;
 
   let skills = [];
-  const selected = new Set();
+  const selectedSkills = new Set();
+  let attachments = [];
 
   function el(tag, className, textValue) {
     const node = document.createElement(tag);
@@ -16,15 +17,15 @@
   async function refreshSkills() {
     const result = await window.sovereignbot.skills.list({});
     skills = result?.skills ?? [];
-    for (const id of [...selected]) {
-      if (!skills.some((skill) => skill.id === id)) selected.delete(id);
+    for (const id of [...selectedSkills]) {
+      if (!skills.some((skill) => skill.id === id)) selectedSkills.delete(id);
     }
-    renderSelected();
+    renderDraftExtensions();
     renderSkillList();
   }
 
-  function selectedSkills() {
-    return skills.filter((skill) => selected.has(skill.id));
+  function chosenSkills() {
+    return skills.filter((skill) => selectedSkills.has(skill.id));
   }
 
   function ensureComposerSurface() {
@@ -40,38 +41,85 @@
       tools.insertBefore(button, hint);
     }
 
+    const add = document.getElementById("composer-add");
+    if (add) {
+      add.title = "Attach files";
+      add.setAttribute("aria-label", "Attach files");
+      add.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        void pickAttachments();
+      }, true);
+    }
+
     const composerBox = document.querySelector(".composer-box");
-    if (composerBox && !document.getElementById("selected-skills")) {
+    if (composerBox && !document.getElementById("draft-extensions")) {
       const row = el("div", "selected-skills hidden");
-      row.id = "selected-skills";
+      row.id = "draft-extensions";
       composerBox.parentElement?.insertBefore(row, composerBox);
     }
   }
 
-  function renderSelected() {
+  function renderDraftExtensions() {
     ensureComposerSurface();
-    const row = document.getElementById("selected-skills");
+    const row = document.getElementById("draft-extensions");
     if (!row) return;
     row.textContent = "";
-    const chosen = selectedSkills();
-    row.classList.toggle("hidden", chosen.length === 0);
-    for (const skill of chosen) {
+    const skillRows = chosenSkills();
+    row.classList.toggle("hidden", skillRows.length === 0 && attachments.length === 0);
+
+    for (const artifact of attachments) {
+      const chip = el("button", "selected-skill attachment-chip", `＋ ${artifact.fileName || artifact.title} ×`);
+      chip.type = "button";
+      chip.title = "Remove attachment from next message";
+      chip.addEventListener("click", () => {
+        attachments = attachments.filter((entry) => entry.id !== artifact.id);
+        renderDraftExtensions();
+      });
+      row.append(chip);
+    }
+
+    for (const skill of skillRows) {
       const chip = el("button", "selected-skill", `✦ ${skill.name} ×`);
       chip.type = "button";
       chip.title = "Remove skill from next message";
       chip.addEventListener("click", () => {
-        selected.delete(skill.id);
-        renderSelected();
+        selectedSkills.delete(skill.id);
+        renderDraftExtensions();
         renderSkillList();
       });
       row.append(chip);
     }
   }
 
+  async function pickAttachments() {
+    const conversation = state.selectedConversation;
+    if (!conversation) return;
+    const add = document.getElementById("composer-add");
+    if (add) add.disabled = true;
+    try {
+      const result = await window.sovereignbot.artifacts.attachViaDialog({ conversationId: conversation.id });
+      if (result?.canceled) return;
+      for (const artifact of result?.artifacts ?? []) {
+        if (!attachments.some((entry) => entry.id === artifact.id)) attachments.push(artifact);
+      }
+      if (attachments.length > 12) attachments = attachments.slice(-12);
+      renderDraftExtensions();
+      if (result?.errors?.length) {
+        $("composer-error").textContent = `${result.errors.length} file(s) could not be attached.`;
+        show($("composer-error"));
+      }
+    } catch (error) {
+      $("composer-error").textContent = text(error?.message || error).replace(/^.*Error: /, "");
+      show($("composer-error"));
+    } finally {
+      if (add) add.disabled = false;
+    }
+  }
+
   function ensureDialog() {
     let dialog = document.getElementById("skills-dialog");
     if (dialog) return dialog;
-
     dialog = el("dialog", "modal skill-modal");
     dialog.id = "skills-dialog";
     const shell = el("div", "modal-card skill-modal-card");
@@ -82,11 +130,9 @@
     close.type = "button";
     close.addEventListener("click", () => dialog.close());
     head.append(copy, close);
-
     const description = el("p", "skill-modal-copy", "Select one or more skills for your next message. Skills guide how the coworker works; they do not grant extra permissions.");
     const list = el("div", "skill-list");
     list.id = "skill-list";
-
     const createToggle = el("button", "quiet-action skill-new-toggle", "+ New skill");
     createToggle.type = "button";
     const form = el("form", "skill-create-form hidden");
@@ -133,13 +179,9 @@
       save.disabled = true;
       try {
         const created = await window.sovereignbot.skills.create({
-          skill: {
-            name: name.value.trim(),
-            description: desc.value.trim(),
-            instructions: instructions.value.trim(),
-          },
+          skill: { name: name.value.trim(), description: desc.value.trim(), instructions: instructions.value.trim() },
         });
-        selected.add(created.id);
+        selectedSkills.add(created.id);
         form.reset();
         form.classList.add("hidden");
         await refreshSkills();
@@ -166,14 +208,14 @@
       return;
     }
     for (const skill of skills) {
-      const row = el("label", `skill-option${selected.has(skill.id) ? " selected" : ""}`);
+      const row = el("label", `skill-option${selectedSkills.has(skill.id) ? " selected" : ""}`);
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.checked = selected.has(skill.id);
+      checkbox.checked = selectedSkills.has(skill.id);
       checkbox.addEventListener("change", () => {
-        if (checkbox.checked) selected.add(skill.id);
-        else selected.delete(skill.id);
-        renderSelected();
+        if (checkbox.checked) selectedSkills.add(skill.id);
+        else selectedSkills.delete(skill.id);
+        renderDraftExtensions();
         renderSkillList();
       });
       const icon = el("span", "skill-option-icon", "✦");
@@ -191,13 +233,14 @@
     dialog.showModal();
   }
 
-  async function sendWithSkills(event) {
+  async function sendWithExtensions(event) {
     event?.preventDefault();
     const conversation = state.selectedConversation;
     if (!conversation) return;
     const area = $("composer-input");
-    const value = area.value.trim();
-    if (!value) return;
+    const typed = area.value.trim();
+    if (!typed && attachments.length === 0) return;
+    const value = typed || (attachments.length === 1 ? "Review the attached file." : "Review the attached files.");
     hide($("composer-error"));
     $("composer-send").disabled = true;
     try {
@@ -205,14 +248,16 @@
         conversationId: conversation.id,
         text: value,
         ...(state.mentionIds.size ? { mentions: [...state.mentionIds] } : {}),
-        skillIds: [...selected],
+        ...(selectedSkills.size ? { skillIds: [...selectedSkills] } : {}),
+        ...(attachments.length ? { artifactIds: attachments.map((entry) => entry.id) } : {}),
         clientMessageId: `ui-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       });
       area.value = "";
       autoSizeComposer();
       state.mentionIds.clear();
-      selected.clear();
-      renderSelected();
+      selectedSkills.clear();
+      attachments = [];
+      renderDraftExtensions();
       await refreshConversation(true);
     } catch (error) {
       $("composer-error").textContent = text(error?.message || error).replace(/^.*Error: /, "");
@@ -222,26 +267,26 @@
     }
   }
 
-  function interceptSelectedSkillSend() {
+  function interceptExtendedSend() {
     const form = document.getElementById("composer-form");
     const area = document.getElementById("composer-input");
     if (!form || !area) return;
     form.addEventListener("submit", (event) => {
-      if (!selected.size) return;
+      if (!selectedSkills.size && !attachments.length) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      void sendWithSkills(event);
+      void sendWithExtensions(event);
     }, true);
     area.addEventListener("keydown", (event) => {
-      if (!selected.size || event.key !== "Enter" || event.shiftKey) return;
+      if ((!selectedSkills.size && !attachments.length) || event.key !== "Enter" || event.shiftKey) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      void sendWithSkills(event);
+      void sendWithExtensions(event);
     }, true);
   }
 
   ensureComposerSurface();
   ensureDialog();
-  interceptSelectedSkillSend();
+  interceptExtendedSend();
   refreshSkills().catch(() => {});
 })();
