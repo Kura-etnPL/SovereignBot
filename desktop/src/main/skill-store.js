@@ -6,6 +6,8 @@ const MAX_SKILLS = 256;
 const MAX_NAME = 100;
 const MAX_DESCRIPTION = 280;
 const MAX_INSTRUCTIONS = 16_000;
+const MAX_MESSAGE_SKILLS = 8;
+const MAX_INVOCATIONS = 10_000;
 
 function makeId() {
     return `skill_${randomBytes(8).toString("hex")}`;
@@ -25,6 +27,10 @@ function text(value, label, max, { required = false } = {}) {
 
 function validId(value) {
     return typeof value === "string" && /^skill_[a-f0-9]{16}$/i.test(value);
+}
+
+function validMessageId(value) {
+    return typeof value === "string" && /^msg_[a-f0-9]{16}$/i.test(value);
 }
 
 function clone(value) {
@@ -74,21 +80,49 @@ function sanitize(entry) {
     }
 }
 
+function sanitizeInvocation(value) {
+    try {
+        if (!value || typeof value !== "object" || !validMessageId(value.messageId)) return undefined;
+        if (!Array.isArray(value.skillIds) || value.skillIds.length > MAX_MESSAGE_SKILLS) return undefined;
+        const skillIds = [...new Set(value.skillIds)];
+        if (skillIds.some((id) => !validId(id))) return undefined;
+        if (typeof value.createdAt !== "string") return undefined;
+        return { messageId: value.messageId, skillIds, createdAt: value.createdAt };
+    }
+    catch {
+        return undefined;
+    }
+}
+
 export function createSkillStore({ persistPath, now = () => new Date().toISOString(), makeSkillId = makeId } = {}) {
     if (!persistPath) throw new Error("skill store requires persistPath");
     const loaded = loadJsonState(persistPath, null);
     const skills = loaded?.schema === SKILLS_SCHEMA && Array.isArray(loaded.skills)
         ? loaded.skills.map(sanitize).filter(Boolean).slice(-MAX_SKILLS)
         : [];
+    const invocations = loaded?.schema === SKILLS_SCHEMA && Array.isArray(loaded.invocations)
+        ? loaded.invocations.map(sanitizeInvocation).filter(Boolean).slice(-MAX_INVOCATIONS)
+        : [];
 
     function save() {
-        saveJsonState(persistPath, { schema: SKILLS_SCHEMA, skills });
+        saveJsonState(persistPath, { schema: SKILLS_SCHEMA, skills, invocations });
     }
 
     function requireSkill(id) {
         const skill = skills.find((entry) => entry.id === String(id));
         if (!skill) throw new Error(`unknown skill id: ${id}`);
         return skill;
+    }
+
+    function activeSkills(skillIds) {
+        const ids = [...new Set(skillIds ?? [])];
+        if (ids.length > MAX_MESSAGE_SKILLS) throw new Error(`a message may use at most ${MAX_MESSAGE_SKILLS} skills`);
+        return ids.map((id) => {
+            if (!validId(id)) throw new Error(`invalid skill id: ${id}`);
+            const skill = requireSkill(id);
+            if (skill.state !== "active") throw new Error(`skill is archived: ${id}`);
+            return skill;
+        });
     }
 
     return {
@@ -126,6 +160,32 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
             const skill = requireSkill(id);
             if (skill.state !== "active") throw new Error(`skill is archived: ${id}`);
             return clone(skill);
+        },
+        bindMessage(messageId, skillIds) {
+            if (!validMessageId(messageId)) throw new Error("skill invocation requires a valid messageId");
+            const selected = activeSkills(skillIds);
+            const existing = invocations.find((entry) => entry.messageId === messageId);
+            const invocation = { messageId, skillIds: selected.map((entry) => entry.id), createdAt: existing?.createdAt ?? now() };
+            if (existing) Object.assign(existing, invocation);
+            else invocations.push(invocation);
+            if (invocations.length > MAX_INVOCATIONS) invocations.splice(0, invocations.length - MAX_INVOCATIONS);
+            save();
+            return clone(invocation);
+        },
+        skillsForMessage(messageId) {
+            const invocation = invocations.find((entry) => entry.messageId === String(messageId));
+            if (!invocation) return [];
+            return invocation.skillIds.map((id) => skills.find((entry) => entry.id === id)).filter((entry) => entry?.state === "active").map(clone);
+        },
+        decorateConversation(conversation) {
+            const copy = clone(conversation);
+            copy.messages = copy.messages.map((message) => {
+                const selected = this.skillsForMessage(message.id);
+                if (!selected.length) return message;
+                const skillBlock = selected.map((skill) => `Skill: ${skill.name}\n${skill.instructions}`).join("\n\n");
+                return { ...message, text: `${message.text}\n\n<applied_skills>\n${skillBlock}\n</applied_skills>` };
+            });
+            return copy;
         },
     };
 }
