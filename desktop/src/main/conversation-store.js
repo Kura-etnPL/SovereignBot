@@ -18,156 +18,84 @@ const AUTHORITY_KEYS = new Set([
     "allowprivatehosts", "governedtools", "capabilities",
 ]);
 
-function makeConversationId() {
-    return `conv_${randomBytes(8).toString("hex")}`;
-}
-
-function makeMessageId() {
-    return `msg_${randomBytes(8).toString("hex")}`;
-}
-
-function normalizedKey(key) {
-    return String(key).replaceAll(/[-_\s]/g, "").toLowerCase();
-}
-
+function makeConversationId() { return `conv_${randomBytes(8).toString("hex")}`; }
+function makeMessageId() { return `msg_${randomBytes(8).toString("hex")}`; }
+function normalizedKey(key) { return String(key).replaceAll(/[-_\s]/g, "").toLowerCase(); }
 function rejectAuthority(value, path = "message") {
-    if (!value || typeof value !== "object")
-        return;
-    if (Array.isArray(value)) {
-        value.forEach((entry, index) => rejectAuthority(entry, `${path}[${index}]`));
-        return;
-    }
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) { value.forEach((entry, index) => rejectAuthority(entry, `${path}[${index}]`)); return; }
     for (const [key, child] of Object.entries(value)) {
-        if (AUTHORITY_KEYS.has(normalizedKey(key)))
-            throw new Error(`authority-bearing conversation field is not allowed: ${path}.${key}`);
+        if (AUTHORITY_KEYS.has(normalizedKey(key))) throw new Error(`authority-bearing conversation field is not allowed: ${path}.${key}`);
         rejectAuthority(child, `${path}.${key}`);
     }
 }
-
-function plainObject(value, label) {
-    if (!value || typeof value !== "object" || Array.isArray(value))
-        throw new Error(`${label} must be an object`);
-}
-
+function plainObject(value, label) { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`); }
 function boundedText(value, label, max, { required = false } = {}) {
-    if (value === undefined || value === null) {
-        if (required)
-            throw new Error(`${label} is required`);
-        return undefined;
-    }
-    if (typeof value !== "string")
-        throw new Error(`${label} must be a string`);
+    if (value === undefined || value === null) { if (required) throw new Error(`${label} is required`); return undefined; }
+    if (typeof value !== "string") throw new Error(`${label} must be a string`);
     const trimmed = value.trim();
-    if (!trimmed && required)
-        throw new Error(`${label} is required`);
-    if (trimmed.length > max)
-        throw new Error(`${label} exceeds ${max} characters`);
+    if (!trimmed && required) throw new Error(`${label} is required`);
+    if (trimmed.length > max) throw new Error(`${label} exceeds ${max} characters`);
     return trimmed || undefined;
 }
-
 function idList(value, label, { max = MAX_REFERENCES } = {}) {
-    if (value === undefined)
-        return [];
-    if (!Array.isArray(value))
-        throw new Error(`${label} must be an array`);
-    if (value.length > max)
-        throw new Error(`${label} exceeds ${max} entries`);
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+    if (value.length > max) throw new Error(`${label} exceeds ${max} entries`);
     const result = [];
     for (const item of value) {
-        if (typeof item !== "string" || !/^[A-Za-z0-9][\w:.-]{0,127}$/.test(item))
-            throw new Error(`${label} contains an invalid identifier`);
-        if (!result.includes(item))
-            result.push(item);
+        if (typeof item !== "string" || !/^[A-Za-z0-9][\w:.-]{0,127}$/.test(item)) throw new Error(`${label} contains an invalid identifier`);
+        if (!result.includes(item)) result.push(item);
     }
     return result;
 }
+function validConversationId(value) { return typeof value === "string" && /^conv_[a-f0-9]{16}$/i.test(value); }
+function validMessageId(value) { return typeof value === "string" && /^msg_[a-f0-9]{16}$/i.test(value); }
+function clone(value) { return structuredClone(value); }
 
-function validConversationId(value) {
-    return typeof value === "string" && /^conv_[a-f0-9]{16}$/i.test(value);
-}
-
-function validMessageId(value) {
-    return typeof value === "string" && /^msg_[a-f0-9]{16}$/i.test(value);
-}
-
-function clone(value) {
-    return structuredClone(value);
-}
-
-export function createConversationStore({
-    persistPath,
-    coworkerStore,
-    now = () => new Date().toISOString(),
-    makeConversationId: makeConversationIdFn = makeConversationId,
-    makeMessageId: makeMessageIdFn = makeMessageId,
-} = {}) {
-    if (!persistPath)
-        throw new Error("conversation store requires persistPath");
-    if (!coworkerStore?.get || !coworkerStore?.list)
-        throw new Error("conversation store requires coworkerStore");
+export function createConversationStore({ persistPath, coworkerStore, now = () => new Date().toISOString(), makeConversationId: makeConversationIdFn = makeConversationId, makeMessageId: makeMessageIdFn = makeMessageId } = {}) {
+    if (!persistPath) throw new Error("conversation store requires persistPath");
+    if (!coworkerStore?.get || !coworkerStore?.list) throw new Error("conversation store requires coworkerStore");
 
     function requireCoworker(id) {
         const coworker = coworkerStore.get(id);
-        if (coworker.state === "archived")
-            throw new Error(`archived coworker cannot join new work: ${id}`);
+        if (coworker.state === "archived") throw new Error(`archived coworker cannot join new work: ${id}`);
         return coworker;
-    }
-
-    function sanitizePersistedConversation(entry) {
-        try {
-            if (!entry || typeof entry !== "object" || !validConversationId(entry.id))
-                return undefined;
-            if (!["direct", "team"].includes(entry.kind))
-                return undefined;
-            const participants = idList(entry.participants, "participants", { max: MAX_PARTICIPANTS });
-            if (!participants.includes(USER_PARTICIPANT))
-                return undefined;
-            for (const id of participants.filter((id) => id !== USER_PARTICIPANT))
-                requireCoworker(id);
-            if (entry.kind === "direct" && participants.length !== 2)
-                return undefined;
-            const messages = Array.isArray(entry.messages)
-                ? entry.messages.filter((message) => sanitizePersistedMessage(message, participants)).slice(-MAX_MESSAGES_PER_CONVERSATION)
-                : [];
-            const title = boundedText(entry.title, "title", MAX_TITLE) ?? (entry.kind === "direct" ? "Conversation" : "Team");
-            if (typeof entry.createdAt !== "string" || typeof entry.updatedAt !== "string")
-                return undefined;
-            return {
-                id: entry.id,
-                kind: entry.kind,
-                title,
-                participants,
-                messages,
-                createdAt: entry.createdAt,
-                updatedAt: entry.updatedAt,
-            };
-        }
-        catch {
-            return undefined;
-        }
     }
 
     function sanitizePersistedMessage(message, participants) {
         try {
-            if (!message || typeof message !== "object" || !validMessageId(message.id))
-                return false;
-            if (typeof message.senderId !== "string" || !participants.includes(message.senderId))
-                return false;
-            if (typeof message.text !== "string" || !message.text.trim() || message.text.length > MAX_MESSAGE_TEXT)
-                return false;
-            if (typeof message.createdAt !== "string")
-                return false;
-            if (message.replyTo !== undefined && !validMessageId(message.replyTo))
-                return false;
+            if (!message || typeof message !== "object" || !validMessageId(message.id)) return false;
+            if (typeof message.senderId !== "string" || !participants.includes(message.senderId)) return false;
+            if (typeof message.text !== "string" || !message.text.trim() || message.text.length > MAX_MESSAGE_TEXT) return false;
+            if (typeof message.createdAt !== "string") return false;
+            if (message.replyTo !== undefined && !validMessageId(message.replyTo)) return false;
             idList(message.mentions, "mentions", { max: MAX_PARTICIPANTS });
             idList(message.artifactIds, "artifactIds");
-            if (!message.delivery || typeof message.delivery !== "object" || Array.isArray(message.delivery))
-                return false;
+            if (!message.delivery || typeof message.delivery !== "object" || Array.isArray(message.delivery)) return false;
             return true;
-        }
-        catch {
-            return false;
-        }
+        } catch { return false; }
+    }
+
+    function sanitizePersistedConversation(entry) {
+        try {
+            if (!entry || typeof entry !== "object" || !validConversationId(entry.id)) return undefined;
+            if (!["direct", "team"].includes(entry.kind)) return undefined;
+            const participants = idList(entry.participants, "participants", { max: MAX_PARTICIPANTS });
+            if (!participants.includes(USER_PARTICIPANT)) return undefined;
+            for (const id of participants.filter((id) => id !== USER_PARTICIPANT)) requireCoworker(id);
+            if (entry.kind === "direct" && participants.length !== 2) return undefined;
+            let leadCoworkerId;
+            if (entry.leadCoworkerId !== undefined) {
+                if (entry.kind !== "team" || typeof entry.leadCoworkerId !== "string" || !participants.includes(entry.leadCoworkerId) || entry.leadCoworkerId === USER_PARTICIPANT) return undefined;
+                requireCoworker(entry.leadCoworkerId);
+                leadCoworkerId = entry.leadCoworkerId;
+            }
+            const messages = Array.isArray(entry.messages) ? entry.messages.filter((message) => sanitizePersistedMessage(message, participants)).slice(-MAX_MESSAGES_PER_CONVERSATION) : [];
+            const title = boundedText(entry.title, "title", MAX_TITLE) ?? (entry.kind === "direct" ? "Conversation" : "Team");
+            if (typeof entry.createdAt !== "string" || typeof entry.updatedAt !== "string") return undefined;
+            return { id: entry.id, kind: entry.kind, title, participants, ...(leadCoworkerId ? { leadCoworkerId } : {}), messages, createdAt: entry.createdAt, updatedAt: entry.updatedAt };
+        } catch { return undefined; }
     }
 
     const loaded = loadJsonState(persistPath, null);
@@ -175,31 +103,19 @@ export function createConversationStore({
         ? loaded.conversations.map(sanitizePersistedConversation).filter(Boolean).slice(0, MAX_CONVERSATIONS)
         : [];
 
-    function save() {
-        saveJsonState(persistPath, { schema: CONVERSATIONS_SCHEMA, conversations });
-    }
-
-    function requireConversation(id) {
-        const conversation = conversations.find((entry) => entry.id === String(id));
-        if (!conversation)
-            throw new Error(`unknown conversation id: ${id}`);
-        return conversation;
-    }
-
-    function requireParticipant(conversation, participantId) {
-        if (!conversation.participants.includes(participantId))
-            throw new Error(`participant ${participantId} is not in conversation ${conversation.id}`);
-        if (participantId !== USER_PARTICIPANT)
-            requireCoworker(participantId);
-    }
+    function save() { saveJsonState(persistPath, { schema: CONVERSATIONS_SCHEMA, conversations }); }
+    function requireConversation(id) { const conversation = conversations.find((entry) => entry.id === String(id)); if (!conversation) throw new Error(`unknown conversation id: ${id}`); return conversation; }
+    function requireParticipant(conversation, participantId) { if (!conversation.participants.includes(participantId)) throw new Error(`participant ${participantId} is not in conversation ${conversation.id}`); if (participantId !== USER_PARTICIPANT) requireCoworker(participantId); }
 
     function recipientIds(conversation, senderId, mentions) {
         const coworkers = conversation.participants.filter((id) => id !== USER_PARTICIPANT && id !== senderId);
-        if (!mentions.length)
+        if (!mentions.length) {
+            if (senderId === USER_PARTICIPANT && conversation.leadCoworkerId && coworkers.includes(conversation.leadCoworkerId))
+                return [conversation.leadCoworkerId];
             return coworkers;
+        }
         for (const mention of mentions) {
-            if (!coworkers.includes(mention))
-                throw new Error(`mentioned coworker is not an eligible participant: ${mention}`);
+            if (!coworkers.includes(mention)) throw new Error(`mentioned coworker is not an eligible participant: ${mention}`);
         }
         return mentions;
     }
@@ -211,42 +127,28 @@ export function createConversationStore({
             kind: conversation.kind,
             title: conversation.title,
             participants: [...conversation.participants],
+            ...(conversation.leadCoworkerId ? { leadCoworkerId: conversation.leadCoworkerId } : {}),
             createdAt: conversation.createdAt,
             updatedAt: conversation.updatedAt,
             messageCount: conversation.messages.length,
-            lastMessage: lastMessage
-                ? { id: lastMessage.id, senderId: lastMessage.senderId, textPreview: lastMessage.text.slice(0, 160), createdAt: lastMessage.createdAt }
-                : undefined,
+            lastMessage: lastMessage ? { id: lastMessage.id, senderId: lastMessage.senderId, textPreview: lastMessage.text.slice(0, 160), createdAt: lastMessage.createdAt } : undefined,
         };
     }
 
-    function createConversation({ kind, title, coworkerIds }) {
-        if (conversations.length >= MAX_CONVERSATIONS)
-            throw new Error(`conversation limit reached (${MAX_CONVERSATIONS})`);
-        if (!["direct", "team"].includes(kind))
-            throw new Error("conversation kind must be direct or team");
+    function createConversation({ kind, title, coworkerIds, leadCoworkerId }) {
+        if (conversations.length >= MAX_CONVERSATIONS) throw new Error(`conversation limit reached (${MAX_CONVERSATIONS})`);
+        if (!["direct", "team"].includes(kind)) throw new Error("conversation kind must be direct or team");
         const ids = idList(coworkerIds, "coworkerIds", { max: MAX_PARTICIPANTS - 1 });
-        if (!ids.length)
-            throw new Error("conversation requires at least one coworker");
+        if (!ids.length) throw new Error("conversation requires at least one coworker");
         ids.forEach(requireCoworker);
-        if (kind === "direct" && ids.length !== 1)
-            throw new Error("direct conversation requires exactly one coworker");
-        if (kind === "team" && ids.length < 2)
-            throw new Error("team conversation requires at least two coworkers");
+        if (kind === "direct" && ids.length !== 1) throw new Error("direct conversation requires exactly one coworker");
+        if (kind === "team" && ids.length < 2) throw new Error("team conversation requires at least two coworkers");
+        if (leadCoworkerId !== undefined && (kind !== "team" || !ids.includes(leadCoworkerId))) throw new Error("lead coworker must be a member of the team");
         const id = makeConversationIdFn();
-        if (!validConversationId(id) || conversations.some((entry) => entry.id === id))
-            throw new Error("conversation id factory returned an invalid or duplicate id");
+        if (!validConversationId(id) || conversations.some((entry) => entry.id === id)) throw new Error("conversation id factory returned an invalid or duplicate id");
         const timestamp = now();
         const fallbackTitle = kind === "direct" ? requireCoworker(ids[0]).name : "Team";
-        const conversation = {
-            id,
-            kind,
-            title: boundedText(title, "title", MAX_TITLE) ?? fallbackTitle,
-            participants: [USER_PARTICIPANT, ...ids],
-            messages: [],
-            createdAt: timestamp,
-            updatedAt: timestamp,
-        };
+        const conversation = { id, kind, title: boundedText(title, "title", MAX_TITLE) ?? fallbackTitle, participants: [USER_PARTICIPANT, ...ids], ...(leadCoworkerId ? { leadCoworkerId } : {}), messages: [], createdAt: timestamp, updatedAt: timestamp };
         conversations.push(conversation);
         save();
         return summarize(conversation);
@@ -258,44 +160,25 @@ export function createConversationStore({
         plainObject(payload, "message");
         rejectAuthority(payload);
         const allowed = new Set(["text", "mentions", "replyTo", "artifactIds", "clientMessageId"]);
-        for (const key of Object.keys(payload)) {
-            if (!allowed.has(key))
-                throw new Error(`unknown message field: ${key}`);
-        }
+        for (const key of Object.keys(payload)) { if (!allowed.has(key)) throw new Error(`unknown message field: ${key}`); }
         const text = boundedText(payload.text, "text", MAX_MESSAGE_TEXT, { required: true });
         const mentions = idList(payload.mentions, "mentions", { max: MAX_PARTICIPANTS });
         const artifactIds = idList(payload.artifactIds, "artifactIds");
         const replyTo = payload.replyTo;
-        if (replyTo !== undefined) {
-            if (!validMessageId(replyTo) || !conversation.messages.some((entry) => entry.id === replyTo))
-                throw new Error("replyTo must reference an existing message in this conversation");
-        }
+        if (replyTo !== undefined && (!validMessageId(replyTo) || !conversation.messages.some((entry) => entry.id === replyTo))) throw new Error("replyTo must reference an existing message in this conversation");
         const clientMessageId = boundedText(payload.clientMessageId, "clientMessageId", 128);
         if (clientMessageId) {
             const duplicate = conversation.messages.find((entry) => entry.clientMessageId === clientMessageId && entry.senderId === senderId);
-            if (duplicate)
-                return clone(duplicate);
+            if (duplicate) return clone(duplicate);
         }
         const recipients = recipientIds(conversation, senderId, mentions);
         const id = makeMessageIdFn();
-        if (!validMessageId(id) || conversation.messages.some((entry) => entry.id === id))
-            throw new Error("message id factory returned an invalid or duplicate id");
+        if (!validMessageId(id) || conversation.messages.some((entry) => entry.id === id)) throw new Error("message id factory returned an invalid or duplicate id");
         const createdAt = now();
         const delivery = Object.fromEntries(recipients.map((recipientId) => [recipientId, { status: "pending", updatedAt: createdAt }]));
-        const message = {
-            id,
-            senderId,
-            text,
-            mentions,
-            artifactIds,
-            ...(replyTo ? { replyTo } : {}),
-            ...(clientMessageId ? { clientMessageId } : {}),
-            delivery,
-            createdAt,
-        };
+        const message = { id, senderId, text, mentions, artifactIds, ...(replyTo ? { replyTo } : {}), ...(clientMessageId ? { clientMessageId } : {}), delivery, createdAt };
         conversation.messages.push(message);
-        if (conversation.messages.length > MAX_MESSAGES_PER_CONVERSATION)
-            conversation.messages.splice(0, conversation.messages.length - MAX_MESSAGES_PER_CONVERSATION);
+        if (conversation.messages.length > MAX_MESSAGES_PER_CONVERSATION) conversation.messages.splice(0, conversation.messages.length - MAX_MESSAGES_PER_CONVERSATION);
         conversation.updatedAt = createdAt;
         save();
         return clone(message);
@@ -303,64 +186,41 @@ export function createConversationStore({
 
     return {
         schema: CONVERSATIONS_SCHEMA,
-
-        list() {
-            return { schema: CONVERSATIONS_SCHEMA, conversations: conversations.map(summarize) };
-        },
-
-        get(id) {
-            const conversation = requireConversation(id);
-            return { ...summarize(conversation), messages: clone(conversation.messages) };
-        },
-
+        list() { return { schema: CONVERSATIONS_SCHEMA, conversations: conversations.map(summarize) }; },
+        get(id) { const conversation = requireConversation(id); return { ...summarize(conversation), messages: clone(conversation.messages) }; },
         createDirect(coworkerId) {
             const existing = conversations.find((entry) => entry.kind === "direct" && entry.participants.length === 2 && entry.participants.includes(coworkerId));
             return existing ? summarize(existing) : createConversation({ kind: "direct", coworkerIds: [coworkerId] });
         },
-
-        createTeam({ title, coworkerIds }) {
-            return createConversation({ kind: "team", title, coworkerIds });
+        createTeam({ title, coworkerIds, leadCoworkerId }) {
+            if (leadCoworkerId) {
+                const existing = conversations.find((entry) => entry.kind === "team" && entry.leadCoworkerId === leadCoworkerId);
+                if (existing) return summarize(existing);
+            }
+            return createConversation({ kind: "team", title, coworkerIds, leadCoworkerId });
         },
-
-        postUserMessage(conversationId, payload) {
-            return post(conversationId, payload, { senderId: USER_PARTICIPANT });
-        },
-
-        postCoworkerMessage(conversationId, coworkerId, payload) {
-            requireCoworker(coworkerId);
-            return post(conversationId, payload, { senderId: coworkerId });
-        },
-
+        postUserMessage(conversationId, payload) { return post(conversationId, payload, { senderId: USER_PARTICIPANT }); },
+        postCoworkerMessage(conversationId, coworkerId, payload) { requireCoworker(coworkerId); return post(conversationId, payload, { senderId: coworkerId }); },
         markDelivery(conversationId, messageId, coworkerId, status, detail) {
-            if (!["pending", "delivered", "failed"].includes(status))
-                throw new Error("delivery status must be pending, delivered, or failed");
+            if (!["pending", "delivered", "failed"].includes(status)) throw new Error("delivery status must be pending, delivered, or failed");
             const conversation = requireConversation(conversationId);
             const message = conversation.messages.find((entry) => entry.id === String(messageId));
-            if (!message)
-                throw new Error(`unknown message id: ${messageId}`);
-            if (!Object.hasOwn(message.delivery, coworkerId))
-                throw new Error(`coworker ${coworkerId} is not a recipient of message ${messageId}`);
-            message.delivery[coworkerId] = {
-                status,
-                updatedAt: now(),
-                ...(detail ? { detail: boundedText(detail, "detail", 500) } : {}),
-            };
+            if (!message) throw new Error(`unknown message id: ${messageId}`);
+            if (!Object.hasOwn(message.delivery, coworkerId)) throw new Error(`coworker ${coworkerId} is not a recipient of message ${messageId}`);
+            message.delivery[coworkerId] = { status, updatedAt: now(), ...(detail ? { detail: boundedText(detail, "detail", 500) } : {}) };
             conversation.updatedAt = message.delivery[coworkerId].updatedAt;
             save();
             return clone(message.delivery[coworkerId]);
         },
-
         pendingFor(coworkerId, { limit = 50 } = {}) {
             requireCoworker(coworkerId);
-            if (!Number.isInteger(limit) || limit < 1 || limit > 200)
-                throw new Error("pending delivery limit must be between 1 and 200");
+            if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error("pending delivery limit must be between 1 and 200");
             const pending = [];
             for (const conversation of conversations) {
                 for (const message of conversation.messages) {
                     if (message.delivery?.[coworkerId]?.status === "pending") {
                         pending.push({ conversation: summarize(conversation), message: clone(message) });
-                        if (pending.length >= limit)
-                            return pending;
+                        if (pending.length >= limit) return pending;
                     }
                 }
             }
