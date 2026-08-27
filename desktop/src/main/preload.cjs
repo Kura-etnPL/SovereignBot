@@ -24,6 +24,14 @@ contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
         archive: invoke("coworker:archive"),
         restore: invoke("coworker:restore"),
     }),
+    skills: Object.freeze({
+        list: invoke("skill:list"),
+        get: invoke("skill:get"),
+        create: invoke("skill:create"),
+        update: invoke("skill:update"),
+        archive: invoke("skill:archive"),
+        restore: invoke("skill:restore"),
+    }),
     conversations: Object.freeze({
         list: invoke("conversation:list"),
         get: invoke("conversation:get"),

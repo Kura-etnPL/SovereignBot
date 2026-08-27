@@ -1,0 +1,23 @@
+.skill-trigger { font-size: 13px; }
+.selected-skills { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 4px 6px; }
+.selected-skill { min-height: 26px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--panel-3); color: var(--text); cursor: pointer; font-size: 9.5px; font-weight: 600; }
+.selected-skill:hover { background: var(--panel); }
+.skill-modal-card { width: min(620px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 40px)); overflow: auto; }
+.skill-modal-copy { margin: -4px 0 12px; color: var(--text-3); font-size: 11px; line-height: 1.5; }
+.skill-list { display: grid; gap: 7px; max-height: 300px; overflow: auto; scrollbar-width: thin; }
+.skill-option { display: grid; grid-template-columns: auto 32px minmax(0, 1fr); gap: 8px; align-items: center; padding: 9px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); cursor: pointer; }
+.skill-option:hover, .skill-option.selected { border-color: var(--line-strong); background: var(--panel-3); }
+.skill-option input { accent-color: var(--text); }
+.skill-option-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: var(--panel); color: var(--text); }
+.skill-option-copy { min-width: 0; }
+.skill-option-copy strong, .skill-option-copy span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.skill-option-copy strong { font-size: 11.5px; }
+.skill-option-copy span { margin-top: 2px; color: var(--text-3); font-size: 9.5px; }
+.skill-empty { padding: 18px; border: 1px dashed var(--line); border-radius: 11px; color: var(--text-3); text-align: center; font-size: 10.5px; }
+.skill-new-toggle { margin-top: 12px; }
+.skill-create-form { display: grid; gap: 10px; margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.skill-create-form label { display: grid; gap: 5px; color: var(--text-2); font-size: 10.5px; }
+.skill-create-form input, .skill-create-form textarea { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--bg); color: var(--text); outline: none; font: inherit; resize: vertical; }
+.skill-create-form input:focus, .skill-create-form textarea:focus { border-color: color-mix(in srgb, var(--text) 35%, var(--line-strong)); }
+.skill-form-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.future-section { display: none; }
