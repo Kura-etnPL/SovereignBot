@@ -89,7 +89,7 @@ export function createCoworkerDispatcher({
             }
             throw new Error(`${coworker.name} has configured workspaces, but none are currently available`);
         }
-        const cwd = join(dataDir, "coworker-workspaces", coworker.id);
+        const cwd = join(dataDir, "desktop-state", "coworker-workspaces", coworker.id);
         mkdirSync(cwd, { recursive: true });
         return { workspaceId: `coworker:${coworker.id}`, cwd };
     }

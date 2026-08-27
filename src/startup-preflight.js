@@ -20,6 +20,8 @@ const KNOWN_TOP_LEVEL = new Set([
     "computers",
     "operator-sessions",
     "tool-bridges",
+    "desktop-state",
+    "artifacts",
 ]);
 
 function fail(message) {

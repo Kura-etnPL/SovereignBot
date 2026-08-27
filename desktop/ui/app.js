@@ -26,7 +26,7 @@ function text(value) {
 
 function initials(name) {
   const parts = text(name).trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "✦";
+  if (!parts.length) return "鉁?;
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return `${parts[0][0] ?? ""}${parts.at(-1)?.[0] ?? ""}`.toUpperCase();
 }
@@ -188,7 +188,7 @@ function renderReadiness() {
     summary.textContent = "Demo mode";
     dot.classList.add("offline");
   } else if (state.roster?.ready) {
-    summary.textContent = providers.length ? `${providers.join(" + ")} ready · ${readyCoworkers} coworker lanes` : `${readyCoworkers} coworker lanes ready`;
+    summary.textContent = providers.length ? `${providers.join(" + ")} ready 路 ${readyCoworkers} coworker lanes` : `${readyCoworkers} coworker lanes ready`;
     dot.classList.remove("offline");
   } else {
     summary.textContent = "Connect Codex or Claude Code";
@@ -300,7 +300,7 @@ function renderConversationHeader(conversation) {
   $("conversation-title").textContent = conversation.title;
   $("conversation-kind").textContent = conversation.kind === "team" ? "Team" : "Coworker";
   $("conversation-subtitle").textContent = conversation.kind === "team"
-    ? members.map((entry) => entry.name).join(" · ")
+    ? members.map((entry) => entry.name).join(" 路 ")
     : direct?.role || "Persistent coworker conversation";
   $("demo-banner").classList.toggle("hidden", state.roster?.mode !== "demo");
 
@@ -365,7 +365,7 @@ function renderMessage(conversation, message) {
     const values = Object.values(message.delivery);
     const pending = values.filter((entry) => entry?.status === "pending").length;
     const failed = values.filter((entry) => entry?.status === "failed").length;
-    delivery.textContent = pending ? "Working…" : failed ? `${failed} delivery failed` : "Delivered";
+    delivery.textContent = pending ? "Working鈥? : failed ? `${failed} delivery failed` : "Delivered";
     content.append(delivery);
   }
   row.append(content);
@@ -396,7 +396,7 @@ function renderMessages(conversation, forceScroll = false) {
   $("typing-row").classList.toggle("hidden", pending.size === 0);
   if (pending.size) {
     const names = [...pending].map((id) => coworkerById(id)?.name).filter(Boolean);
-    $("typing-label").textContent = names.length > 1 ? `${names.join(" & ")} are working…` : `${names[0] || "Coworker"} is working…`;
+    $("typing-label").textContent = names.length > 1 ? `${names.join(" & ")} are working鈥 : `${names[0] || "Coworker"} is working鈥;
   }
   const scroller = $("message-scroller");
   if (forceScroll || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 160)
@@ -493,7 +493,7 @@ function populateTeamPicker() {
     avatar.className = "nav-avatar";
     avatar.textContent = avatarFor(coworker);
     const copy = document.createElement("span");
-    copy.textContent = `${coworker.name} — ${coworker.role}`;
+    copy.textContent = `${coworker.name} 鈥?${coworker.role}`;
     label.append(checkbox, avatar, copy);
     picker.append(label);
   }
@@ -647,7 +647,7 @@ function renderWorkspaces() {
 }
 
 function renderAdvancedRoster() {
-  const lines = (state.roster?.agents ?? []).map((agent) => `${agent.name}\n  ${agent.harnessKind} · ${agent.capabilities.join(", ")}`);
+  const lines = (state.roster?.agents ?? []).map((agent) => `${agent.name}\n  ${agent.harnessKind} 路 ${agent.capabilities.join(", ")}`);
   $("advanced-roster").textContent = lines.join("\n\n") || "No active runtime agents.";
 }
 
@@ -671,7 +671,7 @@ async function refreshSettingsData() {
     renderSidebar();
     const browsers = firstRun?.browsers ?? [];
     $("browser-summary").textContent = browsers.length
-      ? browsers.map((entry) => `${entry.browser} ${entry.version}`).join(" · ")
+      ? browsers.map((entry) => `${entry.browser} ${entry.version}`).join(" 路 ")
       : "No supported browser detected yet.";
   } catch {
     // Smoke mode does not bind the settings surface.
@@ -697,11 +697,11 @@ async function refreshActivity() {
       window.sovereignbot.operator.getOverview({}),
       window.sovereignbot.operator.getAudit({ limit: 30 }),
     ]);
-    const agents = (overview.agents ?? []).map((entry) => `${entry.name || entry.id} · ${entry.harnessKind || entry.harness?.kind || ""}`);
+    const agents = (overview.agents ?? []).map((entry) => `${entry.name || entry.id} 路 ${entry.harnessKind || entry.harness?.kind || ""}`);
     const tasks = overview.tasks ?? [];
     const counts = {};
     for (const task of tasks) counts[task.status] = (counts[task.status] ?? 0) + 1;
-    $("overview-block").textContent = `Coworker/runtime agents\n${agents.join("\n") || "—"}\n\nTasks ${JSON.stringify(counts)}`;
+    $("overview-block").textContent = `Coworker/runtime agents\n${agents.join("\n") || "鈥?}\n\nTasks ${JSON.stringify(counts)}`;
     $("audit-block").textContent = (audit.entries ?? []).slice().reverse().map((entry) => `${entry.at ?? ""}  ${entry.type}  ${entry.subject ?? ""}`).join("\n") || "No audit entries.";
   } catch {
     $("overview-block").textContent = "Activity is unavailable in this runtime mode.";
@@ -737,9 +737,7 @@ function bindEvents() {
       sendMessage(event);
     }
   });
-  $("composer-add").addEventListener("click", () => {
-    $("composer-hint").textContent = "Artifacts are the next V3 surface — messaging stays available now.";
-  });
+  // composer-add is wired by skills-ui.js to open the real attachment dialog.
 
   $("open-details").addEventListener("click", () => $("details-panel").classList.toggle("hidden"));
   $("close-details").addEventListener("click", () => hide($("details-panel")));
@@ -748,7 +746,7 @@ function bindEvents() {
   $("close-activity").addEventListener("click", () => hide($("activity-drawer")));
 
   $("settings-refresh-providers").addEventListener("click", async () => {
-    $("provider-action-result").textContent = "Refreshing…";
+    $("provider-action-result").textContent = "Refreshing鈥?;
     try {
       await window.sovereignbot.providers.refresh({});
       await refreshSettingsData();
@@ -757,7 +755,7 @@ function bindEvents() {
   });
   $("add-workspace").addEventListener("click", async () => { await window.sovereignbot.workspaces.addViaDialog({}); await refreshSettingsData(); });
   $("provision-driver").addEventListener("click", async () => {
-    $("driver-result").textContent = "Setting up managed browser…";
+    $("driver-result").textContent = "Setting up managed browser鈥?;
     try {
       const result = await window.sovereignbot.computer.provisionDriver({});
       $("driver-result").textContent = result?.ok === false ? result.reason : `ChromeDriver ${result.driverVersion ?? ""} ready.`;
