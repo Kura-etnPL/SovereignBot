@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { arch, cpus, freemem, hostname, platform, release, totalmem, uptime } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const REPO = process.env.SOVEREIGN_CONTROL_REPO || "Kura-etnPL/SovereignBot-Control";
 const ISSUE = Number(process.env.SOVEREIGN_CONTROL_ISSUE || "1");
@@ -25,6 +26,7 @@ const STATE_FILE = join(STATE_DIR, "state.json");
 const DESKTOP_PROCESS_FILE = join(STATE_DIR, "desktop-process.json");
 const DESKTOP_STDOUT = join(STATE_DIR, "desktop.stdout.log");
 const DESKTOP_STDERR = join(STATE_DIR, "desktop.stderr.log");
+const CAPTURE_SCRIPT = fileURLToPath(new URL("./capture-sovereign-window.ps1", import.meta.url));
 const PROTOCOL = "sovereign-local/1";
 const COMMAND_MARKER = "SOVEREIGN-LOCAL-COMMAND";
 const RESULT_MARKER = "SOVEREIGN-LOCAL-RESULT";
@@ -45,6 +47,7 @@ const OPS = new Set([
   "recipe.desktop-start",
   "recipe.desktop-stop",
   "recipe.desktop-package-smoke",
+  "recipe.desktop-capture",
 ]);
 
 function redact(text) {
@@ -124,9 +127,15 @@ function processFind(pattern) {
   const value = String(pattern || "").trim();
   if (!value || value.length > 80) throw new Error("pattern must be 1-80 characters");
   const escaped = value.replaceAll("'", "''");
-  const script = `$p='${escaped}'; Get-Process | Where-Object { $_.ProcessName -like "*$p*" -or $_.Path -like "*$p*" } | Select-Object -First 80 Id,ProcessName,Path | ConvertTo-Json -Compress`;
+  const script = `$p='${escaped}'; Get-Process | Where-Object { $_.ProcessName -like \"*$p*\" -or $_.Path -like \"*$p*\" } | Select-Object -First 80 Id,ProcessName,Path | ConvertTo-Json -Compress`;
   const raw = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { timeout: 15000 }).trim();
   return raw ? JSON.parse(raw) : [];
+}
+
+function processExists(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  const script = `$p=Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if($p){'true'}else{'false'}`;
+  return run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { timeout: 10000 }).trim() === "true";
 }
 
 function requireEmptyArgs(args) {
@@ -175,11 +184,8 @@ function startDesktop() {
 
   try {
     const existing = JSON.parse(readFileSync(DESKTOP_PROCESS_FILE, "utf8"));
-    if (Number.isInteger(existing.pid) && existing.pid > 0) {
-      const probe = processFind(String(existing.pid));
-      if (Array.isArray(probe) ? probe.some((item) => Number(item.Id) === existing.pid) : Number(probe?.Id) === existing.pid)
-        return { alreadyRunning: true, pid: existing.pid, ...prepared };
-    }
+    if (processExists(Number(existing.pid)))
+      return { alreadyRunning: true, pid: existing.pid, ...prepared };
   } catch {}
 
   writeFileSync(DESKTOP_STDOUT, "", "utf8");
@@ -213,11 +219,7 @@ function stopDesktop() {
   catch { return { stopped: false, reason: "no managed Desktop process record" }; }
   const pid = Number(record.pid);
   if (!Number.isInteger(pid) || pid <= 0) throw new Error("managed Desktop process record is invalid");
-  try {
-    run("taskkill.exe", ["/PID", String(pid), "/T"], { timeout: 30000 });
-  } catch (error) {
-    if (!/not found|no running instance|not found/i.test(String(error.message))) throw error;
-  }
+  if (processExists(pid)) run("taskkill.exe", ["/PID", String(pid), "/T"], { timeout: 30000 });
   rmSync(DESKTOP_PROCESS_FILE, { force: true });
   return { stopped: true, pid };
 }
@@ -228,6 +230,15 @@ function desktopLogTail() {
     catch { return ""; }
   };
   return { stdout: tail(DESKTOP_STDOUT), stderr: tail(DESKTOP_STDERR) };
+}
+
+function captureDesktop() {
+  if (!existsSync(CAPTURE_SCRIPT)) throw new Error("SovereignBot QA capture script is missing");
+  const raw = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", CAPTURE_SCRIPT], { timeout: 30000 }).trim();
+  const frame = JSON.parse(raw);
+  if (frame.mimeType !== "image/jpeg" || typeof frame.data !== "string" || frame.data.length > 36000)
+    throw new Error("SovereignBot QA capture returned an invalid frame");
+  return frame;
 }
 
 function runRecipe(op, args) {
@@ -257,6 +268,8 @@ function runRecipe(op, args) {
       const smokeOutput = run("npm.cmd", ["run", "smoke:packaged"], { cwd: desktopDir(), timeout: 300000 });
       return { ...prepared, packageOutput, smokeOutput };
     }
+    case "recipe.desktop-capture":
+      return captureDesktop();
     default:
       throw new Error(`unsupported recipe: ${op}`);
   }
