@@ -10,14 +10,15 @@
     "scripts": {
         "sync-core": "node scripts/sync-core.mjs",
         "fetch-node": "node scripts/fetch-node.mjs",
+        "prepare-runtime": "node scripts/sync-core.mjs && node scripts/fetch-node.mjs",
         "check": "node scripts/check.mjs",
         "test": "node --test",
-        "package": "npm run sync-core && electron-forge package",
-        "start": "electron .",
+        "package": "npm run prepare-runtime && electron-forge package",
+        "start": "npm run prepare-runtime && electron .",
         "smoke:packaged": "node scripts/run-packaged-smoke.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
-        "make": "npm run sync-core && electron-forge make --platform win32 --arch x64",
+        "make": "npm run prepare-runtime && electron-forge make --platform win32 --arch x64",
         "installer-e2e": "node scripts/installer-e2e.mjs",
         "release-manifest": "node scripts/write-release-manifest.mjs"
     },
