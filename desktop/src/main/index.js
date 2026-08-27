@@ -12,6 +12,8 @@ import { createGoalController } from "./goal-controller.js";
 import { createCoworkerStore } from "./coworker-store.js";
 import { createConversationStore } from "./conversation-store.js";
 import { createArtifactStore } from "./artifact-store.js";
+import { createSkillStore } from "./skill-store.js";
+import { createSkillAwareConversationStore, createSkillHandlers } from "./skill-integration.js";
 import { createCoworkerDispatcher } from "./coworker-dispatcher.js";
 import { openProviderLogin } from "./provider-login.js";
 import { validateRoleAssignment } from "./provider-roster.js";
@@ -76,6 +78,7 @@ async function main() {
         coworkerStore,
     });
     const artifactStore = createArtifactStore({ dataDir });
+    const skillStore = createSkillStore({ persistPath: join(dataDir, "desktop-state", "skills.json") });
 
     let host;
     try {
@@ -170,7 +173,7 @@ async function main() {
             runtime: host.runtime,
             roster: () => host.rosterSummary(),
             coworkerStore,
-            conversationStore,
+            conversationStore: createSkillAwareConversationStore(conversationStore, skillStore),
             artifactStore,
             services,
         });
@@ -244,15 +247,15 @@ async function main() {
                     const updated = coworkerStore.restore(coworkerId);
                     return { coworker: updated, refresh: await refreshCoworkerRuntime() };
                 },
+                ...createSkillHandlers({
+                    skillStore,
+                    conversationStore,
+                    dispatchMessage: (conversationId, messageId) => coworkerDispatcher.dispatchMessage(conversationId, messageId),
+                }),
                 "conversation:list": () => conversationStore.list(),
                 "conversation:get": ({ conversationId }) => conversationStore.get(conversationId),
                 "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
                 "conversation:createTeam": ({ title, coworkerIds }) => conversationStore.createTeam({ title, coworkerIds }),
-                "conversation:send": ({ conversationId, text, mentions, replyTo, artifactIds, clientMessageId }) => {
-                    const message = conversationStore.postUserMessage(conversationId, { text, mentions, replyTo, artifactIds, clientMessageId });
-                    const deliveries = coworkerDispatcher.dispatchMessage(conversationId, message.id);
-                    return { message, scheduledRecipients: deliveries.length };
-                },
                 "artifact:list": ({ conversationId, coworkerId, limit }) => artifactStore.list({ conversationId, coworkerId, limit }),
                 "artifact:get": ({ artifactId }) => artifactStore.get(artifactId),
                 "artifact:preview": ({ artifactId }) => artifactStore.previewText(artifactId),
