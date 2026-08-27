@@ -20,3 +20,4 @@
 .skill-create-form input, .skill-create-form textarea { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--bg); color: var(--text); outline: none; font: inherit; resize: vertical; }
 .skill-create-form input:focus, .skill-create-form textarea:focus { border-color: color-mix(in srgb, var(--text) 35%, var(--line-strong)); }
 .skill-form-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.future-chip-row span:last-child { display: none; }
