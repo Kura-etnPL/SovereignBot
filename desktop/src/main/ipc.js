@@ -3,6 +3,7 @@ import { IPC_CHANNELS, validateIpcRequest } from "./lib/ipc-schema.js";
 import { V3_IPC_CHANNELS, validateV3IpcRequest } from "./lib/v3-ipc-schema.js";
 
 const LIVE_FRAME_CHANNEL = "computer:frame";
+const ATTACH_CHANNEL = "artifact:attachViaDialog";
 const SKILL_CHANNELS = Object.freeze({
     "skill:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:get": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
@@ -15,6 +16,7 @@ const ALL_IPC_CHANNELS = Object.freeze({
     ...IPC_CHANNELS,
     ...V3_IPC_CHANNELS,
     [LIVE_FRAME_CHANNEL]: Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    [ATTACH_CHANNEL]: Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     ...SKILL_CHANNELS,
 });
 
@@ -28,6 +30,12 @@ function exactKeys(payload, allowed, label) {
     for (const key of Object.keys(payload)) {
         if (!allowed.has(key)) throw new Error(`${label} payload contains unknown field: ${key}`);
     }
+}
+
+function conversationId(value) {
+    if (typeof value !== "string" || !/^conv_[A-Za-z0-9][\w:-]{0,127}$/.test(value))
+        throw new Error("conversationId must be a conversation identifier");
+    return value;
 }
 
 function skillId(value) {
@@ -92,10 +100,7 @@ function validateSkillRequest(channel, payload) {
 }
 
 function validateLiveFrame(payload) {
-    if (!payload || typeof payload !== "object" || Array.isArray(payload))
-        throw new Error("computer frame payload must be an object");
-    if (Object.keys(payload).length !== 1 || !Object.hasOwn(payload, "agentId"))
-        throw new Error("computer frame payload accepts only agentId");
+    exactKeys(payload, new Set(["agentId"]), LIVE_FRAME_CHANNEL);
     if (typeof payload.agentId !== "string" || !/^[A-Za-z0-9][\w:.-]{0,127}$/.test(payload.agentId))
         throw new Error("agentId must be an identifier");
     return { agentId: payload.agentId };
@@ -112,6 +117,10 @@ function validateConversationSend(payload) {
 function validateRequest(channel, payload) {
     if (channel === LIVE_FRAME_CHANNEL)
         return validateLiveFrame(payload);
+    if (channel === ATTACH_CHANNEL) {
+        exactKeys(payload, new Set(["conversationId"]), channel);
+        return { conversationId: conversationId(payload.conversationId) };
+    }
     if (SKILL_CHANNELS[channel])
         return validateSkillRequest(channel, payload);
     if (channel === "conversation:send")
