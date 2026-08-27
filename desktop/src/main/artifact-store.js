@@ -7,6 +7,7 @@ export const ARTIFACTS_SCHEMA = "sovereignbot.desktop.artifacts.v1";
 const MAX_ARTIFACTS = 5_000;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 128 * 1024;
+const MAX_ATTACHMENT_CONTEXT_BYTES = 24 * 1024;
 const MAX_TITLE = 180;
 
 const MIME_BY_EXT = new Map([
@@ -69,6 +70,18 @@ function assertWorkspaceFile(workspacePath, relativePath) {
     return { root, actual, stat };
 }
 
+function assertPickedFile(path) {
+    if (typeof path !== "string" || !path || path.includes("\0")) throw new Error("picked attachment path is invalid");
+    const requested = resolve(path);
+    const lstat = lstatSync(requested);
+    if (lstat.isSymbolicLink()) throw new Error("picked attachment may not be a symbolic link");
+    const actual = realpathSync(requested);
+    const stat = statSync(actual);
+    if (!stat.isFile()) throw new Error("picked attachment must be a regular file");
+    if (stat.size < 0 || stat.size > MAX_FILE_BYTES) throw new Error(`attachment exceeds ${MAX_FILE_BYTES} bytes`);
+    return { actual, stat };
+}
+
 function sha256File(path) {
     return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
@@ -128,6 +141,33 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
         return full;
     }
 
+    function allocateStoredCopy({ actual, stat, title, metadata = {} }) {
+        if (artifacts.length >= MAX_ARTIFACTS) throw new Error(`artifact registry limit reached (${MAX_ARTIFACTS})`);
+        const id = makeArtifactId();
+        if (!/^artifact_[a-f0-9]{16}$/i.test(id) || artifacts.some((entry) => entry.id === id))
+            throw new Error("artifact id factory returned an invalid or duplicate id");
+        const fileName = basename(actual);
+        const artifactDir = join(rootDir, id);
+        mkdirSync(artifactDir, { recursive: false });
+        const storedName = fileName.slice(0, 180) || "artifact";
+        const destination = join(artifactDir, storedName);
+        copyFileSync(actual, destination);
+        const entry = {
+            id,
+            title: boundedText(title, "artifact title", MAX_TITLE) ?? fileName,
+            fileName,
+            mimeType: mimeFor(fileName),
+            size: stat.size,
+            sha256: sha256File(destination),
+            ...metadata,
+            storageRelativePath: relative(rootDir, destination),
+            createdAt: now(),
+        };
+        artifacts.push(entry);
+        save();
+        return publicView(entry);
+    }
+
     return {
         schema: ARTIFACTS_SCHEMA,
 
@@ -157,43 +197,53 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             return { artifact: publicView(entry), preview: slice.toString("utf8"), truncated: buffer.length > MAX_PREVIEW_BYTES };
         },
 
+        contextForMessage(artifactIds = []) {
+            return artifactIds.slice(0, 12).map((id) => {
+                const entry = requireArtifact(id);
+                const result = { id: entry.id, title: entry.title, fileName: entry.fileName, mimeType: entry.mimeType, size: entry.size };
+                if (entry.sourceKind === "user" && (entry.mimeType.startsWith("text/") || entry.mimeType === "application/json")) {
+                    const buffer = readFileSync(storagePath(entry));
+                    result.text = buffer.subarray(0, MAX_ATTACHMENT_CONTEXT_BYTES).toString("utf8");
+                    result.truncated = buffer.length > MAX_ATTACHMENT_CONTEXT_BYTES;
+                }
+                return result;
+            });
+        },
+
+        ingestPickedFile({ sourcePath, title, conversationId }) {
+            if (conversationId !== undefined && !validId(conversationId, "conv")) throw new Error("invalid conversationId");
+            const { actual, stat } = assertPickedFile(sourcePath);
+            return allocateStoredCopy({
+                actual,
+                stat,
+                title,
+                metadata: {
+                    sourceKind: "user",
+                    ...(conversationId ? { conversationId } : {}),
+                },
+            });
+        },
+
         ingestWorkspaceFile({ workspaceId, workspacePath, relativePath, title, createdByCoworkerId, conversationId, sourceMessageId }) {
-            if (artifacts.length >= MAX_ARTIFACTS) throw new Error(`artifact registry limit reached (${MAX_ARTIFACTS})`);
             const safePath = safeRelativePath(relativePath);
             const { actual, stat } = assertWorkspaceFile(workspacePath, safePath);
-            const id = makeArtifactId();
-            if (!/^artifact_[a-f0-9]{16}$/i.test(id) || artifacts.some((entry) => entry.id === id))
-                throw new Error("artifact id factory returned an invalid or duplicate id");
             if (typeof workspaceId !== "string" || !workspaceId) throw new Error("workspaceId is required");
             if (createdByCoworkerId !== undefined && !validId(createdByCoworkerId, "coworker")) throw new Error("invalid createdByCoworkerId");
             if (conversationId !== undefined && !validId(conversationId, "conv")) throw new Error("invalid conversationId");
             if (sourceMessageId !== undefined && !validId(sourceMessageId, "msg")) throw new Error("invalid sourceMessageId");
-
-            const fileName = basename(actual);
-            const artifactDir = join(rootDir, id);
-            mkdirSync(artifactDir, { recursive: false });
-            const storedName = fileName.slice(0, 180) || "artifact";
-            const destination = join(artifactDir, storedName);
-            copyFileSync(actual, destination);
-            const digest = sha256File(destination);
-            const entry = {
-                id,
-                title: boundedText(title, "artifact title", MAX_TITLE) ?? fileName,
-                fileName,
-                mimeType: mimeFor(fileName),
-                size: stat.size,
-                sha256: digest,
-                workspaceId,
-                sourceRelativePath: safePath,
-                ...(createdByCoworkerId ? { createdByCoworkerId } : {}),
-                ...(conversationId ? { conversationId } : {}),
-                ...(sourceMessageId ? { sourceMessageId } : {}),
-                storageRelativePath: relative(rootDir, destination),
-                createdAt: now(),
-            };
-            artifacts.push(entry);
-            save();
-            return publicView(entry);
+            return allocateStoredCopy({
+                actual,
+                stat,
+                title,
+                metadata: {
+                    sourceKind: "coworker",
+                    workspaceId,
+                    sourceRelativePath: safePath,
+                    ...(createdByCoworkerId ? { createdByCoworkerId } : {}),
+                    ...(conversationId ? { conversationId } : {}),
+                    ...(sourceMessageId ? { sourceMessageId } : {}),
+                },
+            });
         },
     };
 }
