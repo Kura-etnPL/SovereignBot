@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 import { artifactPromptInstruction, extractArtifactManifest } from "./lib/artifact-manifest.js";
+import { extractHandoffManifest, handoffPromptInstruction } from "./lib/handoff-manifest.js";
 import { coworkerAgentId, coworkerCapability } from "./provider-roster.js";
 
 const DISPATCH_SCHEMA = "sovereignbot.desktop.coworker-dispatch.v1";
@@ -9,6 +10,7 @@ const MAX_CONTEXT_MESSAGES = 32;
 const MAX_CONTEXT_TEXT = 4_000;
 const MAX_REPLY_TEXT = 20_000;
 const MAX_SESSION_ID = 2_000;
+const MAX_HANDOFF_DEPTH = 4;
 
 function stateKey(conversationId, coworkerId) {
     return `${conversationId}:${coworkerId}`;
@@ -90,6 +92,29 @@ export function createCoworkerDispatcher({
         const cwd = join(dataDir, "coworker-workspaces", coworker.id);
         mkdirSync(cwd, { recursive: true });
         return { workspaceId: `coworker:${coworker.id}`, cwd };
+    }
+
+    function handoffDepth(conversation, source) {
+        let depth = 0;
+        let cursor = source;
+        const seen = new Set();
+        while (cursor && cursor.senderId !== "user" && cursor.replyTo && depth <= MAX_HANDOFF_DEPTH) {
+            if (seen.has(cursor.id)) break;
+            seen.add(cursor.id);
+            depth += 1;
+            cursor = conversation.messages.find((entry) => entry.id === cursor.replyTo);
+        }
+        return depth;
+    }
+
+    function availableHandoffCoworkers(conversation, coworkerId, source) {
+        if (conversation.kind !== "team" || handoffDepth(conversation, source) >= MAX_HANDOFF_DEPTH)
+            return [];
+        return conversation.participants
+            .filter((id) => id !== "user" && id !== coworkerId)
+            .map((id) => coworkerStore.get(id))
+            .filter((entry) => entry.state === "active")
+            .map((entry) => ({ id: entry.id, name: entry.name, role: entry.role }));
     }
 
     async function bindContinuation(task, previousTaskId, agentId, harnessKind) {
@@ -178,6 +203,7 @@ export function createCoworkerDispatcher({
         const supervisorAgentId = snapshot.roles?.planner;
         if (!supervisorAgentId)
             throw new Error("coworker dispatch requires a ready supervisor/planner identity");
+        const availableHandoffs = availableHandoffCoworkers(conversation, coworkerId, source);
 
         const plan = await runtime.orchestrator.createPlan({
             title: `${coworker.name}: conversation turn`,
@@ -196,6 +222,8 @@ export function createCoworkerDispatcher({
                     coworker.instructions ? `Working instructions: ${coworker.instructions}` : "",
                     "Respond to the newest message as this persistent coworker. Preserve continuity with the conversation, be action-oriented, and do not claim work you did not actually complete.",
                     artifactStore ? artifactPromptInstruction() : "",
+                    handoffPromptInstruction(availableHandoffs),
+                    artifactStore && availableHandoffs.length ? "If both files and a handoff are needed, put the SOVEREIGN_ARTIFACTS line first and the SOVEREIGN_HANDOFFS line last." : "",
                 ].filter(Boolean).join("\n"),
                 conversation: publicConversationContext(conversation, coworkerId),
                 newestMessageId: source.id,
@@ -219,8 +247,17 @@ export function createCoworkerDispatcher({
             return { ok: false, taskId: task.id, error: "provider returned no text reply" };
         }
 
+        const handoffResult = extractHandoffManifest(rawText, availableHandoffs.map((entry) => entry.id));
+        if (handoffResult.invalidManifest) {
+            await runtime.audit.append({
+                type: "coworker.handoff_manifest_rejected",
+                actor: coworkerAgentId(coworkerId),
+                subject: task.id,
+                data: { conversationId, messageId },
+            });
+        }
         const artifactResult = await ingestDeclaredArtifacts({
-            rawText,
+            rawText: handoffResult.text,
             context,
             coworkerId,
             conversationId,
@@ -231,12 +268,23 @@ export function createCoworkerDispatcher({
         const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, {
             text: visibleText.slice(0, MAX_REPLY_TEXT),
             replyTo: source.id,
+            ...(handoffResult.coworkerIds.length ? { mentions: handoffResult.coworkerIds } : {}),
             ...(artifactResult.artifactIds.length ? { artifactIds: artifactResult.artifactIds } : {}),
         });
         conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
         state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, updatedAt: now() };
         save();
-        return { ok: true, taskId: task.id, reply, artifacts: artifactResult.artifactIds };
+
+        if (handoffResult.coworkerIds.length) {
+            await runtime.audit.append({
+                type: "coworker.handoff",
+                actor: coworkerAgentId(coworkerId),
+                subject: reply.id,
+                data: { conversationId, fromCoworkerId: coworkerId, toCoworkerIds: handoffResult.coworkerIds, depth: handoffDepth(conversation, source) + 1 },
+            });
+            dispatchMessage(conversationId, reply.id);
+        }
+        return { ok: true, taskId: task.id, reply, artifacts: artifactResult.artifactIds, handoffs: handoffResult.coworkerIds };
     }
 
     function scheduleDelivery(conversationId, messageId, coworkerId) {
@@ -257,17 +305,19 @@ export function createCoworkerDispatcher({
         return run;
     }
 
+    function dispatchMessage(conversationId, messageId) {
+        const conversation = conversationStore.get(conversationId);
+        const message = conversation.messages.find((entry) => entry.id === messageId);
+        if (!message)
+            throw new Error(`unknown message id: ${messageId}`);
+        const recipients = Object.entries(message.delivery ?? {})
+            .filter(([, delivery]) => delivery?.status === "pending")
+            .map(([recipientId]) => recipientId);
+        return recipients.map((recipientId) => scheduleDelivery(conversationId, messageId, recipientId));
+    }
+
     return {
-        dispatchMessage(conversationId, messageId) {
-            const conversation = conversationStore.get(conversationId);
-            const message = conversation.messages.find((entry) => entry.id === messageId);
-            if (!message)
-                throw new Error(`unknown message id: ${messageId}`);
-            const recipients = Object.entries(message.delivery ?? {})
-                .filter(([, delivery]) => delivery?.status === "pending")
-                .map(([coworkerId]) => coworkerId);
-            return recipients.map((coworkerId) => scheduleDelivery(conversationId, messageId, coworkerId));
-        },
+        dispatchMessage,
         async flush() {
             await Promise.allSettled([...chains.values()]);
         },
