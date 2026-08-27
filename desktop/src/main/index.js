@@ -300,6 +300,16 @@ async function main() {
     };
     await start();
 
+    // Detailed CLI version/auth probing is deliberately post-window. It may take tens of
+    // seconds on a cold CLI or a stale login and must never make the desktop appear hung.
+    // Fast launcher resolution already gives the runtime an honest provider/no-provider
+    // state; this background pass only refines that state and applies any real change.
+    if (host.mode !== "demo") {
+        void host.refreshProviders({ isBusy: goalsBusy })
+            .then((refresh) => applyProviderRefresh(refresh))
+            .catch((error) => logStartupError("background provider refresh failed", error));
+    }
+
     app.on("second-instance", () => {
         if (!win)
             return;
