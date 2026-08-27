@@ -78,6 +78,36 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         claude: resolveFakeProviderLaunch({ ...process.env, provider: "claude" }),
     };
 
+    function resolveFast(resolver, label, fakeLauncher) {
+        try {
+            const launch = fakeLauncher
+                ? { command: fakeLauncher.command, prefixArgs: fakeLauncher.prefixArgs, source: "fake-shim" }
+                : resolver({});
+            return {
+                provider: label,
+                found: true,
+                source: launch.source,
+                commandPathHidden: true,
+                auth: { state: "unverified" },
+                interactiveLoginAvailable: false,
+            };
+        }
+        catch (error) {
+            return { provider: label, found: false, reason: String(error?.message ?? error) };
+        }
+    }
+
+    // Desktop startup must never wait on vendor CLIs. Resolving a reviewed launcher is a
+    // local filesystem/PATH check only; --help/version/auth probes happen after the window
+    // is available through refreshProviders(). `unverified` is intentionally usable by the
+    // roster and any real auth failure still surfaces from the provider harness honestly.
+    function resolveProvidersFast() {
+        return {
+            codex: resolveFast(coreModules.resolveCodexLaunch, "codex", fakeLaunchers.codex),
+            claude: resolveFast(coreModules.resolveClaudeCodeLaunch, "claude-code", fakeLaunchers.claude),
+        };
+    }
+
     async function detectProviders() {
         const [codex, claude] = await Promise.all([
             describeProvider(
@@ -164,9 +194,8 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
     let computerPath;
     let refreshChain = Promise.resolve();
 
-    async function build(initial) {
+    async function build(nextDiscovery) {
         const settings = getSettings();
-        const nextDiscovery = initial ? await detectProviders() : discovery;
         const computer = computerRuntimeConfig();
         const nextRoster = buildProviderRoster({
             discovery: nextDiscovery,
@@ -193,7 +222,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         return nextRuntime;
     }
 
-    runtime = await build(true);
+    runtime = await build(resolveProvidersFast());
 
     async function hasActiveWorkNow() {
         return (await runtime.orchestrator.listTasks()).some((task) => ACTIVE_TASK_STATUSES.has(task.status));
@@ -227,7 +256,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             return { applied: false, reason: "active-work" };
 
         const previous = runtime;
-        await build(false);
+        runtime = await build(nextDiscovery);
         await previous.close();
         return { applied: true };
     }
