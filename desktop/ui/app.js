@@ -26,7 +26,7 @@ function text(value) {
 
 function initials(name) {
   const parts = text(name).trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "鉁?;
+  if (!parts.length) return "✦";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return `${parts[0][0] ?? ""}${parts.at(-1)?.[0] ?? ""}`.toUpperCase();
 }
@@ -370,7 +370,7 @@ function renderMessage(conversation, message) {
     const values = Object.values(message.delivery);
     const pending = values.filter((entry) => entry?.status === "pending").length;
     const failed = values.filter((entry) => entry?.status === "failed").length;
-    delivery.textContent = pending ? "Working鈥? : failed ? `${failed} delivery failed` : "Delivered";
+    delivery.textContent = pending ? "Working…": failed ? `${failed} delivery failed` : "Delivered";
     content.append(delivery);
   }
   row.append(content);
@@ -401,7 +401,7 @@ function renderMessages(conversation, forceScroll = false) {
   $("typing-row").classList.toggle("hidden", pending.size === 0);
   if (pending.size) {
     const names = [...pending].map((id) => coworkerById(id)?.name).filter(Boolean);
-    $("typing-label").textContent = names.length > 1 ? `${names.join(" & ")} are working鈥 : `${names[0] || "Coworker"} is working鈥;
+    $("typing-label").textContent = names.length > 1 ? `${names.join(" & ")} are working…` : `${names[0] || "Coworker"} is working…`;
   }
   const scroller = $("message-scroller");
   if (forceScroll || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 160)
@@ -498,7 +498,7 @@ function populateTeamPicker() {
     avatar.className = "nav-avatar";
     avatar.textContent = avatarFor(coworker);
     const copy = document.createElement("span");
-    copy.textContent = `${coworker.name} 鈥?${coworker.role}`;
+    copy.textContent = `${coworker.name} — ${coworker.role}`;
     label.append(checkbox, avatar, copy);
     picker.append(label);
   }
@@ -706,7 +706,7 @@ async function refreshActivity() {
     const tasks = overview.tasks ?? [];
     const counts = {};
     for (const task of tasks) counts[task.status] = (counts[task.status] ?? 0) + 1;
-    $("overview-block").textContent = `Coworker/runtime agents\n${agents.join("\n") || "鈥?}\n\nTasks ${JSON.stringify(counts)}`;
+    $("overview-block").textContent = `Coworker/runtime agents\n${agents.join("\n") || "…"}\n\nTasks ${JSON.stringify(counts)}`;
     $("audit-block").textContent = (audit.entries ?? []).slice().reverse().map((entry) => `${entry.at ?? ""}  ${entry.type}  ${entry.subject ?? ""}`).join("\n") || "No audit entries.";
   } catch {
     $("overview-block").textContent = "Activity is unavailable in this runtime mode.";
@@ -751,7 +751,7 @@ function bindEvents() {
   $("close-activity").addEventListener("click", () => hide($("activity-drawer")));
 
   $("settings-refresh-providers").addEventListener("click", async () => {
-    $("provider-action-result").textContent = "Refreshing鈥?;
+    $("provider-action-result").textContent = "Refreshing…";
     try {
       await window.sovereignbot.providers.refresh({});
       await refreshSettingsData();
@@ -760,7 +760,7 @@ function bindEvents() {
   });
   $("add-workspace").addEventListener("click", async () => { await window.sovereignbot.workspaces.addViaDialog({}); await refreshSettingsData(); });
   $("provision-driver").addEventListener("click", async () => {
-    $("driver-result").textContent = "Setting up managed browser鈥?;
+    $("driver-result").textContent = "Setting up managed browser…";
     try {
       const result = await window.sovereignbot.computer.provisionDriver({});
       $("driver-result").textContent = result?.ok === false ? result.reason : `ChromeDriver ${result.driverVersion ?? ""} ready.`;
