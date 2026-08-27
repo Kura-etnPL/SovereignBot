@@ -31,20 +31,21 @@ export function extractHandoffManifest(providerText, allowedIds = []) {
     if (markerIndex < 0)
         return { text: original.trim(), coworkerIds: [] };
 
+    const visible = [...lines.slice(0, markerIndex), ...lines.slice(markerIndex + 1)].join("\n").trim();
+    const invalid = () => ({ text: visible, coworkerIds: [], invalidManifest: true });
     const raw = lines[markerIndex].trim().slice(MARKER.length).trim();
     let parsed;
     try { parsed = JSON.parse(raw); }
-    catch { return { text: original.trim(), coworkerIds: [], invalidManifest: true }; }
+    catch { return invalid(); }
     if (!Array.isArray(parsed) || parsed.length > MAX_HANDOFFS)
-        return { text: original.trim(), coworkerIds: [], invalidManifest: true };
+        return invalid();
 
     const coworkerIds = [];
     for (const value of parsed) {
         const id = coworkerId(value);
         if (!id || !allowed.has(id))
-            return { text: original.trim(), coworkerIds: [], invalidManifest: true };
+            return invalid();
         if (!coworkerIds.includes(id)) coworkerIds.push(id);
     }
-    const visible = [...lines.slice(0, markerIndex), ...lines.slice(markerIndex + 1)].join("\n").trim();
     return { text: visible, coworkerIds };
 }
