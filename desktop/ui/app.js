@@ -200,8 +200,10 @@ async function refreshCoworkers() {
   try {
     const result = await window.sovereignbot.coworkers.list({});
     state.coworkers = result?.coworkers ?? [];
-  } catch {
+  } catch (error) {
     state.coworkers = state.coworkers ?? [];
+    const target = $("provider-action-result");
+    if (target && error) target.textContent = String(error?.message ?? error).slice(0, 200);
   }
   renderSidebar();
 }
@@ -210,8 +212,10 @@ async function refreshConversations() {
   try {
     const result = await window.sovereignbot.conversations.list({});
     state.conversations = result?.conversations ?? [];
-  } catch {
+  } catch (error) {
     state.conversations = state.conversations ?? [];
+    const target = $("provider-action-result");
+    if (target && error) target.textContent = String(error?.message ?? error).slice(0, 200);
   }
   renderSidebar();
 }
@@ -219,8 +223,9 @@ async function refreshConversations() {
 async function refreshRoster() {
   try {
     state.roster = await window.sovereignbot.providers.getRoster({});
-  } catch {
-    // Smoke mode or startup race; keep the previous safe default.
+  } catch (error) {
+    const target = $("provider-action-result");
+    if (target && error) target.textContent = String(error?.message ?? error).slice(0, 200);
   }
   renderReadiness();
   renderSidebar();
@@ -774,14 +779,27 @@ async function bootstrap() {
   try {
     state.handshake = await window.sovereignbot.handshake({});
     $("chip-version").textContent = state.handshake?.version || "V3";
-  } catch {
+  } catch (error) {
     $("chip-version").textContent = "offline";
+    $("provider-summary").textContent = "Offline — restart the app.";
+    $("provider-dot")?.classList.add("offline");
+    $("provider-action-result").textContent = String(error?.message ?? error).slice(0, 300);
     return;
   }
 
-  await Promise.allSettled([refreshCoworkers(), refreshConversations(), refreshRoster(), refreshSettingsData()]);
+  const results = await Promise.allSettled([refreshCoworkers(), refreshConversations(), refreshRoster(), refreshSettingsData()]);
+  const rejected = results.filter((entry) => entry.status === "rejected");
+  if (rejected.length) {
+    const first = rejected[0]?.reason;
+    $("provider-action-result").textContent = String(first?.message ?? first ?? "Startup data did not load — use Refresh or check Settings.").slice(0, 300);
+  }
   renderSidebar();
   renderReadiness();
+  // If bootstrap racing kept stale placeholders, a follow-up pass once providers
+  // have settled typically recovers without user action.
+  if (!state.coworkers.length || !state.roster || state.roster.providers === undefined) {
+    setTimeout(() => Promise.allSettled([refreshCoworkers(), refreshRoster()]).then(() => { renderSidebar(); renderReadiness(); }), 1200);
+  }
 }
 
 bootstrap();
