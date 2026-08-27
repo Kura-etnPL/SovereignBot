@@ -33,6 +33,15 @@ function argvHasSquirrelFlag(argv) {
     return argv.slice(1).some((arg) => SQUIRREL_FLAGS.has(arg));
 }
 
+function logStartupError(scope, error) {
+    const message = String(error?.stack ?? error);
+    try {
+        process.stderr.write(`[sovereignbot] ${scope}: ${message}\n`);
+    }
+    catch {}
+    return message;
+}
+
 if (!app.requestSingleInstanceLock()) {
     app.quit();
 }
@@ -45,7 +54,7 @@ else {
     app.setAppUserModelId("com.sovereignbot.desktop");
     app.whenReady().then(() => {
         main().catch((error) => {
-            const message = String(error?.stack ?? error);
+            const message = logStartupError("failed to start", error);
             if (process.argv.includes("--desktop-smoke")) {
                 process.stdout.write(`${JSON.stringify({ smoke: "failed", checks: {}, error: message })}\n`);
                 app.exit(1);
@@ -91,8 +100,9 @@ async function main() {
         });
     }
     catch (error) {
+        const message = logStartupError("runtime host failed", error);
         const { dialog } = await import("electron");
-        dialog.showErrorBox("SovereignBot failed to start", String(error?.stack ?? error));
+        dialog.showErrorBox("SovereignBot failed to start", message);
         app.exit(1);
         return;
     }
