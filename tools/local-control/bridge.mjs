@@ -45,6 +45,7 @@ const OPS = new Set([
   "recipe.desktop-start",
   "recipe.desktop-stop",
   "recipe.desktop-package-smoke",
+  "recipe.desktop-capture",
 ]);
 
 function redact(text) {
@@ -72,8 +73,19 @@ function run(command, args, options = {}) {
   return redact(result.stdout || "");
 }
 
+function runNpm(args, options = {}) {
+  return run(
+    process.env.ComSpec || "cmd.exe",
+    ["/d", "/s", "/c", ["npm.cmd", ...args].join(" ")],
+    options
+  );
+}
+
 function ghJson(args) {
-  const text = run("gh", args, { timeout: 30000 }).trim();
+  const result = spawnSync("gh", args, { shell: false, encoding: "utf8", windowsHide: true, timeout: 30000, maxBuffer: 8 * 1024 * 1024 });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`gh exited ${result.status}: ${String(result.stderr || result.stdout || "gh failed").slice(-3500)}`);
+  const text = (result.stdout || "").trim();
   return text ? JSON.parse(text) : undefined;
 }
 
@@ -164,7 +176,7 @@ function ensureDesktopDependencies() {
   const dir = desktopDir();
   const electron = join(dir, "node_modules", "electron", "package.json");
   if (!existsSync(electron)) {
-    run("npm.cmd", ["ci", "--no-audit", "--no-fund"], { cwd: dir, timeout: 600000 });
+    runNpm(["ci", "--no-audit", "--no-fund"], { cwd: dir, timeout: 600000 });
   }
 }
 
@@ -214,7 +226,7 @@ function stopDesktop() {
   const pid = Number(record.pid);
   if (!Number.isInteger(pid) || pid <= 0) throw new Error("managed Desktop process record is invalid");
   try {
-    run("taskkill.exe", ["/PID", String(pid), "/T"], { timeout: 30000 });
+    run("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { timeout: 30000 });
   } catch (error) {
     if (!/not found|no running instance|not found/i.test(String(error.message))) throw error;
   }
@@ -230,6 +242,25 @@ function desktopLogTail() {
   return { stdout: tail(DESKTOP_STDOUT), stderr: tail(DESKTOP_STDERR) };
 }
 
+
+function captureDesktop() {
+  const captureScript = join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "capture-sovereign-window.ps1");
+  if (!existsSync(captureScript)) throw new Error(`capture script not found: ${captureScript}`);
+  const raw = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", captureScript], { timeout: 30000 });
+  const text = String(raw || "").trim();
+  if (!text) throw new Error("capture script produced empty stdout");
+  let parsed;
+  try { parsed = JSON.parse(text); } catch (e) { throw new Error(`capture output is not valid JSON: ${text.slice(0, 400)}`); }
+  if (!parsed || typeof parsed !== "object") throw new Error("capture output is not an object");
+  if (parsed.mimeType !== "image/jpeg") throw new Error(`capture mimeType must be image/jpeg, got ${String(parsed.mimeType)}`);
+  if (typeof parsed.data !== "string" || parsed.data.length === 0) throw new Error("capture data must be non-empty base64 string");
+  if (parsed.data.length > 36000 * 1.2) throw new Error(`capture data too large: ${parsed.data.length} chars (limit ~36000)`);
+  const expectedRoot = String(LIVE_WORKTREE || "").toLowerCase();
+  const gotRoot = String(parsed.sourceRoot || "").toLowerCase();
+  if (!gotRoot || gotRoot !== expectedRoot) throw new Error(`capture sourceRoot must be ${LIVE_WORKTREE}, got ${String(parsed.sourceRoot)}`);
+  return parsed;
+}
+
 function runRecipe(op, args) {
   requireEmptyArgs(args);
   switch (op) {
@@ -243,18 +274,20 @@ function runRecipe(op, args) {
     case "recipe.desktop-check": {
       const prepared = ensureLiveWorktree();
       ensureDesktopDependencies();
-      const output = run("npm.cmd", ["run", "check"], { cwd: desktopDir(), timeout: 300000 });
+      const output = runNpm(["run", "check"], { cwd: desktopDir(), timeout: 300000 });
       return { ...prepared, output };
     }
     case "recipe.desktop-start":
       return startDesktop();
     case "recipe.desktop-stop":
       return stopDesktop();
+    case "recipe.desktop-capture":
+      return { ...captureDesktop(), ...ensureLiveWorktree() };
     case "recipe.desktop-package-smoke": {
       const prepared = ensureLiveWorktree();
       ensureDesktopDependencies();
-      const packageOutput = run("npm.cmd", ["run", "package"], { cwd: desktopDir(), timeout: 600000 });
-      const smokeOutput = run("npm.cmd", ["run", "smoke:packaged"], { cwd: desktopDir(), timeout: 300000 });
+      const packageOutput = runNpm(["run", "package"], { cwd: desktopDir(), timeout: 600000 });
+      const smokeOutput = runNpm(["run", "smoke:packaged"], { cwd: desktopDir(), timeout: 300000 });
       return { ...prepared, packageOutput, smokeOutput };
     }
     default:
