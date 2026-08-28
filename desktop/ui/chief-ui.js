@@ -1,9 +1,9 @@
 "use strict";
 
 (() => {
-  if (!window.sovereignbot?.conversations || typeof openDirectCoworker !== "function") return;
+  if (!window.sovereignbot?.conversations || typeof openDirect !== "function") return;
 
-  const baseOpenDirectCoworker = openDirectCoworker;
+  const baseOpenDirectCoworker = openDirect;
   const baseRefreshConversation = refreshConversation;
   const baseRenderConversationHeader = renderConversationHeader;
 
@@ -31,7 +31,7 @@
     }
   }
 
-  openDirectCoworker = async function openChiefAwareCoworker(coworkerId) {
+  openDirect = async function openChiefAwareCoworker(coworkerId) {
     const target = state.coworkers.find((entry) => entry.id === coworkerId);
     const lead = chief();
     if (!target || !lead || target.id !== lead.id)

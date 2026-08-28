@@ -292,3 +292,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .settings-grid { grid-template-columns: 1fr; }
   .settings-card.span-2 { grid-column: auto; }
 }
+
+.attention-badge{display:inline-flex;min-width:18px;height:18px;padding:0 5px;align-items:center;justify-content:center;border-radius:999px;background:var(--bad);color:#fff;font-size:10px;font-weight:700;}
+.attention-badge.hidden{display:none!important;}
+.job-card{padding:12px;border:1px solid var(--line);border-radius:11px;background:var(--panel-2);display:flex;flex-direction:column;gap:6px;}
+.job-card-head{display:flex;justify-content:space-between;gap:8px;align-items:center;}
+.job-status{padding:2px 7px;border-radius:999px;background:var(--panel-3);color:var(--text-3);font-size:10px;text-transform:uppercase;letter-spacing:.05em;}
+.job-status.needs_attention{background:color-mix(in srgb, var(--bad) 18%, var(--panel-2));color:var(--bad);}
+.job-status.working{background:color-mix(in srgb, var(--good) 18%, var(--panel-2));color:var(--good);}
