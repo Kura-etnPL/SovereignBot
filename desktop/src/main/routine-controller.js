@@ -47,7 +47,6 @@ function setLocalTime(date, hhmm) {
 export function nextRoutineOccurrence(scheduleValue, afterMs) {
   const schedule = normalizeRoutineSchedule(scheduleValue);
   if (schedule.type === "one-time") return null;
-  const after = new Date(afterMs);
   if (schedule.type === "hourly") {
     const next = new Date(afterMs);
     next.setSeconds(0, 0);
@@ -61,7 +60,7 @@ export function nextRoutineOccurrence(scheduleValue, afterMs) {
     return next.toISOString();
   }
   const next = setLocalTime(new Date(afterMs), schedule.time);
-  let delta = (schedule.weekday - next.getDay() + 7) % 7;
+  const delta = (schedule.weekday - next.getDay() + 7) % 7;
   next.setDate(next.getDate() + delta);
   if (next.getTime() <= afterMs) next.setDate(next.getDate() + 7);
   return next.toISOString();
@@ -93,7 +92,6 @@ function sanitizeRoutine(entry) {
     const name = String(entry.name ?? "").trim();
     const instruction = String(entry.instruction ?? "").trim();
     if (!name || name.length > MAX_NAME || !instruction || instruction.length > MAX_INSTRUCTION) return undefined;
-    const schedule = normalizeRoutineSchedule(entry.schedule);
     return {
       id: entry.id,
       name,
@@ -102,7 +100,7 @@ function sanitizeRoutine(entry) {
       instruction,
       skillId: entry.skillId ? String(entry.skillId) : undefined,
       workspaceId: entry.workspaceId ? String(entry.workspaceId) : undefined,
-      schedule,
+      schedule: normalizeRoutineSchedule(entry.schedule),
       createdAt: String(entry.createdAt ?? ""),
       updatedAt: String(entry.updatedAt ?? ""),
       lastRunAt: entry.lastRunAt ? String(entry.lastRunAt) : undefined,
@@ -125,18 +123,8 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
   const routines = loaded?.schema === ROUTINES_SCHEMA && Array.isArray(loaded.routines)
     ? loaded.routines.map(sanitizeRoutine).filter(Boolean)
     : [];
-  let changedOnLoad = false;
-  for (const routine of routines) {
-    if (!routine.enabled) continue;
-    if (!routine.nextRunAt) {
-      if (routine.schedule.type === "one-time" && routine.lastRunAt) routine.enabled = false;
-      else routine.nextRunAt = initialNextRun(routine.schedule, now());
-      changedOnLoad = true;
-    }
-  }
 
   function save() { saveJsonState(persistPath, { schema: ROUTINES_SCHEMA, routines }); }
-  if (changedOnLoad) save();
   function requireRoutine(id) { const routine = routines.find((entry) => entry.id === String(id)); if (!routine) throw new Error(`unknown routine id: ${id}`); return routine; }
   function validateRefs({ coworkerId, skillId, workspaceId }) {
     coworkerStore.get(coworkerId);
@@ -167,9 +155,36 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
   }
   function trimHistory(routine) { if (routine.history.length > ROUTINE_HISTORY_LIMIT) routine.history.splice(0, routine.history.length - ROUTINE_HISTORY_LIMIT); }
 
-  async function reconcileHistory() {
-    let dirty = false;
+  let changedOnLoad = false;
+  const loadStamp = nowIso(now);
+  for (const routine of routines) {
+    let routineDirty = false;
+    for (const run of routine.history) {
+      if (run.status === "submitting" && !run.jobId) {
+        run.status = "failed";
+        run.error = run.error ?? "interrupted before Job creation";
+        run.finishedAt = run.finishedAt ?? loadStamp;
+        routine.failureCount += 1;
+        if (run === routine.history.at(-1)) routine.lastStatus = "failed";
+        routineDirty = true;
+      }
+    }
+    if (routine.enabled && !routine.nextRunAt) {
+      if (routine.schedule.type === "one-time" && routine.lastRunAt) routine.enabled = false;
+      else routine.nextRunAt = initialNextRun(routine.schedule, now());
+      routineDirty = true;
+    }
+    if (routineDirty) {
+      routine.updatedAt = loadStamp;
+      changedOnLoad = true;
+    }
+  }
+  if (changedOnLoad) save();
+
+  function reconcileHistory() {
+    let anyDirty = false;
     for (const routine of routines) {
+      let routineDirty = false;
       for (const run of routine.history) {
         if (!run.jobId || TERMINAL_JOB.has(run.status)) continue;
         let job;
@@ -181,14 +196,17 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
         if (job.status === "failed" && previous !== "failed") routine.failureCount += 1;
         if (job.status === "completed") routine.failureCount = 0;
         if (run === routine.history.at(-1)) routine.lastStatus = job.status;
-        dirty = true;
+        routineDirty = true;
       }
-      if (dirty) routine.updatedAt = nowIso(now);
+      if (routineDirty) {
+        routine.updatedAt = nowIso(now);
+        anyDirty = true;
+      }
     }
-    if (dirty) save();
+    if (anyDirty) save();
   }
 
-  async function fireRoutine(routine) {
+  function fireRoutine(routine) {
     if (!routine.enabled || !routine.nextRunAt || Date.parse(routine.nextRunAt) > now()) return undefined;
     const scheduledFor = routine.nextRunAt;
     const startedAt = nowIso(now);
@@ -201,7 +219,9 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
       routine.enabled = false;
       routine.nextRunAt = undefined;
     } else {
-      routine.nextRunAt = nextRoutineOccurrence(routine.schedule, Date.parse(scheduledFor));
+      // If the app was offline for hours/days, catch up at most once. Never emit a
+      // backlog storm for every missed historical occurrence.
+      routine.nextRunAt = nextRoutineOccurrence(routine.schedule, Math.max(Date.parse(scheduledFor), now()));
     }
     routine.updatedAt = startedAt;
     save();
@@ -251,11 +271,11 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
     timer = setTimeout(() => { void tickNow(); }, delay);
     if (timer.unref) timer.unref();
   }
-  async function tickOnce() {
-    await reconcileHistory();
+  function tickOnce() {
+    reconcileHistory();
     const due = routines.filter((r) => r.enabled && r.nextRunAt && Date.parse(r.nextRunAt) <= now()).sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt));
-    for (const routine of due) await fireRoutine(routine);
-    await reconcileHistory();
+    for (const routine of due) fireRoutine(routine);
+    reconcileHistory();
   }
   async function tickNow() {
     const run = tickChain.then(() => tickOnce());
@@ -299,9 +319,9 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
       scheduleWake();
       return publicRoutine(routine, true);
     },
-    list() { return { schema: ROUTINES_SCHEMA, routines: routines.map((routine) => publicRoutine(routine, false)) }; },
-    get(routineId) { return publicRoutine(requireRoutine(routineId), true); },
-    history(routineId) { const routine = requireRoutine(routineId); return { routineId: routine.id, history: clone(routine.history).reverse() }; },
+    list() { reconcileHistory(); return { schema: ROUTINES_SCHEMA, routines: routines.map((routine) => publicRoutine(routine, false)) }; },
+    get(routineId) { reconcileHistory(); return publicRoutine(requireRoutine(routineId), true); },
+    history(routineId) { reconcileHistory(); const routine = requireRoutine(routineId); return { routineId: routine.id, history: clone(routine.history).reverse() }; },
     setEnabled(routineId, enabled) {
       if (typeof enabled !== "boolean") throw new Error("enabled must be boolean");
       const routine = requireRoutine(routineId);
