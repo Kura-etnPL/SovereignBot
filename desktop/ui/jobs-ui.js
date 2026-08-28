@@ -144,24 +144,34 @@
           <label id="routine-field-minute" class="hidden"><span data-i18n="routines.minute">Minute past the hour</span><input id="routine-minute" type="number" min="0" max="59" value="0"></label>
           <label id="routine-field-time" class="hidden"><span data-i18n="routines.time">Time</span><input id="routine-time" type="time" value="09:00"></label>
           <label id="routine-field-weekday" class="hidden"><span data-i18n="routines.weekday">Weekday</span><select id="routine-weekday"></select></label>
-          <p id="routine-form-error" class="inline-error hidden"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-dialog" type="button">Cancel</button><button class="hero-action" type="submit" data-i18n="routines.create">New routine</button></div>
+          <p id="routine-form-error" class="inline-error hidden"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-dialog" type="button" data-i18n="action.cancel">Cancel</button><button class="hero-action" type="submit" data-i18n="routines.create">New routine</button></div>
         </form></dialog>
-        <dialog id="routine-detail-dialog" class="modal"><div class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="routines.history">History</span><h2 id="routine-detail-title">Routine</h2></div><button class="modal-x" data-close-dialog="routine-detail-dialog" type="button">×</button></div><p id="routine-detail-meta" class="setting-feedback"></p><div id="routine-history" class="workspace-cards"></div><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-detail-dialog" type="button">Close</button></div></div></dialog>`;
+        <dialog id="routine-detail-dialog" class="modal"><div class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="routines.history">History</span><h2 id="routine-detail-title">Routine</h2></div><button class="modal-x" data-close-dialog="routine-detail-dialog" type="button">×</button></div><p id="routine-detail-meta" class="setting-feedback"></p><div id="routine-history" class="workspace-cards"></div><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-detail-dialog" type="button" data-i18n="action.close">Close</button></div></div></dialog>`;
       document.querySelector(".workspace-shell")?.append(section);
     }
-    for (const el of $("view-routines")?.querySelectorAll("[data-i18n]") ?? []) el.textContent = t(el.dataset.i18n, el.textContent);
-    populateWeekdays();
+    applyRoutineLocale();
   }
 
-  function populateWeekdays() {
+  function applyRoutineLocale() {
+    for (const el of $("view-routines")?.querySelectorAll("[data-i18n]") ?? []) el.textContent = t(el.dataset.i18n, el.textContent);
+    const navLabel = $("nav-routines")?.querySelector("[data-i18n]");
+    if (navLabel) navLabel.textContent = t(navLabel.dataset.i18n, navLabel.textContent);
+    populateWeekdays(true);
+  }
+
+  function populateWeekdays(force = false) {
     const sel = $("routine-weekday");
-    if (!sel || sel.options.length) return;
+    if (!sel) return;
+    const selected = sel.value;
+    if (sel.options.length && !force) return;
+    sel.textContent = "";
     for (let day = 0; day < 7; day += 1) {
       const opt = document.createElement("option");
       opt.value = String(day);
       opt.textContent = t(`weekday.${day}`, String(day));
       sel.append(opt);
     }
+    if ([...sel.options].some((opt) => opt.value === selected)) sel.value = selected;
   }
 
   function scheduleLabel(schedule) {
@@ -214,7 +224,7 @@
         const card = document.createElement("div"); card.className = "job-card";
         const line = document.createElement("div"); line.textContent = `${new Date(run.scheduledFor).toLocaleString()} · ${run.status}${run.error ? ` · ${run.error}` : ""}`;
         card.append(line);
-        if (run.jobId) { const btn = document.createElement("button"); btn.className = "quiet-action"; btn.type = "button"; btn.textContent = `${t("action.open", "Open")} Job`; btn.addEventListener("click", async () => { $("routine-detail-dialog")?.close(); await openDetail(run.jobId); }); card.append(btn); }
+        if (run.jobId) { const btn = document.createElement("button"); btn.className = "quiet-action"; btn.type = "button"; btn.textContent = `${t("action.open", "Open")} ${t("routines.job", "Job")}`; btn.addEventListener("click", async () => { $("routine-detail-dialog")?.close(); await openDetail(run.jobId); }); card.append(btn); }
         root.append(card);
       }
       $("routine-detail-dialog")?.showModal?.();
@@ -315,7 +325,11 @@
     bindEvents();
     refresh(); refreshRoutines();
     setInterval(refresh, 8000); setInterval(refreshRoutines, 10000);
-    new MutationObserver(() => { renderRoutineList(); if (currentRoutineId && $("routine-detail-dialog")?.open) void openRoutineDetail(currentRoutineId); populateWeekdays(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
+    new MutationObserver(() => {
+      applyRoutineLocale();
+      renderRoutineList();
+      if (currentRoutineId && $("routine-detail-dialog")?.open) void openRoutineDetail(currentRoutineId);
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
   }
 
   globalThis.SovereignJobsUI = { refresh, renderList, refreshRoutines };
