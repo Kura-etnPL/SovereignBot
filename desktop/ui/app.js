@@ -188,7 +188,7 @@ function renderReadiness() {
     summary.textContent = "Demo mode";
     dot.classList.add("offline");
   } else if (state.roster?.ready) {
-    summary.textContent = providers.length ? `${providers.join(" + ")} ready 路 ${readyCoworkers} coworker lanes` : `${readyCoworkers} coworker lanes ready`;
+    summary.textContent = providers.length ? `${providers.join(" + ")} ready · ${readyCoworkers} coworker lanes` : `${readyCoworkers} coworker lanes ready`;
     dot.classList.remove("offline");
   } else {
     summary.textContent = "Connect Codex or Claude Code";
@@ -249,7 +249,14 @@ async function openConversation(conversationId) {
   hide($("details-panel"));
   renderSidebar();
   await refreshConversation(true);
-  $("composer-input").focus();
+  try { $("composer-input")?.focus({ preventScroll: true }); } catch { $("composer-input")?.focus(); }
+  // If Chromium still nudged the root scroller on focus, pin it back. Keep the
+  // inner message-scroller behavior intact; only the root viewport must stay at 0.
+  try {
+    if ((window.scrollY ?? 0) !== 0) window.scrollTo(0, 0);
+    const root = document.scrollingElement;
+    if (root && root.scrollTop !== 0) root.scrollTop = 0;
+  } catch {}
 }
 
 function participantCoworkers(conversation) {
@@ -305,7 +312,7 @@ function renderConversationHeader(conversation) {
   $("conversation-title").textContent = conversation.title;
   $("conversation-kind").textContent = conversation.kind === "team" ? "Team" : "Coworker";
   $("conversation-subtitle").textContent = conversation.kind === "team"
-    ? members.map((entry) => entry.name).join(" 路 ")
+    ? members.map((entry) => entry.name).join(" · ")
     : direct?.role || "Persistent coworker conversation";
   $("demo-banner").classList.toggle("hidden", state.roster?.mode !== "demo");
 
@@ -672,7 +679,7 @@ function renderWorkspaces() {
 }
 
 function renderAdvancedRoster() {
-  const lines = (state.roster?.agents ?? []).map((agent) => `${agent.name}\n  ${agent.harnessKind} 路 ${agent.capabilities.join(", ")}`);
+  const lines = (state.roster?.agents ?? []).map((agent) => `${agent.name}\n  ${agent.harnessKind} · ${agent.capabilities.join(", ")}`);
   $("advanced-roster").textContent = lines.join("\n\n") || "No active runtime agents.";
 }
 
@@ -696,7 +703,7 @@ async function refreshSettingsData() {
     renderSidebar();
     const browsers = firstRun?.browsers ?? [];
     $("browser-summary").textContent = browsers.length
-      ? browsers.map((entry) => `${entry.browser} ${entry.version}`).join(" 路 ")
+      ? browsers.map((entry) => `${entry.browser} ${entry.version}`).join(" · ")
       : "No supported browser detected yet.";
   } catch {
     // Smoke mode does not bind the settings surface.
@@ -722,7 +729,7 @@ async function refreshActivity() {
       window.sovereignbot.operator.getOverview({}),
       window.sovereignbot.operator.getAudit({ limit: 30 }),
     ]);
-    const agents = (overview.agents ?? []).map((entry) => `${entry.name || entry.id} 路 ${entry.harnessKind || entry.harness?.kind || ""}`);
+    const agents = (overview.agents ?? []).map((entry) => `${entry.name || entry.id} · ${entry.harnessKind || entry.harness?.kind || ""}`);
     const tasks = overview.tasks ?? [];
     const counts = {};
     for (const task of tasks) counts[task.status] = (counts[task.status] ?? 0) + 1;
