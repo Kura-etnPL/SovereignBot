@@ -37,6 +37,10 @@ export async function runVerifyGate({ app }) {
   const { createSkillStore } = await import("./skill-store.js");
   const { createSkillAwareConversationStore, createSkillHandlers } = await import("./skill-integration.js");
 
+  // verify-gate: ignore EPIPE from console forwarding so it never becomes a dialog
+  try { process.on("uncaughtException", (err) => { if (String(err?.code) === "EPIPE" || String(err?.message ?? "").includes("EPIPE")) return; throw err; }); } catch {}
+  try { process.stderr.on("error", (err) => { if (String(err?.code) === "EPIPE") return; }); } catch {}
+  try { process.stdout.on("error", (err) => { if (String(err?.code) === "EPIPE") return; }); } catch {}
   await mkdir(EVIDENCE_DIR, { recursive: true });
   const logLines = [];
   const gateLog = [];

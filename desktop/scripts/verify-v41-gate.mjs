@@ -22,12 +22,14 @@ if (!existsSync(join(DESKTOP_ROOT, "node_modules", "electron", "package.json")))
 console.error(`[verify-launcher] spawning Electron --verify-gate (timeout ${TIMEOUT_MS/1000}s)`);
 const child = spawn(electronBin, [".", "--verify-gate"], {
   cwd: DESKTOP_ROOT,
-  stdio: "inherit",
+  stdio: ["inherit","inherit","pipe"],
   env: process.env,
   shell: process.platform === "win32",
 });
 
 let done = false;
+child.stderr?.on("data", d => { try { process.stderr.write(d); } catch {} });
+child.stderr?.on("error", () => {}); // verify-gate launcher stderr: swallow EPIPE
 const timer = setTimeout(() => {
   if (done) return;
   console.error(`[verify-launcher] timed out after ${TIMEOUT_MS/1000}s — killing Electron`);
