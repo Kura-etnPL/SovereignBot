@@ -188,7 +188,7 @@ function renderReadiness() {
     summary.textContent = "Demo mode";
     dot.classList.add("offline");
   } else if (state.roster?.ready) {
-    summary.textContent = providers.length ? `${providers.join(" + ")} ready 路 ${readyCoworkers} coworker lanes` : `${readyCoworkers} coworker lanes ready`;
+    summary.textContent = providers.length ? `${providers.join(" + ")} ready · ${readyCoworkers} coworker lanes` : `${readyCoworkers} coworker lanes ready`;
     dot.classList.remove("offline");
   } else {
     summary.textContent = "Connect Codex or Claude Code";
@@ -249,7 +249,14 @@ async function openConversation(conversationId) {
   hide($("details-panel"));
   renderSidebar();
   await refreshConversation(true);
-  $("composer-input").focus();
+  try { $("composer-input")?.focus({ preventScroll: true }); } catch { $("composer-input")?.focus(); }
+  // If Chromium still nudged the root scroller on focus, pin it back. Keep the
+  // inner message-scroller behavior intact; only the root viewport must stay at 0.
+  try {
+    if ((window.scrollY ?? 0) !== 0) window.scrollTo(0, 0);
+    const root = document.scrollingElement;
+    if (root && root.scrollTop !== 0) root.scrollTop = 0;
+  } catch {}
 }
 
 function participantCoworkers(conversation) {
@@ -305,7 +312,7 @@ function renderConversationHeader(conversation) {
   $("conversation-title").textContent = conversation.title;
   $("conversation-kind").textContent = conversation.kind === "team" ? "Team" : "Coworker";
   $("conversation-subtitle").textContent = conversation.kind === "team"
-    ? members.map((entry) => entry.name).join(" 路 ")
+    ? members.map((entry) => entry.name).join(" · ")
     : direct?.role || "Persistent coworker conversation";
   $("demo-banner").classList.toggle("hidden", state.roster?.mode !== "demo");
 
@@ -552,6 +559,24 @@ async function createTeam(event) {
   }
 }
 
+function applyLocale(setting, systemLocale) {
+  const I18n = globalThis.SovereignI18n;
+  if (!I18n) return "en";
+  const locale = I18n.resolveLocale(setting, systemLocale);
+  I18n.setLocale(locale);
+  for (const el of document.querySelectorAll("[data-i18n]")) {
+    const key = el.getAttribute("data-i18n");
+    if (key) el.textContent = I18n.t(key);
+  }
+  const t = I18n.t.bind(I18n);
+  const langEl = $("setting-language");
+  if (langEl) langEl.value = setting ?? "system";
+  const placeholder = $("composer-input");
+  if (placeholder) placeholder.placeholder = t("chat.placeholder");
+  const hint = $("composer-hint");
+  if (hint) hint.textContent = t("chat.hint");
+  return locale;
+}
 function renderSettings() {
   const settings = state.settings;
   if (!settings) return;
@@ -560,6 +585,8 @@ function renderSettings() {
   $("setting-close").value = settings.closeBehavior ?? "ask";
   $("setting-notifications").checked = settings.notifications !== false;
   $("setting-demo-mode").checked = settings.demoMode === true;
+  $("setting-language").value = settings.language ?? "system";
+  applyLocale(settings.language ?? "system", state.handshake?.locale);
 }
 
 function renderProviderCards() {
@@ -652,7 +679,7 @@ function renderWorkspaces() {
 }
 
 function renderAdvancedRoster() {
-  const lines = (state.roster?.agents ?? []).map((agent) => `${agent.name}\n  ${agent.harnessKind} 路 ${agent.capabilities.join(", ")}`);
+  const lines = (state.roster?.agents ?? []).map((agent) => `${agent.name}\n  ${agent.harnessKind} · ${agent.capabilities.join(", ")}`);
   $("advanced-roster").textContent = lines.join("\n\n") || "No active runtime agents.";
 }
 
@@ -676,7 +703,7 @@ async function refreshSettingsData() {
     renderSidebar();
     const browsers = firstRun?.browsers ?? [];
     $("browser-summary").textContent = browsers.length
-      ? browsers.map((entry) => `${entry.browser} ${entry.version}`).join(" 路 ")
+      ? browsers.map((entry) => `${entry.browser} ${entry.version}`).join(" · ")
       : "No supported browser detected yet.";
   } catch {
     // Smoke mode does not bind the settings surface.
@@ -702,7 +729,7 @@ async function refreshActivity() {
       window.sovereignbot.operator.getOverview({}),
       window.sovereignbot.operator.getAudit({ limit: 30 }),
     ]);
-    const agents = (overview.agents ?? []).map((entry) => `${entry.name || entry.id} 路 ${entry.harnessKind || entry.harness?.kind || ""}`);
+    const agents = (overview.agents ?? []).map((entry) => `${entry.name || entry.id} · ${entry.harnessKind || entry.harness?.kind || ""}`);
     const tasks = overview.tasks ?? [];
     const counts = {};
     for (const task of tasks) counts[task.status] = (counts[task.status] ?? 0) + 1;
@@ -772,6 +799,34 @@ function bindEvents() {
   $("setting-close").addEventListener("change", (event) => saveSimpleSetting("closeBehavior", event.target.value));
   $("setting-notifications").addEventListener("change", (event) => saveSimpleSetting("notifications", event.target.checked));
   $("setting-demo-mode").addEventListener("change", (event) => saveSimpleSetting("demoMode", event.target.checked));
+  $("setting-language").addEventListener("change", async (event) => {
+    try {
+      state.settings = await window.sovereignbot.settings.update({ language: event.target.value });
+      applyLocale(state.settings.language ?? "system", state.handshake?.locale);
+      renderSidebar(); renderReadiness(); if (state.selectedConversation) renderConversationHeader(state.selectedConversation);
+    } catch (error) { $("provider-action-result").textContent = text(error?.message || error).replace(/^.*Error: /, ""); }
+  });
+  document.addEventListener("keydown", (event) => {
+    const tag = document.activeElement?.tagName;
+    const editable = document.activeElement?.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    if (event.key === "Escape") {
+      hide($("details-panel")); hide($("activity-drawer"));
+      for (const d of document.querySelectorAll("dialog[open]")) d.close();
+      return;
+    }
+    if (editable) return;
+    if ((event.ctrlKey || event.metaKey) && event.key === ",") { event.preventDefault(); switchView("settings"); void refreshSettingsData(); }
+  });
+  window.sovereignbot?.onNavigate?.((target) => { if (target === "settings") { switchView("settings"); void refreshSettingsData(); } });
+  window.sovereignbot?.onNewChat?.(() => {
+    const chief = state.coworkers.find((e) => /chief of staff/i.test(e.name)) ?? state.coworkers[0];
+    if (chief) void openDirect(chief.id);
+  });
+  window.sovereignbot?.onToggleComputer?.(() => {
+    const btn = document.getElementById("open-computer");
+    if (btn) btn.click(); else document.getElementById("details-panel")?.classList.toggle("hidden");
+  });
+  window.sovereignbot?.onToggleActivity?.(async () => { const d = $("activity-drawer"); const hidden = d.classList.contains("hidden"); if (hidden) { show(d); await refreshActivity(); } else hide(d); });
 }
 
 async function bootstrap() {
@@ -779,6 +834,7 @@ async function bootstrap() {
   try {
     state.handshake = await window.sovereignbot.handshake({});
     $("chip-version").textContent = state.handshake?.version || "V3";
+    applyLocale(state.handshake?.language ?? "system", state.handshake?.locale);
   } catch (error) {
     $("chip-version").textContent = "offline";
     $("provider-summary").textContent = "Offline — restart the app.";

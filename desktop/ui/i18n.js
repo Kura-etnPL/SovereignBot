@@ -1,0 +1,204 @@
+"use strict";
+// Lightweight browser i18n — plain script, no imports (sandbox preload has no bundler).
+(() => {
+  const translations = {
+    en: {
+      "nav.coworkers": "Coworkers",
+      "nav.teams": "Teams",
+      "nav.recent": "Recent",
+      "nav.activity": "Activity",
+      "nav.settings": "Settings",
+      "action.newCoworker": "New coworker",
+      "action.newTeam": "New team",
+      "action.refresh": "Refresh",
+      "action.addFolder": "Add folder",
+      "action.provisionBrowser": "Set up browser",
+      "action.takeControl": "Take control",
+      "action.handBack": "Hand back",
+      "welcome.eyebrow": "SOVEREIGN COWORKER OS",
+      "welcome.title": "Your team is ready when you are.",
+      "welcome.subtitle": "Choose a coworker on the left, or create a team. They keep their own context, work in trusted spaces, and hand work to each other without making you the router.",
+      "welcome.talkChief": "Talk to Chief of Staff",
+      "welcome.createTeam": "Create a team",
+      "status.checkingProviders": "Checking AI providers…",
+      "status.loadingCoworkers": "Loading coworkers…",
+      "status.demoMode": "Demo mode",
+      "status.connectProvider": "Connect Codex or Claude Code",
+      "coworker.persistentCount": "{count} persistent coworker{s}",
+      "chat.placeholder": "Message your coworker…",
+      "chat.hint": "Enter to send · Shift+Enter for a new line",
+      "chat.working": "Working…",
+      "chat.delivered": "Delivered",
+      "chat.send": "Send",
+      "settings.title": "Settings",
+      "settings.subtitle": "Provider access, trusted workspaces and runtime preferences.",
+      "settings.providers": "AI providers",
+      "settings.providersDesc": "SovereignBot uses your locally authenticated subscription CLIs.",
+      "settings.workspaces": "Trusted workspaces",
+      "settings.workspacesDesc": "Coworkers can only work in folders you explicitly add.",
+      "settings.appearance": "Appearance",
+      "settings.theme": "Theme",
+      "settings.theme.system": "System",
+      "settings.theme.dark": "Dark",
+      "settings.theme.light": "Light",
+      "settings.notifications": "Notifications",
+      "settings.notificationsDesc": "When coworker work finishes",
+      "settings.window": "Window",
+      "settings.windowClose": "When closed",
+      "settings.window.ask": "Ask every time",
+      "settings.window.tray": "Keep working in tray",
+      "settings.window.quit": "Quit SovereignBot",
+      "settings.demoMode": "Demo mode",
+      "settings.demoModeDesc": "Echo only — no real provider",
+      "settings.computer": "Managed computer",
+      "settings.computerDesc": "Provision a verified browser driver for governed browser work.",
+      "settings.language": "Language",
+      "settings.language.system": "System",
+      "settings.language.zh": "简体中文",
+      "settings.language.en": "English",
+      "settings.keyboard": "Keyboard shortcuts",
+      "settings.keyboard.desc": "Quick access to common actions.",
+      "settings.keyboard.settings": "Settings",
+      "settings.keyboard.newChat": "New Chief conversation",
+      "settings.keyboard.computer": "Toggle Computer",
+      "settings.keyboard.activity": "Activity",
+      "settings.keyboard.close": "Close panel / dialog",
+      "coworker.chief": "幕僚长",
+      "coworker.codingLead": "编程主管",
+      "coworker.researcher": "研究员",
+      "provider.codex": "Codex",
+      "provider.claude": "Claude Code",
+      "provider.auto": "Automatic",
+      "details.title": "Details",
+      "details.members": "Members",
+      "details.provider": "Provider",
+      "details.workspace": "Workspace",
+      "details.currentWork": "Current work",
+      "details.ready": "Ready",
+      "activity.title": "Activity",
+      "activity.overview": "Overview",
+      "activity.audit": "Audit",
+      "dialog.coworker.title": "Who are you adding?",
+      "dialog.coworker.eyebrow": "NEW COWORKER",
+      "dialog.team.title": "Bring coworkers together",
+      "dialog.team.eyebrow": "NEW TEAM",
+    },
+    "zh-CN": {
+      "nav.coworkers": "同事",
+      "nav.teams": "团队",
+      "nav.recent": "最近",
+      "nav.activity": "动态",
+      "nav.settings": "设置",
+      "action.newCoworker": "新建同事",
+      "action.newTeam": "新建团队",
+      "action.refresh": "刷新",
+      "action.addFolder": "添加文件夹",
+      "action.provisionBrowser": "配置浏览器",
+      "action.takeControl": "接管",
+      "action.handBack": "交回",
+      "welcome.eyebrow": "SOVEREIGN 协同系统",
+      "welcome.title": "你的团队随时待命。",
+      "welcome.subtitle": "在左侧选择一位同事，或创建一个团队。他们各自保持上下文，在受信任空间中工作，并自动将工作转交给合适的同事，无需你来回转达。",
+      "welcome.talkChief": "与幕僚长对话",
+      "welcome.createTeam": "创建团队",
+      "status.checkingProviders": "正在检查 AI 提供方…",
+      "status.loadingCoworkers": "正在加载同事…",
+      "status.demoMode": "演示模式",
+      "status.connectProvider": "请连接 Codex 或 Claude Code",
+      "coworker.persistentCount": "{count} 位常驻同事",
+      "chat.placeholder": "给同事发消息…",
+      "chat.hint": "回车发送 · Shift+回车换行",
+      "chat.working": "处理中…",
+      "chat.delivered": "已送达",
+      "chat.send": "发送",
+      "settings.title": "设置",
+      "settings.subtitle": "提供方接入、受信任工作区与运行偏好。",
+      "settings.providers": "AI 提供方",
+      "settings.providersDesc": "SovereignBot 使用你在本机已登录的订阅版 CLI。",
+      "settings.workspaces": "受信任工作区",
+      "settings.workspacesDesc": "同事仅能在你明确添加的文件夹中工作。",
+      "settings.appearance": "外观",
+      "settings.theme": "主题",
+      "settings.theme.system": "跟随系统",
+      "settings.theme.dark": "深色",
+      "settings.theme.light": "浅色",
+      "settings.notifications": "通知",
+      "settings.notificationsDesc": "同事完成工作时提醒",
+      "settings.window": "窗口",
+      "settings.windowClose": "关闭时",
+      "settings.window.ask": "每次询问",
+      "settings.window.tray": "在托盘中继续运行",
+      "settings.window.quit": "退出 SovereignBot",
+      "settings.demoMode": "演示模式",
+      "settings.demoModeDesc": "仅回声演示——不调用真实提供方",
+      "settings.computer": "受管计算机",
+      "settings.computerDesc": "为受管浏览器任务准备已验证的浏览器驱动。",
+      "settings.language": "语言",
+      "settings.language.system": "跟随系统",
+      "settings.language.zh": "简体中文",
+      "settings.language.en": "English",
+      "settings.keyboard": "键盘快捷键",
+      "settings.keyboard.desc": "常用操作的快速入口。",
+      "settings.keyboard.settings": "设置",
+      "settings.keyboard.newChat": "新建幕僚长对话",
+      "settings.keyboard.computer": "切换 Computer 面板",
+      "settings.keyboard.activity": "动态",
+      "settings.keyboard.close": "关闭面板/弹窗",
+      "coworker.chief": "幕僚长",
+      "coworker.codingLead": "编程主管",
+      "coworker.researcher": "研究员",
+      "provider.codex": "Codex",
+      "provider.claude": "Claude Code",
+      "provider.auto": "自动",
+      "details.title": "详情",
+      "details.members": "成员",
+      "details.provider": "提供方",
+      "details.workspace": "工作区",
+      "details.currentWork": "当前工作",
+      "details.ready": "就绪",
+      "activity.title": "动态",
+      "activity.overview": "概览",
+      "activity.audit": "审计",
+      "dialog.coworker.title": "你要添加谁？",
+      "dialog.coworker.eyebrow": "新建同事",
+      "dialog.team.title": "把同事聚到一起",
+      "dialog.team.eyebrow": "新建团队",
+    },
+  };
+  let _locale = "en";
+  function resolveLocale(setting, systemLocale) {
+    if (setting === "zh-CN") return "zh-CN";
+    if (setting === "en") return "en";
+    const sys = String(systemLocale ?? "");
+    if (/^zh/i.test(sys)) return "zh-CN";
+    return "en";
+  }
+  function setLocale(locale) {
+    const next = locale === "zh-CN" ? "zh-CN" : "en";
+    _locale = next;
+    try { document.documentElement.lang = next; } catch {}
+    return next;
+  }
+  function currentLocale() { return _locale; }
+  function t(key, params) {
+    const table = translations[_locale] ?? translations.en;
+    let value = table[key];
+    if (value === undefined) value = translations.en[key];
+    if (value === undefined) return key;
+    if (params && typeof params === "object") {
+      for (const [k, v] of Object.entries(params)) value = value.replaceAll(`{${k}}`, String(v));
+    }
+    return value;
+  }
+  const DEFAULT_NAME_MAP = {
+    "Chief of Staff": { en: "Chief of Staff", "zh-CN": "幕僚长" },
+    "Coding Lead": { en: "Coding Lead", "zh-CN": "编程主管" },
+    Researcher: { en: "Researcher", "zh-CN": "研究员" },
+  };
+  function displayCoworkerName(name) {
+    const m = DEFAULT_NAME_MAP[String(name)];
+    if (!m) return String(name);
+    return m[_locale] ?? m.en ?? String(name);
+  }
+  globalThis.SovereignI18n = { translations, resolveLocale, setLocale, currentLocale, t, displayCoworkerName };
+})();

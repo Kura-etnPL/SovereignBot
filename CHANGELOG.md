@@ -2,6 +2,22 @@
 
 All notable changes to SovereignBot are documented in this file.
 
+## [3.0.0] - 2026-08-28
+
+SovereignBot 3.0.0 is the Windows GA release: the V3 Coworker Desktop now ships as a real double-clickable product with bilingual UI, Windows launcher shortcuts, keyboard access, a hardened internal-Node packaging path, and a `3.0.0` version identity. V4 Always-On work (persistent Jobs, Routines, Attention, Teach, Event Triggers, Worker Node, Remote) starts from this frozen commit without modifying the V3 line.
+
+### Added
+
+- Bilingual UI: System / 简体中文 / English with immediate in-place switching and persistence, display-only mapping for default coworker identities (Chief of Staff → 幕僚长, Coding Lead → 编程主管, Researcher → 研究员), and a lightweight `t(key)` dictionary with English fallback.
+- Windows launcher shortcuts for both the Start Menu and Desktop (`SovereignBot.lnk`) verified by installer E2E; shortcuts are removed on uninstall without dead links.
+- In-app keyboard shortcuts that do not steal editing keys: Ctrl+, Settings, Ctrl+N new Chief conversation, Ctrl+Shift+C Computer, Ctrl+Shift+A Activity, Esc to close transient panels.
+- Internal-Node Forge wrapper (`resources/node/node.exe v22.23.2`) is now the stable `npm run make/package` path, avoiding the Node v24 + packager stall.
+- Version freeze at stable `3.0.0` across root `package.json`, `src/version.js`, and `desktop/package.json` together with release notes `docs/releases/v3.0.0.md` and `desktop-v3.0.0.md`.
+
+### Changed
+
+- Desktop packaging and installer E2E are now driven exclusively through the internal-Node wrapper on Windows; `forge.config.js` ignores the outer `out/` location implicitly, and the Squirrel maker remains `{name:"sovereignbot", noMsi:true}` with provenance-bound publishing.
+
 ## [1.1.1] - 2026-08-25
 
 SovereignBot 1.1.1 is the corrective Desktop release: v1.1.1 corrects the Desktop provider wiring and release provenance gaps in v1.1.0. The published `desktop-v1.1.0` tag and assets remain immutable as history; this version makes the product claims true — real Codex/Claude execution in normal mode, trusted workspace-bound provider processes, independent model review, model synthesis, and a read-only-verify → downstream-publish release chain.
