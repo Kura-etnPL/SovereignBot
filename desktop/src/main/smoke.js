@@ -28,6 +28,9 @@ export async function runSmokeMode({ app }) {
         resumeContinuity: false,
         noEchoNormalMode: false,
         noSessionLeak: false,
+        v41Surfaces: false,
+        v41JobPreload: false,
+        v41ZhCn: false,
         cleanQuit: false,
     };
     let dataDir;
@@ -234,6 +237,51 @@ export async function runSmokeMode({ app }) {
             new Promise((resolve) => setTimeout(() => resolve(false), 15000)),
         ]);
         checks.handshake = handshakeResult === true;
+
+        // V4.1 packaged-product assertions. These run inside the same hidden renderer used
+        // by packaged smoke and installer E2E, so they catch missing protocol assets,
+        // preload regressions, or i18n failures in the actual app.asar/installed executable.
+        const v41 = await win.webContents.executeJavaScript(`(function(){
+            const I = globalThis.SovereignI18n;
+            const jobs = globalThis.sovereignbot?.jobs;
+            const surfaceIds = [
+                "nav-work", "view-work", "work-list", "nav-attention", "attention-badge",
+                "job-detail-dialog", "job-detail-approve", "job-detail-dismiss",
+            ];
+            const surfaces = surfaceIds.every((id) => Boolean(document.getElementById(id)));
+            const jobMethods = ["submit", "list", "getStatus", "getConversation", "cancel", "pause", "resume", "approve", "dismiss", "attention"];
+            const jobPreload = jobMethods.every((name) => typeof jobs?.[name] === "function");
+            let zhWork = "";
+            let zhAttention = "";
+            let zhLang = "";
+            if (I && typeof I.setLocale === "function" && typeof I.t === "function") {
+                const previous = typeof I.currentLocale === "function" ? I.currentLocale() : "en";
+                I.setLocale("zh-CN");
+                for (const el of document.querySelectorAll("[data-i18n]")) {
+                    const key = el.getAttribute("data-i18n");
+                    if (key) el.textContent = I.t(key);
+                }
+                zhWork = document.querySelector('[data-i18n="nav.work"]')?.textContent?.trim() ?? "";
+                zhAttention = document.querySelector('[data-i18n="nav.attention"]')?.textContent?.trim() ?? "";
+                zhLang = document.documentElement.lang;
+                I.setLocale(previous);
+                for (const el of document.querySelectorAll("[data-i18n]")) {
+                    const key = el.getAttribute("data-i18n");
+                    if (key) el.textContent = I.t(key);
+                }
+            }
+            return {
+                surfaces,
+                jobPreload,
+                i18n: Boolean(I && typeof I.t === "function"),
+                zhWork,
+                zhAttention,
+                zhLang,
+            };
+        })()`);
+        checks.v41Surfaces = v41.surfaces === true && v41.i18n === true;
+        checks.v41JobPreload = v41.jobPreload === true;
+        checks.v41ZhCn = v41.zhWork === "工作" && v41.zhAttention === "需关注" && v41.zhLang === "zh-CN";
 
         if (!win.isDestroyed()) {
             const image = await win.webContents.capturePage();
