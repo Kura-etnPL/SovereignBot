@@ -250,6 +250,8 @@ async function openConversation(conversationId) {
   renderSidebar();
   await refreshConversation(true);
   try { $("composer-input")?.focus({ preventScroll: true }); } catch { $("composer-input")?.focus(); }
+  // If Chromium still nudged the root scroller on focus, pin it back. Keep the
+  // inner message-scroller behavior intact; only the root viewport must stay at 0.
   try {
     if ((window.scrollY ?? 0) !== 0) window.scrollTo(0, 0);
     const root = document.scrollingElement;
