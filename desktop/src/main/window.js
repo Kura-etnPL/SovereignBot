@@ -1,4 +1,4 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, Menu } from "electron";
 import { fileURLToPath } from "node:url";
 import { isAppUrl } from "./lib/app-assets.js";
 
@@ -29,6 +29,42 @@ export function createMainWindow({ smoke = false } = {}) {
     });
 
     win.setMenuBarVisibility(false);
+    try {
+        const template = [
+            {
+                label: "SovereignBot",
+                submenu: [
+                    { role: "about" },
+                    { type: "separator" },
+                    {
+                        label: "Settings",
+                        accelerator: "CmdOrCtrl+,",
+                        click: () => win.webContents.send("sovereignbot:navigate", "settings"),
+                    },
+                    {
+                        label: "New conversation",
+                        accelerator: "CmdOrCtrl+N",
+                        click: () => win.webContents.send("sovereignbot:newChat"),
+                    },
+                    {
+                        label: "Toggle Computer",
+                        accelerator: "CmdOrCtrl+Shift+C",
+                        click: () => win.webContents.send("sovereignbot:toggleComputer"),
+                    },
+                    {
+                        label: "Activity",
+                        accelerator: "CmdOrCtrl+Shift+A",
+                        click: () => win.webContents.send("sovereignbot:toggleActivity"),
+                    },
+                    { type: "separator" },
+                    { role: "quit" },
+                ],
+            },
+            { label: "Edit", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
+        ];
+        const menu = Menu.buildFromTemplate(template);
+        Menu.setApplicationMenu(menu);
+    } catch {}
 
     // No popups, no arbitrary navigation, no <webview> attachment, and DevTools are closed
     // immediately in production builds (smoke mode may open them for debugging).

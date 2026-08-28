@@ -10,6 +10,7 @@ export const DESKTOP_SETTINGS_SCHEMA = Object.freeze({
     closeBehavior: Object.freeze(["ask", "tray", "quit"]),
     notifications: "boolean",
     demoMode: "boolean",
+    language: Object.freeze(["system", "zh-CN", "en"]),
 });
 
 function defaultSettings() {
@@ -21,6 +22,7 @@ function defaultSettings() {
         // Explicit Demo Mode is the only non-test place Echo agents may run. Normal
         // production mode always requires a real, enabled provider.
         demoMode: false,
+        language: "system",
         providers: { codex: { enabled: true }, claude: { enabled: true } },
         roles: {},
     };
@@ -28,6 +30,7 @@ function defaultSettings() {
 
 function normalizeSettings(value) {
     const settings = { ...defaultSettings(), ...value };
+    if (!["system", "zh-CN", "en"].includes(settings.language)) settings.language = "system";
     settings.providers = {
         codex: { enabled: value?.providers?.codex?.enabled !== false },
         claude: { enabled: value?.providers?.claude?.enabled !== false },

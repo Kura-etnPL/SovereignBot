@@ -201,7 +201,7 @@ export const IPC_CHANNELS = Object.freeze({
             if (!isPlainObject(payload) || Object.keys(payload).length === 0)
                 throw new Error("settings update payload must be a non-empty object");
             assertNoForbiddenKeys(payload);
-            const allowed = new Set(["theme", "closeBehavior", "notifications", "demoMode", "providers", "roles"]);
+            const allowed = new Set(["theme", "closeBehavior", "notifications", "demoMode", "language", "providers", "roles"]);
             for (const key of Object.keys(payload)) {
                 if (!allowed.has(key))
                     throw new Error(`unexpected settings field: ${key.slice(0, 40)}`);

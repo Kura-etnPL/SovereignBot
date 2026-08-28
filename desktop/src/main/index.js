@@ -210,7 +210,7 @@ async function main() {
         bindIpcChannels({
             win,
             handlers: {
-                "app:handshake": async () => ({ ok: true, version: desktopVersion(), platform: process.platform, locale: app.getLocale() }),
+                "app:handshake": async () => ({ ok: true, version: desktopVersion(), platform: process.platform, locale: app.getLocale(), language: services.getSettings().language }),
                 ...bridge.handlers,
                 "firstrun:getStatus": () => firstRun.getStatus(),
                 "computer:browserStatus": async () => (await firstRun.getStatus()).browsers,

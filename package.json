@@ -1,6 +1,6 @@
 {
     "name": "sovereignbot",
-    "version": "1.1.1",
+    "version": "3.0.0",
     "description": "Local-first AI coworker runtime with durable memory, governed actions, and multi-agent orchestration.",
     "type": "module",
     "private": false,

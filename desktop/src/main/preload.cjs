@@ -19,4 +19,24 @@ contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
     operator: Object.freeze({ getOverview: invoke("operator:getOverview"), getWorkers: invoke("operator:getWorkers"), getAudit: invoke("operator:getAudit"), searchMemory: invoke("operator:searchMemory"), getPolicy: invoke("operator:getPolicy"), getPolicyVersion: invoke("operator:getPolicyVersion"), validatePolicy: invoke("operator:validatePolicy"), dryRunPolicy: invoke("operator:dryRunPolicy"), applyPolicy: invoke("operator:applyPolicy"), rollbackPolicy: invoke("operator:rollbackPolicy"), getTaskGraph: invoke("operator:getTaskGraph"), getTaskEvents: invoke("operator:getTaskEvents") }),
     computer: Object.freeze({ control: invoke("computer:control"), lifecycle: invoke("computer:lifecycle"), frame: invoke("computer:frame"), supplySecret: invoke("computer:supplySecret"), browserStatus: invoke("computer:browserStatus"), provisionDriver: invoke("computer:provisionDriver") }),
     providers: Object.freeze({ getRoster: invoke("provider:getRoster"), refresh: invoke("provider:refresh"), openLogin: invoke("provider:openLogin"), setRoleAssignment: invoke("provider:setRoleAssignment") }),
+    onNavigate: (handler) => {
+        const wrapped = (_event, target) => handler(target);
+        ipcRenderer.on("sovereignbot:navigate", wrapped);
+        return () => ipcRenderer.removeListener("sovereignbot:navigate", wrapped);
+    },
+    onNewChat: (handler) => {
+        const wrapped = () => handler();
+        ipcRenderer.on("sovereignbot:newChat", wrapped);
+        return () => ipcRenderer.removeListener("sovereignbot:newChat", wrapped);
+    },
+    onToggleComputer: (handler) => {
+        const wrapped = () => handler();
+        ipcRenderer.on("sovereignbot:toggleComputer", wrapped);
+        return () => ipcRenderer.removeListener("sovereignbot:toggleComputer", wrapped);
+    },
+    onToggleActivity: (handler) => {
+        const wrapped = () => handler();
+        ipcRenderer.on("sovereignbot:toggleActivity", wrapped);
+        return () => ipcRenderer.removeListener("sovereignbot:toggleActivity", wrapped);
+    },
 }));
