@@ -9,6 +9,8 @@ import { startRuntimeHost } from "./runtime-host.js";
 import { createDesktopServices } from "./services.js";
 import { createFirstRunService } from "./first-run.js";
 import { createGoalController } from "./goal-controller.js";
+import { createJobController } from "./job-controller.js";
+import { createChiefLoop } from "./chief-loop.js";
 import { createCoworkerStore } from "./coworker-store.js";
 import { createConversationStore } from "./conversation-store.js";
 import { createArtifactStore } from "./artifact-store.js";
@@ -111,6 +113,8 @@ async function main() {
     let win;
     let bridge;
     let goals;
+    let jobs;
+    let chiefLoop;
     let coworkerDispatcher;
     let quitting = false;
     let shutdownStarted = false;
@@ -121,6 +125,7 @@ async function main() {
             return;
         shutdownStarted = true;
         quitting = true;
+        try { chiefLoop?.stop(); } catch {}
         try {
             await Promise.race([coworkerDispatcher?.flush?.() ?? Promise.resolve(), delay(15_000)]);
             if (goals) {
@@ -131,6 +136,7 @@ async function main() {
                 }
                 await Promise.race([goals.flush(), delay(15_000)]);
             }
+            if (jobs) await Promise.race([jobs.flush(), delay(15_000)]);
             await Promise.race([host?.close(), delay(15_000)]);
         }
         finally {
@@ -180,6 +186,18 @@ async function main() {
                 }).show();
             },
         });
+        jobs = createJobController({
+            dataDir,
+            runtime: host.runtime,
+            roster: () => host.rosterSummary(),
+            coworkerStore,
+            services,
+            supervisorAgentId: host.plannerAgentId,
+            readiness: goalReadiness,
+        });
+        try { chiefLoop?.stop(); } catch {}
+        chiefLoop = createChiefLoop({ jobController: jobs, goalController: goals, roster: () => host.rosterSummary(), services, coworkerStore });
+        chiefLoop.start();
         coworkerDispatcher = createCoworkerDispatcher({
             dataDir,
             runtime: host.runtime,
@@ -281,6 +299,16 @@ async function main() {
                 "goal:getStatus": ({ goalId }) => goals.getGoal(goalId),
                 "goal:getConversation": ({ goalId }) => goals.getConversation(goalId),
                 "goal:cancel": async ({ goalId }) => await goals.cancel(goalId),
+                "job:submit": (payload) => jobs.submitJob(payload),
+                "job:list": () => jobs.listJobs(),
+                "job:getStatus": ({ jobId }) => jobs.getJob(jobId),
+                "job:getConversation": ({ jobId }) => jobs.getConversation(jobId),
+                "job:cancel": async ({ jobId }) => await jobs.cancel(jobId),
+                "job:pause": async ({ jobId }) => await jobs.pause(jobId),
+                "job:resume": async ({ jobId }) => await jobs.resume(jobId),
+                "job:approve": async ({ jobId }) => await jobs.approve(jobId),
+                "job:dismiss": async ({ jobId }) => await jobs.dismiss(jobId),
+                "job:attention": () => jobs.attentionJobs(),
             },
         });
     }

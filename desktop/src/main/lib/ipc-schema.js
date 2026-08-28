@@ -176,6 +176,61 @@ export const IPC_CHANNELS = Object.freeze({
             goalId: idField(),
         }, 1024),
     }),
+    "job:submit": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 16 * 1024,
+        validateRequest: (payload) => {
+            if (!isPlainObject(payload)) throw new Error("request payload must be an object");
+            assertNoForbiddenKeys(payload);
+            if (typeof payload.title !== "string" || !payload.title.trim()) throw new Error("missing request field: title");
+            if (payload.title.length > 120) throw new Error("title exceeds 120 characters");
+            if (typeof payload.objective !== "string" || !payload.objective.trim()) throw new Error("missing request field: objective");
+            if (payload.objective.length > 8000) throw new Error("objective exceeds 8000 characters");
+            if (typeof payload.ownerCoworkerId !== "string" || !payload.ownerCoworkerId.trim()) throw new Error("missing request field: ownerCoworkerId");
+            const out = { title: payload.title, objective: payload.objective, ownerCoworkerId: idField()(payload.ownerCoworkerId, "ownerCoworkerId") };
+            if (payload.parentJobId !== undefined) out.parentJobId = idField()(payload.parentJobId, "parentJobId");
+            if (payload.priority !== undefined) out.priority = enumField(["low", "normal", "high"])(payload.priority, "priority");
+            if (payload.nextActionAt !== undefined) out.nextActionAt = stringField(64)(payload.nextActionAt, "nextActionAt");
+            return out;
+        },
+    }),
+    "job:list": emptyRequest(),
+    "job:getStatus": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({ jobId: idField() }, 1024),
+    }),
+    "job:getConversation": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({ jobId: idField() }, 1024),
+    }),
+    "job:cancel": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({ jobId: idField() }, 1024),
+    }),
+    "job:pause": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({ jobId: idField() }, 1024),
+    }),
+    "job:resume": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({ jobId: idField() }, 1024),
+    }),
+    "job:approve": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({ jobId: idField() }, 1024),
+    }),
+    "job:dismiss": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({ jobId: idField() }, 1024),
+    }),
+    "job:attention": emptyRequest(),
     "settings:get": emptyRequest(),
     "provider:getRoster": emptyRequest(),
     "provider:refresh": emptyRequest(),
