@@ -44,6 +44,14 @@ jobs:
         working-directory: desktop
         run: npm test
 
+      # V4.1's deterministic Electron gate covers the product-level Jobs/Chief/Attention
+      # state machine and renderer behavior that unit tests alone cannot prove: repeated
+      # root-scroll invariants, waiting -> needs_attention escalation, approve/dismiss,
+      # zh-CN switching, restart hydration, pump isolation, and depth/child caps.
+      - name: V4.1 vertical behavior gate (Jobs/Chief/Attention)
+        working-directory: desktop
+        run: node scripts/verify-v41-gate.mjs --quick
+
       - name: Fetch pinned internal Node runtime
         working-directory: desktop
         run: npm run fetch-node
