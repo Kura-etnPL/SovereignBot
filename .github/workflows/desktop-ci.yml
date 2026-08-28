@@ -53,9 +53,17 @@ jobs:
       # root-scroll invariants, waiting -> needs_attention escalation, approve/dismiss,
       # zh-CN switching, restart hydration, pump isolation, and depth/child caps.
       # It must run after fetch-node because RuntimeHost deliberately refuses host Node.
+      # CI supplies the reviewed fake-provider shims so the gate has the same trusted
+      # provider roster shape as a signed-in workstation without any real account/quota.
       - name: V4.1 vertical behavior gate (Jobs/Chief/Attention)
         working-directory: desktop
-        run: node scripts/verify-v41-gate.mjs --quick
+        env:
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-provider-transcript-v41-gate.jsonl
+        shell: pwsh
+        run: |
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
+          node scripts/verify-v41-gate.mjs --quick
 
       # One packaging pass: forge make packages (postPackage hook flips+verifies fuses
       # before Squirrel hashes the payload) and produces the Squirrel installer.
