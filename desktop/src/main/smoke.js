@@ -30,6 +30,8 @@ export async function runSmokeMode({ app }) {
         noSessionLeak: false,
         v41Surfaces: false,
         v41JobPreload: false,
+        v41JobsUi: false,
+        v41ChiefUi: false,
         v41ZhCn: false,
         cleanQuit: false,
     };
@@ -244,6 +246,7 @@ export async function runSmokeMode({ app }) {
         const v41 = await win.webContents.executeJavaScript(`(function(){
             const I = globalThis.SovereignI18n;
             const jobs = globalThis.sovereignbot?.jobs;
+            const jobsUi = globalThis.SovereignJobsUI;
             const surfaceIds = [
                 "nav-work", "view-work", "work-list", "nav-attention", "attention-badge",
                 "job-detail-dialog", "job-detail-approve", "job-detail-dismiss",
@@ -251,6 +254,11 @@ export async function runSmokeMode({ app }) {
             const surfaces = surfaceIds.every((id) => Boolean(document.getElementById(id)));
             const jobMethods = ["submit", "list", "getStatus", "getConversation", "cancel", "pause", "resume", "approve", "dismiss", "attention"];
             const jobPreload = jobMethods.every((name) => typeof jobs?.[name] === "function");
+            const jobsUiLoaded = Boolean(jobsUi && typeof jobsUi.refresh === "function" && typeof jobsUi.renderList === "function");
+            const chiefUiLoaded = typeof globalThis.openDirect === "function"
+                && globalThis.openDirect.name === "openChiefAwareCoworker"
+                && typeof globalThis.refreshConversation === "function"
+                && globalThis.refreshConversation.name === "refreshChiefAwareConversation";
             let zhWork = "";
             let zhAttention = "";
             let zhLang = "";
@@ -273,6 +281,8 @@ export async function runSmokeMode({ app }) {
             return {
                 surfaces,
                 jobPreload,
+                jobsUiLoaded,
+                chiefUiLoaded,
                 i18n: Boolean(I && typeof I.t === "function"),
                 zhWork,
                 zhAttention,
@@ -281,6 +291,8 @@ export async function runSmokeMode({ app }) {
         })()`);
         checks.v41Surfaces = v41.surfaces === true && v41.i18n === true;
         checks.v41JobPreload = v41.jobPreload === true;
+        checks.v41JobsUi = v41.jobsUiLoaded === true;
+        checks.v41ChiefUi = v41.chiefUiLoaded === true;
         checks.v41ZhCn = v41.zhWork === "工作" && v41.zhAttention === "需关注" && v41.zhLang === "zh-CN";
 
         if (!win.isDestroyed()) {
