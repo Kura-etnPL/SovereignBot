@@ -1,0 +1,79 @@
+name: Desktop dependency audit (isolated)
+
+on:
+  push:
+    branches:
+      - audit/v41-desktop-deps
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Audit production and full lockfile separately
+        working-directory: desktop
+        shell: bash
+        run: |
+          set +e
+          npm audit --package-lock-only --omit=dev --json > "$RUNNER_TEMP/prod-audit.json"
+          prod_code=$?
+          npm audit --package-lock-only --json > "$RUNNER_TEMP/full-audit.json"
+          full_code=$?
+          set -e
+
+          echo "prod audit exit=$prod_code"
+          echo "full audit exit=$full_code"
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          const rank = { critical: 5, high: 4, moderate: 3, low: 2, info: 1, none: 0 };
+
+          function load(path) {
+            try { return JSON.parse(fs.readFileSync(path, 'utf8')); }
+            catch (error) { return { error: { message: String(error?.message ?? error) } }; }
+          }
+
+          function summarize(path, label) {
+            const audit = load(path);
+            console.log(`\n=== ${label} ===`);
+            if (audit.error) {
+              console.log(`AUDIT_ERROR ${JSON.stringify(audit.error)}`);
+              return;
+            }
+            console.log(`COUNTS ${JSON.stringify(audit.metadata?.vulnerabilities ?? {})}`);
+            const vulns = Object.values(audit.vulnerabilities ?? {}).sort((a, b) =>
+              (rank[b.severity] ?? 0) - (rank[a.severity] ?? 0) || String(a.name).localeCompare(String(b.name))
+            );
+            if (!vulns.length) {
+              console.log('NO_VULNERABILITIES');
+              return;
+            }
+            for (const vuln of vulns) {
+              console.log(`PACKAGE ${vuln.name} severity=${vuln.severity} direct=${Boolean(vuln.isDirect)} range=${JSON.stringify(vuln.range)} fixAvailable=${JSON.stringify(vuln.fixAvailable)}`);
+              const advisories = (Array.isArray(vuln.via) ? vuln.via : [])
+                .filter((entry) => entry && typeof entry === 'object');
+              const seen = new Set();
+              for (const advisory of advisories) {
+                const key = advisory.url || `${advisory.source}:${advisory.title}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                console.log(`  VIA severity=${advisory.severity} title=${JSON.stringify(advisory.title)} range=${JSON.stringify(advisory.range)} url=${advisory.url ?? ''}`);
+              }
+              const inherited = (Array.isArray(vuln.via) ? vuln.via : []).filter((entry) => typeof entry === 'string');
+              if (inherited.length) console.log(`  VIA_PACKAGES ${JSON.stringify(inherited)}`);
+              if (Array.isArray(vuln.effects) && vuln.effects.length) console.log(`  EFFECTS ${JSON.stringify(vuln.effects)}`);
+              if (Array.isArray(vuln.nodes) && vuln.nodes.length) console.log(`  NODES ${JSON.stringify(vuln.nodes.slice(0, 12))}${vuln.nodes.length > 12 ? ` +${vuln.nodes.length - 12} more` : ''}`);
+            }
+          }
+
+          summarize(process.env.RUNNER_TEMP + '/prod-audit.json', 'PRODUCTION OMIT_DEV');
+          summarize(process.env.RUNNER_TEMP + '/full-audit.json', 'FULL INCLUDING_DEV');
+          NODE
