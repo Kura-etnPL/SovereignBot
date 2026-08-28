@@ -2,6 +2,21 @@
 
 All notable changes to SovereignBot are documented in this file.
 
+## [4.0.0] - Unreleased
+
+SovereignBot 4.0.0 is the active V4 Always-On Autonomous Team development line. V3 remains frozen at the published 3.0.0 GA baseline while V4 evolves product-level persistent work and supervision without changing the existing trust boundary.
+
+### Added
+
+- Persistent product-level Jobs with queued / working / waiting / needs_attention / completed / failed / cancelled states, bounded retry/backoff, fingerprint deduplication, depth/child caps, and durable atomic state.
+- Chief of Staff supervisor loop that reuses the existing orchestrator and governed execution path instead of introducing a second agent runtime.
+- Work and Attention product surfaces with bilingual zh-CN/en UI, visible attention counts, job detail actions, and restart hydration.
+- Real Windows V4.1 vertical-gate coverage for long-conversation viewport invariants, Job retry/attention/approve/dismiss flow, i18n, hydration, caps, and pump isolation.
+
+### Changed
+
+- V4 development builds report `4.0.0-dev` across Core and Desktop so stable 3.0.0 provenance-bound release workflows intentionally skip V4 commits until the next explicit release freeze.
+
 ## [3.0.0] - 2026-08-28
 
 SovereignBot 3.0.0 is the Windows GA release: the V3 Coworker Desktop now ships as a real double-clickable product with bilingual UI, Windows launcher shortcuts, keyboard access, a hardened internal-Node packaging path, and a `3.0.0` version identity. V4 Always-On work (persistent Jobs, Routines, Attention, Teach, Event Triggers, Worker Node, Remote) starts from this frozen commit without modifying the V3 line.
@@ -61,6 +76,7 @@ SovereignBot 1.0 is the first production release of the supported local-first co
 - Transactional v0.3 ComputerRegistry → v2 migration with marker-bound crash recovery and pre-commit rollback.
 - Deterministic portable release archive, SHA-256 manifest, and Windows PowerShell / POSIX bootstrap installers.
 - Deterministic RC soak coverage with repeated same-dataDir restart/retry/review/cancel/policy/repeat-guard cycles and three serialized full-suite rounds on both Ubuntu and Windows.
+- The exact pre-version RC product tree passed the ordinary seven-job release matrix plus dedicated three-round Ubuntu/Windows soak jobs with no unresolved P0/P1 defect.
 
 ### Security
 
