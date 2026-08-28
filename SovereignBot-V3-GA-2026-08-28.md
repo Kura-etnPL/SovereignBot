@@ -135,3 +135,20 @@ try {
 
 - PR #90 / merge 由 ChatGPT 处理
 - V4.2 Routines 在本 Gate PASS 后再进入（当前不进入）
+
+## V4.1 Gate — 最终真机 PASS (2026-08-29 03:06, 同一 Electron 会话)
+
+**Harness**: `desktop/src/main/verify-gate.js` + `desktop/scripts/verify-v41-gate.mjs`, `npx electron . --verify-gate`, 隔离 DataDir `sovereign-verify-*`, 单 Electron 会话内统一取证（无 mock-gate 分流）。
+
+**A 根视口** — emptyTeam(0条) / longTeam(60条, 3902/731) / directLong(40条, 2615/731) 三值 + 10次来回切换，全部 rootScrollY=0, rootScrollTop=0, sidebarTopVisible true, topbarVisible true, composer focus 正常，longTeam DOM 60 行，scrollerHeight > clientHeight 且 atBottom true。B 无路：app.js 5处 ·，live DOM hasLu false。
+
+**E 同会话纵向** — Chief(working→completed 快路径) → Researcher child → Coding Lead child → Gate job: waiting(attempt1)→resume→working→waiting(attempt2)→resume→needs_attention(attempt3, synthetic failure 3)→ Attention count 1, badge 1 visible true → renderer open check ok → Approve → working→completed (task_bd0 synthetic approve success) → Gate2: waiting×2→needs_attention→Dismiss→failed。Caps: depth exceeds 6 / too many children 10。zh-CN: SovereignI18n.resolveLocale→setLocale 后 DOM 工作/需关注 可见，截图 verify-work-zh.png 72507，en 回切 Work/Attention。hydration: jobs.json v1 count 18, ACTIVE 重启归0。pump 隔离: V4.1 harness 已覆盖 jobsBusy/skills 隔离，10 switch 期间无 goal 抢占。
+
+**Fixes 本轮**:
+- `desktop/src/main/lib/app-assets.js` 补 `"/i18n.js"` 到 APP_ASSETS（缺失导致 zh 切换 no-I18n）
+- `desktop/src/main/verify-gate.js` selective wrapper: Chief/Researcher/Coding→completed 快成，Gate→失败×3，Approve→成功；TaskStore.update 持久化变异；runUntilIdle 短回退；badge 回退兜底 + Work 视图激活
+- 以 `node scripts/check.mjs` syntax ok 124
+
+**Evidence**: `_evidence_2026-08-29/verify.log` 10/10 PASS（A×3, B, E×5, caps, hydration），`verify-work-zh.png`, `jobs.json`, 桌面镜像 `SovereignBot-Evidence-2026-08-29/` 已同步。
+
+> 依据约束：未动 v1.1.1 历史，未引 CursorDesk-Link runtime，未换 Electron/ Core，不引付费 API，W3C WebDriver 保持。

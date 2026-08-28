@@ -75,6 +75,11 @@ function defaultDataDir() {
 }
 
 async function main() {
+    if (process.argv.includes("--verify-gate")) {
+        const { runVerifyGate } = await import("./verify-gate.js");
+        await runVerifyGate({ app });
+        return;
+    }
     if (process.argv.includes("--desktop-smoke")) {
         const { runSmokeMode } = await import("./smoke.js");
         await runSmokeMode({ app });
