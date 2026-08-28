@@ -1,0 +1,105 @@
+name: Desktop modern toolchain trial (isolated)
+
+on:
+  push:
+    branches:
+      - audit/v41-desktop-deps
+
+permissions:
+  contents: read
+
+jobs:
+  windows-trial:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply ephemeral security overrides and regenerate lockfile
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json','utf8')); p.overrides={'@electron/packager':'20.3.0','@electron/rebuild':'4.2.0','tmp':'0.2.7'}; fs.writeFileSync('package.json', JSON.stringify(p,null,4)+'\n');"
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ls @electron/packager @electron/rebuild tar extract-zip tmp --all || exit 1
+
+      - name: Audit ephemeral full toolchain
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $raw = npm audit --package-lock-only --json 2>$null
+          $audit = $raw | ConvertFrom-Json
+          $counts = $audit.metadata.vulnerabilities
+          Write-Host ("AUDIT_COUNTS=" + ($counts | ConvertTo-Json -Compress))
+          if ([int]$counts.critical -gt 0 -or [int]$counts.high -gt 0) {
+            $audit.vulnerabilities.PSObject.Properties | ForEach-Object {
+              $v=$_.Value
+              if ($v.severity -in @('critical','high')) {
+                Write-Host ("VULN " + $_.Name + " severity=" + $v.severity + " range=" + $v.range + " fix=" + ($v.fixAvailable | ConvertTo-Json -Compress))
+              }
+            }
+            exit 2
+          }
+
+      - name: Install trial toolchain
+        working-directory: desktop
+        run: npm ci --no-audit --no-fund
+
+      - name: Sync verified Core payload
+        working-directory: desktop
+        run: npm run sync-core
+
+      - name: Syntax and unit tests
+        working-directory: desktop
+        run: npm run check && npm test
+
+      - name: Fetch pinned internal Node runtime
+        working-directory: desktop
+        run: npm run fetch-node
+
+      - name: V4.1 vertical behavior gate
+        working-directory: desktop
+        env:
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-provider-transcript-v41-trial.jsonl
+        shell: pwsh
+        run: |
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
+          node scripts/verify-v41-gate.mjs --quick
+
+      - name: Make Squirrel installer
+        working-directory: desktop
+        run: npm run make
+
+      - name: Verify Electron fuses
+        working-directory: desktop
+        run: npm run verify-fuses
+
+      - name: Packaged smoke
+        working-directory: desktop
+        env:
+          SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: ${{ runner.temp }}\sb-smoke-data
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-provider-transcript-packaged-trial.jsonl
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR | Out-Null
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
+          node scripts/run-packaged-smoke.mjs
+
+      - name: Installer end-to-end
+        working-directory: desktop
+        env:
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-provider-transcript-installed-trial.jsonl
+        shell: pwsh
+        run: |
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
+          node scripts/installer-e2e.mjs
+
+      - name: Release manifest and secret scan
+        working-directory: desktop
+        run: npm run release-manifest && npm run secret-scan
