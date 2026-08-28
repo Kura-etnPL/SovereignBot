@@ -76,14 +76,24 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       // due check: not before nextActionAt
       if (job.nextActionAt && Date.now() < Date.parse(job.nextActionAt)) return;
 
-      // runaway guard: fingerprint within window triggers needs_attention
+      // runaway guard: fingerprint within window triggers needs_attention on
+      // rapid re-queue without human interval. Normal wait->resume cycles are
+      // driven by nextActionAt timing (or explicit resume/approve) and must
+      // not be mistaken for a loop. resume() sets _skipFingerprintOnce for the
+      // waiting->queued transition.
       const nowMs = Date.now();
       const fp = `${job.ownerCoworkerId}:${slice(job.objective, 80)}`;
-      if (fingerprint && fingerprint.key === fp && nowMs - Date.parse(fingerprint.at) < CAPS.fingerprintWindowMs) {
-        job._repeatCount = (job._repeatCount ?? 0) + 1;
-      } else { job._repeatCount = 0; }
+      if (job._skipFingerprintOnce) {
+        job._repeatCount = 0;
+        delete job._skipFingerprintOnce;
+      } else {
+        const isRequeueWithoutWait = !job.nextActionAt || Date.parse(job.nextActionAt) > nowMs;
+        if (isRequeueWithoutWait && fingerprint && fingerprint.key === fp && nowMs - Date.parse(fingerprint.at) < CAPS.fingerprintWindowMs) {
+          job._repeatCount = (job._repeatCount ?? 0) + 1;
+        } else if (isRequeueWithoutWait) { job._repeatCount = 0; }
+      }
       job._fingerprint = { key: fp, at: now() };
-      if (job._repeatCount >= 2) { // same objective rapidly re-queued
+      if (job._repeatCount >= 2) {
         setStatus(job, "needs_attention");
         job.attentionState = { reason: "repeated objective fingerprint", fingerprint: fp, at: now() };
         job.outcomeSummary = "Needs attention: repeated objective detected.";
@@ -195,11 +205,20 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     async resume(jobId) {
       const j = getJob(jobId);
       if (j.status !== "waiting" && j.status !== "needs_attention") throw new Error(`only waiting/needs_attention jobs can be resumed (current: ${j.status})`);
-      j.attempt = 0; j.error = undefined; j.attentionState = undefined; j.nextActionAt = undefined;
+      const fromWaiting = j.status === "waiting";
+      const fromNeedsAttention = j.status === "needs_attention";
+      if (fromNeedsAttention) { j.attempt = 0; j._fingerprint = undefined; j._repeatCount = 0; }
+      j.error = undefined; j.attentionState = undefined; j.nextActionAt = undefined;
+      if (fromWaiting) j._skipFingerprintOnce = true;
+      if (fromNeedsAttention) { j._fingerprint = undefined; j._repeatCount = 0; delete j._skipFingerprintOnce; }
       setStatus(j, "queued"); save(); schedule(j.id); return publicJob(j);
     },
-    async approve(jobId) { // alias for resume from needs_attention (UI uses approve)
-      return this.resume(jobId);
+    async approve(jobId) {
+      const j = getJob(jobId);
+      if (j.status !== "needs_attention") throw new Error(`only needs_attention jobs can be approved`);
+      j.attempt = 0; j.error = undefined; j.attentionState = undefined; j.nextActionAt = undefined;
+      j._fingerprint = undefined; j._repeatCount = 0; delete j._skipFingerprintOnce;
+      setStatus(j, "queued"); save(); schedule(j.id); return publicJob(j);
     },
     async dismiss(jobId) { // dismiss needs_attention -> failed (explicit)
       const j = getJob(jobId);
