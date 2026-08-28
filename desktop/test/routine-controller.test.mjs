@@ -91,8 +91,7 @@ test("due recurring routine creates exactly one governed Job and restart does no
     assert.equal(submitted.length, 1, "same occurrence must not fire twice");
 
     jobStates.get("job_1").status = "completed";
-    await controller.tickNow();
-    assert.equal(controller.get(routine.id).history[0].status, "completed");
+    assert.equal(controller.get(routine.id).history[0].status, "completed", "reads reconcile Job outcome immediately");
 
     const nextRunAt = controller.get(routine.id).nextRunAt;
     controller.stop();
@@ -107,6 +106,28 @@ test("due recurring routine creates exactly one governed Job and restart does no
     assert.equal(submitted.length, 1, "disabled routine must not fire");
     const enabled = controller.setEnabled(routine.id, true);
     assert.ok(Date.parse(enabled.nextRunAt) > clock.value, "re-enable must schedule a future occurrence");
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("long offline gap catches up at most once instead of creating a missed-run storm", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "sovereign-routine-catchup-"));
+  const clock = { value: new Date(2026, 7, 29, 8, 10, 0, 0).getTime() };
+  const submitted = [];
+  const jobStates = new Map();
+  try {
+    const controller = harness(dataDir, clock, submitted, jobStates);
+    const minute = (new Date(clock.value).getMinutes() + 1) % 60;
+    const routine = controller.create({ name: "Hourly catch-up", coworkerId: "chief", instruction: "Check once after wake.", schedule: { type: "hourly", minute } });
+    const original = Date.parse(routine.nextRunAt);
+    clock.value = original + 8 * 3600_000;
+    await controller.tickNow();
+    assert.equal(submitted.length, 1, "only one catch-up Job should be created");
+    const next = Date.parse(controller.get(routine.id).nextRunAt);
+    assert.ok(next > clock.value, "next occurrence must jump to the future after catch-up");
+    await controller.tickNow();
+    assert.equal(submitted.length, 1, "second immediate tick must not replay missed hours");
   } finally {
     await rm(dataDir, { recursive: true, force: true });
   }
