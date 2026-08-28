@@ -44,6 +44,13 @@ jobs:
         working-directory: desktop
         run: npm test
 
+      # Short real-Electron Windows vertical gate for V4 Routines. It uses isolated temp
+      # state + deterministic Job execution, never real provider quota/accounts, and proves
+      # Routine -> Job -> ChiefLoop -> history/restart/dedup + zh-CN/en UI in one window.
+      - name: V4.2 Routine vertical gate
+        working-directory: desktop
+        run: node scripts/verify-v42-routines.mjs
+
       - name: Fetch pinned internal Node runtime
         working-directory: desktop
         run: npm run fetch-node
