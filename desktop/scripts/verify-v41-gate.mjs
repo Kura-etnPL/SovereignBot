@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 // Launcher for the verify-gate harness — run from worktree root:
-//   node desktop/scripts/verify-v41-gate.mjs          # spawns Electron --verify-gate (15 min timeout)
-//   node desktop/scripts/verify-v41-gate.mjs --quick  # shorter timeout for iteration
-import { spawn } from "node:child_process";
+//   node desktop/scripts/verify-v41-gate.mjs          # spawns Electron --verify-gate (12 min timeout)
+//   node desktop/scripts/verify-v41-gate.mjs --quick  # shorter timeout for iteration/CI
+import { spawn, spawnSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DESKTOP_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const WORKTREE_ROOT = join(DESKTOP_ROOT, "..");
 const quick = process.argv.includes("--quick");
 const TIMEOUT_MS = quick ? 3 * 60_000 : 12 * 60_000;
 
@@ -28,20 +27,48 @@ const child = spawn(electronBin, [".", "--verify-gate"], {
 });
 
 let done = false;
-child.stderr?.on("data", d => { try { process.stderr.write(d); } catch {} });
+let fatalStartup = false;
+let forcedTermination = false;
+
+function terminateTree(reason) {
+  if (done || forcedTermination) return;
+  forcedTermination = true;
+  console.error(`[verify-launcher] ${reason} — terminating Electron process tree`);
+  if (process.platform === "win32" && child.pid) {
+    try {
+      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      return;
+    } catch {}
+  }
+  try { child.kill("SIGTERM"); } catch {}
+  setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 5000).unref?.();
+}
+
+child.stderr?.on("data", d => {
+  const text = String(d);
+  try { process.stderr.write(d); } catch {}
+  // In verify mode an app-level startup failure is terminal. The normal app intentionally
+  // shows an error dialog, but a headless CI runner cannot dismiss it, so fail fast here
+  // instead of burning the entire watchdog timeout.
+  if (!fatalStartup && text.includes("[sovereignbot] failed to start:")) {
+    fatalStartup = true;
+    terminateTree("detected verify-gate startup failure");
+  }
+});
 child.stderr?.on("error", () => {}); // verify-gate launcher stderr: swallow EPIPE
 const timer = setTimeout(() => {
   if (done) return;
-  console.error(`[verify-launcher] timed out after ${TIMEOUT_MS/1000}s — killing Electron`);
-  try { child.kill("SIGTERM"); } catch {}
-  setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 5000);
+  terminateTree(`timed out after ${TIMEOUT_MS/1000}s`);
 }, TIMEOUT_MS);
 
 child.on("exit", (code, signal) => {
   done = true;
   clearTimeout(timer);
   console.error(`[verify-launcher] Electron exited code=${code} signal=${signal}`);
-  process.exit(code ?? (signal ? 1 : 0));
+  process.exit(fatalStartup ? 1 : (code ?? (signal ? 1 : 0)));
 });
 child.on("error", (err) => {
   done = true;
