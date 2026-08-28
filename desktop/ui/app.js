@@ -188,7 +188,7 @@ function renderReadiness() {
     summary.textContent = "Demo mode";
     dot.classList.add("offline");
   } else if (state.roster?.ready) {
-    summary.textContent = providers.length ? `${providers.join(" + ")} ready · ${readyCoworkers} coworker lanes` : `${readyCoworkers} coworker lanes ready`;
+    summary.textContent = providers.length ? `${providers.join(" + ")} ready 路 ${readyCoworkers} coworker lanes` : `${readyCoworkers} coworker lanes ready`;
     dot.classList.remove("offline");
   } else {
     summary.textContent = "Connect Codex or Claude Code";
@@ -200,8 +200,10 @@ async function refreshCoworkers() {
   try {
     const result = await window.sovereignbot.coworkers.list({});
     state.coworkers = result?.coworkers ?? [];
-  } catch {
+  } catch (error) {
     state.coworkers = state.coworkers ?? [];
+    const target = $("provider-action-result");
+    if (target && error) target.textContent = String(error?.message ?? error).slice(0, 200);
   }
   renderSidebar();
 }
@@ -210,8 +212,10 @@ async function refreshConversations() {
   try {
     const result = await window.sovereignbot.conversations.list({});
     state.conversations = result?.conversations ?? [];
-  } catch {
+  } catch (error) {
     state.conversations = state.conversations ?? [];
+    const target = $("provider-action-result");
+    if (target && error) target.textContent = String(error?.message ?? error).slice(0, 200);
   }
   renderSidebar();
 }
@@ -219,8 +223,9 @@ async function refreshConversations() {
 async function refreshRoster() {
   try {
     state.roster = await window.sovereignbot.providers.getRoster({});
-  } catch {
-    // Smoke mode or startup race; keep the previous safe default.
+  } catch (error) {
+    const target = $("provider-action-result");
+    if (target && error) target.textContent = String(error?.message ?? error).slice(0, 200);
   }
   renderReadiness();
   renderSidebar();
@@ -300,7 +305,7 @@ function renderConversationHeader(conversation) {
   $("conversation-title").textContent = conversation.title;
   $("conversation-kind").textContent = conversation.kind === "team" ? "Team" : "Coworker";
   $("conversation-subtitle").textContent = conversation.kind === "team"
-    ? members.map((entry) => entry.name).join(" · ")
+    ? members.map((entry) => entry.name).join(" 路 ")
     : direct?.role || "Persistent coworker conversation";
   $("demo-banner").classList.toggle("hidden", state.roster?.mode !== "demo");
 
@@ -365,7 +370,7 @@ function renderMessage(conversation, message) {
     const values = Object.values(message.delivery);
     const pending = values.filter((entry) => entry?.status === "pending").length;
     const failed = values.filter((entry) => entry?.status === "failed").length;
-    delivery.textContent = pending ? "Working…" : failed ? `${failed} delivery failed` : "Delivered";
+    delivery.textContent = pending ? "Working…": failed ? `${failed} delivery failed` : "Delivered";
     content.append(delivery);
   }
   row.append(content);
@@ -647,7 +652,7 @@ function renderWorkspaces() {
 }
 
 function renderAdvancedRoster() {
-  const lines = (state.roster?.agents ?? []).map((agent) => `${agent.name}\n  ${agent.harnessKind} · ${agent.capabilities.join(", ")}`);
+  const lines = (state.roster?.agents ?? []).map((agent) => `${agent.name}\n  ${agent.harnessKind} 路 ${agent.capabilities.join(", ")}`);
   $("advanced-roster").textContent = lines.join("\n\n") || "No active runtime agents.";
 }
 
@@ -671,7 +676,7 @@ async function refreshSettingsData() {
     renderSidebar();
     const browsers = firstRun?.browsers ?? [];
     $("browser-summary").textContent = browsers.length
-      ? browsers.map((entry) => `${entry.browser} ${entry.version}`).join(" · ")
+      ? browsers.map((entry) => `${entry.browser} ${entry.version}`).join(" 路 ")
       : "No supported browser detected yet.";
   } catch {
     // Smoke mode does not bind the settings surface.
@@ -697,11 +702,11 @@ async function refreshActivity() {
       window.sovereignbot.operator.getOverview({}),
       window.sovereignbot.operator.getAudit({ limit: 30 }),
     ]);
-    const agents = (overview.agents ?? []).map((entry) => `${entry.name || entry.id} · ${entry.harnessKind || entry.harness?.kind || ""}`);
+    const agents = (overview.agents ?? []).map((entry) => `${entry.name || entry.id} 路 ${entry.harnessKind || entry.harness?.kind || ""}`);
     const tasks = overview.tasks ?? [];
     const counts = {};
     for (const task of tasks) counts[task.status] = (counts[task.status] ?? 0) + 1;
-    $("overview-block").textContent = `Coworker/runtime agents\n${agents.join("\n") || "—"}\n\nTasks ${JSON.stringify(counts)}`;
+    $("overview-block").textContent = `Coworker/runtime agents\n${agents.join("\n") || "…"}\n\nTasks ${JSON.stringify(counts)}`;
     $("audit-block").textContent = (audit.entries ?? []).slice().reverse().map((entry) => `${entry.at ?? ""}  ${entry.type}  ${entry.subject ?? ""}`).join("\n") || "No audit entries.";
   } catch {
     $("overview-block").textContent = "Activity is unavailable in this runtime mode.";
@@ -737,9 +742,7 @@ function bindEvents() {
       sendMessage(event);
     }
   });
-  $("composer-add").addEventListener("click", () => {
-    $("composer-hint").textContent = "Artifacts are the next V3 surface — messaging stays available now.";
-  });
+  // composer-add is wired by skills-ui.js to open the real attachment dialog.
 
   $("open-details").addEventListener("click", () => $("details-panel").classList.toggle("hidden"));
   $("close-details").addEventListener("click", () => hide($("details-panel")));
@@ -776,14 +779,27 @@ async function bootstrap() {
   try {
     state.handshake = await window.sovereignbot.handshake({});
     $("chip-version").textContent = state.handshake?.version || "V3";
-  } catch {
+  } catch (error) {
     $("chip-version").textContent = "offline";
+    $("provider-summary").textContent = "Offline — restart the app.";
+    $("provider-dot")?.classList.add("offline");
+    $("provider-action-result").textContent = String(error?.message ?? error).slice(0, 300);
     return;
   }
 
-  await Promise.allSettled([refreshCoworkers(), refreshConversations(), refreshRoster(), refreshSettingsData()]);
+  const results = await Promise.allSettled([refreshCoworkers(), refreshConversations(), refreshRoster(), refreshSettingsData()]);
+  const rejected = results.filter((entry) => entry.status === "rejected");
+  if (rejected.length) {
+    const first = rejected[0]?.reason;
+    $("provider-action-result").textContent = String(first?.message ?? first ?? "Startup data did not load — use Refresh or check Settings.").slice(0, 300);
+  }
   renderSidebar();
   renderReadiness();
+  // If bootstrap racing kept stale placeholders, a follow-up pass once providers
+  // have settled typically recovers without user action.
+  if (!state.coworkers.length || !state.roster || state.roster.providers === undefined) {
+    setTimeout(() => Promise.allSettled([refreshCoworkers(), refreshRoster()]).then(() => { renderSidebar(); renderReadiness(); }), 1200);
+  }
 }
 
 bootstrap();

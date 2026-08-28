@@ -17,6 +17,15 @@ export const APP_ASSETS = Object.freeze({
     "/index.html": Object.freeze({ file: "index.html", type: HTML }),
     "/app.js": Object.freeze({ file: "app.js", type: JS }),
     "/style.css": Object.freeze({ file: "style.css", type: CSS }),
+    "/artifacts-ui.js": Object.freeze({ file: "artifacts-ui.js", type: JS }),
+    "/computer-ui.js": Object.freeze({ file: "computer-ui.js", type: JS }),
+    "/live-screen-ui.js": Object.freeze({ file: "live-screen-ui.js", type: JS }),
+    "/skills-ui.js": Object.freeze({ file: "skills-ui.js", type: JS }),
+    "/chief-ui.js": Object.freeze({ file: "chief-ui.js", type: JS }),
+    "/artifacts.css": Object.freeze({ file: "artifacts.css", type: CSS }),
+    "/computer.css": Object.freeze({ file: "computer.css", type: CSS }),
+    "/live-screen.css": Object.freeze({ file: "live-screen.css", type: CSS }),
+    "/skills.css": Object.freeze({ file: "skills.css", type: CSS }),
 });
 
 export function resolveAppAsset(rawUrl) {
