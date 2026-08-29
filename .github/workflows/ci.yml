@@ -75,3 +75,27 @@ jobs:
       - run: google-chrome --version
       - run: chromedriver --version
       - run: npm run test:browser
+
+  ci-gate:
+    name: ci-gate
+    if: ${{ always() }}
+    needs:
+      - test
+      - portable-install-linux
+      - portable-install-windows
+      - browser-e2e
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every CI dependency
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          INSTALL_LINUX_RESULT: ${{ needs.portable-install-linux.result }}
+          INSTALL_WINDOWS_RESULT: ${{ needs.portable-install-windows.result }}
+          BROWSER_RESULT: ${{ needs.browser-e2e.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$TEST_RESULT" = "success"
+          test "$INSTALL_LINUX_RESULT" = "success"
+          test "$INSTALL_WINDOWS_RESULT" = "success"
+          test "$BROWSER_RESULT" = "success"
