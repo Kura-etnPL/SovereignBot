@@ -4,11 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    paths:
-      - "desktop/**"
-      - "src/**"
-      - "sidecars/**"
-      - ".github/workflows/desktop-ci.yml"
 
 permissions:
   contents: read
@@ -118,3 +113,18 @@ jobs:
       - name: Secret scan over packaged payload
         working-directory: desktop
         run: npm run secret-scan
+
+  desktop-gate:
+    name: desktop-gate
+    if: ${{ always() }}
+    needs:
+      - desktop-windows
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require Windows shipping gate
+        env:
+          DESKTOP_RESULT: ${{ needs.desktop-windows.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$DESKTOP_RESULT" = "success"

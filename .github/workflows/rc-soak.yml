@@ -35,3 +35,18 @@ jobs:
         env:
           SOVEREIGNBOT_SOAK_ROUNDS: "3"
         run: npm run test:soak
+
+  rc-soak-gate:
+    name: rc-soak-gate
+    if: ${{ always() }}
+    needs:
+      - soak
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require both RC soak matrix jobs
+        env:
+          SOAK_RESULT: ${{ needs.soak.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SOAK_RESULT" = "success"
