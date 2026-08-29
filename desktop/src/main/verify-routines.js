@@ -1,6 +1,6 @@
 // V4.2 Routines vertical gate. Runs in a real Electron window with isolated state,
 // deterministic Job execution, real IPC/preload/UI, and an injected clock so the system
-// clock is never changed. Triggered only by --verify-routines.
+// clock is never changed. Triggered only by the dedicated verify-routines entrypoint.
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -157,13 +157,14 @@ export async function runVerifyRoutines({ app }) {
     })})`);
     check("routine created through renderer IPC", /^routine_/.test(routine.id));
     const firstDue = Date.parse(routine.nextRunAt);
+    const scheduledFor = routine.nextRunAt;
     clock.value = firstDue + 1000;
     await routines.tickNow();
     const afterRoutineTick = jobs.listJobs().jobs;
     check("due routine creates exactly one Job", afterRoutineTick.length === 1, `jobs=${afterRoutineTick.length}`);
     check("Routine never executes provider directly", fake.tasks.length === 0, `tasks=${fake.tasks.length}`);
     check("Job carries Routine identity", afterRoutineTick[0]?.routineId === routine.id);
-    check("Job carries trusted workspace", afterRoutineTick[0]?.workspaceId === undefined || afterRoutineTick[0]?.routineId === routine.id);
+    check("Job remains queued until existing Chief path wakes it", afterRoutineTick[0]?.status === "queued", afterRoutineTick[0]?.status);
     const advanced = routines.get(routine.id).nextRunAt;
     check("nextRunAt pre-advanced past now", Date.parse(advanced) > clock.value, advanced);
 
@@ -171,6 +172,17 @@ export async function runVerifyRoutines({ app }) {
     await jobs.flush();
     const job = jobs.listJobs().jobs[0];
     check("Chief loop executes existing Job path", job?.status === "completed", job?.status);
+    const delegatedTask = fake.tasks[0];
+    check(
+      "trusted Routine workspace reaches delegateTrusted execution context",
+      delegatedTask?.executionContext?.workspaceId === workspaceId && delegatedTask?.executionContext?.cwd === workspacePath,
+      JSON.stringify({ workspaceId: delegatedTask?.executionContext?.workspaceId, cwd: delegatedTask?.executionContext?.cwd }),
+    );
+    check(
+      "Routine metadata reaches governed Job task",
+      delegatedTask?.input?.routineId === routine.id && delegatedTask?.input?.scheduledFor === scheduledFor,
+      JSON.stringify({ routineId: delegatedTask?.input?.routineId, scheduledFor: delegatedTask?.input?.scheduledFor }),
+    );
     const historyAfter = routines.history(routine.id).history;
     check("Routine history links completed Job", historyAfter.length === 1 && historyAfter[0].jobId === job.id && historyAfter[0].status === "completed");
 
