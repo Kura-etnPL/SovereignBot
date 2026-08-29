@@ -199,6 +199,27 @@ export async function runVerifyRoutines({ app }) {
     const reenabled = await win.webContents.executeJavaScript(`window.sovereignbot.routines.setEnabled({routineId:${JSON.stringify(routine.id)},enabled:true})`);
     check("re-enable schedules future occurrence", Date.parse(reenabled.nextRunAt) > clock.value, reenabled.nextRunAt);
 
+    const failedRoutineName = "V4.2 gate one-time failure";
+    const failedRoutine = await win.webContents.executeJavaScript(`window.sovereignbot.routines.create(${JSON.stringify({
+      name: failedRoutineName,
+      coworkerId: chief.id,
+      instruction: "This run must fail closed before provider execution.",
+      workspaceId,
+      schedule: { type: "one-time", at: new Date(clock.value - 1000).toISOString() },
+    })})`);
+    services.removeWorkspace(workspaceId);
+    const tasksBeforeFailedRun = fake.tasks.length;
+    await routines.tickNow();
+    const failedState = routines.get(failedRoutine.id);
+    const failedHistory = routines.history(failedRoutine.id).history;
+    check("invalid trusted workspace fails Routine before Job creation", jobs.listJobs().jobs.length === jobCount && fake.tasks.length === tasksBeforeFailedRun, `jobs=${jobs.listJobs().jobs.length} tasks=${fake.tasks.length}`);
+    check("failed Routine history is durable and explicit", failedHistory.length === 1 && failedHistory[0].status === "failed" && !failedHistory[0].jobId && failedState.failureCount === 1, JSON.stringify({ status: failedHistory[0]?.status, failureCount: failedState.failureCount }));
+    check("failed one-time Routine is consumed", failedState.enabled === false && failedState.nextRunAt === undefined);
+    const reenableRejected = await win.webContents.executeJavaScript(`window.sovereignbot.routines.setEnabled({routineId:${JSON.stringify(failedRoutine.id)},enabled:true}).then(()=>false,()=>true)`);
+    check("consumed one-time Routine cannot be re-enabled", reenableRejected === true);
+    const failedButtons = await win.webContents.executeJavaScript(`(async()=>{await window.SovereignJobsUI.refreshRoutines(); const card=[...document.querySelectorAll('#routine-list .job-card')].find(x=>x.querySelector('strong')?.textContent===${JSON.stringify(failedRoutineName)}); return card?[...card.querySelectorAll('button')].map(b=>b.textContent.trim()):[]})()`);
+    check("consumed one-time UI offers no Enable action", !failedButtons.includes("Enable"), JSON.stringify(failedButtons));
+
     await win.webContents.executeJavaScript(`document.getElementById('setting-language').value='zh-CN'; document.getElementById('setting-language').dispatchEvent(new Event('change',{bubbles:true}))`);
     await sleep(250);
     await win.webContents.executeJavaScript(`document.getElementById('nav-routines').click()`);
@@ -213,7 +234,7 @@ export async function runVerifyRoutines({ app }) {
 
     const png = await win.webContents.capturePage();
     await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.png"), png.toPNG());
-    const summary = { at: new Date().toISOString(), dataDir, routineId: routine.id, jobId: job.id, checks, routine: routines.get(routine.id), job: jobs.getJob(job.id) };
+    const summary = { at: new Date().toISOString(), dataDir, routineId: routine.id, failedRoutineId: failedRoutine.id, jobId: job.id, checks, routine: routines.get(routine.id), failedRoutine: routines.get(failedRoutine.id), job: jobs.getJob(job.id) };
     await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.json"), `${JSON.stringify(summary, null, 2)}\n`, "utf8");
     await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.log"), `${log.join("\n")}\n`, "utf8");
 
