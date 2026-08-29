@@ -200,9 +200,14 @@
       meta.textContent = `${scheduleLabel(routine.schedule)} · ${t("routines.nextRun", "Next run")}: ${next}${routine.lastStatus ? ` · ${t("routines.lastStatus", "Last status")}: ${routine.lastStatus}` : ""}`;
       const actions = document.createElement("div"); actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
       const open = document.createElement("button"); open.className = "quiet-action"; open.type = "button"; open.textContent = t("routines.history", "History"); open.addEventListener("click", () => openRoutineDetail(routine.id));
-      const toggle = document.createElement("button"); toggle.className = "quiet-action"; toggle.type = "button"; toggle.textContent = routine.enabled ? t("routines.disable", "Disable") : t("routines.enable", "Enable"); toggle.addEventListener("click", async () => { await window.sovereignbot.routines.setEnabled({ routineId: routine.id, enabled: !routine.enabled }); await refreshRoutines(); });
       const remove = document.createElement("button"); remove.className = "quiet-action"; remove.type = "button"; remove.textContent = t("routines.remove", "Remove"); remove.addEventListener("click", async () => { await window.sovereignbot.routines.remove({ routineId: routine.id }); await refreshRoutines(); });
-      actions.append(open, toggle, remove);
+      const consumedOneTime = routine.schedule?.type === "one-time" && Boolean(routine.lastRunAt);
+      actions.append(open);
+      if (!consumedOneTime) {
+        const toggle = document.createElement("button"); toggle.className = "quiet-action"; toggle.type = "button"; toggle.textContent = routine.enabled ? t("routines.disable", "Disable") : t("routines.enable", "Enable"); toggle.addEventListener("click", async () => { await window.sovereignbot.routines.setEnabled({ routineId: routine.id, enabled: !routine.enabled }); await refreshRoutines(); });
+        actions.append(toggle);
+      }
+      actions.append(remove);
       card.append(head, meta, actions); root.append(card);
     }
   }
