@@ -10,6 +10,13 @@ $runtimeBridge = Join-Path $stateDir 'bridge.mjs'
 $stdoutLog = Join-Path $stateDir 'bridge.stdout.log'
 $stderrLog = Join-Path $stateDir 'bridge.stderr.log'
 
+# Pinned official GitHub CLI portable build. This is intentionally not installed
+# system-wide and never changes the machine/user PATH.
+$portableGhVersion = '2.98.0'
+$portableGhAsset = 'gh_2.98.0_windows_amd64.zip'
+$portableGhSha256 = 'c28c7b3b584967a05b74d9eaf7481bff24ddc34930bf2d6e442c148236561eb1'
+$portableGhUrl = 'https://github.com/cli/cli/releases/download/v2.98.0/gh_2.98.0_windows_amd64.zip'
+
 function Resolve-ExecutablePath {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -28,6 +35,57 @@ function Resolve-ExecutablePath {
     }
 
     return $null
+}
+
+function Get-PortableGitHubCli {
+    $toolRoot = Join-Path $stateDir 'tools'
+    $versionRoot = Join-Path $toolRoot "gh-$portableGhVersion"
+    $existing = if (Test-Path -LiteralPath $versionRoot) {
+        Get-ChildItem -LiteralPath $versionRoot -File -Filter 'gh.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    } else { $null }
+    if ($existing) { return $existing.FullName }
+
+    New-Item -ItemType Directory -Force -Path $toolRoot | Out-Null
+    $zipPath = Join-Path $toolRoot $portableGhAsset
+
+    $downloadRequired = $true
+    if (Test-Path -LiteralPath $zipPath) {
+        $existingHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($existingHash -eq $portableGhSha256) {
+            $downloadRequired = $false
+        } else {
+            Remove-Item -LiteralPath $zipPath -Force
+        }
+    }
+
+    if ($downloadRequired) {
+        Write-Host "[sovereign-local] downloading pinned GitHub CLI v$portableGhVersion to E-drive runtime"
+        Invoke-WebRequest -Uri $portableGhUrl -OutFile $zipPath
+    }
+
+    $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($hash -ne $portableGhSha256) {
+        Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+        throw "GitHub CLI archive SHA-256 mismatch. Expected $portableGhSha256, got $hash"
+    }
+
+    $extractTmp = Join-Path $toolRoot "gh-$portableGhVersion.extracting"
+    Remove-Item -LiteralPath $extractTmp -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $versionRoot -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $extractTmp | Out-Null
+    try {
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $extractTmp -Force
+        $gh = Get-ChildItem -LiteralPath $extractTmp -File -Filter 'gh.exe' -Recurse -ErrorAction Stop | Select-Object -First 1
+        if (-not $gh) { throw 'Downloaded GitHub CLI archive did not contain gh.exe' }
+        Move-Item -LiteralPath $extractTmp -Destination $versionRoot
+    } catch {
+        Remove-Item -LiteralPath $extractTmp -Recurse -Force -ErrorAction SilentlyContinue
+        throw
+    }
+
+    $resolved = Get-ChildItem -LiteralPath $versionRoot -File -Filter 'gh.exe' -Recurse -ErrorAction Stop | Select-Object -First 1
+    if (-not $resolved) { throw 'Portable GitHub CLI extraction completed without gh.exe' }
+    return $resolved.FullName
 }
 
 function Resolve-GitHubCli {
@@ -62,7 +120,7 @@ function Resolve-GitHubCli {
         }
     }
 
-    throw 'GitHub CLI gh.exe was not found. Install GitHub CLI or set SOVEREIGN_CONTROL_GH to the full gh.exe path.'
+    return Get-PortableGitHubCli
 }
 
 if (-not (Test-Path -LiteralPath $project)) {
@@ -92,6 +150,14 @@ $env:SOVEREIGN_CONTROL_GH = $gh
 $env:SOVEREIGNBOT_PROJECT = $project
 $env:SOVEREIGN_CONTROL_STATE_DIR = $stateDir
 $env:SOVEREIGNBOT_LIVE_WORKTREE = $liveWorktree
+
+# Fail clearly before spawning the long-lived bridge if this executable has no usable
+# GitHub authentication. Existing GitHub CLI auth is reused when present; no token is
+# printed, copied, exported, or written by this launcher.
+$null = & $gh auth status 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "GitHub CLI is available at $gh but is not authenticated. Run '& `"$gh`" auth login --hostname github.com --web' once, then rerun this launcher."
+}
 
 $needle = [Regex]::Escape($runtimeBridge)
 $existing = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
