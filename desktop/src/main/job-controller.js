@@ -17,7 +17,7 @@ export function makeJobId() { return `job_${randomBytes(8).toString("hex")}`; }
 function slice(v, n) { const s = String(v ?? "").replace(/\s+/g, " ").trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; }
 function depthOf(jobs, id) { let d = 0, cur = jobs.find(j => j.id === id); while (cur?.parentJobId && d < 100) { d += 1; cur = jobs.find(j => j.id === cur.parentJobId); } return d; }
 
-export function createJobController({ dataDir, runtime, roster, coworkerStore, services, persistPath, supervisorAgentId, readiness, now = () => new Date().toISOString(), makeId = makeJobId } = {}) {
+export function createJobController({ dataDir, runtime, roster, coworkerStore, services, skillStore, persistPath, supervisorAgentId, readiness, now = () => new Date().toISOString(), makeId = makeJobId } = {}) {
   if (!dataDir || !runtime?.orchestrator) throw new Error("job controller requires dataDir and runtime");
   if (typeof roster !== "function") throw new Error("job controller requires roster reader");
   if (!coworkerStore?.get) throw new Error("job controller requires coworkerStore");
@@ -42,7 +42,12 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     if (b.agentId !== coworkerAgentId(coworkerId)) throw new Error(`coworker binding mismatch for ${coworkerId}`);
     return { snap, binding: b };
   }
-  function workspaceContext(coworker) {
+  function workspaceContext(job, coworker) {
+    if (job.requestedWorkspaceId) {
+      const cwd = services.workspacePath(job.requestedWorkspaceId);
+      if (!cwd) throw new Error(`routine workspace is no longer trusted: ${job.requestedWorkspaceId}`);
+      return { workspaceId: job.requestedWorkspaceId, cwd };
+    }
     const configured = coworker.workspaceIds ?? [];
     if (configured.length) { for (const wid of configured) { const p = services.workspacePath(wid); if (p) return { workspaceId: wid, cwd: p }; } throw new Error(`${coworker.name} has configured workspaces, but none are currently available`); }
     const cwd = join(dataDir, "desktop-state", "coworker-workspaces", coworker.id);
@@ -50,13 +55,43 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     return { workspaceId: `coworker:${coworker.id}`, cwd };
   }
   function getJob(id) { const j = jobs.find(x => x.id === String(id)); if (!j) throw new Error(`unknown job id: ${id}`); return j; }
-  function publicJob(j) { return { id: j.id, title: j.title, objective: j.objective, status: j.status, priority: j.priority, ownerCoworkerId: j.ownerCoworkerId, parentJobId: j.parentJobId ?? null, workspaceId: j.workspaceId, nextActionAt: j.nextActionAt ?? null, attempt: j.attempt, depth: depthOf(jobs, j.id), childJobIds: [...(j.childJobIds ?? [])], attentionState: j.attentionState ? structuredClone(j.attentionState) : undefined, outcomeSummary: j.outcomeSummary ?? undefined, error: j.error ?? undefined, createdAt: j.createdAt, updatedAt: j.updatedAt, conversationId: j.conversationId ?? undefined, taskIds: [...(j.taskIds ?? [])] }; }
+  function publicJob(j) { return { id: j.id, title: j.title, objective: j.objective, status: j.status, priority: j.priority, ownerCoworkerId: j.ownerCoworkerId, parentJobId: j.parentJobId ?? null, workspaceId: j.workspaceId, routineId: j.routineId ?? undefined, skillId: j.skillId ?? undefined, scheduledFor: j.scheduledFor ?? undefined, nextActionAt: j.nextActionAt ?? null, attempt: j.attempt, depth: depthOf(jobs, j.id), childJobIds: [...(j.childJobIds ?? [])], attentionState: j.attentionState ? structuredClone(j.attentionState) : undefined, outcomeSummary: j.outcomeSummary ?? undefined, error: j.error ?? undefined, createdAt: j.createdAt, updatedAt: j.updatedAt, conversationId: j.conversationId ?? undefined, taskIds: [...(j.taskIds ?? [])] }; }
   function appendMessage(job, kind, text, role = "system") {
     job.conversation = job.conversation ?? { messages: [] };
     job.conversation.messages.push({ at: now(), role, kind, text: String(text).slice(0, 4000) });
     if (job.conversation.messages.length > MAX_MESSAGES) job.conversation.messages.splice(0, job.conversation.messages.length - MAX_MESSAGES);
   }
   function setStatus(job, status) { job.status = status; job.updatedAt = now(); appendMessage(job, "status", `job status: ${status}`); }
+  function normalizeInternalContext(value) {
+    if (value === undefined) return {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("internal job context must be an object");
+    const allowed = new Set(["routineId", "scheduledFor", "skillId", "workspaceId", "deferSchedule"]);
+    for (const key of Object.keys(value)) if (!allowed.has(key)) throw new Error(`unknown internal job context field: ${key}`);
+    const out = {};
+    if (value.routineId !== undefined) out.routineId = String(value.routineId);
+    if (value.scheduledFor !== undefined) {
+      const d = new Date(value.scheduledFor);
+      if (Number.isNaN(d.getTime())) throw new Error("scheduledFor must be a valid date");
+      out.scheduledFor = d.toISOString();
+    }
+    if (value.skillId !== undefined) {
+      if (!skillStore?.requireActive) throw new Error("job skill context requires skill store");
+      skillStore.requireActive(value.skillId);
+      out.skillId = String(value.skillId);
+    }
+    if (value.workspaceId !== undefined) {
+      if (!services.workspacePath(value.workspaceId)) throw new Error(`unknown trusted workspace: ${value.workspaceId}`);
+      out.workspaceId = String(value.workspaceId);
+    }
+    out.deferSchedule = value.deferSchedule === true;
+    return out;
+  }
+  function providerInstruction(job) {
+    if (!job.skillId) return job.objective;
+    if (!skillStore?.requireActive) throw new Error("job skill context requires skill store");
+    const skill = skillStore.requireActive(job.skillId);
+    return `${job.objective}\n\n<applied_skill>\nSkill: ${skill.name}\n${skill.instructions}\n</applied_skill>`;
+  }
 
   let pumpChain = Promise.resolve();
   function schedule(jobId) { const run = pumpChain.then(() => runPump(jobId)); pumpChain = run.catch(() => {}); return run; }
@@ -64,23 +99,18 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
   async function runPump(jobId) {
     const job = jobs.find(j => j.id === jobId);
     if (!job || TERMINAL.has(job.status)) return;
-    if (job.status === "cancelled") return;
+    if (job.status === "cancelled" || job.status === "needs_attention") return;
+    if (job.nextActionAt && Date.now() < Date.parse(job.nextActionAt)) return;
     let fingerprint = job._fingerprint;
     try {
       const coworker = coworkerStore.get(job.ownerCoworkerId);
       const { snap, binding } = requireCoworkerBinding(job.ownerCoworkerId);
-      const ctx = workspaceContext(coworker);
+      const ctx = workspaceContext(job, coworker);
       const supervisorId = snap.roles?.planner ?? supervisorAgentId;
       job.workspaceId = ctx.workspaceId;
+      if (job.status === "waiting") { job._skipFingerprintOnce = true; job.nextActionAt = undefined; setStatus(job, "queued"); }
       if (job.status === "queued") { setStatus(job, "working"); save(); }
-      // due check: not before nextActionAt
-      if (job.nextActionAt && Date.now() < Date.parse(job.nextActionAt)) return;
 
-      // runaway guard: fingerprint within window triggers needs_attention on
-      // rapid re-queue without human interval. Normal wait->resume cycles are
-      // driven by nextActionAt timing (or explicit resume/approve) and must
-      // not be mistaken for a loop. resume() sets _skipFingerprintOnce for the
-      // waiting->queued transition.
       const nowMs = Date.now();
       const fp = `${job.ownerCoworkerId}:${slice(job.objective, 80)}`;
       if (job._skipFingerprintOnce) {
@@ -106,7 +136,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         title: job.title,
         requiredCapabilities: [coworkerCapability(job.ownerCoworkerId)],
         preferredAgentId: binding.agentId,
-        input: { instruction: job.objective, jobId: job.id, objective: job.objective, attempt: job.attempt ?? 0 },
+        input: { instruction: providerInstruction(job), jobId: job.id, objective: job.objective, attempt: job.attempt ?? 0, routineId: job.routineId, scheduledFor: job.scheduledFor },
       }, ctx, supervisorId);
       job.taskIds = [...(job.taskIds ?? []), task.id];
       if (!job.conversationId) job.conversationId = `job-conv-${job.id}`;
@@ -122,7 +152,6 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         try { await runtime.orchestrator.aggregatePlan(plan.id, supervisorId); } catch {}
         save(); return;
       }
-      // failure path — bounded retry once with exponential backoff
       const attempt = (job.attempt ?? 0) + 1;
       job.attempt = attempt;
       job.error = String(finished?.error ?? `job task ended as ${status}`).slice(0, 500);
@@ -157,7 +186,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
 
   return {
     CAPS,
-    submitJob({ title, objective, ownerCoworkerId, parentJobId, priority, nextActionAt }) {
+    submitJob({ title, objective, ownerCoworkerId, parentJobId, priority, nextActionAt, internalContext } = {}) {
       const t = typeof title === "string" ? title.trim() : "";
       const obj = typeof objective === "string" ? objective.trim() : "";
       if (!t) throw new Error("job title is required");
@@ -165,7 +194,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       if (!obj) throw new Error("job objective is required");
       if (obj.length > MAX_OBJECTIVE) throw new Error(`job objective exceeds ${MAX_OBJECTIVE} characters`);
       if (!ownerCoworkerId) throw new Error("ownerCoworkerId is required");
-      coworkerStore.get(ownerCoworkerId); // validates existence
+      coworkerStore.get(ownerCoworkerId);
       if (readiness) { const s = readiness(); if (!s?.allowed) throw new Error(s?.reason ?? "Connect at least one AI provider to run jobs."); }
       if (parentJobId) {
         const parent = getJob(parentJobId);
@@ -174,18 +203,18 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       }
       let resolvedNextActionAt;
       if (nextActionAt !== undefined) { const d = new Date(nextActionAt); if (Number.isNaN(d.getTime())) throw new Error("nextActionAt must be a valid date"); resolvedNextActionAt = d.toISOString(); }
-      const job = { id: makeId(), title: t, objective: obj, ownerCoworkerId: String(ownerCoworkerId), status: "queued", priority: priority ?? "normal", workspaceId: undefined, conversationId: undefined, planId: undefined, taskIds: [], parentJobId: parentJobId ? String(parentJobId) : undefined, childJobIds: [], attempt: 0, nextActionAt: resolvedNextActionAt, attentionState: undefined, outcomeSummary: undefined, error: undefined, createdAt: now(), updatedAt: now(), conversation: { messages: [] } };
+      const internal = normalizeInternalContext(internalContext);
+      const job = { id: makeId(), title: t, objective: obj, ownerCoworkerId: String(ownerCoworkerId), status: "queued", priority: priority ?? "normal", workspaceId: undefined, requestedWorkspaceId: internal.workspaceId, routineId: internal.routineId, skillId: internal.skillId, scheduledFor: internal.scheduledFor, conversationId: undefined, planId: undefined, taskIds: [], parentJobId: parentJobId ? String(parentJobId) : undefined, childJobIds: [], attempt: 0, nextActionAt: resolvedNextActionAt, attentionState: undefined, outcomeSummary: undefined, error: undefined, createdAt: now(), updatedAt: now(), conversation: { messages: [] } };
       appendMessage(job, "goal", obj, "user");
       jobs.push(job);
       if (parentJobId) { const p = getJob(parentJobId); p.childJobIds = [...(p.childJobIds ?? []), job.id]; p.updatedAt = now(); }
       save();
-      schedule(job.id);
+      if (!internal.deferSchedule) schedule(job.id);
       return publicJob(job);
     },
     spawnChildJob(parentJobId, { title, objective, ownerCoworkerId, priority }) {
       const parent = getJob(parentJobId);
-      const child = this.submitJob({ title, objective, ownerCoworkerId: ownerCoworkerId ?? parent.ownerCoworkerId, parentJobId: parent.id, priority });
-      return child;
+      return this.submitJob({ title, objective, ownerCoworkerId: ownerCoworkerId ?? parent.ownerCoworkerId, parentJobId: parent.id, priority });
     },
     getJob(jobId) { return publicJob(getJob(jobId)); },
     listJobs() { return { schema: JOBS_SCHEMA, jobs: jobs.map(publicJob) }; },
@@ -220,13 +249,25 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       j._fingerprint = undefined; j._repeatCount = 0; delete j._skipFingerprintOnce;
       setStatus(j, "queued"); save(); schedule(j.id); return publicJob(j);
     },
-    async dismiss(jobId) { // dismiss needs_attention -> failed (explicit)
+    async dismiss(jobId) {
       const j = getJob(jobId);
       if (j.status !== "needs_attention") throw new Error(`only needs_attention jobs can be dismissed`);
       setStatus(j, "failed"); j.attentionState = { ...(j.attentionState ?? {}), dismissedAt: now() }; save(); return publicJob(j);
     },
-    jobsBusy() { return jobs.some(j => !TERMINAL.has(j.status) && j.status !== "waiting"); },
-    dueJobs() { const n = Date.now(); return jobs.filter(j => (j.status === "queued" || j.status === "waiting") && (!j.nextActionAt || Date.parse(j.nextActionAt) <= n)); },
+    jobsBusy() { return jobs.some(j => j.status === "working"); },
+    dueJobs() { const n = Date.now(); return jobs.filter(j => (j.status === "queued" || j.status === "waiting") && (!j.nextActionAt || Date.parse(j.nextActionAt) <= n)).map(publicJob); },
+    async wakeDueJobs() {
+      const n = Date.now();
+      const due = jobs.filter(j => (j.status === "queued" || j.status === "waiting") && (!j.nextActionAt || Date.parse(j.nextActionAt) <= n));
+      if (!due.length) return [];
+      for (const j of due) {
+        if (j.status === "waiting") { j._skipFingerprintOnce = true; setStatus(j, "queued"); }
+        j.nextActionAt = undefined;
+      }
+      save();
+      for (const j of due) schedule(j.id);
+      return due.map(publicJob);
+    },
     flush() { return pumpChain; },
   };
 }
