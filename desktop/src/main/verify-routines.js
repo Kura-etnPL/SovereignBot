@@ -51,6 +51,45 @@ function fakeRuntime() {
   };
 }
 
+async function captureVisualEvidence(win) {
+  const attempts = [];
+  const fail = (method, error) => attempts.push({ method, error: String(error?.message ?? error).slice(0, 500) });
+
+  try {
+    win.show();
+    await sleep(200);
+    const image = await win.capturePage(undefined, { stayAwake: true });
+    if (!image || image.isEmpty()) throw new Error("BrowserWindow.capturePage returned an empty image");
+    return { image, method: "BrowserWindow.capturePage", attempts };
+  } catch (error) {
+    fail("BrowserWindow.capturePage", error);
+  }
+
+  try {
+    const { desktopCapturer } = await import("electron");
+    win.show();
+    await sleep(200);
+    const bounds = win.getBounds();
+    const sourceId = win.getMediaSourceId();
+    const sources = await desktopCapturer.getSources({
+      types: ["window"],
+      thumbnailSize: { width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) },
+      fetchWindowIcons: false,
+    });
+    const handle = sourceId.split(":")[1];
+    const source = sources.find((entry) => entry.id === sourceId)
+      ?? sources.find((entry) => entry.id.split(":")[1] === handle)
+      ?? sources.find((entry) => entry.name === win.getTitle());
+    if (!source) throw new Error(`desktopCapturer could not find BrowserWindow source ${sourceId}`);
+    if (!source.thumbnail || source.thumbnail.isEmpty()) throw new Error("desktopCapturer returned an empty BrowserWindow thumbnail");
+    return { image: source.thumbnail, method: "desktopCapturer.window", attempts };
+  } catch (error) {
+    fail("desktopCapturer.window", error);
+  }
+
+  return { image: undefined, method: undefined, attempts };
+}
+
 export async function runVerifyRoutines({ app }) {
   const { dialog } = await import("electron");
   await mkdir(EVIDENCE_DIR, { recursive: true });
@@ -232,14 +271,69 @@ export async function runVerifyRoutines({ app }) {
     const en = await win.webContents.executeJavaScript(`({lang:document.documentElement.lang,nav:document.getElementById('nav-routines')?.innerText,title:document.querySelector('#view-routines h1')?.innerText})`);
     check("English Routines UI", en.lang === "en" && /Routines/.test(`${en.nav} ${en.title}`), JSON.stringify(en));
 
-    const png = await win.webContents.capturePage();
-    await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.png"), png.toPNG());
-    const summary = { at: new Date().toISOString(), dataDir, routineId: routine.id, failedRoutineId: failedRoutine.id, jobId: job.id, checks, routine: routines.get(routine.id), failedRoutine: routines.get(failedRoutine.id), job: jobs.getJob(job.id) };
-    await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.json"), `${JSON.stringify(summary, null, 2)}\n`, "utf8");
-    await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.log"), `${log.join("\n")}\n`, "utf8");
+    const surface = await win.webContents.executeJavaScript(`({
+      work: !!document.getElementById('nav-work'),
+      attention: !!document.getElementById('nav-attention'),
+      routines: !!document.getElementById('nav-routines'),
+      settings: !!document.getElementById('nav-settings'),
+      routinesVisible: document.getElementById('view-routines')?.classList.contains('hidden') === false,
+      title: document.querySelector('#view-routines h1')?.textContent?.trim()
+    })`);
+    check("real product window keeps V4.1 navigation and opens Routines", surface.work && surface.attention && surface.routines && surface.settings && surface.routinesVisible && surface.title === "Routines", JSON.stringify(surface));
+
+    const editor = await win.webContents.executeJavaScript(`(async()=>{
+      document.getElementById('routine-new')?.click();
+      await new Promise((resolve)=>setTimeout(resolve,150));
+      const dialog=document.getElementById('routine-dialog');
+      const type=document.getElementById('routine-type');
+      const hidden=(id)=>document.getElementById(id)?.classList.contains('hidden');
+      const states={};
+      for(const value of ['one-time','hourly','daily','weekly']){
+        type.value=value;
+        type.dispatchEvent(new Event('change',{bubbles:true}));
+        states[value]={at:hidden('routine-field-at'),minute:hidden('routine-field-minute'),time:hidden('routine-field-time'),weekday:hidden('routine-field-weekday')};
+      }
+      const result={
+        open:!!dialog?.open,
+        options:[...type.options].map((entry)=>entry.value),
+        fields:['routine-name','routine-instruction','routine-owner','routine-skill','routine-workspace','routine-type','routine-at','routine-minute','routine-time','routine-weekday'].every((id)=>!!document.getElementById(id)),
+        states
+      };
+      dialog?.close();
+      return result;
+    })()`);
+    const scheduleEditorOk = editor.open
+      && editor.fields
+      && JSON.stringify(editor.options) === JSON.stringify(["one-time", "hourly", "daily", "weekly"])
+      && editor.states["one-time"]?.at === false && editor.states["one-time"]?.minute === true && editor.states["one-time"]?.time === true && editor.states["one-time"]?.weekday === true
+      && editor.states.hourly?.at === true && editor.states.hourly?.minute === false && editor.states.hourly?.time === true && editor.states.hourly?.weekday === true
+      && editor.states.daily?.at === true && editor.states.daily?.minute === true && editor.states.daily?.time === false && editor.states.daily?.weekday === true
+      && editor.states.weekly?.at === true && editor.states.weekly?.minute === true && editor.states.weekly?.time === false && editor.states.weekly?.weekday === false;
+    check("real Routines editor exposes only supported schedules and fields", scheduleEditorOk, JSON.stringify(editor));
+
+    const visual = await captureVisualEvidence(win);
+    check("real window visual evidence captured", Boolean(visual.image) && !visual.image.isEmpty(), JSON.stringify({ method: visual.method, attempts: visual.attempts }));
+    if (visual.image && !visual.image.isEmpty()) await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.png"), visual.image.toPNG());
 
     const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
     note(`[summary] ${Object.keys(checks).length - failed.length}/${Object.keys(checks).length} PASS`);
+    const summary = {
+      at: new Date().toISOString(),
+      dataDir,
+      routineId: routine.id,
+      failedRoutineId: failedRoutine.id,
+      jobId: job.id,
+      checks,
+      visualEvidence: { method: visual.method, attempts: visual.attempts, captured: Boolean(visual.image) && !visual.image.isEmpty() },
+      productSurface: surface,
+      routineEditor: editor,
+      routine: routines.get(routine.id),
+      failedRoutine: routines.get(failedRoutine.id),
+      job: jobs.getJob(job.id),
+    };
+    await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.json"), `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+    await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.log"), `${log.join("\n")}\n`, "utf8");
+
     if (failed.length) throw new Error(`V4.2 routine gate failed: ${failed.join(", ")}`);
   } finally {
     try { routines.stop(); } catch {}
