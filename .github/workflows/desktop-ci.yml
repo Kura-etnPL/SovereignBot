@@ -46,6 +46,12 @@ jobs:
         working-directory: desktop
         run: node scripts/verify-v42-routines.mjs
 
+      # V4.3's deterministic real-Electron Attention Center gate proves durable
+      # needs_attention hydration, projection ordering, operator actions, and UI.
+      - name: V4.3 Attention vertical gate
+        working-directory: desktop
+        run: node scripts/verify-v43-attention.mjs
+
       - name: Fetch pinned internal Node runtime
         working-directory: desktop
         run: npm run fetch-node

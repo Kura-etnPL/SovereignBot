@@ -5,6 +5,9 @@
   function t(key, fallback) { try { return I18n()?.t(key) ?? fallback ?? key; } catch { return fallback ?? key; } }
 
   let jobs = [];
+  let attentionJobs = [];
+  let attentionPollTimer;
+  let attentionRequest = 0;
   let currentJobId;
   let pollTimer;
   let routines = [];
@@ -62,11 +65,96 @@
   function updateAttentionBadge() {
     const badge = $("attention-badge");
     if (!badge) return;
-    const n = jobs.filter(j => j.status === "needs_attention").length;
+    const n = attentionJobs.length;
     badge.textContent = String(n);
     badge.classList.toggle("hidden", n === 0);
-    const nav = $("nav-attention");
-    if (nav) nav.classList.toggle("active", n > 0 && $("view-work")?.classList.contains("hidden") === false);
+  }
+
+  function attentionTime(job) {
+    return job.attentionState?.at ?? job.updatedAt ?? job.createdAt;
+  }
+
+  function renderAttentionList() {
+    const root = $("attention-list");
+    if (!root) return;
+    root.textContent = "";
+    if (!attentionJobs.length) {
+      const p = document.createElement("p");
+      p.className = "setting-feedback";
+      p.textContent = t("attention.empty", "Nothing needs your attention.");
+      root.append(p);
+      return;
+    }
+    const displayValue = (value) => {
+      const span = document.createElement("span");
+      span.textContent = value;
+      return span;
+    };
+    const detailRow = (label, value) => {
+      const row = document.createElement("div");
+      row.className = "setting-feedback";
+      row.style.margin = "0";
+      const strong = document.createElement("strong");
+      strong.textContent = `${label}: `;
+      row.append(strong, displayValue(value));
+      return row;
+    };
+    for (const job of attentionJobs) {
+      const card = document.createElement("div");
+      card.className = "job-card";
+      card.dataset.jobId = job.id;
+      const head = document.createElement("div");
+      head.className = "job-card-head";
+      const title = document.createElement("strong");
+      title.textContent = job.title;
+      title.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:68%";
+      const status = document.createElement("span");
+      status.className = statusClass(job.status);
+      status.textContent = statusLabel(job.status);
+      head.append(title, status);
+      const reason = job.attentionState?.reason || job.error || job.outcomeSummary || "—";
+      const owner = I18n()?.displayCoworkerName?.(job.ownerCoworkerId) ?? job.ownerCoworkerId ?? "—";
+      const priority = t(`attention.priority.${job.priority}`, job.priority ?? "normal");
+      const source = job.routineId ? t("attention.source.routine", "Routine") : t("attention.source.job", "Job");
+      const raisedAt = attentionTime(job);
+      const raised = raisedAt ? new Date(raisedAt).toLocaleString() : "—";
+      const details = document.createElement("div");
+      details.style.cssText = "display:grid;gap:4px";
+      details.append(
+        detailRow(t("attention.reason", "Reason"), reason),
+        detailRow(t("attention.owner", "Coworker"), owner),
+        detailRow(t("attention.priority", "Priority"), priority),
+        detailRow(t("attention.source", "Source"), source),
+        detailRow(t("attention.raised", "Raised"), raised),
+      );
+      const actions = document.createElement("div");
+      actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+      const runAction = async (button, action) => {
+        button.disabled = true;
+        try {
+          await action();
+          await refreshAttention();
+          await refresh();
+        } catch (error) {
+          const errorEl = $("attention-error");
+          if (errorEl) { errorEl.textContent = String(error?.message ?? error).slice(0, 400); errorEl.classList.remove("hidden"); }
+        } finally {
+          button.disabled = false;
+        }
+      };
+      const open = document.createElement("button");
+      open.type = "button"; open.className = "quiet-action"; open.textContent = t("attention.openJob", "Open job");
+      open.addEventListener("click", () => { void openDetail(job.id); });
+      const retry = document.createElement("button");
+      retry.type = "button"; retry.className = "hero-action"; retry.textContent = t("attention.retry", "Retry");
+      retry.addEventListener("click", () => runAction(retry, () => window.sovereignbot.jobs.approve({ jobId: job.id })));
+      const dismiss = document.createElement("button");
+      dismiss.type = "button"; dismiss.className = "quiet-action"; dismiss.textContent = t("attention.dismiss", "Dismiss");
+      dismiss.addEventListener("click", () => runAction(dismiss, () => window.sovereignbot.jobs.dismiss({ jobId: job.id })));
+      actions.append(open, retry, dismiss);
+      card.append(head, details, actions);
+      root.append(card);
+    }
   }
 
   async function refresh() {
@@ -74,6 +162,19 @@
       const res = await window.sovereignbot.jobs.list({});
       jobs = res?.jobs ?? [];
       renderList();
+    } catch {}
+    await refreshAttention();
+  }
+
+  async function refreshAttention() {
+    const request = ++attentionRequest;
+    try {
+      const res = await window.sovereignbot.jobs.attention({});
+      if (request !== attentionRequest) return;
+      attentionJobs = res?.jobs ?? [];
+      const errorEl = $("attention-error");
+      errorEl?.classList.add("hidden");
+      renderAttentionList();
       updateAttentionBadge();
     } catch {}
   }
@@ -90,10 +191,13 @@
       body.textContent = msgs.length ? msgs.map(m => `[${m.kind ?? m.role}] ${m.text}`).join("\n\n") : (job.outcomeSummary ?? job.error ?? "");
       const needs = job.status === "needs_attention";
       const waiting = job.status === "waiting";
+      const approve = $("job-detail-approve");
+      if (approve) approve.textContent = t("attention.retry", "Retry");
       $("job-detail-approve")?.classList.toggle("hidden", !needs);
       $("job-detail-dismiss")?.classList.toggle("hidden", !needs);
       $("job-detail-pause")?.classList.toggle("hidden", waiting || needs || ["completed","failed","cancelled"].includes(job.status));
-      $("job-detail-resume")?.classList.toggle("hidden", !(waiting || needs));
+      $("job-detail-resume")?.classList.toggle("hidden", !waiting);
+      if ($("job-detail-resume")) $("job-detail-resume").textContent = t("action.resume", "Resume");
       $("job-detail-dialog")?.showModal?.();
     } catch (e) {
       const el = $("provider-action-result");
@@ -150,6 +254,24 @@
       document.querySelector(".workspace-shell")?.append(section);
     }
     applyRoutineLocale();
+  }
+
+  function ensureAttentionSurface() {
+    if (!$('view-attention')) {
+      const section = document.createElement("section");
+      section.id = "view-attention";
+      section.className = "main-view settings-view hidden";
+      section.innerHTML = `
+        <header class="page-header"><div><span class="eyebrow" data-i18n="attention.title">Attention</span><h1 data-i18n="attention.title">Attention</h1><p data-i18n="attention.subtitle">Items that need your decision before work can continue.</p></div><button id="attention-refresh" class="quiet-action" type="button" data-i18n="action.refresh">Refresh</button></header>
+        <p id="attention-error" class="inline-error hidden"></p>
+        <div id="attention-list" class="workspace-cards"></div>`;
+      document.querySelector(".workspace-shell")?.append(section);
+    }
+    applyAttentionLocale();
+  }
+
+  function applyAttentionLocale() {
+    for (const el of $("view-attention")?.querySelectorAll("[data-i18n]") ?? []) el.textContent = t(el.dataset.i18n, el.textContent);
   }
 
   function applyRoutineLocale() {
@@ -280,8 +402,26 @@
     $("nav-work")?.classList.remove("active"); $("nav-attention")?.classList.remove("active"); $("nav-settings")?.classList.remove("active");
     $("nav-routines")?.classList.add("active");
     clearTimeout(routinePollTimer);
+    clearTimeout(attentionPollTimer);
     routinePollTimer = setTimeout(function poll(){ refreshRoutines().finally(()=>{ if(!$("view-routines")?.classList.contains("hidden")) routinePollTimer=setTimeout(poll, 5000); }); }, 5000);
     void refreshRoutines();
+  }
+
+  function showAttentionView() {
+    for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
+    $("view-attention")?.classList.remove("hidden");
+    for (const id of ["nav-work", "nav-routines", "nav-settings"]) $(id)?.classList.remove("active");
+    $("nav-attention")?.classList.add("active");
+    clearTimeout(pollTimer);
+    clearTimeout(routinePollTimer);
+    clearTimeout(attentionPollTimer);
+    const poll = () => {
+      refreshAttention().finally(() => {
+        if (!$('view-attention')?.classList.contains("hidden")) attentionPollTimer = setTimeout(poll, 5000);
+      });
+    };
+    attentionPollTimer = setTimeout(poll, 5000);
+    void refreshAttention();
   }
 
   function bindEvents() {
@@ -289,18 +429,19 @@
       for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
       $("view-work")?.classList.remove("hidden");
       await refresh();
-      $("nav-settings")?.classList.remove("active"); $("nav-routines")?.classList.remove("active"); $("nav-work")?.classList.add("active");
+      $("nav-settings")?.classList.remove("active"); $("nav-routines")?.classList.remove("active"); $("nav-attention")?.classList.remove("active"); $("nav-work")?.classList.add("active");
       clearTimeout(pollTimer);
+      clearTimeout(routinePollTimer);
+      clearTimeout(attentionPollTimer);
       pollTimer = setTimeout(function poll(){ refresh().finally(()=>{ if(!$("view-work")?.classList.contains("hidden")) pollTimer=setTimeout(poll, 2500); }); }, 2500);
     });
-    $("nav-attention")?.addEventListener("click", async () => {
-      for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
-      $("view-work")?.classList.remove("hidden");
-      await refresh();
-      jobs.sort((a,b)=> (a.status==="needs_attention"? -1 : b.status==="needs_attention"? 1 : 0));
-      renderList();
-    });
+    $("nav-attention")?.addEventListener("click", showAttentionView);
     $("nav-routines")?.addEventListener("click", showRoutinesView);
+    $("nav-settings")?.addEventListener("click", () => {
+      clearTimeout(pollTimer); clearTimeout(routinePollTimer); clearTimeout(attentionPollTimer);
+      for (const id of ["nav-work", "nav-attention", "nav-routines"]) $(id)?.classList.remove("active");
+      $("nav-settings")?.classList.add("active");
+    });
     $("work-refresh")?.addEventListener("click", refresh);
     $("work-new")?.addEventListener("click", async () => { try { const cw = await window.sovereignbot.coworkers.list({}); populateOwnerSelect(cw?.coworkers ?? []); } catch {} $("job-dialog")?.showModal?.(); });
     $("job-form")?.addEventListener("submit", async (e) => {
@@ -308,11 +449,12 @@
       try { await window.sovereignbot.jobs.submit({ title: $("job-title").value.trim(), objective: $("job-objective").value.trim(), ownerCoworkerId: $("job-owner").value }); $("job-dialog")?.close(); $("job-form")?.reset(); await refresh(); }
       catch (err) { if (errEl) { errEl.textContent = String(err?.message ?? err).replace(/^.*Error: /, "").slice(0, 400); errEl.classList.remove("hidden"); } }
     });
-    $("job-detail-approve")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.approve({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refresh(); });
-    $("job-detail-dismiss")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.dismiss({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refresh(); });
+    $("job-detail-approve")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.approve({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refreshAttention(); await refresh(); });
+    $("job-detail-dismiss")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.dismiss({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refreshAttention(); await refresh(); });
     $("job-detail-pause")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.pause({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refresh(); });
     $("job-detail-resume")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.resume({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refresh(); });
     $("routine-refresh")?.addEventListener("click", refreshRoutines);
+    $("attention-refresh")?.addEventListener("click", refreshAttention);
     $("routine-new")?.addEventListener("click", async () => { await populateRoutineForm(); $("routine-dialog")?.showModal?.(); });
     $("routine-type")?.addEventListener("change", showScheduleFields);
     $("routine-form")?.addEventListener("submit", async (e) => {
@@ -326,17 +468,20 @@
   }
 
   function init() {
+    ensureAttentionSurface();
     ensureRoutineSurface();
     bindEvents();
     refresh(); refreshRoutines();
     setInterval(refresh, 8000); setInterval(refreshRoutines, 10000);
     new MutationObserver(() => {
       applyRoutineLocale();
+      applyAttentionLocale();
       renderRoutineList();
+      renderAttentionList();
       if (currentRoutineId && $("routine-detail-dialog")?.open) void openRoutineDetail(currentRoutineId);
     }).observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
   }
 
-  globalThis.SovereignJobsUI = { refresh, renderList, refreshRoutines };
+  globalThis.SovereignJobsUI = { refresh, renderList, refreshRoutines, refreshAttention, renderAttentionList };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
 })();
