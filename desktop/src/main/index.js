@@ -11,6 +11,7 @@ import { createFirstRunService } from "./first-run.js";
 import { createGoalController } from "./goal-controller.js";
 import { createJobController } from "./job-controller.js";
 import { createChiefLoop } from "./chief-loop.js";
+import { createRoutineController } from "./routine-controller.js";
 import { createCoworkerStore } from "./coworker-store.js";
 import { createConversationStore } from "./conversation-store.js";
 import { createArtifactStore } from "./artifact-store.js";
@@ -119,6 +120,7 @@ async function main() {
     let bridge;
     let goals;
     let jobs;
+    let routines;
     let chiefLoop;
     let coworkerDispatcher;
     let quitting = false;
@@ -130,6 +132,7 @@ async function main() {
             return;
         shutdownStarted = true;
         quitting = true;
+        try { routines?.stop(); } catch {}
         try { chiefLoop?.stop(); } catch {}
         try {
             await Promise.race([coworkerDispatcher?.flush?.() ?? Promise.resolve(), delay(15_000)]);
@@ -141,6 +144,7 @@ async function main() {
                 }
                 await Promise.race([goals.flush(), delay(15_000)]);
             }
+            if (routines) await Promise.race([routines.flush(), delay(5_000)]);
             if (jobs) await Promise.race([jobs.flush(), delay(15_000)]);
             await Promise.race([host?.close(), delay(15_000)]);
         }
@@ -173,6 +177,8 @@ async function main() {
         : false;
 
     function rebuildRuntimeBoundServices() {
+        try { routines?.stop(); } catch {}
+        try { chiefLoop?.stop(); } catch {}
         bridge = createOperatorBridge(host.runtime);
         goals = createGoalController({
             runtime: host.runtime,
@@ -197,11 +203,13 @@ async function main() {
             roster: () => host.rosterSummary(),
             coworkerStore,
             services,
+            skillStore,
             supervisorAgentId: host.plannerAgentId,
             readiness: goalReadiness,
         });
-        try { chiefLoop?.stop(); } catch {}
-        chiefLoop = createChiefLoop({ jobController: jobs, goalController: goals, roster: () => host.rosterSummary(), services, coworkerStore });
+        routines = createRoutineController({ dataDir, jobController: jobs, coworkerStore, skillStore, services });
+        chiefLoop = createChiefLoop({ jobController: jobs, goalController: goals, roster: () => host.rosterSummary() });
+        routines.start();
         chiefLoop.start();
         coworkerDispatcher = createCoworkerDispatcher({
             dataDir,
@@ -314,6 +322,12 @@ async function main() {
                 "job:approve": async ({ jobId }) => await jobs.approve(jobId),
                 "job:dismiss": async ({ jobId }) => await jobs.dismiss(jobId),
                 "job:attention": () => jobs.attentionJobs(),
+                "routine:create": (payload) => routines.create(payload),
+                "routine:list": () => routines.list(),
+                "routine:get": ({ routineId }) => routines.get(routineId),
+                "routine:history": ({ routineId }) => routines.history(routineId),
+                "routine:setEnabled": ({ routineId, enabled }) => routines.setEnabled(routineId, enabled),
+                "routine:remove": ({ routineId }) => routines.remove(routineId),
             },
         });
     }
@@ -333,10 +347,6 @@ async function main() {
     };
     await start();
 
-    // Detailed CLI version/auth probing is deliberately post-window. It may take tens of
-    // seconds on a cold CLI or a stale login and must never make the desktop appear hung.
-    // Fast launcher resolution already gives the runtime an honest provider/no-provider
-    // state; this background pass only refines that state and applies any real change.
     if (host.mode !== "demo") {
         void host.refreshProviders({ isBusy: goalsBusy })
             .then((refresh) => applyProviderRefresh(refresh))
