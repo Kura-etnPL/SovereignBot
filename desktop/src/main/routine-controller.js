@@ -6,6 +6,7 @@ export const ROUTINES_SCHEMA = "sovereignbot.desktop.routines.v1";
 export const ROUTINE_HISTORY_LIMIT = 100;
 const MAX_NAME = 120;
 const MAX_INSTRUCTION = 8000;
+const MAX_TIMER_DELAY_MS = 2_147_000_000;
 const SCHEDULE_TYPES = new Set(["one-time", "hourly", "daily", "weekly"]);
 const TERMINAL_JOB = new Set(["completed", "failed", "cancelled"]);
 
@@ -264,8 +265,9 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
     clearTimer();
     if (!running) return;
     const enabled = routines.filter((r) => r.enabled && r.nextRunAt).map((r) => Date.parse(r.nextRunAt)).filter(Number.isFinite);
-    const earliest = enabled.length ? Math.min(...enabled) : now() + 60_000;
-    const delay = Math.max(250, Math.min(60_000, earliest - now()));
+    if (!enabled.length) return;
+    const earliest = Math.min(...enabled);
+    const delay = Math.max(1, Math.min(MAX_TIMER_DELAY_MS, earliest - now()));
     timer = setTimeout(() => { void tickNow(); }, delay);
     if (timer.unref) timer.unref();
   }
@@ -323,6 +325,7 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
     setEnabled(routineId, enabled) {
       if (typeof enabled !== "boolean") throw new Error("enabled must be boolean");
       const routine = requireRoutine(routineId);
+      if (enabled && routine.schedule.type === "one-time" && routine.lastRunAt) throw new Error("completed one-time routine cannot be re-enabled; create a new routine instead");
       routine.enabled = enabled;
       routine.updatedAt = nowIso(now);
       routine.nextRunAt = enabled ? initialNextRun(routine.schedule, now()) : undefined;
