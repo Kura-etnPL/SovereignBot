@@ -23,6 +23,7 @@ export const APP_ASSETS = Object.freeze({
     "/skills-ui.js": Object.freeze({ file: "skills-ui.js", type: JS }),
     "/chief-ui.js": Object.freeze({ file: "chief-ui.js", type: JS }),
     "/jobs-ui.js": Object.freeze({ file: "jobs-ui.js", type: JS }),
+    "/triggers-ui.js": Object.freeze({ file: "triggers-ui.js", type: JS }),
     "/i18n.js": Object.freeze({ file: "i18n.js", type: JS }),
     "/artifacts.css": Object.freeze({ file: "artifacts.css", type: CSS }),
     "/computer.css": Object.freeze({ file: "computer.css", type: CSS }),

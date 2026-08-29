@@ -6,17 +6,39 @@ export const ROUTINES_SCHEMA = "sovereignbot.desktop.routines.v1";
 export const ROUTINE_HISTORY_LIMIT = 100;
 const MAX_NAME = 120;
 const MAX_INSTRUCTION = 8000;
+const MAX_EVENT_PATH = 512;
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
 const SCHEDULE_TYPES = new Set(["one-time", "hourly", "daily", "weekly"]);
 const TERMINAL_JOB = new Set(["completed", "failed", "cancelled"]);
+const EVENT_TYPES = new Set(["change", "rename"]);
 
 function makeRoutineId() { return `routine_${randomBytes(8).toString("hex")}`; }
 function makeRunId() { return `run_${randomBytes(8).toString("hex")}`; }
+function makeEventRunId() { return `event_${randomBytes(8).toString("hex")}`; }
 function clone(value) { return structuredClone(value); }
 function nowIso(now) { return new Date(now()).toISOString(); }
 function asIso(value, label) { const d = new Date(value); if (Number.isNaN(d.getTime())) throw new Error(`${label} must be a valid date`); return d.toISOString(); }
 function validateTime(value, label = "time") { if (typeof value !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) throw new Error(`${label} must be HH:MM`); return value; }
-function exactKeys(value, allowed, label) { for (const key of Object.keys(value)) if (!allowed.has(key)) throw new Error(`unexpected ${label} field: ${key}`); }
+function exactKeys(value, allowed, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
+  for (const key of Object.keys(value)) if (!allowed.has(key)) throw new Error(`unexpected ${label} field: ${key}`);
+}
+
+// Event metadata is deliberately narrower than a normal Job objective. The watcher may
+// report an untrusted filename, but it must never be able to turn that filename into a
+// working directory, shell fragment, or file-content lookup.
+export function normalizeEventRelativePath(value, label = "relativePath") {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${label} must be a relative path`);
+  const raw = value.trim().replaceAll("\\", "/");
+  if (raw.includes("\0") || raw.startsWith("/") || /^[A-Za-z]:/.test(raw) || raw.includes(":"))
+    throw new Error(`${label} must stay inside the trusted workspace`);
+  const parts = raw.split("/");
+  if (parts.some((part) => !part || part === "." || part === ".."))
+    throw new Error(`${label} must not contain traversal segments`);
+  const normalized = parts.join("/");
+  if (normalized.length > MAX_EVENT_PATH) throw new Error(`${label} exceeds ${MAX_EVENT_PATH} characters`);
+  return normalized;
+}
 
 export function normalizeRoutineSchedule(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("schedule must be an object");
@@ -75,15 +97,29 @@ function initialNextRun(schedule, currentMs) {
 function sanitizeHistory(value) {
   if (!Array.isArray(value)) return [];
   return value.filter((entry) => entry && typeof entry.id === "string" && typeof entry.scheduledFor === "string")
-    .map((entry) => ({
-      id: entry.id,
-      scheduledFor: entry.scheduledFor,
-      startedAt: entry.startedAt,
-      finishedAt: entry.finishedAt,
-      jobId: entry.jobId,
-      status: entry.status,
-      error: entry.error,
-    }))
+    .map((entry) => {
+      const source = entry.source === "event" ? "event" : "schedule";
+      const run = {
+        id: entry.id,
+        scheduledFor: entry.scheduledFor,
+        startedAt: entry.startedAt,
+        finishedAt: entry.finishedAt,
+        jobId: entry.jobId,
+        status: entry.status,
+        error: entry.error,
+        source,
+      };
+      if (source === "event") {
+        if (typeof entry.triggerId === "string" && /^trigger_[a-f0-9]{16}$/i.test(entry.triggerId)) run.triggerId = entry.triggerId;
+        if (typeof entry.eventId === "string" && /^event_[a-f0-9]{16}$/i.test(entry.eventId)) run.eventId = entry.eventId;
+        if (typeof entry.relativePath === "string") {
+          try { run.relativePath = normalizeEventRelativePath(entry.relativePath); } catch {}
+        }
+        if (EVENT_TYPES.has(entry.eventType)) run.eventType = entry.eventType;
+        if (typeof entry.workspaceId === "string" && /^[A-Za-z0-9][\w:.-]{0,159}$/.test(entry.workspaceId)) run.workspaceId = entry.workspaceId;
+      }
+      return run;
+    })
     .slice(-ROUTINE_HISTORY_LIMIT);
 }
 
@@ -113,7 +149,7 @@ function sanitizeRoutine(entry) {
   } catch { return undefined; }
 }
 
-export function createRoutineController({ dataDir, jobController, coworkerStore, skillStore, services, persistPath, now = () => Date.now(), makeId = makeRoutineId, makeHistoryId = makeRunId } = {}) {
+export function createRoutineController({ dataDir, jobController, coworkerStore, skillStore, services, persistPath, now = () => Date.now(), makeId = makeRoutineId, makeHistoryId = makeRunId, makeEventId = makeEventRunId } = {}) {
   if (!dataDir) throw new Error("routine controller requires dataDir");
   if (!jobController?.submitJob || !jobController?.getJob) throw new Error("routine controller requires jobController");
   if (!coworkerStore?.get) throw new Error("routine controller requires coworkerStore");
@@ -207,19 +243,18 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
     if (anyDirty) save();
   }
 
-  function fireRoutine(routine) {
-    if (!routine.enabled || !routine.nextRunAt || Date.parse(routine.nextRunAt) > now()) return undefined;
-    const scheduledFor = routine.nextRunAt;
+  function submitRoutineRun(routine, { scheduledFor, source = "schedule", event } = {}) {
     const startedAt = nowIso(now);
-    const run = { id: makeHistoryId(), scheduledFor, startedAt, status: "submitting" };
+    const run = { id: makeHistoryId(), scheduledFor, startedAt, status: "submitting", source };
+    if (source === "event") Object.assign(run, event);
     routine.history.push(run);
     trimHistory(routine);
     routine.lastRunAt = startedAt;
     routine.lastStatus = "submitting";
-    if (routine.schedule.type === "one-time") {
+    if (source === "schedule" && routine.schedule.type === "one-time") {
       routine.enabled = false;
       routine.nextRunAt = undefined;
-    } else {
+    } else if (source === "schedule") {
       routine.nextRunAt = nextRoutineOccurrence(routine.schedule, Math.max(Date.parse(scheduledFor), now()));
     }
     routine.updatedAt = startedAt;
@@ -244,7 +279,7 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
       routine.lastStatus = job.status;
       routine.updatedAt = nowIso(now);
       save();
-      return job;
+      return { job, run: clone(run) };
     } catch (error) {
       run.status = "failed";
       run.error = String(error?.message ?? error).slice(0, 500);
@@ -255,6 +290,34 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
       save();
       return undefined;
     }
+  }
+
+  function fireRoutine(routine) {
+    if (!routine.enabled || !routine.nextRunAt || Date.parse(routine.nextRunAt) > now()) return undefined;
+    return submitRoutineRun(routine, { scheduledFor: routine.nextRunAt })?.job;
+  }
+
+  function triggerEvent(routineId, event = {}) {
+    exactKeys(event, new Set(["triggerId", "eventId", "relativePath", "eventType", "workspaceId", "observedAt"]), "routine event");
+    const routine = requireRoutine(routineId);
+    if (!routine.enabled) throw new Error("routine is disabled");
+    if (routine.schedule.type === "one-time") throw new Error("one-time routines cannot be event-triggered");
+    if (!routine.workspaceId || event.workspaceId !== routine.workspaceId) throw new Error("event workspace does not match routine workspace");
+    if (typeof event.triggerId !== "string" || !/^trigger_[a-f0-9]{16}$/i.test(event.triggerId)) throw new Error("triggerId must be a trigger identifier");
+    const eventId = event.eventId ?? makeEventId();
+    if (typeof eventId !== "string" || !/^event_[a-f0-9]{16}$/i.test(eventId)) throw new Error("eventId must be an event identifier");
+    if (!EVENT_TYPES.has(event.eventType)) throw new Error("eventType must be change or rename");
+    const metadata = {
+      triggerId: event.triggerId,
+      eventId,
+      relativePath: normalizeEventRelativePath(event.relativePath),
+      eventType: event.eventType,
+      workspaceId: event.workspaceId,
+    };
+    const observedAt = asIso(event.observedAt ?? nowIso(now), "event.observedAt");
+    const result = submitRoutineRun(routine, { scheduledFor: observedAt, source: "event", event: metadata });
+    if (!result) throw new Error("event-triggered Routine Job could not be created");
+    return result;
   }
 
   let timer;
@@ -322,6 +385,7 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
     list() { reconcileHistory(); return { schema: ROUTINES_SCHEMA, routines: routines.map((routine) => publicRoutine(routine, false)) }; },
     get(routineId) { reconcileHistory(); return publicRoutine(requireRoutine(routineId), true); },
     history(routineId) { reconcileHistory(); const routine = requireRoutine(routineId); return { routineId: routine.id, history: clone(routine.history).reverse() }; },
+    triggerEvent,
     setEnabled(routineId, enabled) {
       if (typeof enabled !== "boolean") throw new Error("enabled must be boolean");
       const routine = requireRoutine(routineId);

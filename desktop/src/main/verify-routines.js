@@ -13,6 +13,7 @@ import { createSkillStore } from "./skill-store.js";
 import { createJobController } from "./job-controller.js";
 import { createChiefLoop } from "./chief-loop.js";
 import { createRoutineController } from "./routine-controller.js";
+import { EVENT_TRIGGERS_SCHEMA } from "./event-trigger-controller.js";
 import { coworkerAgentId } from "./provider-roster.js";
 import { createMainWindow, appOrigin } from "./window.js";
 import { installAppProtocolHandler } from "./protocol.js";
@@ -179,6 +180,9 @@ export async function runVerifyRoutines({ app }) {
         "routine:history": ({ routineId }) => routines.history(routineId),
         "routine:setEnabled": ({ routineId, enabled }) => routines.setEnabled(routineId, enabled),
         "routine:remove": ({ routineId }) => routines.remove(routineId),
+        // The V4.2 harness does not instantiate the V4.4 controller, but the
+        // shared renderer now hydrates this read-only surface on startup.
+        "eventTrigger:list": () => ({ schema: EVENT_TRIGGERS_SCHEMA, triggers: [] }),
       },
     });
 
