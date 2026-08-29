@@ -145,7 +145,9 @@ test("one-time routine fires once, disables itself and stays consumed after rest
     assert.equal(submitted.length, 1);
     assert.equal(controller.get(routine.id).enabled, false);
     assert.equal(controller.get(routine.id).nextRunAt, undefined);
+    assert.throws(() => controller.setEnabled(routine.id, true), /cannot be re-enabled/);
     controller = harness(dataDir, clock, submitted, jobStates);
+    assert.throws(() => controller.setEnabled(routine.id, true), /cannot be re-enabled/);
     await controller.tickNow();
     assert.equal(submitted.length, 1);
   } finally {
