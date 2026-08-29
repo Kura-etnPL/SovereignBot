@@ -2,13 +2,14 @@
 (() => {
   const I18n = () => globalThis.SovereignI18n;
   const $ = (id) => document.getElementById(id);
-  const show = (el) => el?.classList.remove("hidden");
-  const hide = (el) => el?.classList.add("hidden");
   function t(key, fallback) { try { return I18n()?.t(key) ?? fallback ?? key; } catch { return fallback ?? key; } }
 
   let jobs = [];
   let currentJobId;
   let pollTimer;
+  let routines = [];
+  let routinePollTimer;
+  let currentRoutineId;
 
   function statusClass(s) { return `job-status ${s}`; }
   function statusLabel(s) { return t(`work.status.${s}`, s); }
@@ -65,7 +66,7 @@
     badge.textContent = String(n);
     badge.classList.toggle("hidden", n === 0);
     const nav = $("nav-attention");
-    if (nav) nav.classList.toggle("active", n > 0 && document.getElementById("view-work")?.classList.contains("hidden") === false);
+    if (nav) nav.classList.toggle("active", n > 0 && $("view-work")?.classList.contains("hidden") === false);
   }
 
   async function refresh() {
@@ -93,25 +94,189 @@
       $("job-detail-dismiss")?.classList.toggle("hidden", !needs);
       $("job-detail-pause")?.classList.toggle("hidden", waiting || needs || ["completed","failed","cancelled"].includes(job.status));
       $("job-detail-resume")?.classList.toggle("hidden", !(waiting || needs));
-      const dlg = $("job-detail-dialog");
-      if (dlg?.showModal) dlg.showModal();
+      $("job-detail-dialog")?.showModal?.();
     } catch (e) {
-      const el = document.getElementById("provider-action-result");
+      const el = $("provider-action-result");
       if (el) el.textContent = String(e?.message ?? e).slice(0, 300);
     }
   }
 
-  function populateOwnerSelect(coworkers) {
-    const sel = $("job-owner");
+  function populateOwnerSelect(coworkers, targetId = "job-owner") {
+    const sel = $(targetId);
     if (!sel) return;
     sel.textContent = "";
     for (const c of (coworkers ?? [])) {
       if (c.state !== "active") continue;
       const opt = document.createElement("option");
       opt.value = c.id;
-      opt.textContent = c.name;
+      opt.textContent = I18n()?.displayCoworkerName?.(c.name) ?? c.name;
       sel.append(opt);
     }
+  }
+
+  function ensureRoutineSurface() {
+    if (!$("nav-routines")) {
+      const nav = document.createElement("button");
+      nav.id = "nav-routines";
+      nav.className = "utility-nav";
+      nav.type = "button";
+      const label = document.createElement("span");
+      label.dataset.i18n = "nav.routines";
+      label.textContent = t("nav.routines", "Routines");
+      nav.append(label);
+      $("nav-work")?.after(nav);
+    }
+    if (!$("view-routines")) {
+      const section = document.createElement("section");
+      section.id = "view-routines";
+      section.className = "main-view settings-view hidden";
+      section.innerHTML = `
+        <header class="page-header"><div><span class="eyebrow" data-i18n="routines.title">Routines</span><h1 data-i18n="routines.title">Routines</h1><p data-i18n="routines.subtitle">Schedule recurring work.</p></div><div style="display:flex;gap:8px;align-items:center"><button id="routine-refresh" class="quiet-action" type="button" data-i18n="action.refresh">Refresh</button><button id="routine-new" class="hero-action" type="button" data-i18n="routines.create">New routine</button></div></header>
+        <div id="routine-list" class="workspace-cards"></div>
+        <dialog id="routine-dialog" class="modal"><form id="routine-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="routines.create">New routine</span><h2 data-i18n="routines.create">New routine</h2></div><button class="modal-x" data-close-dialog="routine-dialog" type="button">×</button></div>
+          <label><span data-i18n="routines.name">Name</span><input id="routine-name" maxlength="120" required></label>
+          <label><span data-i18n="routines.instruction">Instruction</span><textarea id="routine-instruction" maxlength="8000" rows="4" required></textarea></label>
+          <label><span data-i18n="routines.coworker">Coworker</span><select id="routine-owner"></select></label>
+          <label><span data-i18n="routines.skill">Skill</span><select id="routine-skill"></select></label>
+          <label><span data-i18n="routines.workspace">Workspace</span><select id="routine-workspace"></select></label>
+          <label><span data-i18n="routines.schedule">Schedule</span><select id="routine-type"><option value="one-time" data-i18n="routines.type.one-time">One-time</option><option value="hourly" data-i18n="routines.type.hourly">Hourly</option><option value="daily" data-i18n="routines.type.daily">Daily</option><option value="weekly" data-i18n="routines.type.weekly">Weekly</option></select></label>
+          <label id="routine-field-at"><span data-i18n="routines.at">Run at</span><input id="routine-at" type="datetime-local"></label>
+          <label id="routine-field-minute" class="hidden"><span data-i18n="routines.minute">Minute past the hour</span><input id="routine-minute" type="number" min="0" max="59" value="0"></label>
+          <label id="routine-field-time" class="hidden"><span data-i18n="routines.time">Time</span><input id="routine-time" type="time" value="09:00"></label>
+          <label id="routine-field-weekday" class="hidden"><span data-i18n="routines.weekday">Weekday</span><select id="routine-weekday"></select></label>
+          <p id="routine-form-error" class="inline-error hidden"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-dialog" type="button" data-i18n="action.cancel">Cancel</button><button class="hero-action" type="submit" data-i18n="routines.create">New routine</button></div>
+        </form></dialog>
+        <dialog id="routine-detail-dialog" class="modal"><div class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="routines.history">History</span><h2 id="routine-detail-title">Routine</h2></div><button class="modal-x" data-close-dialog="routine-detail-dialog" type="button">×</button></div><p id="routine-detail-meta" class="setting-feedback"></p><div id="routine-history" class="workspace-cards"></div><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-detail-dialog" type="button" data-i18n="action.close">Close</button></div></div></dialog>`;
+      document.querySelector(".workspace-shell")?.append(section);
+    }
+    applyRoutineLocale();
+  }
+
+  function applyRoutineLocale() {
+    for (const el of $("view-routines")?.querySelectorAll("[data-i18n]") ?? []) el.textContent = t(el.dataset.i18n, el.textContent);
+    const navLabel = $("nav-routines")?.querySelector("[data-i18n]");
+    if (navLabel) navLabel.textContent = t(navLabel.dataset.i18n, navLabel.textContent);
+    populateWeekdays(true);
+  }
+
+  function populateWeekdays(force = false) {
+    const sel = $("routine-weekday");
+    if (!sel) return;
+    const selected = sel.value;
+    if (sel.options.length && !force) return;
+    sel.textContent = "";
+    for (let day = 0; day < 7; day += 1) {
+      const opt = document.createElement("option");
+      opt.value = String(day);
+      opt.textContent = t(`weekday.${day}`, String(day));
+      sel.append(opt);
+    }
+    if ([...sel.options].some((opt) => opt.value === selected)) sel.value = selected;
+  }
+
+  function scheduleLabel(schedule) {
+    if (!schedule) return "—";
+    if (schedule.type === "one-time") return `${t("routines.type.one-time", "One-time")} · ${new Date(schedule.at).toLocaleString()}`;
+    if (schedule.type === "hourly") return `${t("routines.type.hourly", "Hourly")} · :${String(schedule.minute).padStart(2,"0")}`;
+    if (schedule.type === "daily") return `${t("routines.type.daily", "Daily")} · ${schedule.time}`;
+    return `${t("routines.type.weekly", "Weekly")} · ${t(`weekday.${schedule.weekday}`, schedule.weekday)} ${schedule.time}`;
+  }
+
+  function renderRoutineList() {
+    const root = $("routine-list");
+    if (!root) return;
+    root.textContent = "";
+    if (!routines.length) {
+      const p = document.createElement("p"); p.className = "setting-feedback"; p.textContent = t("routines.empty", "No routines yet."); root.append(p); return;
+    }
+    for (const routine of routines) {
+      const card = document.createElement("div"); card.className = "job-card";
+      const head = document.createElement("div"); head.className = "job-card-head";
+      const title = document.createElement("strong"); title.textContent = routine.name;
+      const badge = document.createElement("span"); badge.className = `job-status ${routine.enabled ? "completed" : "waiting"}`; badge.textContent = routine.enabled ? t("routines.enabled", "Enabled") : t("routines.disabled", "Disabled");
+      head.append(title, badge);
+      const meta = document.createElement("div"); meta.className = "setting-feedback"; meta.style.margin = "0";
+      const next = routine.nextRunAt ? new Date(routine.nextRunAt).toLocaleString() : "—";
+      meta.textContent = `${scheduleLabel(routine.schedule)} · ${t("routines.nextRun", "Next run")}: ${next}${routine.lastStatus ? ` · ${t("routines.lastStatus", "Last status")}: ${routine.lastStatus}` : ""}`;
+      const actions = document.createElement("div"); actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
+      const open = document.createElement("button"); open.className = "quiet-action"; open.type = "button"; open.textContent = t("routines.history", "History"); open.addEventListener("click", () => openRoutineDetail(routine.id));
+      const toggle = document.createElement("button"); toggle.className = "quiet-action"; toggle.type = "button"; toggle.textContent = routine.enabled ? t("routines.disable", "Disable") : t("routines.enable", "Enable"); toggle.addEventListener("click", async () => { await window.sovereignbot.routines.setEnabled({ routineId: routine.id, enabled: !routine.enabled }); await refreshRoutines(); });
+      const remove = document.createElement("button"); remove.className = "quiet-action"; remove.type = "button"; remove.textContent = t("routines.remove", "Remove"); remove.addEventListener("click", async () => { await window.sovereignbot.routines.remove({ routineId: routine.id }); await refreshRoutines(); });
+      actions.append(open, toggle, remove);
+      card.append(head, meta, actions); root.append(card);
+    }
+  }
+
+  async function refreshRoutines() {
+    try { const result = await window.sovereignbot.routines.list({}); routines = result?.routines ?? []; renderRoutineList(); } catch {}
+  }
+
+  async function openRoutineDetail(routineId) {
+    currentRoutineId = routineId;
+    try {
+      const routine = await window.sovereignbot.routines.get({ routineId });
+      const history = await window.sovereignbot.routines.history({ routineId });
+      $("routine-detail-title").textContent = routine.name;
+      $("routine-detail-meta").textContent = `${scheduleLabel(routine.schedule)} · ${routine.enabled ? t("routines.enabled", "Enabled") : t("routines.disabled", "Disabled")}`;
+      const root = $("routine-history"); root.textContent = "";
+      if (!(history.history ?? []).length) { const p = document.createElement("p"); p.className = "setting-feedback"; p.textContent = t("routines.historyEmpty", "No runs yet."); root.append(p); }
+      for (const run of history.history ?? []) {
+        const card = document.createElement("div"); card.className = "job-card";
+        const line = document.createElement("div"); line.textContent = `${new Date(run.scheduledFor).toLocaleString()} · ${run.status}${run.error ? ` · ${run.error}` : ""}`;
+        card.append(line);
+        if (run.jobId) { const btn = document.createElement("button"); btn.className = "quiet-action"; btn.type = "button"; btn.textContent = `${t("action.open", "Open")} ${t("routines.job", "Job")}`; btn.addEventListener("click", async () => { $("routine-detail-dialog")?.close(); await openDetail(run.jobId); }); card.append(btn); }
+        root.append(card);
+      }
+      $("routine-detail-dialog")?.showModal?.();
+    } catch {}
+  }
+
+  function showScheduleFields() {
+    const type = $("routine-type")?.value ?? "one-time";
+    $("routine-field-at")?.classList.toggle("hidden", type !== "one-time");
+    $("routine-field-minute")?.classList.toggle("hidden", type !== "hourly");
+    $("routine-field-time")?.classList.toggle("hidden", !["daily","weekly"].includes(type));
+    $("routine-field-weekday")?.classList.toggle("hidden", type !== "weekly");
+  }
+
+  function scheduleFromForm() {
+    const type = $("routine-type").value;
+    if (type === "one-time") {
+      const value = $("routine-at").value;
+      if (!value) throw new Error(t("routines.at", "Run at") + " is required");
+      return { type, at: new Date(value).toISOString() };
+    }
+    if (type === "hourly") return { type, minute: Number($("routine-minute").value) };
+    if (type === "daily") return { type, time: $("routine-time").value };
+    return { type, weekday: Number($("routine-weekday").value), time: $("routine-time").value };
+  }
+
+  async function populateRoutineForm() {
+    const [cw, skills, workspaces] = await Promise.all([
+      window.sovereignbot.coworkers.list({}).catch(() => ({ coworkers: [] })),
+      window.sovereignbot.skills.list({}).catch(() => ({ skills: [] })),
+      window.sovereignbot.workspaces.list({}).catch(() => ({ workspaces: [] })),
+    ]);
+    populateOwnerSelect(cw?.coworkers ?? [], "routine-owner");
+    const skill = $("routine-skill"); skill.textContent = "";
+    const none = document.createElement("option"); none.value = ""; none.textContent = t("routines.noSkill", "No skill"); skill.append(none);
+    for (const item of skills?.skills ?? []) { const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.name; skill.append(opt); }
+    const ws = $("routine-workspace"); ws.textContent = "";
+    const def = document.createElement("option"); def.value = ""; def.textContent = t("routines.defaultWorkspace", "Coworker default"); ws.append(def);
+    for (const item of workspaces?.workspaces ?? []) { const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.path; ws.append(opt); }
+    const inOneHour = new Date(Date.now() + 3600_000); const local = new Date(inOneHour.getTime() - inOneHour.getTimezoneOffset() * 60000).toISOString().slice(0,16); $("routine-at").value = local;
+    $("routine-minute").value = String(new Date().getMinutes());
+    showScheduleFields();
+  }
+
+  function showRoutinesView() {
+    for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
+    $("view-routines")?.classList.remove("hidden");
+    $("nav-work")?.classList.remove("active"); $("nav-attention")?.classList.remove("active"); $("nav-settings")?.classList.remove("active");
+    $("nav-routines")?.classList.add("active");
+    clearTimeout(routinePollTimer);
+    routinePollTimer = setTimeout(function poll(){ refreshRoutines().finally(()=>{ if(!$("view-routines")?.classList.contains("hidden")) routinePollTimer=setTimeout(poll, 5000); }); }, 5000);
+    void refreshRoutines();
   }
 
   function bindEvents() {
@@ -119,52 +284,54 @@
       for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
       $("view-work")?.classList.remove("hidden");
       await refresh();
-      // switchView compat: update active class
-      document.getElementById("nav-settings")?.classList.remove("active");
-      $("nav-work")?.classList.add("active");
+      $("nav-settings")?.classList.remove("active"); $("nav-routines")?.classList.remove("active"); $("nav-work")?.classList.add("active");
       clearTimeout(pollTimer);
-      pollTimer = setTimeout(function poll(){ refresh().finally(()=>{ if(!document.getElementById("view-work")?.classList.contains("hidden")) pollTimer=setTimeout(poll, 2500); }); }, 2500);
+      pollTimer = setTimeout(function poll(){ refresh().finally(()=>{ if(!$("view-work")?.classList.contains("hidden")) pollTimer=setTimeout(poll, 2500); }); }, 2500);
     });
     $("nav-attention")?.addEventListener("click", async () => {
       for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
       $("view-work")?.classList.remove("hidden");
       await refresh();
-      // filter visual: bring needs_attention to top (already sorted by backend? ensure)
       jobs.sort((a,b)=> (a.status==="needs_attention"? -1 : b.status==="needs_attention"? 1 : 0));
       renderList();
     });
+    $("nav-routines")?.addEventListener("click", showRoutinesView);
     $("work-refresh")?.addEventListener("click", refresh);
-    $("work-new")?.addEventListener("click", async () => {
-      try {
-        const cw = await window.sovereignbot.coworkers.list({});
-        populateOwnerSelect(cw?.coworkers ?? []);
-      } catch {}
-      const dlg = $("job-dialog");
-      if (dlg?.showModal) dlg.showModal();
-    });
+    $("work-new")?.addEventListener("click", async () => { try { const cw = await window.sovereignbot.coworkers.list({}); populateOwnerSelect(cw?.coworkers ?? []); } catch {} $("job-dialog")?.showModal?.(); });
     $("job-form")?.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const errEl = $("job-form-error");
-      errEl?.classList.add("hidden");
-      try {
-        await window.sovereignbot.jobs.submit({ title: $("job-title").value.trim(), objective: $("job-objective").value.trim(), ownerCoworkerId: $("job-owner").value });
-        $("job-dialog")?.close();
-        $("job-form")?.reset();
-        await refresh();
-      } catch (err) {
-        if (errEl) { errEl.textContent = String(err?.message ?? err).replace(/^.*Error: /, "").slice(0, 400); errEl.classList.remove("hidden"); }
-      }
+      e.preventDefault(); const errEl = $("job-form-error"); errEl?.classList.add("hidden");
+      try { await window.sovereignbot.jobs.submit({ title: $("job-title").value.trim(), objective: $("job-objective").value.trim(), ownerCoworkerId: $("job-owner").value }); $("job-dialog")?.close(); $("job-form")?.reset(); await refresh(); }
+      catch (err) { if (errEl) { errEl.textContent = String(err?.message ?? err).replace(/^.*Error: /, "").slice(0, 400); errEl.classList.remove("hidden"); } }
     });
     $("job-detail-approve")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.approve({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refresh(); });
     $("job-detail-dismiss")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.dismiss({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refresh(); });
     $("job-detail-pause")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.pause({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refresh(); });
     $("job-detail-resume")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.resume({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refresh(); });
-    for (const b of document.querySelectorAll("[data-close-dialog]")) b.addEventListener("click", () => document.getElementById(b.dataset.closeDialog)?.close());
+    $("routine-refresh")?.addEventListener("click", refreshRoutines);
+    $("routine-new")?.addEventListener("click", async () => { await populateRoutineForm(); $("routine-dialog")?.showModal?.(); });
+    $("routine-type")?.addEventListener("change", showScheduleFields);
+    $("routine-form")?.addEventListener("submit", async (e) => {
+      e.preventDefault(); const err = $("routine-form-error"); err?.classList.add("hidden");
+      try {
+        await window.sovereignbot.routines.create({ name: $("routine-name").value.trim(), instruction: $("routine-instruction").value.trim(), coworkerId: $("routine-owner").value, skillId: $("routine-skill").value || undefined, workspaceId: $("routine-workspace").value || undefined, schedule: scheduleFromForm() });
+        $("routine-dialog")?.close(); $("routine-form")?.reset(); await refreshRoutines();
+      } catch (error) { if (err) { err.textContent = String(error?.message ?? error).replace(/^.*Error: /, "").slice(0,400); err.classList.remove("hidden"); } }
+    });
+    for (const b of document.querySelectorAll("[data-close-dialog]")) b.addEventListener("click", () => $(b.dataset.closeDialog)?.close());
   }
 
-  // expose refresh for global poll
-  globalThis.SovereignJobsUI = { refresh, renderList };
+  function init() {
+    ensureRoutineSurface();
+    bindEvents();
+    refresh(); refreshRoutines();
+    setInterval(refresh, 8000); setInterval(refreshRoutines, 10000);
+    new MutationObserver(() => {
+      applyRoutineLocale();
+      renderRoutineList();
+      if (currentRoutineId && $("routine-detail-dialog")?.open) void openRoutineDetail(currentRoutineId);
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
+  }
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => { bindEvents(); refresh(); setInterval(refresh, 8000); });
-  else { bindEvents(); refresh(); setInterval(refresh, 8000); }
+  globalThis.SovereignJobsUI = { refresh, renderList, refreshRoutines };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
 })();
