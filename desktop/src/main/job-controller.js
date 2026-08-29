@@ -9,7 +9,10 @@ export const MAX_OBJECTIVE = 8000;
 export const MAX_TITLE = 120;
 const MAX_MESSAGES = 100;
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
-const ACTIVE = new Set(["queued", "working", "waiting", "needs_attention"]);
+// Jobs waiting for an operator decision are already stopped. They must survive
+// a process restart as attention items; only work that was actively in-flight
+// should be marked interrupted.
+const INTERRUPTED_ON_RESTART = new Set(["queued", "working", "waiting"]);
 const VALID_STATUSES = new Set(["queued", "working", "waiting", "needs_attention", "completed", "failed", "cancelled"]);
 const CAPS = Object.freeze({ maxDepth: 6, maxAttempts: 3, maxChildren: 10, fingerprintWindowMs: 180_000 });
 
@@ -27,7 +30,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
 
   const loaded = loadJsonState(persistPath, null);
   const jobs = loaded?.schema === JOBS_SCHEMA && Array.isArray(loaded.jobs) ? loaded.jobs.filter(j => j && typeof j.id === "string" && VALID_STATUSES.has(j.status)) : [];
-  for (const j of jobs) if (ACTIVE.has(j.status)) { j.status = "failed"; j.error = j.error ?? "interrupted by application shutdown"; j.updatedAt = now(); }
+  for (const j of jobs) if (INTERRUPTED_ON_RESTART.has(j.status)) { j.status = "failed"; j.error = j.error ?? "interrupted by application shutdown"; j.updatedAt = now(); }
 
   function save() { saveJsonState(persistPath, { schema: JOBS_SCHEMA, jobs }); }
   function rosterSnapshot() {
@@ -218,7 +221,26 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     },
     getJob(jobId) { return publicJob(getJob(jobId)); },
     listJobs() { return { schema: JOBS_SCHEMA, jobs: jobs.map(publicJob) }; },
-    attentionJobs() { return { schema: JOBS_SCHEMA, jobs: jobs.filter(j => j.status === "needs_attention").map(publicJob) }; },
+    attentionJobs() {
+      const priorityRank = { high: 0, normal: 1, low: 2 };
+      const timestamp = (job) => {
+        const candidates = [job.attentionState?.at, job.updatedAt, job.createdAt];
+        for (const value of candidates) {
+          const parsed = Date.parse(value ?? "");
+          if (Number.isFinite(parsed)) return parsed;
+        }
+        return Number.POSITIVE_INFINITY;
+      };
+      const attention = jobs.filter(j => j.status === "needs_attention").slice();
+      attention.sort((a, b) => {
+        const priority = (priorityRank[a.priority] ?? 1) - (priorityRank[b.priority] ?? 1);
+        if (priority) return priority;
+        const raised = timestamp(a) - timestamp(b);
+        if (raised) return raised;
+        return String(a.id).localeCompare(String(b.id));
+      });
+      return { schema: JOBS_SCHEMA, jobs: attention.map(publicJob) };
+    },
     getConversation(jobId) {
       const j = getJob(jobId);
       return { jobId: j.id, conversationId: j.conversationId ?? `job-conv-${j.id}`, messages: structuredClone((j.conversation?.messages ?? []).slice(-MAX_MESSAGES)) };
@@ -236,6 +258,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       if (j.status !== "waiting" && j.status !== "needs_attention") throw new Error(`only waiting/needs_attention jobs can be resumed (current: ${j.status})`);
       const fromWaiting = j.status === "waiting";
       const fromNeedsAttention = j.status === "needs_attention";
+      if (fromNeedsAttention) appendMessage(j, "decision", "Attention retried by operator.", "user");
       if (fromNeedsAttention) { j.attempt = 0; j._fingerprint = undefined; j._repeatCount = 0; }
       j.error = undefined; j.attentionState = undefined; j.nextActionAt = undefined;
       if (fromWaiting) j._skipFingerprintOnce = true;
@@ -245,6 +268,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     async approve(jobId) {
       const j = getJob(jobId);
       if (j.status !== "needs_attention") throw new Error(`only needs_attention jobs can be approved`);
+      appendMessage(j, "decision", "Attention retried by operator.", "user");
       j.attempt = 0; j.error = undefined; j.attentionState = undefined; j.nextActionAt = undefined;
       j._fingerprint = undefined; j._repeatCount = 0; delete j._skipFingerprintOnce;
       setStatus(j, "queued"); save(); schedule(j.id); return publicJob(j);
@@ -252,6 +276,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     async dismiss(jobId) {
       const j = getJob(jobId);
       if (j.status !== "needs_attention") throw new Error(`only needs_attention jobs can be dismissed`);
+      appendMessage(j, "decision", "Attention dismissed by operator.", "user");
       setStatus(j, "failed"); j.attentionState = { ...(j.attentionState ?? {}), dismissedAt: now() }; save(); return publicJob(j);
     },
     jobsBusy() { return jobs.some(j => j.status === "working"); },
