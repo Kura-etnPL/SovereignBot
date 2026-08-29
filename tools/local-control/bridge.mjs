@@ -55,8 +55,11 @@ function redact(text) {
 }
 
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
-    shell: false,
+  const ghFallback = process.env.SOVEREIGN_CONTROL_GH && command === "gh" ? process.env.SOVEREIGN_CONTROL_GH : command;
+  const isCmd = /\.cmd"?$/i.test(ghFallback) || /\.cmd"?$/i.test(command);
+  const shell = isCmd ? true : false;
+  const result = spawnSync(ghFallback, args, {
+    shell,
     encoding: "utf8",
     windowsHide: true,
     timeout: options.timeout ?? 20000,
@@ -295,7 +298,14 @@ function execute(command) {
 }
 
 function fetchComments() {
-  const pages = ghJson(["api", `repos/${REPO}/issues/${ISSUE}/comments?per_page=100`, "--paginate", "--slurp"]);
+  const result = spawnSync(process.env.SOVEREIGN_CONTROL_GH || "gh", ["api", `repos/${REPO}/issues/${ISSUE}/comments?per_page=100`, "--paginate", "--slurp"], {
+    shell: false, encoding: "utf8", windowsHide: true, timeout: 30000, env: process.env, maxBuffer: 4 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error("gh fetchComments exited " + result.status + ": " + String(result.stderr || "").slice(-2000));
+  const text = String(result.stdout || "").trim();
+  if (!text) return [];
+  const pages = JSON.parse(text);
   return (Array.isArray(pages) ? pages.flat() : []).sort((a, b) => Number(a.id) - Number(b.id));
 }
 
