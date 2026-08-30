@@ -28,6 +28,14 @@ const EVENT_TRIGGER_CHANNELS = Object.freeze({
     "eventTrigger:setEnabled": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "eventTrigger:remove": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
+const WORKER_NODE_CHANNELS = Object.freeze({
+    "workerNode:pairViaDialog": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "workerNode:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "workerNode:get": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "workerNode:refresh": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "workerNode:setEnabled": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "workerNode:remove": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+});
 const ALL_IPC_CHANNELS = Object.freeze({
     ...IPC_CHANNELS,
     ...V3_IPC_CHANNELS,
@@ -36,6 +44,7 @@ const ALL_IPC_CHANNELS = Object.freeze({
     ...SKILL_CHANNELS,
     ...ROUTINE_CHANNELS,
     ...EVENT_TRIGGER_CHANNELS,
+    ...WORKER_NODE_CHANNELS,
 });
 
 function assertObject(payload, label) {
@@ -225,6 +234,30 @@ function validateEventTriggerRequest(channel, payload) {
     throw new Error(`unknown event trigger IPC channel: ${channel}`);
 }
 
+function validateWorkerNodeRequest(channel, payload) {
+    const bytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
+    if (bytes > WORKER_NODE_CHANNELS[channel].maxPayloadBytes) throw new Error(`${channel} payload is too large`);
+    if (["workerNode:pairViaDialog", "workerNode:list"].includes(channel)) {
+        exactKeys(payload, new Set(), channel);
+        return {};
+    }
+    if (["workerNode:get", "workerNode:remove"].includes(channel)) {
+        exactKeys(payload, new Set(["nodeId"]), channel);
+        if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
+        return { nodeId: payload.nodeId };
+    }
+    if (channel === "workerNode:refresh") {
+        exactKeys(payload, new Set(["nodeId"]), channel);
+        if (payload.nodeId === undefined) return {};
+        if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
+        return { nodeId: payload.nodeId };
+    }
+    exactKeys(payload, new Set(["nodeId", "enabled"]), channel);
+    if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
+    if (typeof payload.enabled !== "boolean") throw new Error("enabled must be boolean");
+    return { nodeId: payload.nodeId, enabled: payload.enabled };
+}
+
 function validateLiveFrame(payload) {
     exactKeys(payload, new Set(["agentId"]), LIVE_FRAME_CHANNEL);
     if (typeof payload.agentId !== "string" || !/^[A-Za-z0-9][\w:.-]{0,127}$/.test(payload.agentId))
@@ -253,6 +286,8 @@ function validateRequest(channel, payload) {
         return validateRoutineRequest(channel, payload);
     if (EVENT_TRIGGER_CHANNELS[channel])
         return validateEventTriggerRequest(channel, payload);
+    if (WORKER_NODE_CHANNELS[channel])
+        return validateWorkerNodeRequest(channel, payload);
     if (channel === "conversation:send")
         return validateConversationSend(payload);
     return V3_IPC_CHANNELS[channel]

@@ -45,6 +45,52 @@ export function defaultConfig(dataDir = ".sovereignbot/data") {
     };
 }
 
+export function defaultWorkerNodeConfig(dataDir = ".sovereignbot/worker-node-data", workspacePath = process.cwd()) {
+    return {
+        dataDir,
+        name: "Sovereign Worker",
+        bindHost: "127.0.0.1",
+        port: 7342,
+        supervisorAgentId: "worker-node-supervisor",
+        workerAgentId: "worker-node-worker",
+        workspaces: [{ id: "ws_main", name: "Main workspace", path: workspacePath }],
+        agents: [
+            {
+                id: "worker-node-supervisor",
+                name: "Worker Node Supervisor",
+                role: "supervisor",
+                capabilities: ["planning"],
+                harness: { kind: "echo" },
+            },
+            {
+                id: "worker-node-worker",
+                name: "Worker Node Worker",
+                role: "worker",
+                capabilities: ["general", "coding", "research"],
+                harness: { kind: "echo" },
+            },
+        ],
+        policy: {
+            repeatWindowMs: 180000,
+            repeatMaxActiveFingerprints: 10000,
+            rules: [
+                {
+                    id: "deny-runaway-loop",
+                    effect: "deny",
+                    description: "stop an identical harness action after ten attempts in the repeat window",
+                    match: { category: "harness", operation: "run", repeatAtLeast: 10 },
+                },
+                {
+                    id: "allow-worker-node-worker",
+                    effect: "allow",
+                    description: "allow the configured Worker Node worker harness",
+                    match: { category: "harness", operation: "run", agentId: "worker-node-worker" },
+                },
+            ],
+        },
+    };
+}
+
 export async function writeDefaultConfig(path = DEFAULT_CONFIG_PATH) {
     const absolute = resolve(path);
     await mkdir(dirname(absolute), { recursive: true });

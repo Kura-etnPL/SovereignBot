@@ -16,12 +16,33 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const INTERRUPTED_ON_RESTART = new Set(["queued", "working", "waiting"]);
 const VALID_STATUSES = new Set(["queued", "working", "waiting", "needs_attention", "completed", "failed", "cancelled"]);
 const CAPS = Object.freeze({ maxDepth: 6, maxAttempts: 3, maxChildren: 10, fingerprintWindowMs: 180_000 });
+const WORKER_NODE_DISPATCHER = "worker-node-dispatcher";
+
+function normalizeExecutionTarget(value) {
+  if (value === undefined || value === null) return { kind: "local" };
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("executionTarget must be an object");
+  if (value.kind === "local") {
+    if (Object.keys(value).length !== 1) throw new Error("local executionTarget accepts only kind");
+    return { kind: "local" };
+  }
+  if (value.kind !== "worker-node" || Object.keys(value).some((key) => !["kind", "nodeId", "workspaceId"].includes(key)))
+    throw new Error("executionTarget must be local or worker-node");
+  if (Object.keys(value).length !== 3 || !/^worker_[0-9a-f]{16}$/i.test(String(value.nodeId ?? "")))
+    throw new Error("executionTarget.nodeId is invalid");
+  if (typeof value.workspaceId !== "string" || !/^[A-Za-z0-9][\w:.-]{0,159}$/.test(value.workspaceId))
+    throw new Error("executionTarget.workspaceId is invalid");
+  return { kind: "worker-node", nodeId: value.nodeId, workspaceId: value.workspaceId };
+}
+
+function isWorkerNodeTarget(job) { return job.executionTarget?.kind === "worker-node"; }
+function isTransportFailure(error) { return /worker-node transport unavailable|reconnect required/i.test(String(error?.message ?? error)); }
+function makeWorkerRequestId() { return `worker_request_${randomBytes(8).toString("hex")}`; }
 
 export function makeJobId() { return `job_${randomBytes(8).toString("hex")}`; }
 function slice(v, n) { const s = String(v ?? "").replace(/\s+/g, " ").trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; }
 function depthOf(jobs, id) { let d = 0, cur = jobs.find(j => j.id === id); while (cur?.parentJobId && d < 100) { d += 1; cur = jobs.find(j => j.id === cur.parentJobId); } return d; }
 
-export function createJobController({ dataDir, runtime, roster, coworkerStore, services, skillStore, persistPath, supervisorAgentId, readiness, now = () => new Date().toISOString(), makeId = makeJobId } = {}) {
+export function createJobController({ dataDir, runtime, roster, coworkerStore, services, skillStore, workerNodeStore, persistPath, supervisorAgentId, readiness, now = () => new Date().toISOString(), makeId = makeJobId, makeRequestId = makeWorkerRequestId } = {}) {
   if (!dataDir || !runtime?.orchestrator) throw new Error("job controller requires dataDir and runtime");
   if (typeof roster !== "function") throw new Error("job controller requires roster reader");
   if (!coworkerStore?.get) throw new Error("job controller requires coworkerStore");
@@ -31,7 +52,22 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
 
   const loaded = loadJsonState(persistPath, null);
   const jobs = loaded?.schema === JOBS_SCHEMA && Array.isArray(loaded.jobs) ? loaded.jobs.filter(j => j && typeof j.id === "string" && VALID_STATUSES.has(j.status)) : [];
-  for (const j of jobs) if (INTERRUPTED_ON_RESTART.has(j.status)) { j.status = "failed"; j.error = j.error ?? "interrupted by application shutdown"; j.updatedAt = now(); }
+  for (const j of jobs) {
+    try { j.executionTarget = normalizeExecutionTarget(j.executionTarget); }
+    catch { j.executionTarget = { kind: "local" }; j.status = "needs_attention"; j.error = "invalid persisted execution target"; j.attentionState = { reason: j.error, at: now() }; }
+    if (INTERRUPTED_ON_RESTART.has(j.status)) {
+      if (isWorkerNodeTarget(j) && j.remoteTaskId) {
+        // The local task is disposable; the stable request/remote task binding is not.
+        // The next pump polls the existing node task and cannot silently run locally.
+        j.status = "queued";
+        j.nextActionAt = undefined;
+      } else {
+        j.status = "failed";
+        j.error = j.error ?? "interrupted by application shutdown";
+      }
+      j.updatedAt = now();
+    }
+  }
   for (const j of jobs) {
     if (j.eventMetadata === undefined) continue;
     try {
@@ -67,7 +103,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     return { workspaceId: `coworker:${coworker.id}`, cwd };
   }
   function getJob(id) { const j = jobs.find(x => x.id === String(id)); if (!j) throw new Error(`unknown job id: ${id}`); return j; }
-  function publicJob(j) { return { id: j.id, title: j.title, objective: j.objective, status: j.status, priority: j.priority, ownerCoworkerId: j.ownerCoworkerId, parentJobId: j.parentJobId ?? null, workspaceId: j.workspaceId, routineId: j.routineId ?? undefined, skillId: j.skillId ?? undefined, scheduledFor: j.scheduledFor ?? undefined, nextActionAt: j.nextActionAt ?? null, attempt: j.attempt, depth: depthOf(jobs, j.id), childJobIds: [...(j.childJobIds ?? [])], attentionState: j.attentionState ? structuredClone(j.attentionState) : undefined, outcomeSummary: j.outcomeSummary ?? undefined, error: j.error ?? undefined, createdAt: j.createdAt, updatedAt: j.updatedAt, conversationId: j.conversationId ?? undefined, taskIds: [...(j.taskIds ?? [])] }; }
+  function publicJob(j) { return { id: j.id, title: j.title, objective: j.objective, status: j.status, priority: j.priority, ownerCoworkerId: j.ownerCoworkerId, parentJobId: j.parentJobId ?? null, workspaceId: j.workspaceId, executionTarget: structuredClone(j.executionTarget ?? { kind: "local" }), workerNodeName: j.workerNodeName ?? undefined, workerWorkspaceName: j.workerWorkspaceName ?? undefined, routineId: j.routineId ?? undefined, skillId: j.skillId ?? undefined, scheduledFor: j.scheduledFor ?? undefined, nextActionAt: j.nextActionAt ?? null, attempt: j.attempt, depth: depthOf(jobs, j.id), childJobIds: [...(j.childJobIds ?? [])], attentionState: j.attentionState ? structuredClone(j.attentionState) : undefined, outcomeSummary: j.outcomeSummary ?? undefined, error: j.error ?? undefined, createdAt: j.createdAt, updatedAt: j.updatedAt, conversationId: j.conversationId ?? undefined, taskIds: [...(j.taskIds ?? [])] }; }
   function appendMessage(job, kind, text, role = "system") {
     job.conversation = job.conversation ?? { messages: [] };
     job.conversation.messages.push({ at: now(), role, kind, text: String(text).slice(0, 4000) });
@@ -128,7 +164,20 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     try {
       const coworker = coworkerStore.get(job.ownerCoworkerId);
       const { snap, binding } = requireCoworkerBinding(job.ownerCoworkerId);
-      const ctx = workspaceContext(job, coworker);
+      const remoteTarget = isWorkerNodeTarget(job) ? workerNodeStore?.resolveDispatchTarget(job.executionTarget.nodeId, job.executionTarget.workspaceId) : undefined;
+      if (isWorkerNodeTarget(job) && !remoteTarget)
+        throw new Error("selected Worker Node is unavailable; local fallback is disabled");
+      const ctx = remoteTarget
+        ? { kind: "worker-node", nodeId: job.executionTarget.nodeId, workspaceId: job.executionTarget.workspaceId }
+        : workspaceContext(job, coworker);
+      if (remoteTarget) {
+        job.workerNodeName = remoteTarget.node.name;
+        job.workerWorkspaceName = remoteTarget.workspace.name;
+        job.workerNodeId = job.executionTarget.nodeId;
+        job.workerWorkspaceId = job.executionTarget.workspaceId;
+        job.requestId = job.requestId ?? makeRequestId();
+        save();
+      }
       const supervisorId = snap.roles?.planner ?? supervisorAgentId;
       job.workspaceId = ctx.workspaceId;
       if (job.status === "waiting") { job._skipFingerprintOnce = true; job.nextActionAt = undefined; setStatus(job, "queued"); }
@@ -155,17 +204,39 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
 
       const plan = await runtime.orchestrator.createPlan({ title: `job: ${slice(job.title, 80)}`, ownerAgentId: supervisorId, input: { jobId: job.id, objective: job.objective } });
       job.planId = plan.id;
+      const remoteTaskInput = remoteTarget ? {
+        instruction: providerInstruction(job),
+        jobId: job.id,
+        objective: job.objective,
+        attempt: job.attempt ?? 0,
+        requestId: job.requestId,
+        remoteTaskId: job.remoteTaskId,
+        requiredCapabilities: ["general"],
+      } : {
+        instruction: providerInstruction(job),
+        jobId: job.id,
+        objective: job.objective,
+        attempt: job.attempt ?? 0,
+        routineId: job.routineId,
+        scheduledFor: job.scheduledFor,
+      };
       const task = await runtime.orchestrator.delegateTrusted(plan.id, {
         title: job.title,
-        requiredCapabilities: [coworkerCapability(job.ownerCoworkerId)],
-        preferredAgentId: binding.agentId,
-        input: { instruction: providerInstruction(job), jobId: job.id, objective: job.objective, attempt: job.attempt ?? 0, routineId: job.routineId, scheduledFor: job.scheduledFor },
+        requiredCapabilities: remoteTarget ? ["worker-node"] : [coworkerCapability(job.ownerCoworkerId)],
+        preferredAgentId: remoteTarget ? WORKER_NODE_DISPATCHER : binding.agentId,
+        input: remoteTaskInput,
       }, ctx, supervisorId);
       job.taskIds = [...(job.taskIds ?? []), task.id];
       if (!job.conversationId) job.conversationId = `job-conv-${job.id}`;
       save();
       await runtime.orchestrator.runUntilIdle();
+      if (jobs.find((entry) => entry.id === jobId)?.status === "cancelled") return;
       const finished = (await runtime.orchestrator.listTasks()).find(t => t.id === task.id);
+      if (remoteTarget) {
+        job.remoteTaskId = finished?.harnessState?.remoteTaskId ?? job.remoteTaskId;
+        job.lastRemoteStatus = finished?.harnessState?.status ?? finished?.status;
+        save();
+      }
       const status = finished?.status ?? "unknown";
       if (status === "completed") {
         const text = typeof finished.result?.text === "string" ? finished.result.text.trim().slice(0, 8000) : "";
@@ -176,10 +247,17 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         save(); return;
       }
       const attempt = (job.attempt ?? 0) + 1;
+      if (remoteTarget && isTransportFailure(finished?.error)) {
+        job.nextActionAt = new Date(Date.now() + 5000).toISOString();
+        job.error = "Worker Node connection interrupted; reconnecting without a new remote task.";
+        setStatus(job, "waiting");
+        save(); return;
+      }
       job.attempt = attempt;
       job.error = String(finished?.error ?? `job task ended as ${status}`).slice(0, 500);
       appendMessage(job, "answer", `Job attempt ${attempt} did not complete: ${job.error}`);
       if (attempt < CAPS.maxAttempts) {
+        if (remoteTarget) { job.requestId = undefined; job.remoteTaskId = undefined; job.lastRemoteStatus = undefined; }
         const delayMs = Math.min(60_000, 1000 * Math.pow(2, attempt));
         job.nextActionAt = new Date(nowMs + delayMs).toISOString();
         setStatus(job, "waiting");
@@ -195,7 +273,16 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       j.error = msg;
       appendMessage(j, "answer", `Job failed: ${msg}`);
       const attempt = (j.attempt ?? 0);
-      if (attempt + 1 < CAPS.maxAttempts && !/no ready AI provider|demo roster/i.test(msg)) {
+      if (isWorkerNodeTarget(j)) {
+        if (isTransportFailure(error)) {
+          j.nextActionAt = new Date(Date.now() + 5000).toISOString();
+          j.error = "Worker Node connection interrupted; reconnecting without a new remote task.";
+          setStatus(j, "waiting");
+        } else {
+          setStatus(j, "needs_attention");
+          j.attentionState = { reason: msg, attempt: j.attempt ?? 0, at: now() };
+        }
+      } else if (attempt + 1 < CAPS.maxAttempts && !/no ready AI provider|demo roster/i.test(msg)) {
         j.attempt = attempt + 1;
         j.nextActionAt = new Date(Date.now() + 1000 * Math.pow(2, j.attempt)).toISOString();
         setStatus(j, "waiting");
@@ -209,7 +296,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
 
   return {
     CAPS,
-    submitJob({ title, objective, ownerCoworkerId, parentJobId, priority, nextActionAt, internalContext } = {}) {
+    submitJob({ title, objective, ownerCoworkerId, parentJobId, priority, nextActionAt, internalContext, executionTarget } = {}) {
       const t = typeof title === "string" ? title.trim() : "";
       const obj = typeof objective === "string" ? objective.trim() : "";
       if (!t) throw new Error("job title is required");
@@ -218,7 +305,8 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       if (obj.length > MAX_OBJECTIVE) throw new Error(`job objective exceeds ${MAX_OBJECTIVE} characters`);
       if (!ownerCoworkerId) throw new Error("ownerCoworkerId is required");
       coworkerStore.get(ownerCoworkerId);
-      if (readiness) { const s = readiness(); if (!s?.allowed) throw new Error(s?.reason ?? "Connect at least one AI provider to run jobs."); }
+      const target = normalizeExecutionTarget(executionTarget);
+      if (target.kind === "local" && readiness) { const s = readiness(); if (!s?.allowed) throw new Error(s?.reason ?? "Connect at least one AI provider to run jobs."); }
       if (parentJobId) {
         const parent = getJob(parentJobId);
         if (depthOf(jobs, parent.id) + 1 > CAPS.maxDepth) throw new Error(`job depth exceeds ${CAPS.maxDepth}`);
@@ -227,7 +315,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       let resolvedNextActionAt;
       if (nextActionAt !== undefined) { const d = new Date(nextActionAt); if (Number.isNaN(d.getTime())) throw new Error("nextActionAt must be a valid date"); resolvedNextActionAt = d.toISOString(); }
       const internal = normalizeInternalContext(internalContext);
-      const job = { id: makeId(), title: t, objective: obj, ownerCoworkerId: String(ownerCoworkerId), status: "queued", priority: priority ?? "normal", workspaceId: undefined, requestedWorkspaceId: internal.workspaceId, routineId: internal.routineId, skillId: internal.skillId, scheduledFor: internal.scheduledFor, eventMetadata: internal.eventMetadata, conversationId: undefined, planId: undefined, taskIds: [], parentJobId: parentJobId ? String(parentJobId) : undefined, childJobIds: [], attempt: 0, nextActionAt: resolvedNextActionAt, attentionState: undefined, outcomeSummary: undefined, error: undefined, createdAt: now(), updatedAt: now(), conversation: { messages: [] } };
+      const job = { id: makeId(), title: t, objective: obj, ownerCoworkerId: String(ownerCoworkerId), executionTarget: target, status: "queued", priority: priority ?? "normal", workspaceId: undefined, requestedWorkspaceId: internal.workspaceId, routineId: internal.routineId, skillId: internal.skillId, scheduledFor: internal.scheduledFor, eventMetadata: internal.eventMetadata, conversationId: undefined, planId: undefined, taskIds: [], parentJobId: parentJobId ? String(parentJobId) : undefined, childJobIds: [], attempt: 0, nextActionAt: resolvedNextActionAt, attentionState: undefined, outcomeSummary: undefined, error: undefined, createdAt: now(), updatedAt: now(), conversation: { messages: [] } };
       appendMessage(job, "goal", obj, "user");
       jobs.push(job);
       if (parentJobId) { const p = getJob(parentJobId); p.childJobIds = [...(p.childJobIds ?? []), job.id]; p.updatedAt = now(); }
@@ -268,6 +356,24 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     async cancel(jobId) {
       const j = getJob(jobId);
       if (TERMINAL.has(j.status)) return publicJob(j);
+      if (isWorkerNodeTarget(j)) {
+        const latestRemote = j.remoteTaskId ?? (await runtime.orchestrator.listTasks()).filter((task) => (j.taskIds ?? []).includes(task.id)).map((task) => task.harnessState?.remoteTaskId).find(Boolean);
+        if (latestRemote) {
+          j.remoteTaskId = latestRemote;
+          try {
+            const result = await workerNodeStore?.cancel(j.executionTarget.nodeId, latestRemote);
+            if (!result || (result.confirmed !== true && result.status !== "cancelled"))
+              throw new Error("remote cancellation unconfirmed");
+          }
+          catch (error) {
+            j.error = "remote cancellation unconfirmed";
+            j.attentionState = { reason: j.error, at: now() };
+            setStatus(j, "needs_attention");
+            save();
+            return publicJob(j);
+          }
+        }
+      }
       for (const tid of j.taskIds ?? []) { try { await runtime.orchestrator.cancel(tid, { reason: `job ${j.id} cancelled` }); } catch {} }
       appendMessage(j, "answer", "Job cancelled by operator.");
       setStatus(j, "cancelled"); save(); return publicJob(j);

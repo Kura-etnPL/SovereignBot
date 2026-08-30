@@ -1,0 +1,10 @@
+.worker-node-copy { max-width: 720px; }
+.worker-node-safety { border: 1px solid var(--line, #d8dde8); border-radius: 12px; padding: 12px 14px; margin: 16px 0; color: var(--muted, #667085); }
+.worker-node-list { display: grid; gap: 12px; }
+.worker-node-card { border: 1px solid var(--line, #d8dde8); border-radius: 14px; padding: 16px; background: var(--surface, #fff); display: grid; gap: 10px; }
+.worker-node-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.worker-node-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted, #667085); font-size: 13px; }
+.worker-node-workspaces { margin: 0; padding-left: 20px; color: var(--muted, #667085); }
+.worker-node-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.worker-node-status.online { color: #087443; }
+.worker-node-status.offline, .worker-node-status.blocked { color: #a23b24; }

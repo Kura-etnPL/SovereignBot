@@ -164,7 +164,7 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
     return { agents, bindings };
 }
 
-export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false, coworkers = [] } = {}) {
+export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false, coworkers = [], includeWorkerNodeDispatcher = false } = {}) {
     if (!discovery || typeof discovery !== "object")
         throw new Error("provider roster requires discovery results");
 
@@ -239,7 +239,20 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
     }
 
     const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers });
-    const agents = [...orchestrationAgents, ...coworkerRuntime.agents];
+    // This identity is a narrow protocol adapter. It is never a planner/reviewer role,
+    // never receives browser/computer capabilities, and is only compatible with tasks
+    // explicitly stamped with the worker-node trusted context.
+    const workerNodeDispatcher = {
+        id: "worker-node-dispatcher",
+        name: "Worker Node Dispatcher",
+        role: "worker",
+        capabilities: ["worker-node"],
+        harness: { kind: "worker-node" },
+        maxConcurrency: 4,
+    };
+    const agents = includeWorkerNodeDispatcher
+        ? [...orchestrationAgents, ...coworkerRuntime.agents, workerNodeDispatcher]
+        : [...orchestrationAgents, ...coworkerRuntime.agents];
 
     return {
         mode: "provider",

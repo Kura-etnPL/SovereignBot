@@ -6,6 +6,7 @@ import { ComputerRegistry } from "./computer-registry.js";
 import { GovernedToolBridgeManager } from "./governed-tool-bridge.js";
 import { Governor } from "./governor.js";
 import { registerAgentToolBridgeManager } from "./harness.js";
+import { registerAgentWorkerNodeClient } from "./worker-node-harness.js";
 import { MemoryStore } from "./memory.js";
 import { OperatorSessionStore } from "./operator-session.js";
 import { Orchestrator } from "./orchestrator.js";
@@ -98,6 +99,8 @@ export async function createRuntime(config, options = {}) {
     for (const agent of runtimeConfig.agents) {
         if (Array.isArray(agent.governedTools) && agent.governedTools.length)
             registerAgentToolBridgeManager(agent, governedToolBridge);
+        if (agent.harness?.kind === "worker-node" && options.workerNodeClientResolver)
+            registerAgentWorkerNodeClient(agent, options.workerNodeClientResolver);
     }
 
     return {
@@ -117,6 +120,10 @@ export async function createRuntime(config, options = {}) {
         governedToolBridge,
         policyBootstrapped: policyBootstrap.bootstrapped,
         async close() {
+            for (const agent of runtimeConfig.agents) {
+                if (agent.harness?.kind === "worker-node")
+                    registerAgentWorkerNodeClient(agent, undefined);
+            }
             await governedToolBridge.close();
             await (managedComputerDriverFactory ?? computerDriverFactory)?.close?.();
         },

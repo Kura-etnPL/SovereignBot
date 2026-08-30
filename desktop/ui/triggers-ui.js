@@ -111,7 +111,7 @@
     ensureSurface();
     for (const view of document.querySelectorAll(".main-view")) view.classList.add("hidden");
     $("view-triggers")?.classList.remove("hidden");
-    for (const id of ["nav-work", "nav-attention", "nav-routines", "nav-settings"]) $(id)?.classList.remove("active");
+    for (const id of ["nav-work", "nav-attention", "nav-routines", "nav-worker-nodes", "nav-settings"]) $(id)?.classList.remove("active");
     $("nav-triggers")?.classList.add("active");
     clearTimeout(pollTimer);
     const poll = () => refresh().finally(() => { if (!$('view-triggers')?.classList.contains("hidden")) pollTimer = setTimeout(poll, 5000); });

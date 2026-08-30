@@ -182,7 +182,7 @@ export const IPC_CHANNELS = Object.freeze({
         validateRequest: (payload) => {
             if (!isPlainObject(payload)) throw new Error("request payload must be an object");
             assertNoForbiddenKeys(payload);
-            assertOnlyKnownKeys(payload, ["title", "objective", "ownerCoworkerId", "parentJobId", "priority", "nextActionAt"]);
+            assertOnlyKnownKeys(payload, ["title", "objective", "ownerCoworkerId", "parentJobId", "priority", "nextActionAt", "executionTarget"]);
             if (typeof payload.title !== "string" || !payload.title.trim()) throw new Error("missing request field: title");
             if (payload.title.length > 120) throw new Error("title exceeds 120 characters");
             if (typeof payload.objective !== "string" || !payload.objective.trim()) throw new Error("missing request field: objective");
@@ -192,6 +192,7 @@ export const IPC_CHANNELS = Object.freeze({
             if (payload.parentJobId !== undefined) out.parentJobId = idField()(payload.parentJobId, "parentJobId");
             if (payload.priority !== undefined) out.priority = enumField(["low", "normal", "high"])(payload.priority, "priority");
             if (payload.nextActionAt !== undefined) out.nextActionAt = stringField(64)(payload.nextActionAt, "nextActionAt");
+            if (payload.executionTarget !== undefined) out.executionTarget = workerExecutionTarget(payload.executionTarget);
             return out;
         },
     }),
@@ -399,6 +400,31 @@ function idField() {
             throw new Error(`${name} must be an identifier`);
         return value;
     };
+}
+
+function workerNodeIdField() {
+    return (value, name) => {
+        if (typeof value !== "string" || !/^worker_[0-9a-f]{16}$/i.test(value))
+            throw new Error(`${name} must be a Worker Node identifier`);
+        return value;
+    };
+}
+
+function workerExecutionTarget(value) {
+    if (!isPlainObject(value)) throw new Error("executionTarget must be an object");
+    if (value.kind === "local") {
+        assertOnlyKnownKeys(value, ["kind"]);
+        return { kind: "local" };
+    }
+    if (value.kind === "worker-node") {
+        assertOnlyKnownKeys(value, ["kind", "nodeId", "workspaceId"]);
+        return {
+            kind: "worker-node",
+            nodeId: workerNodeIdField()(value.nodeId, "executionTarget.nodeId"),
+            workspaceId: idField()(value.workspaceId, "executionTarget.workspaceId"),
+        };
+    }
+    throw new Error("executionTarget.kind must be local or worker-node");
 }
 
 function integerField(min, max) {

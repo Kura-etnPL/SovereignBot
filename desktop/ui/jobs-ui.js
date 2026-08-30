@@ -13,9 +13,22 @@
   let routines = [];
   let routinePollTimer;
   let currentRoutineId;
+  let workerNodes = [];
 
   function statusClass(s) { return `job-status ${s}`; }
   function statusLabel(s) { return t(`work.status.${s}`, s); }
+
+  function ensureExecutionTargetSurface() {
+    if ($("job-execution") || !$("job-form-error")) return;
+    const makeLabel = (caption, control) => { const label = document.createElement("label"); label.textContent = caption; label.append(control); return label; };
+    const execution = document.createElement("select"); execution.id = "job-execution";
+    for (const [value, caption] of [["local", "This computer / 本机"], ["worker-node", "Paired Worker Node / 已配对工作节点"]]) { const option = document.createElement("option"); option.value = value; option.textContent = caption; execution.append(option); }
+    const node = document.createElement("select"); node.id = "job-node";
+    const workspace = document.createElement("select"); workspace.id = "job-node-workspace";
+    const nodeFields = document.createElement("div"); nodeFields.id = "job-node-fields"; nodeFields.className = "hidden";
+    nodeFields.append(makeLabel("Worker Node", node), makeLabel("Node workspace", workspace));
+    $("job-form-error").before(makeLabel("Execution", execution), nodeFields);
+  }
 
   function renderList() {
     const root = $("work-list");
@@ -43,7 +56,8 @@
       const meta = document.createElement("div");
       meta.className = "setting-feedback";
       meta.style.margin = "0";
-      meta.textContent = `${job.ownerCoworkerId} · ${job.priority}${job.nextActionAt ? ` · next ${new Date(job.nextActionAt).toLocaleString()}` : ""}${job.error ? ` · ${job.error.slice(0,80)}` : ""}`;
+       const target = job.executionTarget?.kind === "worker-node" ? ` · ${job.workerNodeName ?? job.executionTarget.nodeId} / ${job.workerWorkspaceName ?? job.executionTarget.workspaceId}` : " · This computer";
+       meta.textContent = `${job.ownerCoworkerId} · ${job.priority}${target}${job.nextActionAt ? ` · next ${new Date(job.nextActionAt).toLocaleString()}` : ""}${job.error ? ` · ${job.error.slice(0,80)}` : ""}`;
       const actions = document.createElement("div");
       actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
       const openBtn = document.createElement("button");
@@ -164,6 +178,30 @@
       renderList();
     } catch {}
     await refreshAttention();
+  }
+
+  async function populateExecutionTargetForm() {
+    const execution = $("job-execution");
+    const node = $("job-node");
+    const workspace = $("job-node-workspace");
+    if (!execution || !node || !workspace) return;
+    try { workerNodes = (await window.sovereignbot.workerNodes.list({})).nodes ?? []; } catch { workerNodes = []; }
+    node.textContent = "";
+    for (const entry of workerNodes.filter((item) => item.enabled && item.status === "online")) {
+      const option = document.createElement("option");
+      option.value = entry.nodeId;
+      option.textContent = `${entry.name} (${entry.nodeId})`;
+      node.append(option);
+    }
+    workspace.textContent = "";
+    const selected = workerNodes.find((entry) => entry.nodeId === node.value);
+    for (const entry of selected?.workspaces ?? []) {
+      const option = document.createElement("option");
+      option.value = entry.id;
+      option.textContent = `${entry.name} (${entry.id})`;
+      workspace.append(option);
+    }
+    execution.dispatchEvent(new Event("change"));
   }
 
   async function refreshAttention() {
@@ -399,7 +437,7 @@
   function showRoutinesView() {
     for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
     $("view-routines")?.classList.remove("hidden");
-    for (const id of ["nav-work", "nav-attention", "nav-routines", "nav-triggers", "nav-settings"]) $(id)?.classList.remove("active");
+    for (const id of ["nav-work", "nav-attention", "nav-routines", "nav-triggers", "nav-worker-nodes", "nav-settings"]) $(id)?.classList.remove("active");
     $("nav-routines")?.classList.add("active");
     clearTimeout(routinePollTimer);
     clearTimeout(attentionPollTimer);
@@ -410,7 +448,7 @@
   function showAttentionView() {
     for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
     $("view-attention")?.classList.remove("hidden");
-    for (const id of ["nav-work", "nav-routines", "nav-triggers", "nav-settings"]) $(id)?.classList.remove("active");
+    for (const id of ["nav-work", "nav-routines", "nav-triggers", "nav-worker-nodes", "nav-settings"]) $(id)?.classList.remove("active");
     $("nav-attention")?.classList.add("active");
     clearTimeout(pollTimer);
     clearTimeout(routinePollTimer);
@@ -429,7 +467,7 @@
       for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
       $("view-work")?.classList.remove("hidden");
       await refresh();
-      for (const id of ["nav-settings", "nav-routines", "nav-attention", "nav-triggers"]) $(id)?.classList.remove("active"); $("nav-work")?.classList.add("active");
+      for (const id of ["nav-settings", "nav-routines", "nav-attention", "nav-triggers", "nav-worker-nodes"]) $(id)?.classList.remove("active"); $("nav-work")?.classList.add("active");
       clearTimeout(pollTimer);
       clearTimeout(routinePollTimer);
       clearTimeout(attentionPollTimer);
@@ -439,14 +477,35 @@
     $("nav-routines")?.addEventListener("click", showRoutinesView);
     $("nav-settings")?.addEventListener("click", () => {
       clearTimeout(pollTimer); clearTimeout(routinePollTimer); clearTimeout(attentionPollTimer);
-      for (const id of ["nav-work", "nav-attention", "nav-routines", "nav-triggers"]) $(id)?.classList.remove("active");
+      for (const id of ["nav-work", "nav-attention", "nav-routines", "nav-triggers", "nav-worker-nodes"]) $(id)?.classList.remove("active");
       $("nav-settings")?.classList.add("active");
     });
     $("work-refresh")?.addEventListener("click", refresh);
-    $("work-new")?.addEventListener("click", async () => { try { const cw = await window.sovereignbot.coworkers.list({}); populateOwnerSelect(cw?.coworkers ?? []); } catch {} $("job-dialog")?.showModal?.(); });
+    $("work-new")?.addEventListener("click", async () => { try { const cw = await window.sovereignbot.coworkers.list({}); populateOwnerSelect(cw?.coworkers ?? []); } catch {} await populateExecutionTargetForm(); $("job-dialog")?.showModal?.(); });
+    $("job-execution")?.addEventListener("change", () => {
+      const remote = $("job-execution").value === "worker-node";
+      $("job-node-fields")?.classList.toggle("hidden", !remote);
+      $("job-node-workspace")?.toggleAttribute("required", remote);
+      $("job-node")?.toggleAttribute("required", remote);
+    });
+    $("job-node")?.addEventListener("change", () => {
+      const workspace = $("job-node-workspace");
+      if (!workspace) return;
+      workspace.textContent = "";
+      const selected = workerNodes.find((entry) => entry.nodeId === $("job-node").value);
+      for (const entry of selected?.workspaces ?? []) {
+        const option = document.createElement("option"); option.value = entry.id; option.textContent = `${entry.name} (${entry.id})`; workspace.append(option);
+      }
+    });
     $("job-form")?.addEventListener("submit", async (e) => {
       e.preventDefault(); const errEl = $("job-form-error"); errEl?.classList.add("hidden");
-      try { await window.sovereignbot.jobs.submit({ title: $("job-title").value.trim(), objective: $("job-objective").value.trim(), ownerCoworkerId: $("job-owner").value }); $("job-dialog")?.close(); $("job-form")?.reset(); await refresh(); }
+      try {
+        const target = $("job-execution")?.value === "worker-node"
+          ? { kind: "worker-node", nodeId: $("job-node").value, workspaceId: $("job-node-workspace").value }
+          : { kind: "local" };
+        await window.sovereignbot.jobs.submit({ title: $("job-title").value.trim(), objective: $("job-objective").value.trim(), ownerCoworkerId: $("job-owner").value, executionTarget: target });
+        $("job-dialog")?.close(); $("job-form")?.reset(); await refresh();
+      }
       catch (err) { if (errEl) { errEl.textContent = String(err?.message ?? err).replace(/^.*Error: /, "").slice(0, 400); errEl.classList.remove("hidden"); } }
     });
     $("job-detail-approve")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.approve({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refreshAttention(); await refresh(); });
@@ -468,6 +527,7 @@
   }
 
   function init() {
+    ensureExecutionTargetSurface();
     ensureAttentionSurface();
     ensureRoutineSurface();
     bindEvents();
