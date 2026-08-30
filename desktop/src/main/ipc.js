@@ -1,6 +1,7 @@
 import { ipcMain } from "electron";
 import { IPC_CHANNELS, validateIpcRequest } from "./lib/ipc-schema.js";
 import { V3_IPC_CHANNELS, validateV3IpcRequest } from "./lib/v3-ipc-schema.js";
+import { normalizeEventRelativePath } from "./lib/event-metadata.js";
 
 const LIVE_FRAME_CHANNEL = "computer:frame";
 const ATTACH_CHANNEL = "artifact:attachViaDialog";
@@ -20,6 +21,13 @@ const ROUTINE_CHANNELS = Object.freeze({
     "routine:setEnabled": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:remove": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
+const EVENT_TRIGGER_CHANNELS = Object.freeze({
+    "eventTrigger:create": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 4096 }),
+    "eventTrigger:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "eventTrigger:get": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "eventTrigger:setEnabled": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "eventTrigger:remove": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+});
 const ALL_IPC_CHANNELS = Object.freeze({
     ...IPC_CHANNELS,
     ...V3_IPC_CHANNELS,
@@ -27,6 +35,7 @@ const ALL_IPC_CHANNELS = Object.freeze({
     [ATTACH_CHANNEL]: Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     ...SKILL_CHANNELS,
     ...ROUTINE_CHANNELS,
+    ...EVENT_TRIGGER_CHANNELS,
 });
 
 function assertObject(payload, label) {
@@ -56,6 +65,12 @@ function skillId(value) {
 function routineId(value) {
     if (typeof value !== "string" || !/^routine_[a-f0-9]{16}$/i.test(value))
         throw new Error("routineId must be a routine identifier");
+    return value;
+}
+
+function eventTriggerId(value) {
+    if (typeof value !== "string" || !/^trigger_[a-f0-9]{16}$/i.test(value))
+        throw new Error("triggerId must be an event trigger identifier");
     return value;
 }
 
@@ -176,6 +191,40 @@ function validateRoutineRequest(channel, payload) {
     throw new Error(`unknown routine IPC channel: ${channel}`);
 }
 
+function validateEventPathPrefix(value) {
+    const clean = boundedString(value ?? "", "pathPrefix", 512) ?? "";
+    if (!clean) return "";
+    return normalizeEventRelativePath(clean, "pathPrefix");
+}
+
+function validateEventTriggerRequest(channel, payload) {
+    const bytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
+    if (bytes > EVENT_TRIGGER_CHANNELS[channel].maxPayloadBytes) throw new Error(`${channel} payload is too large`);
+    if (channel === "eventTrigger:list") {
+        exactKeys(payload, new Set(), channel);
+        return {};
+    }
+    if (["eventTrigger:get", "eventTrigger:remove"].includes(channel)) {
+        exactKeys(payload, new Set(["triggerId"]), channel);
+        return { triggerId: eventTriggerId(payload.triggerId) };
+    }
+    if (channel === "eventTrigger:setEnabled") {
+        exactKeys(payload, new Set(["triggerId", "enabled"]), channel);
+        if (typeof payload.enabled !== "boolean") throw new Error("enabled must be boolean");
+        return { triggerId: eventTriggerId(payload.triggerId), enabled: payload.enabled };
+    }
+    if (channel === "eventTrigger:create") {
+        exactKeys(payload, new Set(["name", "routineId", "workspaceId", "pathPrefix"]), channel);
+        return {
+            name: boundedString(payload.name, "trigger name", 120, true),
+            routineId: routineId(payload.routineId),
+            workspaceId: generalId(payload.workspaceId, "workspaceId"),
+            pathPrefix: validateEventPathPrefix(payload.pathPrefix),
+        };
+    }
+    throw new Error(`unknown event trigger IPC channel: ${channel}`);
+}
+
 function validateLiveFrame(payload) {
     exactKeys(payload, new Set(["agentId"]), LIVE_FRAME_CHANNEL);
     if (typeof payload.agentId !== "string" || !/^[A-Za-z0-9][\w:.-]{0,127}$/.test(payload.agentId))
@@ -202,6 +251,8 @@ function validateRequest(channel, payload) {
         return validateSkillRequest(channel, payload);
     if (ROUTINE_CHANNELS[channel])
         return validateRoutineRequest(channel, payload);
+    if (EVENT_TRIGGER_CHANNELS[channel])
+        return validateEventTriggerRequest(channel, payload);
     if (channel === "conversation:send")
         return validateConversationSend(payload);
     return V3_IPC_CHANNELS[channel]

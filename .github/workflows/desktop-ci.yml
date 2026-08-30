@@ -52,6 +52,13 @@ jobs:
         working-directory: desktop
         run: node scripts/verify-v43-attention.mjs
 
+      # V4.4's deterministic real-Electron gate proves trusted workspace fs.watch
+      # events enter the existing Routine -> Job -> Chief path with durable state,
+      # coalescing, fail-closed references, restart recovery, and bilingual UI.
+      - name: V4.4 Event Trigger vertical gate
+        working-directory: desktop
+        run: node scripts/verify-v44-event-triggers.mjs
+
       - name: Fetch pinned internal Node runtime
         working-directory: desktop
         run: npm run fetch-node

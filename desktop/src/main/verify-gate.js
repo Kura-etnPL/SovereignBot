@@ -31,6 +31,8 @@ export async function runVerifyGate({ app }) {
   const { createGoalController } = await import("./goal-controller.js");
   const { createJobController } = await import("./job-controller.js");
   const { createChiefLoop } = await import("./chief-loop.js");
+  const { ROUTINES_SCHEMA } = await import("./routine-controller.js");
+  const { EVENT_TRIGGERS_SCHEMA } = await import("./event-trigger-controller.js");
   const { createCoworkerDispatcher } = await import("./coworker-dispatcher.js");
   const { createArtifactStore } = await import("./artifact-store.js");
   const { createAttachmentAwareConversationStore } = await import("./attachment-integration.js");
@@ -166,6 +168,10 @@ export async function runVerifyGate({ app }) {
         "job:approve": async ({ jobId }) => currentJobs.approve(jobId),
         "job:dismiss": async ({ jobId }) => currentJobs.dismiss(jobId),
         "job:attention": () => currentJobs.attentionJobs(),
+        // V4.1 does not exercise Routine/Trigger behavior, but the shared
+        // renderer hydrates both read-only surfaces during startup.
+        "routine:list": () => ({ schema: ROUTINES_SCHEMA, routines: [] }),
+        "eventTrigger:list": () => ({ schema: EVENT_TRIGGERS_SCHEMA, triggers: [] }),
         ...skillHandlers,
         ...bridge.handlers,
       },

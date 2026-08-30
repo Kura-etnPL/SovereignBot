@@ -30,6 +30,23 @@ test("unknown or oversized payloads and channels are rejected fail-closed", () =
     );
 });
 
+test("renderer job submission rejects internal event metadata instead of stripping it", () => {
+    const payload = {
+        title: "Renderer job",
+        objective: "A renderer-created job",
+        ownerCoworkerId: "coworker_1234567890abcdef",
+    };
+    assert.deepEqual(validateIpcRequest("job:submit", payload), payload);
+    assert.throws(
+        () => validateIpcRequest("job:submit", { ...payload, internalContext: { eventMetadata: { source: "workspace-file-change" } } }),
+        /unexpected request field/,
+    );
+    assert.throws(
+        () => validateIpcRequest("job:submit", { ...payload, eventMetadata: { source: "workspace-file-change" } }),
+        /unexpected request field/,
+    );
+});
+
 test("authority-bearing fields are rejected in any operator request payload", () => {
     for (const field of ["actorId", "actor", "harnessState", "sessionId", "bearerToken", "capability"]) {
         const payload = field === "actorId"

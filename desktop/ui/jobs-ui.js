@@ -399,7 +399,7 @@
   function showRoutinesView() {
     for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
     $("view-routines")?.classList.remove("hidden");
-    $("nav-work")?.classList.remove("active"); $("nav-attention")?.classList.remove("active"); $("nav-settings")?.classList.remove("active");
+    for (const id of ["nav-work", "nav-attention", "nav-routines", "nav-triggers", "nav-settings"]) $(id)?.classList.remove("active");
     $("nav-routines")?.classList.add("active");
     clearTimeout(routinePollTimer);
     clearTimeout(attentionPollTimer);
@@ -410,7 +410,7 @@
   function showAttentionView() {
     for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
     $("view-attention")?.classList.remove("hidden");
-    for (const id of ["nav-work", "nav-routines", "nav-settings"]) $(id)?.classList.remove("active");
+    for (const id of ["nav-work", "nav-routines", "nav-triggers", "nav-settings"]) $(id)?.classList.remove("active");
     $("nav-attention")?.classList.add("active");
     clearTimeout(pollTimer);
     clearTimeout(routinePollTimer);
@@ -429,7 +429,7 @@
       for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
       $("view-work")?.classList.remove("hidden");
       await refresh();
-      $("nav-settings")?.classList.remove("active"); $("nav-routines")?.classList.remove("active"); $("nav-attention")?.classList.remove("active"); $("nav-work")?.classList.add("active");
+      for (const id of ["nav-settings", "nav-routines", "nav-attention", "nav-triggers"]) $(id)?.classList.remove("active"); $("nav-work")?.classList.add("active");
       clearTimeout(pollTimer);
       clearTimeout(routinePollTimer);
       clearTimeout(attentionPollTimer);
@@ -439,7 +439,7 @@
     $("nav-routines")?.addEventListener("click", showRoutinesView);
     $("nav-settings")?.addEventListener("click", () => {
       clearTimeout(pollTimer); clearTimeout(routinePollTimer); clearTimeout(attentionPollTimer);
-      for (const id of ["nav-work", "nav-attention", "nav-routines"]) $(id)?.classList.remove("active");
+      for (const id of ["nav-work", "nav-attention", "nav-routines", "nav-triggers"]) $(id)?.classList.remove("active");
       $("nav-settings")?.classList.add("active");
     });
     $("work-refresh")?.addEventListener("click", refresh);

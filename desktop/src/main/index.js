@@ -12,6 +12,7 @@ import { createGoalController } from "./goal-controller.js";
 import { createJobController } from "./job-controller.js";
 import { createChiefLoop } from "./chief-loop.js";
 import { createRoutineController } from "./routine-controller.js";
+import { createEventTriggerController } from "./event-trigger-controller.js";
 import { createCoworkerStore } from "./coworker-store.js";
 import { createConversationStore } from "./conversation-store.js";
 import { createArtifactStore } from "./artifact-store.js";
@@ -121,6 +122,7 @@ async function main() {
     let goals;
     let jobs;
     let routines;
+    let eventTriggers;
     let chiefLoop;
     let coworkerDispatcher;
     let quitting = false;
@@ -132,6 +134,7 @@ async function main() {
             return;
         shutdownStarted = true;
         quitting = true;
+        try { eventTriggers?.stop(); } catch {}
         try { routines?.stop(); } catch {}
         try { chiefLoop?.stop(); } catch {}
         try {
@@ -144,6 +147,7 @@ async function main() {
                 }
                 await Promise.race([goals.flush(), delay(15_000)]);
             }
+            if (eventTriggers) await Promise.race([eventTriggers.flush(), delay(5_000)]);
             if (routines) await Promise.race([routines.flush(), delay(5_000)]);
             if (jobs) await Promise.race([jobs.flush(), delay(15_000)]);
             await Promise.race([host?.close(), delay(15_000)]);
@@ -177,6 +181,7 @@ async function main() {
         : false;
 
     function rebuildRuntimeBoundServices() {
+        try { eventTriggers?.stop(); } catch {}
         try { routines?.stop(); } catch {}
         try { chiefLoop?.stop(); } catch {}
         bridge = createOperatorBridge(host.runtime);
@@ -208,8 +213,10 @@ async function main() {
             readiness: goalReadiness,
         });
         routines = createRoutineController({ dataDir, jobController: jobs, coworkerStore, skillStore, services });
+        eventTriggers = createEventTriggerController({ dataDir, routineController: routines, services });
         chiefLoop = createChiefLoop({ jobController: jobs, goalController: goals, roster: () => host.rosterSummary() });
         routines.start();
+        eventTriggers.start();
         chiefLoop.start();
         coworkerDispatcher = createCoworkerDispatcher({
             dataDir,
@@ -251,10 +258,18 @@ async function main() {
                     await applyProviderRefresh(refresh);
                     return { ...result, refresh };
                 },
-                "workspace:addViaDialog": () => services.addWorkspaceViaDialog(win),
+                "workspace:addViaDialog": async () => {
+                    const result = await services.addWorkspaceViaDialog(win);
+                    eventTriggers?.reconcile();
+                    return result;
+                },
                 "workspace:list": () => services.listWorkspaces(),
                 "workspace:setDefault": ({ id }) => ({ ok: services.setDefaultWorkspace(id) }),
-                "workspace:remove": ({ id }) => ({ removed: services.removeWorkspace(id) }),
+                "workspace:remove": ({ id }) => {
+                    const removed = services.removeWorkspace(id);
+                    eventTriggers?.reconcile();
+                    return { removed };
+                },
                 "settings:get": () => services.getSettings(),
                 "settings:update": (patch) => services.updateSettings(patch),
                 "provider:getRoster": () => host.rosterSummary(),
@@ -326,8 +341,21 @@ async function main() {
                 "routine:list": () => routines.list(),
                 "routine:get": ({ routineId }) => routines.get(routineId),
                 "routine:history": ({ routineId }) => routines.history(routineId),
-                "routine:setEnabled": ({ routineId, enabled }) => routines.setEnabled(routineId, enabled),
-                "routine:remove": ({ routineId }) => routines.remove(routineId),
+                "routine:setEnabled": ({ routineId, enabled }) => {
+                    const result = routines.setEnabled(routineId, enabled);
+                    eventTriggers?.reconcile();
+                    return result;
+                },
+                "routine:remove": ({ routineId }) => {
+                    const result = routines.remove(routineId);
+                    eventTriggers?.reconcile();
+                    return result;
+                },
+                "eventTrigger:create": (payload) => eventTriggers.create(payload),
+                "eventTrigger:list": () => eventTriggers.list(),
+                "eventTrigger:get": ({ triggerId }) => eventTriggers.get(triggerId),
+                "eventTrigger:setEnabled": ({ triggerId, enabled }) => eventTriggers.setEnabled(triggerId, enabled),
+                "eventTrigger:remove": ({ triggerId }) => eventTriggers.remove(triggerId),
             },
         });
     }
