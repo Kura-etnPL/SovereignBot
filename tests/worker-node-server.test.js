@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request as httpRequest } from "node:http";
 import { createWorkerNodeClient } from "../src/worker-node-client.js";
@@ -61,7 +62,7 @@ async function rawRequest(url, { method = "GET", tokenValue, body } = {}) {
 }
 
 async function fixture() {
-    const root = await mkdtemp(join("E:/Eternal/Auto_Empire/runtime/sovereign-control/v45-worker-node/", "unit-server-"));
+    const root = await mkdtemp(join(tmpdir(), "sovereign-v45-unit-server-"));
     const dataDir = join(root, "node-data");
     const workspace = join(root, "workspace");
     await mkdir(workspace, { recursive: true });
@@ -120,21 +121,33 @@ test("Worker Node server is authenticated, redacted, idempotent, and fail-closed
         assert.equal(JSON.stringify(publicLedger).includes(token), false);
         assert.equal(JSON.stringify(publicLedger).includes(f.workspace), false);
     }
-    finally { await f.server.close(); }
+    finally {
+        await f.server.close();
+        await rm(f.root, { recursive: true, force: true });
+    }
 });
 
 test("dispatch ledger marks active work interrupted after restart and never replays", async () => {
-    const root = await mkdtemp(join("E:/Eternal/Auto_Empire/runtime/sovereign-control/v45-worker-node/", "unit-ledger-"));
-    const first = new WorkerNodeDispatchStore(root);
-    await first.put({ requestId: "worker_request_0123456789abcdef", bodyHash: "a".repeat(64), planId: "task_plan", remoteTaskId: "task_00000001-1111-4111-8111-111111111111", status: "running", statusSummary: "running", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-    const restarted = new WorkerNodeDispatchStore(root);
-    const record = await restarted.get("worker_request_0123456789abcdef");
-    assert.equal(record.status, "failed");
-    assert.match(record.statusSummary, /interrupted/);
+    const root = await mkdtemp(join(tmpdir(), "sovereign-v45-unit-ledger-"));
+    try {
+        const first = new WorkerNodeDispatchStore(root);
+        await first.put({ requestId: "worker_request_0123456789abcdef", bodyHash: "a".repeat(64), planId: "task_plan", remoteTaskId: "task_00000001-1111-4111-8111-111111111111", status: "running", statusSummary: "running", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+        const restarted = new WorkerNodeDispatchStore(root);
+        const record = await restarted.get("worker_request_0123456789abcdef");
+        assert.equal(record.status, "failed");
+        assert.match(record.statusSummary, /interrupted/);
+    }
+    finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("worker node configuration rejects non-loopback bind and authority-bearing worker", async () => {
-    const base = { dataDir: "E:/Eternal/Auto_Empire/runtime/sovereign-control/v45-worker-node/config-data", name: "x", bindHost: "127.0.0.1", port: 1, supervisorAgentId: "sup", workerAgentId: "wrk", workspaces: [{ id: "ws_main", name: "Main", path: "E:/Eternal/Auto_Empire" }], agents: [{ id: "sup", role: "supervisor", capabilities: [], harness: { kind: "echo" } }, { id: "wrk", role: "worker", capabilities: [], harness: { kind: "echo" } }], policy: { rules: [] } };
-    assert.throws(() => validateWorkerNodeConfig({ ...base, bindHost: "0.0.0.0" }), /loopback/);
-    assert.throws(() => validateWorkerNodeConfig({ ...base, agents: [...base.agents.slice(0, 1), { ...base.agents[1], capabilities: ["browser"] }] }), /browser/);
+    const root = await mkdtemp(join(tmpdir(), "sovereign-v45-config-"));
+    try {
+        const workspace = join(root, "workspace");
+        const base = { dataDir: join(root, "data"), name: "x", bindHost: "127.0.0.1", port: 1, supervisorAgentId: "sup", workerAgentId: "wrk", workspaces: [{ id: "ws_main", name: "Main", path: workspace }], agents: [{ id: "sup", role: "supervisor", capabilities: [], harness: { kind: "echo" } }, { id: "wrk", role: "worker", capabilities: [], harness: { kind: "echo" } }], policy: { rules: [] } };
+        await mkdir(workspace, { recursive: true });
+        assert.throws(() => validateWorkerNodeConfig({ ...base, bindHost: "0.0.0.0" }), /loopback/);
+        assert.throws(() => validateWorkerNodeConfig({ ...base, agents: [...base.agents.slice(0, 1), { ...base.agents[1], capabilities: ["browser"] }] }), /browser/);
+    }
+    finally { await rm(root, { recursive: true, force: true }); }
 });

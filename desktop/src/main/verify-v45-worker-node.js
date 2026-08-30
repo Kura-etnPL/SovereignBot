@@ -72,6 +72,44 @@ function probeWindowsIntegrity() {
   }
 }
 
+function githubHostedRunner() {
+  return process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_ENVIRONMENT === "github-hosted";
+}
+
+function createWorkerNodeLaunch({ nodeExecutable, configPath, transcriptPath }) {
+  return {
+    executable: nodeExecutable,
+    args: [
+      join(WORKTREE_ROOT, "src", "cli.js"),
+      "worker-node",
+      "serve",
+      "--config",
+      configPath,
+    ],
+    options: {
+      cwd: WORKTREE_ROOT,
+      env: cleanChildEnv({ nodeExecutable, transcriptPath }),
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+      windowsHide: true,
+    },
+  };
+}
+
+function auditWorkerNodeLaunch(launch) {
+  const forbidden = /start-process\s+-verb\s+runas|(?:^|[\\/])runas(?:\.exe)?(?:$|\s)|shellexecute\s*=\s*["']?runas\b|requireadministrator|\b(?:sudo|pkexec)\b|--(?:no-sandbox|disable-gpu-sandbox|disable-sandbox)\b/i;
+  const launchText = [launch.executable, ...(launch.args ?? []), ...(process.argv ?? [])].join("\n");
+  const expectedEntrypoint = join(WORKTREE_ROOT, "src", "cli.js");
+  const explicitElevationRequested = forbidden.test(launchText);
+  const safe = launch.options?.shell === false
+    && launch.options?.windowsHide === true
+    && launch.args?.[0] === expectedEntrypoint
+    && launch.args?.[1] === "worker-node"
+    && launch.args?.[2] === "serve"
+    && !explicitElevationRequested;
+  return { safe, explicitElevationRequested };
+}
+
 async function freeLoopbackPort() {
   const server = createServer();
   await new Promise((resolve, reject) => {
@@ -128,19 +166,8 @@ function runProcess(executable, args, options = {}) {
 }
 
 async function startWorkerProcess({ nodeExecutable, configPath, transcriptPath, onOutput }) {
-  const child = spawn(nodeExecutable, [
-    join(WORKTREE_ROOT, "src", "cli.js"),
-    "worker-node",
-    "serve",
-    "--config",
-    configPath,
-  ], {
-    cwd: WORKTREE_ROOT,
-    env: cleanChildEnv({ nodeExecutable, transcriptPath }),
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: false,
-    windowsHide: true,
-  });
+  const launch = createWorkerNodeLaunch({ nodeExecutable, configPath, transcriptPath });
+  const child = spawn(launch.executable, launch.args, launch.options);
   let stdout = "";
   let stderr = "";
   let exitResolve;
@@ -311,6 +338,8 @@ export async function runVerifyV45WorkerNode({ app }) {
   let disabledJob;
   let publicSurface;
   let integrity;
+  let hostedRunner = false;
+  let workerLaunchAudit;
 
   const renderer = async (script) => await win.webContents.executeJavaScript(script);
 
@@ -352,10 +381,21 @@ export async function runVerifyV45WorkerNode({ app }) {
   }
 
   try {
+    hostedRunner = githubHostedRunner();
     integrity = probeWindowsIntegrity();
-    check("WINDOWS_INTEGRITY_MEDIUM", integrity.level === "Medium", integrity);
-    check("NO_WINDOWS_ADMIN", integrity.noAdmin, integrity);
-    check("NO_DOWNGRADE", !process.argv.some((arg) => /no-sandbox|disable-sandbox|insecure/i.test(arg)), process.argv);
+    if (hostedRunner) {
+      check("GITHUB_HOSTED_WINDOWS_CONTEXT", process.platform === "win32", { environment: "github-hosted", integrity: integrity.level });
+      check("HOSTED_RUNNER_ELEVATION_CLASSIFIED", process.platform === "win32" && integrity.level === "High-or-system" && integrity.noAdmin === false, { environment: "github-hosted", integrity: integrity.level, noAdmin: integrity.noAdmin });
+    }
+    else {
+      check("WINDOWS_INTEGRITY_MEDIUM", integrity.level === "Medium", integrity);
+      check("NO_WINDOWS_ADMIN", integrity.noAdmin, integrity);
+    }
+    const hostExecutionAccepted = hostedRunner
+      ? process.platform === "win32" && integrity.level === "High-or-system" && integrity.noAdmin === false
+      : process.platform === "win32" && integrity.level === "Medium" && integrity.noAdmin === true;
+    check("HOST_EXECUTION_CONTEXT_ACCEPTED", hostExecutionAccepted, { environment: hostedRunner ? "github-hosted" : "local", integrity: integrity.level, noAdmin: integrity.noAdmin });
+    check("NO_DOWNGRADE", !process.argv.some((arg) => /no-sandbox|disable-(?:gpu-)?sandbox|insecure/i.test(arg)), process.argv);
 
     runDir = await mkdtemp(join(EVIDENCE_DIR, "tmp-"));
     desktopDataDir = join(runDir, "desktop-data");
@@ -411,6 +451,9 @@ export async function runVerifyV45WorkerNode({ app }) {
       },
     };
     await writeFile(nodeConfigPath, `${JSON.stringify(workerConfig, null, 2)}\n`, "utf8");
+    const workerLaunch = createWorkerNodeLaunch({ nodeExecutable, configPath: nodeConfigPath, transcriptPath });
+    workerLaunchAudit = auditWorkerNodeLaunch(workerLaunch);
+    check("NO_EXPLICIT_WINDOWS_ELEVATION", workerLaunchAudit.safe, { environment: hostedRunner ? "github-hosted" : "local", explicitElevationRequested: workerLaunchAudit.explicitElevationRequested, shell: workerLaunch.options.shell, windowsHide: workerLaunch.options.windowsHide });
     worker = await startWorkerProcess({
       nodeExecutable,
       configPath: nodeConfigPath,
@@ -862,7 +905,7 @@ export async function runVerifyV45WorkerNode({ app }) {
     nodeId,
     nodeWorkspaceId,
     endpoint: nodeEndpoint,
-    host: { integrity: integrity?.level, noAdmin: integrity?.noAdmin, internalNodeSource: nodeExecutable ? "pinned" : undefined },
+    host: { environment: hostedRunner ? "github-hosted" : "local", integrity: integrity?.level, noAdmin: integrity?.noAdmin, explicitElevationRequested: workerLaunchAudit?.explicitElevationRequested, internalNodeSource: nodeExecutable ? "pinned" : undefined },
     firstJob: firstJob ? { id: firstJob.id, status: firstJob.status, executionTarget: firstJob.executionTarget } : undefined,
     cancelJob: cancelJob ? { id: cancelJob.id, status: cancelJob.status } : undefined,
     disabledJob: disabledJob ? { id: disabledJob.id, status: disabledJob.status } : undefined,
