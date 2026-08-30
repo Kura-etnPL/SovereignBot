@@ -163,8 +163,15 @@ test("watch descriptor anchors existing files and decodes every safe callback sh
     assert.equal(decodeWatcherCallback(descriptor, "order.json", options).relativePath, "inbox/order.json");
     assert.equal(decodeWatcherCallback(descriptor, "inbox/order.json", options).relativePath, "inbox/order.json");
     assert.equal(decodeWatcherCallback(descriptor, Buffer.from("order.json"), options).relativePath, "inbox/order.json");
-    assert.equal(decodeWatcherCallback(descriptor, join(value.root, "inbox", "order.json"), options).relativePath, "inbox/order.json");
-    assert.equal(decodeWatcherCallback(descriptor, join(dataDir, "outside.json"), options).relativePath, undefined);
+    const canonicalAbsolute = decodeWatcherCallback(descriptor, join(descriptor.workspaceRoot, "inbox", "order.json"), options);
+    assert.equal(canonicalAbsolute.relativePath, "inbox/order.json");
+    assert.equal(canonicalAbsolute.diagnostic.raw, "<workspace>/inbox/order.json");
+    const aliasedAbsolute = decodeWatcherCallback(descriptor, join(value.root, "inbox", "order.json"), options);
+    assert.equal(aliasedAbsolute.relativePath, "inbox/order.json");
+    assert.equal(aliasedAbsolute.diagnostic.raw, "<workspace>/inbox/order.json");
+    const absoluteOutside = decodeWatcherCallback(descriptor, join(dataDir, "outside.json"), options);
+    assert.equal(absoluteOutside.relativePath, undefined);
+    assert.equal(absoluteOutside.diagnostic.raw, "<absolute-outside>");
     assert.equal(decodeWatcherCallback(descriptor, null, options).diagnostic.rejectedReason, "filename-unavailable");
     assert.match(decodeWatcherCallback(descriptor, "../escape", options).diagnostic.rejectedReason, /traversal/);
     assert.equal(decodeWatcherCallback(descriptor, "inbox-old/order.json", options).relativePath, undefined);

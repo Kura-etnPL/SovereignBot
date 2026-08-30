@@ -118,7 +118,6 @@ function safeRelative(root, candidate, { allowEmpty = false } = {}) {
 function realRelativeInside(root, candidate, { allowEmpty = false } = {}) {
   const rootPath = resolve(root);
   const candidatePath = resolve(candidate);
-  safeRelative(rootPath, candidatePath, { allowEmpty });
   const realRoot = realpath(rootPath);
   const realCandidate = realpathWithExistingAncestor(candidatePath);
   return safeRelative(realRoot, realCandidate, { allowEmpty });
@@ -144,6 +143,15 @@ function rawFilename(filename) {
 function sanitizeRawFilename(filename, workspaceRoot) {
   let value = rawFilename(filename);
   if (typeof value !== "string") return value;
+  if (isAbsoluteCallbackPath(value)) {
+    if (!workspaceRoot) return "<absolute-untrusted>";
+    try {
+      const relativePath = realRelativeInside(workspaceRoot, value, { allowEmpty: true });
+      return `<workspace>${relativePath ? `/${relativePath}` : ""}`;
+    } catch {
+      return "<absolute-outside>";
+    }
+  }
   const normalized = value.replaceAll("\\", "/");
   const root = String(workspaceRoot ?? "").replaceAll("\\", "/").replace(/\/+$/, "");
   const variants = normalized.startsWith("//?/") ? [normalized.slice(4), normalized] : [normalized];
