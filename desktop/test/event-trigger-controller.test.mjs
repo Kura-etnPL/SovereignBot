@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createEventTriggerController, decodeWatcherCallback, deriveWatchDescriptor, EVENT_TRIGGERS_SCHEMA } from "../src/main/event-trigger-controller.js";
+
+function canonicalPathIdentity(value) {
+  const resolved = typeof realpathSync.native === "function" ? realpathSync.native(value) : realpathSync(value);
+  let normalized = resolved.replaceAll("\\", "/");
+  if (normalized.startsWith("//?/")) normalized = normalized.slice(4);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function assertSameCanonicalPath(actual, expected, message) {
+  assert.equal(canonicalPathIdentity(actual), canonicalPathIdentity(expected), message);
+}
 
 function fakeTimers(clock) {
   let sequence = 0;
@@ -95,7 +106,14 @@ test("trailing debounce resets on the final callback and emits one event only af
     writeFileSync(join(value.root, "inbox", "order.json"), "baseline", "utf8");
     const trigger = value.controller.create({ name: "Inbox review", routineId: value.routine.id, workspaceId: value.routine.workspaceId, pathPrefix: "./inbox/order.json//" });
     value.controller.start();
-    const watcher = value.watchers.get(join(value.root, "inbox"));
+    const diagnostics = value.controller.diagnostics();
+    const descriptor = diagnostics.watchers.find((entry) => entry.triggerIds.includes(trigger.id));
+    assert.ok(descriptor, "trigger must own a real watcher descriptor");
+    assert.equal(descriptor.baseRelative, "inbox");
+    assert.equal(descriptor.recursive, false);
+    assertSameCanonicalPath(descriptor.watchRoot, join(value.root, "inbox"), "the existing-file watcher must use the canonical inbox parent");
+    const watcher = value.watchers.get(descriptor.watchRoot) ?? value.installations.find((entry) => !entry.closed && canonicalPathIdentity(entry.watchRoot) === canonicalPathIdentity(descriptor.watchRoot));
+    assert.ok(watcher, "the canonical descriptor must map to an active fake watcher");
 
     watcher.callback("change", "order.json");
     const beforeQuiet = value.controller.flush();
@@ -131,7 +149,7 @@ test("watch descriptor anchors existing files and decodes every safe callback sh
     const trigger = { pathPrefix: "inbox/order.json" };
     const descriptor = deriveWatchDescriptor(trigger, value.root);
     assert.equal(descriptor.baseRelative, "inbox");
-    assert.equal(descriptor.watchRoot, join(value.root, "inbox"));
+    assertSameCanonicalPath(descriptor.watchRoot, join(value.root, "inbox"), "8.3 and long-path spellings must resolve to the same watcher anchor");
     assert.equal(descriptor.recursive, false);
     mkdirSync(join(value.root, "inbox", "existing"), { recursive: true });
     const directoryDescriptor = deriveWatchDescriptor({ pathPrefix: "inbox/existing" }, value.root);
@@ -161,7 +179,11 @@ test("watch descriptor anchors existing files and decodes every safe callback sh
 
     const publicDescriptor = value.controller.create({ name: "Anchored file", routineId: value.routine.id, workspaceId: value.routine.workspaceId, pathPrefix: trigger.pathPrefix });
     value.controller.start();
-    const watcher = value.watchers.get(join(value.root, "inbox"));
+    const publicDiagnostics = value.controller.diagnostics();
+    const publicWatcherDescriptor = publicDiagnostics.watchers.find((entry) => entry.triggerIds.includes(publicDescriptor.id));
+    assert.ok(publicWatcherDescriptor, "public trigger must own a real watcher descriptor");
+    const watcher = value.watchers.get(publicWatcherDescriptor.watchRoot) ?? value.installations.find((entry) => !entry.closed && canonicalPathIdentity(entry.watchRoot) === canonicalPathIdentity(publicWatcherDescriptor.watchRoot));
+    assert.ok(watcher, "the canonical descriptor must map to an active fake watcher");
     watcher.callback("change", "order.json");
     value.timers.advance(0);
     await value.controller.flush();
