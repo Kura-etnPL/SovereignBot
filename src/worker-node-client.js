@@ -31,13 +31,14 @@ function requestJson(endpoint, token, method, pathname, body, { timeoutMs = DEFA
     const cleanEndpoint = validateLoopbackEndpoint(endpoint);
     const validToken = validateToken(token);
     const url = new URL(cleanEndpoint);
+    const hostname = url.hostname.replace(/^\[|\]$/g, "");
     const text = body === undefined ? "" : JSON.stringify(body);
     if (Buffer.byteLength(text, "utf8") > WORKER_NODE_BODY_LIMIT)
         throw new WorkerNodeProtocolError("Worker Node request is too large", 413, "too_large");
     return new Promise((resolve, reject) => {
         const req = httpRequest({
             protocol: url.protocol,
-            hostname: url.hostname,
+            hostname,
             port: url.port,
             method,
             path: pathname,

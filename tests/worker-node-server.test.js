@@ -50,7 +50,7 @@ async function rawRequest(url, { method = "GET", tokenValue, body } = {}) {
     const target = new URL(url);
     const text = body === undefined ? "" : JSON.stringify(body);
     return await new Promise((resolve, reject) => {
-        const request = httpRequest({ hostname: target.hostname, port: target.port, path: target.pathname, method, headers: { authorization: tokenValue ? `Bearer ${tokenValue}` : undefined, "content-type": "application/json", "content-length": Buffer.byteLength(text) } }, (response) => {
+        const request = httpRequest({ hostname: target.hostname.replace(/^\[|\]$/g, ""), port: target.port, path: target.pathname, method, headers: { ...(tokenValue ? { authorization: `Bearer ${tokenValue}` } : {}), "content-type": "application/json", "content-length": Buffer.byteLength(text) } }, (response) => {
             const chunks = [];
             response.on("data", (chunk) => chunks.push(chunk));
             response.on("end", () => resolve({ status: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) }));
@@ -61,7 +61,7 @@ async function rawRequest(url, { method = "GET", tokenValue, body } = {}) {
     });
 }
 
-async function fixture() {
+async function fixture({ bindHost = "127.0.0.1" } = {}) {
     const root = await mkdtemp(join(tmpdir(), "sovereign-v45-unit-server-"));
     const dataDir = join(root, "node-data");
     const workspace = join(root, "workspace");
@@ -69,7 +69,7 @@ async function fixture() {
     const config = {
         dataDir,
         name: "Unit Worker",
-        bindHost: "127.0.0.1",
+        bindHost,
         port: 0,
         supervisorAgentId: "supervisor",
         workerAgentId: "worker",
@@ -80,7 +80,7 @@ async function fixture() {
         ],
         policy: { repeatWindowMs: 180000, repeatMaxActiveFingerprints: 10000, rules: [] },
     };
-    const runtime = fakeRuntime(`completed cwd=${workspace}`);
+    const runtime = fakeRuntime(`completed cwd=${workspace} /home/runner/project /opt/worker/result`);
     const identity = { nodeId: "worker_0123456789abcdef", token, name: "Unit Worker" };
     const server = await startWorkerNodeServer({ config, runtime, identity });
     return { root, dataDir, workspace, config, runtime, identity, server, client: createWorkerNodeClient({ endpoint: server.url, token }) };
@@ -95,7 +95,8 @@ test("Worker Node server is authenticated, redacted, idempotent, and fail-closed
         assert.equal(health.workspaces[0].id, "ws_main");
         assert.equal(healthText.includes(token), false);
         assert.equal(healthText.includes(f.workspace), false);
-        assert.equal((await rawRequest(`${f.server.url}/v1/health`, { tokenValue: "wrong" })).status, 200);
+        assert.equal((await rawRequest(`${f.server.url}/v1/health`, { tokenValue: "wrong" })).status, 401);
+        assert.equal((await rawRequest(`${f.server.url}/v1/health`)).status, 401);
         assert.equal((await rawRequest(`${f.server.url}/v1/dispatch`, { tokenValue: "wrong", method: "POST", body: {} })).status, 401);
 
         const body = { protocol, requestId: "worker_request_0123456789abcdef", jobId: "job_0123456789abcdef", title: "One task", instruction: "Do it", workspaceId: "ws_main", requiredCapabilities: ["general"], attempt: 0, createdAt: new Date().toISOString() };
@@ -110,8 +111,10 @@ test("Worker Node server is authenticated, redacted, idempotent, and fail-closed
         let status;
         for (let i = 0; i < 20; i += 1) { status = await f.client.getTask(first.remoteTaskId); if (status.status === "completed") break; await new Promise((resolve) => setTimeout(resolve, 10)); }
         assert.equal(status.status, "completed");
-        assert.equal(status.result, "completed cwd=<node-local-workspace>");
+        assert.equal(status.result, "completed cwd=<node-local-workspace> <node-local-path> <node-local-path>");
         assert.equal(status.result.includes(f.workspace), false);
+        assert.equal(status.result.includes("/home/runner/project"), false);
+        assert.equal(status.result.includes("/opt/worker/result"), false);
         assert.equal(JSON.stringify(status).includes("provider-session-canary"), false);
         assert.equal(f.runtime.providerInvocations, 1);
 
@@ -120,6 +123,20 @@ test("Worker Node server is authenticated, redacted, idempotent, and fail-closed
         const publicLedger = JSON.parse(await readFile(join(f.dataDir, "worker-node-dispatch-ledger.json"), "utf8"));
         assert.equal(JSON.stringify(publicLedger).includes(token), false);
         assert.equal(JSON.stringify(publicLedger).includes(f.workspace), false);
+    }
+    finally {
+        await f.server.close();
+        await rm(f.root, { recursive: true, force: true });
+    }
+});
+
+test("Worker Node accepts numeric IPv6 loopback and authenticates every v1 route", async () => {
+    const f = await fixture({ bindHost: "::1" });
+    try {
+        const health = await f.client.health();
+        assert.equal(health.protocol, protocol);
+        assert.equal((await rawRequest(`${f.server.url}/v1/health`, { tokenValue: token })).status, 200);
+        assert.equal((await rawRequest(`${f.server.url}/v1/health`, { tokenValue: "wrong" })).status, 401);
     }
     finally {
         await f.server.close();

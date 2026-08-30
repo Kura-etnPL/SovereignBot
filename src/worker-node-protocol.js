@@ -91,8 +91,8 @@ export function validateToken(value, label = "token") {
 }
 
 export function validateLoopbackBindHost(value) {
-    if (typeof value !== "string" || !["127.0.0.1", "localhost", "::1"].includes(value.toLowerCase()))
-        fail("Worker Node bindHost must be a loopback host: 127.0.0.1, localhost, or ::1");
+    if (typeof value !== "string" || !["127.0.0.1", "::1"].includes(value.toLowerCase()))
+        fail("Worker Node bindHost must be a numeric loopback host: 127.0.0.1 or ::1");
     return value.toLowerCase();
 }
 
@@ -111,7 +111,7 @@ export function validateLoopbackEndpoint(value, { allowPortZero = false } = {}) 
         fail("Worker Node endpoint must be a valid URL");
     }
     const host = endpointHost(parsed);
-    if (parsed.protocol !== "http:" || !["127.0.0.1", "localhost", "::1"].includes(host))
+    if (parsed.protocol !== "http:" || !["127.0.0.1", "::1"].includes(host))
         fail("Worker Node endpoint must be a loopback HTTP endpoint");
     if (parsed.username || parsed.password || parsed.search || parsed.hash || (parsed.pathname !== "/" && parsed.pathname !== ""))
         fail("Worker Node endpoint must not contain credentials, query, fragment, or a path");

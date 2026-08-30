@@ -38,7 +38,7 @@ function executionContext(value) {
 function inputForTask(task) {
     if (!task.input || typeof task.input !== "object" || Array.isArray(task.input))
         throw new Error("worker-node task input must be an object");
-    const allowed = new Set(["instruction", "jobId", "requestId", "requiredCapabilities", "attempt", "remoteTaskId", "objective"]);
+    const allowed = new Set(["instruction", "jobId", "requestId", "requestCreatedAt", "requiredCapabilities", "attempt", "remoteTaskId", "objective"]);
     for (const key of Object.keys(task.input)) {
         if (!allowed.has(key))
             throw new Error(`worker-node task input contains unsupported field: ${key}`);
@@ -50,14 +50,29 @@ function inputForTask(task) {
     const requestId = validateRequestId(task.input.requestId);
     const requiredCapabilities = Array.isArray(task.input.requiredCapabilities) ? task.input.requiredCapabilities : ["general"];
     const attempt = task.input.attempt ?? 0;
-    return { instruction, jobId, requestId, requiredCapabilities, attempt, remoteTaskId: task.input.remoteTaskId };
+    const requestCreatedAt = task.input.requestCreatedAt;
+    if (requestCreatedAt !== undefined && (typeof requestCreatedAt !== "string" || !Number.isFinite(Date.parse(requestCreatedAt))))
+        throw new Error("worker-node requestCreatedAt is invalid");
+    return { instruction, jobId, requestId, requestCreatedAt, requiredCapabilities, attempt, remoteTaskId: task.input.remoteTaskId };
 }
 
-function delay(ms, signal) {
+export function workerNodePollingDelay(ms, signal) {
     return new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, ms);
+        let settled = false;
+        const cleanup = () => signal.removeEventListener("abort", abort);
+        const timer = setTimeout(() => {
+            if (settled)
+                return;
+            settled = true;
+            cleanup();
+            resolve();
+        }, ms);
         const abort = () => {
+            if (settled)
+                return;
+            settled = true;
             clearTimeout(timer);
+            cleanup();
             reject(new Error("worker-node polling aborted"));
         };
         signal.addEventListener("abort", abort, { once: true });
@@ -84,6 +99,9 @@ export class WorkerNodeHarness {
             throw new Error("worker-node remoteTaskId is invalid");
 
         if (!remoteTaskId) {
+            const requestCreatedAt = input.requestCreatedAt ?? context.task.createdAt;
+            if (typeof requestCreatedAt !== "string" || !Number.isFinite(Date.parse(requestCreatedAt)))
+                throw new Error("worker-node requestCreatedAt is invalid");
             const dispatch = validateDispatchPayload({
                 protocol: WORKER_NODE_PROTOCOL,
                 requestId: input.requestId,
@@ -93,7 +111,7 @@ export class WorkerNodeHarness {
                 workspaceId: bound.workspaceId,
                 requiredCapabilities: input.requiredCapabilities,
                 attempt: input.attempt,
-                createdAt: context.task.createdAt,
+                createdAt: new Date(requestCreatedAt).toISOString(),
             });
             const accepted = await client.dispatch(dispatch);
             remoteTaskId = accepted.remoteTaskId;
@@ -104,6 +122,7 @@ export class WorkerNodeHarness {
                 nodeId: bound.nodeId,
                 workspaceId: bound.workspaceId,
                 requestId: input.requestId,
+                requestCreatedAt: new Date(requestCreatedAt).toISOString(),
                 remoteTaskId,
             });
         }
@@ -134,7 +153,7 @@ export class WorkerNodeHarness {
                 transportFailures += 1;
                 if (transportFailures > 12)
                     throw new Error("worker-node transport unavailable: reconnect required");
-                await delay(Math.min(2_000, 150 * transportFailures), context.signal);
+                await workerNodePollingDelay(Math.min(2_000, 150 * transportFailures), context.signal);
                 continue;
             }
             await context.updateHarnessState?.({
@@ -156,7 +175,7 @@ export class WorkerNodeHarness {
                 return { ok: true, output: status.result };
             if (["failed", "cancelled", "blocked"].includes(status.status))
                 return { ok: false, error: status.summary ?? `Worker Node task ended as ${status.status}` };
-            await delay(150, context.signal);
+            await workerNodePollingDelay(150, context.signal);
         }
     }
 }

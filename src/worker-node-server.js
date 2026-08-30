@@ -105,7 +105,8 @@ function redactNodeLocalText(value, workspaces = []) {
     // protocol boundary.
     return text
         .replace(/\b[A-Za-z]:[\\/][^\r\n]*/g, "<node-local-path>")
-        .replace(/\\\\[^\r\n]+/g, "<node-local-path>");
+        .replace(/\\\\[^\r\n]+/g, "<node-local-path>")
+        .replace(/(^|[\s"'=:(\[])(\/(?:home|opt|tmp|var|srv|mnt|media|root|usr|etc|workspace|workspaces|app|run)\/[^\s"'`<>]*)/g, "$1<node-local-path>");
 }
 
 function publicResult(task, workspaces) {
@@ -140,9 +141,7 @@ export function createWorkerNodeService({ config, runtime, identity, ledger, now
     const locks = new Map();
 
     function sanitizedError(error) {
-        let message = safeText(error?.message ?? error);
-        for (const workspace of validated.workspaces)
-            message = message.split(workspace.path).join("<node-local-workspace>");
+        const message = redactNodeLocalText(safeText(error?.message ?? error), validated.workspaces);
         return message || "Worker Node operation failed";
     }
 
@@ -401,8 +400,7 @@ export async function startWorkerNodeServer({ config, runtime, identity, ledger,
                 sendJson(response, 400, { error: "query and fragment are not accepted" });
                 return;
             }
-            const protectedRoute = url.pathname === "/v1/dispatch"
-                || url.pathname.startsWith("/v1/tasks/");
+            const protectedRoute = url.pathname.startsWith("/v1/");
             if (protectedRoute) {
                 const authorization = request.headers.authorization;
                 const expected = `Bearer ${privateIdentity.token}`;

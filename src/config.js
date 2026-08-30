@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 
 export const DEFAULT_CONFIG_PATH = ".sovereignbot/config.json";
 const SUPPORTED_HARNESSES = new Set(["echo", "command", "codex", "claude-code"]);
+const WORKER_NODE_PROVIDERS = new Set(["codex", "claude-code"]);
 const SUPPORTED_COMPUTER_DRIVERS = new Set(["webdriver-sidecar"]);
 const SUPPORTED_BROWSERS = new Set(["chrome", "edge", "firefox"]);
 const SUPPORTED_GOVERNED_TOOLS = new Set(["computer"]);
@@ -45,7 +46,10 @@ export function defaultConfig(dataDir = ".sovereignbot/data") {
     };
 }
 
-export function defaultWorkerNodeConfig(dataDir = ".sovereignbot/worker-node-data", workspacePath = process.cwd()) {
+export function defaultWorkerNodeConfig(dataDir = ".sovereignbot/worker-node-data", workspacePath = process.cwd(), provider) {
+    if (!WORKER_NODE_PROVIDERS.has(provider))
+        throw new Error("worker-node init requires --provider codex or --provider claude-code; Echo is not a production Worker Node harness");
+    const providerHarness = { kind: provider };
     return {
         dataDir,
         name: "Sovereign Worker",
@@ -60,14 +64,14 @@ export function defaultWorkerNodeConfig(dataDir = ".sovereignbot/worker-node-dat
                 name: "Worker Node Supervisor",
                 role: "supervisor",
                 capabilities: ["planning"],
-                harness: { kind: "echo" },
+                harness: { ...providerHarness },
             },
             {
                 id: "worker-node-worker",
                 name: "Worker Node Worker",
                 role: "worker",
                 capabilities: ["general", "coding", "research"],
-                harness: { kind: "echo" },
+                harness: { ...providerHarness },
             },
         ],
         policy: {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,7 +10,7 @@ const COWORKER_ID = "coworker_0123456789abcdef";
 const NODE_ID = "worker_0123456789abcdef";
 const WORKSPACE_ID = "workspace.node";
 
-function makeHarness(dataDir, { resolveDispatchTarget, runUntilIdle, cancelRemote } = {}) {
+function makeHarness(dataDir, { resolveDispatchTarget, runUntilIdle, cancelRemote, workerNodeOnly = false } = {}) {
     const plans = [];
     const delegated = [];
     const tasks = [];
@@ -65,12 +65,21 @@ function makeHarness(dataDir, { resolveDispatchTarget, runUntilIdle, cancelRemot
             return { id, name: "Operator", workspaceIds: [] };
         },
     };
-    const roster = () => ({
+    const roster = () => workerNodeOnly ? {
+        ready: false,
+        mode: "provider",
+        roles: { planner: "worker-node-supervisor" },
+        agents: [
+            { id: "worker-node-supervisor", role: "supervisor", harness: { kind: "worker-node" } },
+            { id: "worker-node-dispatcher", role: "worker", harness: { kind: "worker-node" } },
+        ],
+        coworkerBindings: {},
+    } : {
         ready: true,
         mode: "provider",
         roles: { planner: "local-planner" },
         coworkerBindings: { [COWORKER_ID]: { ready: true, agentId: coworkerAgentId(COWORKER_ID) } },
-    });
+    };
     const services = { workspacePath() { throw new Error("local workspace path must not be consulted for a Worker Node Job"); } };
     const jobs = createJobController({
         dataDir,
@@ -115,10 +124,66 @@ test("manual Worker Node Job uses the typed remote context and never falls back 
         assert.deepEqual(delegation.spec.requiredCapabilities, ["worker-node"]);
         assert.equal(delegation.spec.input.jobId, submitted.id);
         assert.equal(delegation.spec.input.requestId, "worker_request_0123456789abcdef");
+        assert.equal(delegation.spec.input.requestCreatedAt, submitted.createdAt);
         assert.deepEqual(delegation.spec.input.requiredCapabilities, ["general"]);
         assert.ok(!Object.hasOwn(delegation.spec.input, "cwd"));
         assert.ok(!Object.hasOwn(delegation.spec.input, "endpoint"));
         assert.ok(!Object.hasOwn(delegation.spec.input, "token"));
+    }
+    finally {
+        await rm(dataDir, { recursive: true, force: true });
+    }
+});
+
+test("Worker Node Job remains executable when no local provider is ready", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "sovereign-worker-job-node-only-"));
+    try {
+        const harness = makeHarness(dataDir, { workerNodeOnly: true });
+        const submitted = harness.jobs.submitJob({
+            title: "Remote-only review",
+            objective: "Run through the paired Worker Node provider.",
+            ownerCoworkerId: COWORKER_ID,
+            executionTarget: { kind: "worker-node", nodeId: NODE_ID, workspaceId: WORKSPACE_ID },
+        });
+        await harness.jobs.flush();
+        assert.equal(harness.jobs.getJob(submitted.id).status, "completed");
+        assert.equal(harness.plans[0].ownerAgentId, "worker-node-supervisor");
+        assert.equal(harness.delegated[0].supervisorId, "worker-node-supervisor");
+    }
+    finally {
+        await rm(dataDir, { recursive: true, force: true });
+    }
+});
+
+test("Worker Node reconnect budget is durable and ends in attention", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "sovereign-worker-job-reconnect-budget-"));
+    try {
+        const initial = makeHarness(dataDir);
+        const submitted = initial.jobs.submitJob({
+            title: "Bounded reconnect",
+            objective: "Do not reconnect forever after a Worker Node transport failure.",
+            ownerCoworkerId: COWORKER_ID,
+            executionTarget: { kind: "worker-node", nodeId: NODE_ID, workspaceId: WORKSPACE_ID },
+            internalContext: { deferSchedule: true },
+        });
+        const jobsPath = join(dataDir, "desktop-state", "jobs.json");
+        const persisted = JSON.parse(await readFile(jobsPath, "utf8"));
+        persisted.jobs[0].workerNodeReconnectAttempts = 4;
+        await writeFile(jobsPath, `${JSON.stringify(persisted, null, 1)}\n`, "utf8");
+
+        const resumed = makeHarness(dataDir, {
+            runUntilIdle: async (tasks) => {
+                tasks[0].status = "failed";
+                tasks[0].error = "worker-node transport unavailable";
+            },
+        });
+        await resumed.jobs.wakeDueJobs();
+        await resumed.jobs.flush();
+        const job = resumed.jobs.getJob(submitted.id);
+        assert.equal(resumed.jobs.CAPS.maxWorkerNodeReconnects, 5);
+        assert.equal(job.status, "needs_attention");
+        assert.match(job.attentionState.reason, /reconnect budget exhausted/);
+        assert.equal(job.nextActionAt, null);
     }
     finally {
         await rm(dataDir, { recursive: true, force: true });
@@ -178,6 +243,27 @@ test("cancelling a running Worker Node Job cannot be overwritten by the pump", a
     }
     finally {
         release?.();
+        await rm(dataDir, { recursive: true, force: true });
+    }
+});
+
+test("cancelling before remote binding is confirmed becomes attention", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "sovereign-worker-job-cancel-unbound-"));
+    try {
+        const harness = makeHarness(dataDir);
+        const submitted = harness.jobs.submitJob({
+            title: "Cancel before bind",
+            objective: "Do not claim cancellation without a remote task binding.",
+            ownerCoworkerId: COWORKER_ID,
+            executionTarget: { kind: "worker-node", nodeId: NODE_ID, workspaceId: WORKSPACE_ID },
+            internalContext: { deferSchedule: true },
+        });
+        const result = await harness.jobs.cancel(submitted.id);
+        assert.equal(result.status, "needs_attention");
+        assert.match(result.error, /unconfirmed/);
+        assert.equal(harness.delegated.length, 0);
+    }
+    finally {
         await rm(dataDir, { recursive: true, force: true });
     }
 });

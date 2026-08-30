@@ -78,7 +78,7 @@ Usage:
   sovereignbot computer token <agent-id>
   sovereignbot computer operator-token
   sovereignbot computer list
-  sovereignbot worker-node init [--config path]
+  sovereignbot worker-node init --provider <codex|claude-code> [--config path]
   sovereignbot worker-node identity [--config path]
   sovereignbot worker-node serve [--config path]
   sovereignbot worker-node pairing-bundle --endpoint http://127.0.0.1:7342 [--config path]
@@ -119,7 +119,7 @@ async function main() {
             catch (error) {
                 if (error.code !== "ENOENT") throw error;
             }
-            const config = defaultWorkerNodeConfig();
+            const config = defaultWorkerNodeConfig(undefined, undefined, valueAfter(args, "--provider"));
             await writeJsonAtomic(path, config);
             await loadOrCreateWorkerIdentity(config.dataDir, { name: config.name });
             console.log(`created ${path}`);

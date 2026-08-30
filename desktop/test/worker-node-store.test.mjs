@@ -28,7 +28,10 @@ function fakeClientFactory(calls) {
     return ({ endpoint, token }) => {
         calls.push({ endpoint, token });
         return {
-            async health() { return health(); },
+            async health() {
+                if (token === "C".repeat(43)) throw new Error("Worker Node authentication failed");
+                return health();
+            },
             async cancel(remoteTaskId) { return { protocol: WORKER_NODE_PROTOCOL, remoteTaskId, status: "cancelled", confirmed: true }; },
         };
     };
@@ -61,7 +64,14 @@ test("Worker Node store keeps credentials private and only resolves healthy adve
 
         const reloaded = createWorkerNodeStore({ dataDir, clientFactory: fakeClientFactory(calls) });
         assert.deepEqual(reloaded.list().nodes[0].workspaces, [{ id: WORKSPACE_ID, name: "Node Workspace" }]);
-        await assert.rejects(() => reloaded.pair(bundle("B".repeat(43))), /different credentials/);
+        await assert.rejects(() => reloaded.pair(bundle("C".repeat(43))), /authentication failed/);
+        const unchangedPrivateState = JSON.parse(await readFile(privatePath, "utf8"));
+        assert.equal(unchangedPrivateState.credentials[0].token, token);
+        const rotatedToken = "B".repeat(43);
+        const rotated = await reloaded.pair(bundle(rotatedToken));
+        assert.equal(rotated.status, "online");
+        const rotatedPrivateState = JSON.parse(await readFile(privatePath, "utf8"));
+        assert.equal(rotatedPrivateState.credentials[0].token, rotatedToken);
 
         assert.equal(reloaded.setEnabled(NODE_ID, false).status, "blocked");
         assert.throws(() => reloaded.resolveDispatchTarget(NODE_ID, WORKSPACE_ID), /unavailable or disabled/);
@@ -74,7 +84,7 @@ test("Worker Node store keeps credentials private and only resolves healthy adve
         assert.ok(!Object.hasOwn(target.node, "token"));
         const cancelled = await reloaded.cancel(NODE_ID, "task_0123456789abcdef");
         assert.equal(cancelled.confirmed, true);
-        assert.equal(calls.at(-1).token, token);
+        assert.equal(calls.at(-1).token, rotatedToken);
 
         assert.deepEqual(reloaded.remove(NODE_ID), { removed: true });
         assert.deepEqual(reloaded.list().nodes, []);

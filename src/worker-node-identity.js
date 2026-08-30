@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, open, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { readJsonFile, writeJsonAtomic } from "./fs-util.js";
+import { ensureParent, readJsonFile, writeJsonAtomic } from "./fs-util.js";
 import { validateNodeId, validateToken, validatePairingBundle, WORKER_NODE_PROTOCOL, validateLoopbackEndpoint } from "./worker-node-protocol.js";
 
 export const WORKER_NODE_IDENTITY_SCHEMA = "sovereignbot.worker-node.identity.v1";
 const IDENTITY_FILE = "worker-node-identity.json";
+const IDENTITY_CREATE_LOCK_ATTEMPTS = 100;
 
 function identityPath(dataDir) {
     return join(dataDir, IDENTITY_FILE);
@@ -38,15 +39,45 @@ export async function loadOrCreateWorkerIdentity(dataDir, { name = "Sovereign Wo
     const cleanName = String(name).trim();
     if (!cleanName || cleanName.length > 80)
         throw new Error("worker node name must be 1-80 characters");
-    const identity = {
-        schema: WORKER_NODE_IDENTITY_SCHEMA,
-        nodeId: `worker_${randomBytes(8).toString("hex")}`,
-        token: randomBytes(32).toString("base64url"),
-        name: cleanName,
-        createdAt: new Date().toISOString(),
-    };
-    await writeJsonAtomic(path, identity);
-    return validateIdentity(identity);
+    await ensureParent(path);
+    const lockPath = `${path}.create-lock`;
+    for (let attempt = 0; attempt < IDENTITY_CREATE_LOCK_ATTEMPTS; attempt += 1) {
+        let lock;
+        try {
+            lock = await open(lockPath, "wx", 0o600);
+        }
+        catch (error) {
+            if (error.code !== "EEXIST")
+                throw error;
+            const created = await readJsonFile(path, null);
+            if (created)
+                return validateIdentity(created);
+            if (attempt === IDENTITY_CREATE_LOCK_ATTEMPTS - 1)
+                throw new Error("worker node identity creation is already in progress");
+            await new Promise((resolve) => setTimeout(resolve, Math.min(50, 5 + attempt)));
+            continue;
+        }
+
+        try {
+            const created = await readJsonFile(path, null);
+            if (created)
+                return validateIdentity(created);
+            const identity = {
+                schema: WORKER_NODE_IDENTITY_SCHEMA,
+                nodeId: `worker_${randomBytes(8).toString("hex")}`,
+                token: randomBytes(32).toString("base64url"),
+                name: cleanName,
+                createdAt: new Date().toISOString(),
+            };
+            await writeJsonAtomic(path, identity, { mode: 0o600 });
+            return validateIdentity(identity);
+        }
+        finally {
+            await lock.close().catch(() => undefined);
+            await unlink(lockPath).catch(() => undefined);
+        }
+    }
+    throw new Error("worker node identity creation failed");
 }
 
 export async function readWorkerNodeIdentity(dataDir) {

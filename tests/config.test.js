@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { loadConfig } from "../src/config.js";
+import { defaultWorkerNodeConfig, loadConfig } from "../src/config.js";
 
 async function writeConfig(config) {
     const dir = await mkdtemp(join(tmpdir(), "sovereign-config-"));
@@ -91,4 +91,15 @@ test("harness maxTurns must be a positive integer", async () => {
         harness: { kind: "claude-code", maxTurns: 0 },
     }));
     await assert.rejects(() => loadConfig(path), /maxTurns.*positive integer/);
+});
+
+test("production Worker Node defaults require an explicit real provider", () => {
+    assert.throws(() => defaultWorkerNodeConfig("data", "workspace"), /requires --provider codex or --provider claude-code/);
+    assert.throws(() => defaultWorkerNodeConfig("data", "workspace", "echo"), /Echo is not a production Worker Node harness/);
+    for (const provider of ["codex", "claude-code"]) {
+        const config = defaultWorkerNodeConfig("data", "workspace", provider);
+        assert.equal(config.agents[0].harness.kind, provider);
+        assert.equal(config.agents[1].harness.kind, provider);
+        assert.ok(config.agents.every((agent) => agent.harness.kind !== "echo"));
+    }
 });

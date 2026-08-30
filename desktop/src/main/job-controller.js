@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 import { normalizeEventMetadata } from "./lib/event-metadata.js";
-import { coworkerAgentId, coworkerCapability } from "./provider-roster.js";
+import { coworkerAgentId, coworkerCapability, WORKER_NODE_SUPERVISOR } from "./provider-roster.js";
 
 export const JOBS_SCHEMA = "sovereignbot.desktop.jobs.v1";
 export const MAX_OBJECTIVE = 8000;
@@ -15,7 +15,7 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 // should be marked interrupted.
 const INTERRUPTED_ON_RESTART = new Set(["queued", "working", "waiting"]);
 const VALID_STATUSES = new Set(["queued", "working", "waiting", "needs_attention", "completed", "failed", "cancelled"]);
-const CAPS = Object.freeze({ maxDepth: 6, maxAttempts: 3, maxChildren: 10, fingerprintWindowMs: 180_000 });
+const CAPS = Object.freeze({ maxDepth: 6, maxAttempts: 3, maxChildren: 10, maxWorkerNodeReconnects: 5, fingerprintWindowMs: 180_000 });
 const WORKER_NODE_DISPATCHER = "worker-node-dispatcher";
 
 function normalizeExecutionTarget(value) {
@@ -37,6 +37,7 @@ function normalizeExecutionTarget(value) {
 function isWorkerNodeTarget(job) { return job.executionTarget?.kind === "worker-node"; }
 function isTransportFailure(error) { return /worker-node transport unavailable|reconnect required/i.test(String(error?.message ?? error)); }
 function makeWorkerRequestId() { return `worker_request_${randomBytes(8).toString("hex")}`; }
+function isValidIsoTimestamp(value) { return typeof value === "string" && value.length <= 64 && Number.isFinite(Date.parse(value)); }
 
 export function makeJobId() { return `job_${randomBytes(8).toString("hex")}`; }
 function slice(v, n) { const s = String(v ?? "").replace(/\s+/g, " ").trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; }
@@ -56,9 +57,10 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     try { j.executionTarget = normalizeExecutionTarget(j.executionTarget); }
     catch { j.executionTarget = { kind: "local" }; j.status = "needs_attention"; j.error = "invalid persisted execution target"; j.attentionState = { reason: j.error, at: now() }; }
     if (INTERRUPTED_ON_RESTART.has(j.status)) {
-      if (isWorkerNodeTarget(j) && j.remoteTaskId) {
-        // The local task is disposable; the stable request/remote task binding is not.
-        // The next pump polls the existing node task and cannot silently run locally.
+      if (isWorkerNodeTarget(j)) {
+        // The local task is disposable. The next pump recovers its persisted remote
+        // binding when available, or reuses the stable request idempotently when the
+        // crash happened before the binding was written.
         j.status = "queued";
         j.nextActionAt = undefined;
       } else {
@@ -89,6 +91,54 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     if (!b?.ready || !b.agentId) throw new Error(b?.reason ?? `coworker ${coworkerId} has no ready provider binding`);
     if (b.agentId !== coworkerAgentId(coworkerId)) throw new Error(`coworker binding mismatch for ${coworkerId}`);
     return { snap, binding: b };
+  }
+  function workerNodeRosterSnapshot() {
+    const s = roster();
+    if (!s || typeof s !== "object") throw new Error("Worker Node job requires a runtime roster");
+    return s;
+  }
+  function ensureWorkerNodeRequestBinding(job) {
+    job.requestId = job.requestId ?? makeRequestId();
+    if (!isValidIsoTimestamp(job.requestCreatedAt)) {
+      job.requestCreatedAt = isValidIsoTimestamp(job.createdAt) ? new Date(job.createdAt).toISOString() : now();
+    }
+  }
+  async function recoverRemoteTaskBinding(job) {
+    if (!isWorkerNodeTarget(job) || job.remoteTaskId || !(job.taskIds?.length))
+      return;
+    const taskIds = new Set(job.taskIds);
+    const tasks = await runtime.orchestrator.listTasks();
+    const candidate = tasks.find((task) => {
+      const state = task.harnessState;
+      return taskIds.has(task.id)
+        && state?.kind === "worker-node"
+        && state.nodeId === job.executionTarget.nodeId
+        && state.workspaceId === job.executionTarget.workspaceId
+        && (!job.requestId || !state.requestId || state.requestId === job.requestId)
+        && /^task_[0-9a-f-]{16,64}$/i.test(String(state.remoteTaskId ?? ""));
+    });
+    if (!candidate)
+      return;
+    job.remoteTaskId = candidate.harnessState.remoteTaskId;
+    job.requestId = job.requestId ?? candidate.harnessState.requestId;
+    job.requestCreatedAt = job.requestCreatedAt ?? candidate.harnessState.requestCreatedAt;
+    job.lastRemoteStatus = candidate.harnessState.status ?? candidate.status;
+    ensureWorkerNodeRequestBinding(job);
+    save();
+  }
+  function scheduleWorkerNodeReconnect(job) {
+    const attempts = (Number.isInteger(job.workerNodeReconnectAttempts) ? job.workerNodeReconnectAttempts : 0) + 1;
+    job.workerNodeReconnectAttempts = attempts;
+    job.error = "Worker Node connection interrupted; reconnecting without a new remote task.";
+    if (attempts >= CAPS.maxWorkerNodeReconnects) {
+      job.nextActionAt = undefined;
+      setStatus(job, "needs_attention");
+      job.attentionState = { reason: "Worker Node reconnect budget exhausted", reconnectAttempts: attempts, at: now() };
+    } else {
+      job.nextActionAt = new Date(Date.now() + 5000).toISOString();
+      setStatus(job, "waiting");
+    }
+    save();
   }
   function workspaceContext(job, coworker) {
     if (job.requestedWorkspaceId) {
@@ -163,22 +213,25 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     let fingerprint = job._fingerprint;
     try {
       const coworker = coworkerStore.get(job.ownerCoworkerId);
-      const { snap, binding } = requireCoworkerBinding(job.ownerCoworkerId);
       const remoteTarget = isWorkerNodeTarget(job) ? workerNodeStore?.resolveDispatchTarget(job.executionTarget.nodeId, job.executionTarget.workspaceId) : undefined;
       if (isWorkerNodeTarget(job) && !remoteTarget)
         throw new Error("selected Worker Node is unavailable; local fallback is disabled");
+      const { snap, binding } = remoteTarget
+        ? { snap: workerNodeRosterSnapshot(), binding: undefined }
+        : requireCoworkerBinding(job.ownerCoworkerId);
       const ctx = remoteTarget
         ? { kind: "worker-node", nodeId: job.executionTarget.nodeId, workspaceId: job.executionTarget.workspaceId }
         : workspaceContext(job, coworker);
       if (remoteTarget) {
+        await recoverRemoteTaskBinding(job);
+        ensureWorkerNodeRequestBinding(job);
         job.workerNodeName = remoteTarget.node.name;
         job.workerWorkspaceName = remoteTarget.workspace.name;
         job.workerNodeId = job.executionTarget.nodeId;
         job.workerWorkspaceId = job.executionTarget.workspaceId;
-        job.requestId = job.requestId ?? makeRequestId();
         save();
       }
-      const supervisorId = snap.roles?.planner ?? supervisorAgentId;
+      const supervisorId = snap.roles?.planner ?? (remoteTarget ? WORKER_NODE_SUPERVISOR : supervisorAgentId);
       job.workspaceId = ctx.workspaceId;
       if (job.status === "waiting") { job._skipFingerprintOnce = true; job.nextActionAt = undefined; setStatus(job, "queued"); }
       if (job.status === "queued") { setStatus(job, "working"); save(); }
@@ -210,6 +263,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         objective: job.objective,
         attempt: job.attempt ?? 0,
         requestId: job.requestId,
+        requestCreatedAt: job.requestCreatedAt,
         remoteTaskId: job.remoteTaskId,
         requiredCapabilities: ["general"],
       } : {
@@ -230,15 +284,18 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       if (!job.conversationId) job.conversationId = `job-conv-${job.id}`;
       save();
       await runtime.orchestrator.runUntilIdle();
-      if (jobs.find((entry) => entry.id === jobId)?.status === "cancelled") return;
+      const currentJob = jobs.find((entry) => entry.id === jobId);
+      if (!currentJob) return;
       const finished = (await runtime.orchestrator.listTasks()).find(t => t.id === task.id);
       if (remoteTarget) {
         job.remoteTaskId = finished?.harnessState?.remoteTaskId ?? job.remoteTaskId;
         job.lastRemoteStatus = finished?.harnessState?.status ?? finished?.status;
         save();
       }
+      if (["cancelled", "needs_attention"].includes(currentJob.status)) return;
       const status = finished?.status ?? "unknown";
       if (status === "completed") {
+        if (remoteTarget) job.workerNodeReconnectAttempts = 0;
         const text = typeof finished.result?.text === "string" ? finished.result.text.trim().slice(0, 8000) : "";
         job.outcomeSummary = text || "Completed.";
         appendMessage(job, "answer", job.outcomeSummary);
@@ -248,16 +305,21 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       }
       const attempt = (job.attempt ?? 0) + 1;
       if (remoteTarget && isTransportFailure(finished?.error)) {
-        job.nextActionAt = new Date(Date.now() + 5000).toISOString();
-        job.error = "Worker Node connection interrupted; reconnecting without a new remote task.";
-        setStatus(job, "waiting");
-        save(); return;
+        scheduleWorkerNodeReconnect(job);
+        return;
       }
+      if (remoteTarget) job.workerNodeReconnectAttempts = 0;
       job.attempt = attempt;
       job.error = String(finished?.error ?? `job task ended as ${status}`).slice(0, 500);
       appendMessage(job, "answer", `Job attempt ${attempt} did not complete: ${job.error}`);
       if (attempt < CAPS.maxAttempts) {
-        if (remoteTarget) { job.requestId = undefined; job.remoteTaskId = undefined; job.lastRemoteStatus = undefined; }
+        if (remoteTarget) {
+          job.requestId = undefined;
+          job.requestCreatedAt = undefined;
+          job.remoteTaskId = undefined;
+          job.lastRemoteStatus = undefined;
+          job.workerNodeReconnectAttempts = 0;
+        }
         const delayMs = Math.min(60_000, 1000 * Math.pow(2, attempt));
         job.nextActionAt = new Date(nowMs + delayMs).toISOString();
         setStatus(job, "waiting");
@@ -275,10 +337,9 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       const attempt = (j.attempt ?? 0);
       if (isWorkerNodeTarget(j)) {
         if (isTransportFailure(error)) {
-          j.nextActionAt = new Date(Date.now() + 5000).toISOString();
-          j.error = "Worker Node connection interrupted; reconnecting without a new remote task.";
-          setStatus(j, "waiting");
+          scheduleWorkerNodeReconnect(j);
         } else {
+          j.workerNodeReconnectAttempts = 0;
           setStatus(j, "needs_attention");
           j.attentionState = { reason: msg, attempt: j.attempt ?? 0, at: now() };
         }
@@ -315,7 +376,8 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       let resolvedNextActionAt;
       if (nextActionAt !== undefined) { const d = new Date(nextActionAt); if (Number.isNaN(d.getTime())) throw new Error("nextActionAt must be a valid date"); resolvedNextActionAt = d.toISOString(); }
       const internal = normalizeInternalContext(internalContext);
-      const job = { id: makeId(), title: t, objective: obj, ownerCoworkerId: String(ownerCoworkerId), executionTarget: target, status: "queued", priority: priority ?? "normal", workspaceId: undefined, requestedWorkspaceId: internal.workspaceId, routineId: internal.routineId, skillId: internal.skillId, scheduledFor: internal.scheduledFor, eventMetadata: internal.eventMetadata, conversationId: undefined, planId: undefined, taskIds: [], parentJobId: parentJobId ? String(parentJobId) : undefined, childJobIds: [], attempt: 0, nextActionAt: resolvedNextActionAt, attentionState: undefined, outcomeSummary: undefined, error: undefined, createdAt: now(), updatedAt: now(), conversation: { messages: [] } };
+      const createdAt = now();
+      const job = { id: makeId(), title: t, objective: obj, ownerCoworkerId: String(ownerCoworkerId), executionTarget: target, status: "queued", priority: priority ?? "normal", workspaceId: undefined, requestedWorkspaceId: internal.workspaceId, routineId: internal.routineId, skillId: internal.skillId, scheduledFor: internal.scheduledFor, eventMetadata: internal.eventMetadata, conversationId: undefined, planId: undefined, taskIds: [], parentJobId: parentJobId ? String(parentJobId) : undefined, childJobIds: [], attempt: 0, workerNodeReconnectAttempts: 0, requestId: undefined, requestCreatedAt: undefined, remoteTaskId: undefined, lastRemoteStatus: undefined, nextActionAt: resolvedNextActionAt, attentionState: undefined, outcomeSummary: undefined, error: undefined, createdAt, updatedAt: createdAt, conversation: { messages: [] } };
       appendMessage(job, "goal", obj, "user");
       jobs.push(job);
       if (parentJobId) { const p = getJob(parentJobId); p.childJobIds = [...(p.childJobIds ?? []), job.id]; p.updatedAt = now(); }
@@ -358,20 +420,25 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       if (TERMINAL.has(j.status)) return publicJob(j);
       if (isWorkerNodeTarget(j)) {
         const latestRemote = j.remoteTaskId ?? (await runtime.orchestrator.listTasks()).filter((task) => (j.taskIds ?? []).includes(task.id)).map((task) => task.harnessState?.remoteTaskId).find(Boolean);
-        if (latestRemote) {
-          j.remoteTaskId = latestRemote;
-          try {
-            const result = await workerNodeStore?.cancel(j.executionTarget.nodeId, latestRemote);
-            if (!result || (result.confirmed !== true && result.status !== "cancelled"))
-              throw new Error("remote cancellation unconfirmed");
-          }
-          catch (error) {
-            j.error = "remote cancellation unconfirmed";
-            j.attentionState = { reason: j.error, at: now() };
-            setStatus(j, "needs_attention");
-            save();
-            return publicJob(j);
-          }
+        if (!latestRemote) {
+          j.error = "remote cancellation unconfirmed";
+          j.attentionState = { reason: "remote cancellation unconfirmed: remote task id is not bound", at: now() };
+          setStatus(j, "needs_attention");
+          save();
+          return publicJob(j);
+        }
+        j.remoteTaskId = latestRemote;
+        try {
+          const result = await workerNodeStore?.cancel(j.executionTarget.nodeId, latestRemote);
+          if (!result || (result.confirmed !== true && result.status !== "cancelled"))
+            throw new Error("remote cancellation unconfirmed");
+        }
+        catch (error) {
+          j.error = "remote cancellation unconfirmed";
+          j.attentionState = { reason: j.error, at: now() };
+          setStatus(j, "needs_attention");
+          save();
+          return publicJob(j);
         }
       }
       for (const tid of j.taskIds ?? []) { try { await runtime.orchestrator.cancel(tid, { reason: `job ${j.id} cancelled` }); } catch {} }
@@ -386,6 +453,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       const fromNeedsAttention = j.status === "needs_attention";
       if (fromNeedsAttention) appendMessage(j, "decision", "Attention retried by operator.", "user");
       if (fromNeedsAttention) { j.attempt = 0; j._fingerprint = undefined; j._repeatCount = 0; }
+      j.workerNodeReconnectAttempts = 0;
       j.error = undefined; j.attentionState = undefined; j.nextActionAt = undefined;
       if (fromWaiting) j._skipFingerprintOnce = true;
       if (fromNeedsAttention) { j._fingerprint = undefined; j._repeatCount = 0; delete j._skipFingerprintOnce; }
@@ -395,6 +463,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       const j = getJob(jobId);
       if (j.status !== "needs_attention") throw new Error(`only needs_attention jobs can be approved`);
       appendMessage(j, "decision", "Attention retried by operator.", "user");
+      j.workerNodeReconnectAttempts = 0;
       j.attempt = 0; j.error = undefined; j.attentionState = undefined; j.nextActionAt = undefined;
       j._fingerprint = undefined; j._repeatCount = 0; delete j._skipFingerprintOnce;
       setStatus(j, "queued"); save(); schedule(j.id); return publicJob(j);

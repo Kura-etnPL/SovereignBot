@@ -34,6 +34,7 @@ test("Worker Node endpoints and pairing bundles are strict loopback contracts", 
     assert.equal(validateLoopbackEndpoint(bundle.endpoint), bundle.endpoint);
     assert.equal(validateLoopbackEndpoint("http://[::1]:7342"), "http://[::1]:7342");
     for (const endpoint of [
+        "http://localhost:7342",
         "http://0.0.0.0:7342",
         "http://192.168.1.4:7342",
         "https://127.0.0.1:7342",

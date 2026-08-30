@@ -109,7 +109,7 @@ export function createWorkerNodeStore({ dataDir, persistPath, credentialsPath, c
     const credentials = credentialsState(loadJsonState(privatePath, null));
 
     function savePublic() { saveJsonState(statePath, { schema: WORKER_NODES_SCHEMA, nodes: [...nodes.values()] }); }
-    function savePrivate() { saveJsonState(privatePath, { schema: WORKER_NODE_CREDENTIALS_SCHEMA, credentials: [...credentials.values()] }); }
+    function savePrivate() { saveJsonState(privatePath, { schema: WORKER_NODE_CREDENTIALS_SCHEMA, credentials: [...credentials.values()] }, { mode: 0o600 }); }
     function getNode(nodeId) {
         const id = validateNodeId(nodeId);
         const node = nodes.get(id);
@@ -129,10 +129,13 @@ export function createWorkerNodeStore({ dataDir, persistPath, credentialsPath, c
         const existingCredential = credentials.get(bundle.nodeId);
         if (existing && existing.endpoint !== bundle.endpoint)
             throw new Error("Worker Node identity is already paired at a different endpoint");
-        if (existingCredential && (existingCredential.endpoint !== bundle.endpoint || existingCredential.token !== bundle.token))
-            throw new Error("Worker Node identity is already paired with different credentials");
+        if (existingCredential && existingCredential.endpoint !== bundle.endpoint)
+            throw new Error("Worker Node identity is already paired at a different endpoint");
         const client = clientFactory({ endpoint: bundle.endpoint, token: bundle.token });
         const health = validateHealth(bundle, await client.health());
+        // A successfully authenticated bundle may rotate the private bearer token for
+        // the same durable node identity. Invalid bundles fail at health() before either
+        // the credential or public online record is replaced.
         credentials.set(bundle.nodeId, bundle);
         nodes.set(bundle.nodeId, { ...health, enabled: existing?.enabled !== false, status: "online" });
         savePrivate();
