@@ -22,6 +22,7 @@ import { bindIpcChannels } from "./ipc.js";
 const WORKTREE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const EVIDENCE_DIR = process.env.SOVEREIGNBOT_V44_EVIDENCE_DIR ?? join(WORKTREE_ROOT, "_evidence_v44_2026-08-30");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const FILE_BODY_CANARY = "V44_FILE_BODY_MUST_NEVER_REACH_PROVIDER";
 
 function fakeRuntime() {
   let planSeq = 0;
@@ -33,7 +34,7 @@ function fakeRuntime() {
       orchestrator: {
         async createPlan(input) { return { id: `plan_${++planSeq}`, ...input }; },
         async delegateTrusted(planId, spec, executionContext, supervisorId) {
-          const task = { id: `task_${++taskSeq}`, planId, status: "queued", title: spec.title, executionContext, supervisorId };
+          const task = { id: `task_${++taskSeq}`, planId, status: "queued", title: spec.title, input: spec.input, executionContext, supervisorId };
           tasks.push(task);
           return structuredClone(task);
         },
@@ -119,6 +120,7 @@ function projectRoutine(routine) {
       relativePath: run.relativePath,
       eventType: run.eventType,
       workspaceId: run.workspaceId,
+      observedAt: run.observedAt,
       scheduledFor: run.scheduledFor,
       jobId: run.jobId,
       status: run.status,
@@ -159,6 +161,7 @@ export async function runVerifyV44EventTriggers({ app }) {
   let disabledRoutineState;
   let removedWorkspaceState;
   let stormState;
+  let watcherErrorState;
 
   async function renderer(script) {
     return await win.webContents.executeJavaScript(script);
@@ -172,7 +175,19 @@ export async function runVerifyV44EventTriggers({ app }) {
       if (last) return last;
       await sleep(150);
     }
-    throw new Error(`timed out waiting for ${label}${last ? `: ${JSON.stringify(last)}` : ""}`);
+    let diagnostics;
+    try {
+      diagnostics = {
+        last,
+        watcher: eventTriggers?.diagnostics?.(),
+        trigger: eventTriggers?.list?.().triggers?.map(projectTrigger),
+        routineHistoryCount: routine ? routines?.get(routine.id)?.history?.length : undefined,
+        jobIds: jobs?.listJobs?.().jobs?.map((job) => job.id),
+      };
+    } catch (error) {
+      diagnostics = { last, diagnosticsError: String(error?.message ?? error) };
+    }
+    throw new Error(`timed out waiting for ${label}: ${JSON.stringify(diagnostics)}`);
   }
 
   async function drainChief() {
@@ -189,7 +204,36 @@ export async function runVerifyV44EventTriggers({ app }) {
     });
   }
 
-  async function writeEvent(relativePath, value = "V4.4 gate test payload") {
+  function eventHistory(routineId) {
+    return routines.get(routineId).history.filter((entry) => entry.source === "event");
+  }
+
+  function snapshotRunIds(routineId) {
+    return new Set(eventHistory(routineId).map((entry) => entry.id));
+  }
+
+  function snapshotJobIds() {
+    return new Set(jobs.listJobs().jobs.map((job) => job.id));
+  }
+
+  async function waitForNewEventRun(routineId, relativePath, priorRunIds, priorJobIds, label = "new event Job") {
+    return await waitFor(label, async () => {
+      await eventTriggers.flush();
+      const run = eventHistory(routineId).find((entry) => entry.relativePath === relativePath && !priorRunIds.has(entry.id) && entry.jobId && !priorJobIds.has(entry.jobId));
+      return run?.jobId ?? false;
+    });
+  }
+
+  async function waitForWatcherReady(triggerId, label = "watcher installed") {
+    await waitFor(label, async () => {
+      const diagnostics = eventTriggers.diagnostics();
+      const current = eventTriggers.get(triggerId);
+      return diagnostics.watchers.some((entry) => entry.workspaceId === workspaceId) && current?.enabled === true && !["blocked", "error", "disabled"].includes(current?.lastStatus);
+    });
+    await sleep(750);
+  }
+
+  async function writeEvent(relativePath, value = FILE_BODY_CANARY) {
     const target = join(trustedWorkspace, ...relativePath.split("/"));
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, value, "utf8");
@@ -198,7 +242,11 @@ export async function runVerifyV44EventTriggers({ app }) {
   async function writeBurst(relativePath, values = ["one", "two", "three"]) {
     const target = join(trustedWorkspace, ...relativePath.split("/"));
     await mkdir(dirname(target), { recursive: true });
-    await Promise.all(values.map((value) => writeFile(target, value, "utf8")));
+    for (const value of values) {
+      await writeFile(target, value, "utf8");
+      await sleep(140);
+    }
+    await sleep(1000);
   }
 
   try {
@@ -357,81 +405,106 @@ export async function runVerifyV44EventTriggers({ app }) {
     trigger = triggerList.triggers.find((entry) => entry.name === "Inbox file changes");
     check("trigger created through dedicated UI and exact IPC", trigger?.enabled && trigger.routineId === routine.id && trigger.workspaceId === workspaceId && trigger.pathPrefix === "inbox/order.json", JSON.stringify(projectTrigger(trigger)));
     check("trigger state persists only bounded metadata", trigger && !Object.keys(trigger).some((key) => /content|token|cookie|secret|shell|command|provider/i.test(key)), JSON.stringify(Object.keys(trigger ?? {})));
+    await waitForWatcherReady(trigger.id);
 
+    const firstPriorRunIds = snapshotRunIds(routine.id);
+    const firstPriorJobIds = snapshotJobIds();
     const jobsBeforeEvent = jobs.listJobs().jobs.length;
-    await writeBurst("inbox/order.json");
-    await waitFor("first event Job", async () => {
-      await eventTriggers.flush();
-      const current = routines.get(routine.id);
-      const eventRun = current.history.find((entry) => entry.source === "event" && entry.relativePath === "inbox/order.json");
-      return eventRun?.jobId ?? false;
-    });
-    const firstEventRun = routines.get(routine.id).history.find((entry) => entry.source === "event" && entry.relativePath === "inbox/order.json");
-    await waitForCompletedJob(firstEventRun.jobId);
+    await writeBurst("inbox/order.json", [FILE_BODY_CANARY, "V4.4 trailing debounce second write", "V4.4 trailing debounce final write"]);
+    const firstEventJobId = await waitForNewEventRun(routine.id, "inbox/order.json", firstPriorRunIds, firstPriorJobIds, "first real event Job");
+    const firstEventRun = routines.get(routine.id).history.find((entry) => entry.jobId === firstEventJobId);
+    await waitForCompletedJob(firstEventJobId);
     await eventTriggers.flush();
-    const firstRunCount = routines.get(routine.id).history.filter((entry) => entry.source === "event").length;
-    eventJobIds = routines.get(routine.id).history.filter((entry) => entry.source === "event").map((entry) => entry.jobId);
-    const firstJob = jobs.getJob(firstEventRun.jobId);
+    const firstRunCount = eventHistory(routine.id).filter((entry) => !firstPriorRunIds.has(entry.id)).length;
+    eventJobIds = eventHistory(routine.id).map((entry) => entry.jobId);
+    const firstJob = jobs.getJob(firstEventJobId);
     const firstTask = runtimeHarness.tasks.find((entry) => firstJob.taskIds?.includes(entry.id));
-    check("real fs.watch burst creates exactly one event Routine run and Job", firstRunCount === 1 && jobs.listJobs().jobs.length === jobsBeforeEvent + 1, JSON.stringify({ firstRunCount, jobs: jobs.listJobs().jobs.length }));
+    check("real fs.watch trailing-debounce burst creates exactly one event Routine run and Job", firstRunCount === 1 && jobs.listJobs().jobs.length === jobsBeforeEvent + 1, JSON.stringify({ firstRunCount, jobs: jobs.listJobs().jobs.length, diagnostics: eventTriggers.diagnostics() }));
     check("event Job uses the existing governed Chief/Job path", firstJob.status === "completed" && firstJob.routineId === routine.id && firstJob.workspaceId === workspaceId && firstTask?.supervisorId === "v44-gate-supervisor" && firstTask?.executionContext?.workspaceId === workspaceId, JSON.stringify({ job: { id: firstJob.id, status: firstJob.status, routineId: firstJob.routineId, workspaceId: firstJob.workspaceId }, task: firstTask && { id: firstTask.id, supervisorId: firstTask.supervisorId, executionContext: firstTask.executionContext } }));
     const firstRoutineAfter = routines.get(routine.id);
-    check("Routine history links event source, path, workspace, and Job", firstEventRun.source === "event" && firstEventRun.triggerId === trigger.id && firstEventRun.workspaceId === workspaceId && firstEventRun.jobId === firstJob.id && firstEventRun.eventType === "change", JSON.stringify(projectRoutine(firstRoutineAfter)));
+    check("Routine history links event source, path, workspace, and Job", firstEventRun.source === "event" && firstEventRun.triggerId === trigger.id && firstEventRun.workspaceId === workspaceId && firstEventRun.jobId === firstJob.id && firstEventRun.eventType === "change" && firstEventRun.observedAt, JSON.stringify(projectRoutine(firstRoutineAfter)));
     check("event run leaves recurring nextRunAt unchanged", firstRoutineAfter.nextRunAt === nextRunAtBeforeEvent, JSON.stringify({ before: nextRunAtBeforeEvent, after: firstRoutineAfter.nextRunAt }));
 
-    await writeEvent("outside/ignored.json");
+    const delegatedInstruction = firstTask?.input?.instruction ?? "";
+    const eventBlockMatch = delegatedInstruction.match(/<untrusted_event_data>([\s\S]*?)<\/untrusted_event_data>/);
+    let delegatedMetadata;
+    try { delegatedMetadata = eventBlockMatch ? JSON.parse(eventBlockMatch[1]) : undefined; } catch {}
+    check("delegated instruction carries exact untrusted event metadata", delegatedMetadata && Object.keys(delegatedMetadata).sort().join(",") === "eventId,observedAt,relativePath,source,triggerId" && delegatedMetadata.source === "workspace-file-change" && delegatedMetadata.triggerId === trigger.id && delegatedMetadata.relativePath === "inbox/order.json" && delegatedMetadata.observedAt === firstEventRun.observedAt, JSON.stringify({ delegatedMetadata }));
+    check("event body canary and absolute workspace path never reach provider-facing instruction", !firstJob.objective.includes(FILE_BODY_CANARY) && !delegatedInstruction.includes(FILE_BODY_CANARY) && !delegatedInstruction.includes(trustedWorkspace), JSON.stringify({ objective: firstJob.objective, delegatedInstruction }));
+    check("event body canary is absent from trigger state and Routine history", !JSON.stringify(projectTrigger(trigger)).includes(FILE_BODY_CANARY) && !JSON.stringify(firstRoutineAfter.history).includes(FILE_BODY_CANARY), JSON.stringify({ trigger: projectTrigger(trigger), history: projectRoutine(firstRoutineAfter) }));
+
+    await writeEvent("outside/ignored.json", "outside path");
     await sleep(1000);
     await eventTriggers.flush();
     check("outside path prefix creates no Job", jobs.listJobs().jobs.length === jobsBeforeEvent + 1, JSON.stringify({ jobs: jobs.listJobs().jobs.length }));
 
-    await renderer("document.querySelector('#trigger-list .job-card button')?.click()");
-    await waitFor("trigger disabled through UI", async () => (await renderer(`window.sovereignbot.eventTriggers.get({ triggerId: ${JSON.stringify(trigger.id)} })`))?.enabled === false);
-    const jobsBeforeDisabled = jobs.listJobs().jobs.length;
-    await writeEvent("inbox/order.json");
-    await sleep(1000);
+    // Prove the cancellation race against the real renderer/controller path: wait
+    // until fs.watch has delivered a pending event, then disable before quiet expiry.
+    const jobsBeforePendingDisable = jobs.listJobs().jobs.length;
+    const historyBeforePendingDisable = snapshotRunIds(routine.id);
+    await writeEvent("inbox/order.json", "pending event must be cancelled");
+    await waitFor("pending event before disable", async () => eventTriggers.diagnostics().pending.some((entry) => entry.triggerId === trigger.id));
+    await renderer(`window.sovereignbot.eventTriggers.setEnabled(${JSON.stringify({ triggerId: trigger.id, enabled: false })})`);
     await eventTriggers.flush();
-    check("disabled trigger creates no Job", jobs.listJobs().jobs.length === jobsBeforeDisabled, JSON.stringify({ jobs: jobs.listJobs().jobs.length }));
+    check("disable during pending cancels the event without a Job", jobs.listJobs().jobs.length === jobsBeforePendingDisable && !eventHistory(routine.id).some((entry) => !historyBeforePendingDisable.has(entry.id)), JSON.stringify({ jobs: jobs.listJobs().jobs.length, history: eventHistory(routine.id) }));
 
-    await renderer("document.querySelector('#trigger-list .job-card button')?.click()");
-    await waitFor("trigger re-enabled through UI", async () => (await renderer(`window.sovereignbot.eventTriggers.get({ triggerId: ${JSON.stringify(trigger.id)} })`))?.enabled === true);
-    await writeEvent("inbox/order.json");
-    const reenabledRun = await waitFor("re-enabled event Job", async () => {
-      await eventTriggers.flush();
-      return routines.get(routine.id).history.filter((entry) => entry.source === "event" && entry.relativePath === "inbox/order.json").at(-1)?.jobId ?? false;
-    });
+    await renderer(`window.sovereignbot.eventTriggers.setEnabled(${JSON.stringify({ triggerId: trigger.id, enabled: true })})`);
+    await waitForWatcherReady(trigger.id, "watcher after explicit re-enable");
+    const reenabledPriorRunIds = snapshotRunIds(routine.id);
+    const reenabledPriorJobIds = snapshotJobIds();
+    await writeEvent("inbox/order.json", "future event after re-enable");
+    const reenabledRun = await waitForNewEventRun(routine.id, "inbox/order.json", reenabledPriorRunIds, reenabledPriorJobIds, "re-enabled event Job");
     await waitForCompletedJob(reenabledRun);
-    check("re-enabled trigger resumes future events", routines.get(routine.id).history.filter((entry) => entry.source === "event").length === 2, JSON.stringify(projectRoutine(routines.get(routine.id))));
+    check("re-enabled trigger resumes future events", eventHistory(routine.id).filter((entry) => !firstPriorRunIds.has(entry.id)).length === 2, JSON.stringify(projectRoutine(routines.get(routine.id))));
 
     const jobsBeforeRestart = jobs.listJobs().jobs.length;
+    const restartPriorRunIds = snapshotRunIds(routine.id);
+    const restartPriorJobIds = snapshotJobIds();
     eventTriggers.stop();
     eventTriggers = createEventTriggerController({ dataDir, routineController: routines, services, maxFires: 3 });
     eventTriggers.start();
-    await sleep(400);
-    check("controller restart restores durable trigger without replay", jobs.listJobs().jobs.length === jobsBeforeRestart && eventTriggers.get(trigger.id).enabled === true, JSON.stringify({ jobs: jobs.listJobs().jobs.length, trigger: projectTrigger(eventTriggers.get(trigger.id)) }));
-    await writeEvent("inbox/order.json");
-    const restartJobId = await waitFor("post-restart event Job", async () => {
-      await eventTriggers.flush();
-      return routines.get(routine.id).history.filter((entry) => entry.source === "event" && entry.relativePath === "inbox/order.json").at(-1)?.jobId ?? false;
-    });
+    await waitForWatcherReady(trigger.id, "watcher after controller restart");
+    check("controller restart restores durable trigger without replay", jobs.listJobs().jobs.length === jobsBeforeRestart && eventTriggers.get(trigger.id).enabled === true && snapshotRunIds(routine.id).size === restartPriorRunIds.size, JSON.stringify({ jobs: jobs.listJobs().jobs.length, trigger: projectTrigger(eventTriggers.get(trigger.id)), diagnostics: eventTriggers.diagnostics() }));
+    await writeEvent("inbox/order.json", "post-restart event");
+    const restartJobId = await waitForNewEventRun(routine.id, "inbox/order.json", restartPriorRunIds, restartPriorJobIds, "post-restart event Job");
     await waitForCompletedJob(restartJobId);
     restartState = { jobs: jobs.listJobs().jobs.length, history: projectRoutine(routines.get(routine.id)) };
     check("restored watcher handles only future OS events", restartState.history.history.filter((entry) => entry.source === "event").length === 3, JSON.stringify(restartState));
 
+    // Exercise the production watcher's fatal-error handler through its internal
+    // gate-only diagnostic hook; the watcher itself is the real Windows fs.watch.
+    const watcherBeforeError = eventTriggers.diagnostics();
+    const watcherErrorTarget = watcherBeforeError.watchers.find((entry) => entry.workspaceId === workspaceId);
+    watcherErrorTarget?.emitError(new Error("V4.4 gate watcher failure"));
+    await eventTriggers.flush();
+    const watcherAfterError = eventTriggers.diagnostics();
+    const latchedTrigger = eventTriggers.get(trigger.id);
+    const installsAfterErrorInspection = watcherAfterError.watcherInstallCount;
+    eventTriggers.list();
+    eventTriggers.get(trigger.id);
+    eventTriggers.reconcile();
+    watcherErrorState = { trigger: projectTrigger(eventTriggers.get(trigger.id)), before: watcherBeforeError, after: eventTriggers.diagnostics() };
+    check("watcher failure latches the trigger as blocked and cancels the watcher", Boolean(watcherErrorTarget) && latchedTrigger.enabled === false && latchedTrigger.lastStatus === "blocked" && /workspace watcher failed/.test(latchedTrigger.lastError ?? "") && latchedTrigger.failureCount >= 1 && watcherAfterError.watchers.length === 0, JSON.stringify(watcherErrorState));
+    check("list/get/reconcile do not auto-reopen a watcher failure latch", eventTriggers.diagnostics().watcherInstallCount === installsAfterErrorInspection && eventTriggers.diagnostics().watchers.length === 0, JSON.stringify(eventTriggers.diagnostics()));
+    await renderer(`window.sovereignbot.eventTriggers.setEnabled(${JSON.stringify({ triggerId: trigger.id, enabled: true })})`);
+    await waitForWatcherReady(trigger.id, "watcher after fatal-error re-enable");
+    check("explicit re-enable clears the watcher failure latch and rebuilds", eventTriggers.get(trigger.id).enabled === true && eventTriggers.get(trigger.id).lastStatus !== "blocked", JSON.stringify({ trigger: projectTrigger(eventTriggers.get(trigger.id)), diagnostics: eventTriggers.diagnostics() }));
+
     await renderer(`window.sovereignbot.routines.setEnabled(${JSON.stringify({ routineId: routine.id, enabled: false })})`);
     await sleep(900);
     const jobsBeforeDisabledRoutine = jobs.listJobs().jobs.length;
-    await writeEvent("inbox/order.json");
+    await writeEvent("inbox/order.json", "event while linked Routine disabled");
     await sleep(1000);
     await eventTriggers.flush();
     disabledRoutineState = { trigger: projectTrigger(eventTriggers.get(trigger.id)), jobs: jobs.listJobs().jobs.length };
     check("disabled linked Routine fails closed", disabledRoutineState.trigger.lastStatus === "blocked" && disabledRoutineState.jobs === jobsBeforeDisabledRoutine, JSON.stringify(disabledRoutineState));
     await renderer(`window.sovereignbot.routines.setEnabled(${JSON.stringify({ routineId: routine.id, enabled: true })})`);
     await sleep(900);
-    await writeEvent("inbox/order.json");
-    const resumedJobId = await waitFor("resumed Routine event Job", async () => {
-      await eventTriggers.flush();
-      return routines.get(routine.id).history.filter((entry) => entry.source === "event" && entry.relativePath === "inbox/order.json").at(-1)?.jobId ?? false;
-    });
+    await waitForWatcherReady(trigger.id, "watcher after linked Routine re-enable");
+    const resumedPriorRunIds = snapshotRunIds(routine.id);
+    const resumedPriorJobIds = snapshotJobIds();
+    await writeEvent("inbox/order.json", "future event after Routine re-enable");
+    const resumedJobId = await waitForNewEventRun(routine.id, "inbox/order.json", resumedPriorRunIds, resumedPriorJobIds, "resumed Routine event Job");
     await waitForCompletedJob(resumedJobId);
     check("Routine re-enable restores future trigger events", routines.get(routine.id).history.filter((entry) => entry.source === "event").length === 4, JSON.stringify(projectRoutine(routines.get(routine.id))));
 
@@ -449,18 +522,35 @@ export async function runVerifyV44EventTriggers({ app }) {
     // cannot collapse nested-directory callbacks into one parent-directory event.
     stormTrigger = await renderer(`window.sovereignbot.eventTriggers.create(${JSON.stringify({ name: "Storm guard", routineId: stormRoutine.id, workspaceId, pathPrefix: "" })})`);
     check("second trigger uses the same trusted workspace watcher domain", stormTrigger.enabled && stormTrigger.pathPrefix === "", JSON.stringify(projectTrigger(stormTrigger)));
+    await waitForWatcherReady(stormTrigger.id, "watcher for storm trigger");
     const jobsBeforeStorm = jobs.listJobs().jobs.length;
-    for (const path of stormPaths) {
+    for (const path of stormPaths.slice(0, 3)) {
+      const stormPriorRunIds = snapshotRunIds(stormRoutine.id);
+      const stormPriorJobIds = snapshotJobIds();
       await writeEvent(path, "storm metadata only");
-      await sleep(75);
+      const stormJobId = await waitForNewEventRun(stormRoutine.id, path, stormPriorRunIds, stormPriorJobIds, `storm event ${path}`);
+      await waitForCompletedJob(stormJobId);
     }
+    check("trailing debounce permits one governed storm fire per quiet expiry", jobs.listJobs().jobs.length === jobsBeforeStorm + 3 && eventHistory(stormRoutine.id).length === 3, JSON.stringify({ jobs: jobs.listJobs().jobs.length, history: projectRoutine(routines.get(stormRoutine.id)) }));
+
+    const stormRestartPriorRunIds = snapshotRunIds(stormRoutine.id);
+    const stormRestartPriorJobIds = snapshotJobIds();
+    eventTriggers.stop();
+    eventTriggers = createEventTriggerController({ dataDir, routineController: routines, services, maxFires: 3 });
+    eventTriggers.start();
+    await waitForWatcherReady(stormTrigger.id, "watcher after storm accounting restart");
+    check("storm accounting restart does not replay prior events", snapshotRunIds(stormRoutine.id).size === stormRestartPriorRunIds.size && snapshotJobIds().size === stormRestartPriorJobIds.size, JSON.stringify({ history: projectRoutine(routines.get(stormRoutine.id)), diagnostics: eventTriggers.diagnostics() }));
+
+    const fourthStormPriorRunIds = snapshotRunIds(stormRoutine.id);
+    const fourthStormPriorJobIds = snapshotJobIds();
+    await writeEvent(stormPaths[3], "storm metadata only fourth");
     await waitFor("event storm protection", async () => {
       await eventTriggers.flush();
       const current = eventTriggers.get(stormTrigger.id);
       return current.enabled === false && current.lastStatus === "blocked" ? current : false;
     }, 15_000);
-    stormState = { trigger: projectTrigger(eventTriggers.get(stormTrigger.id)), jobs: jobs.listJobs().jobs.length };
-    check("event storm protection disables trigger and records reason", stormState.trigger.enabled === false && stormState.trigger.lastStatus === "blocked" && /event storm protection/.test(stormState.trigger.lastError ?? "") && stormState.jobs <= jobsBeforeStorm + 3, JSON.stringify(stormState));
+    stormState = { trigger: projectTrigger(eventTriggers.get(stormTrigger.id)), jobs: jobs.listJobs().jobs.length, history: projectRoutine(routines.get(stormRoutine.id)), diagnostics: eventTriggers.diagnostics() };
+    check("event storm protection disables trigger and records reason", stormState.trigger.enabled === false && stormState.trigger.lastStatus === "blocked" && /event storm protection/.test(stormState.trigger.lastError ?? "") && stormState.jobs === jobsBeforeStorm + 3 && snapshotRunIds(stormRoutine.id).size === fourthStormPriorRunIds.size && snapshotJobIds().size === fourthStormPriorJobIds.size, JSON.stringify(stormState));
 
     const jobsBeforeWorkspaceRemoval = jobs.listJobs().jobs.length;
     services.removeWorkspace(workspaceId);
@@ -474,8 +564,9 @@ export async function runVerifyV44EventTriggers({ app }) {
     await renderer("document.getElementById('nav-triggers')?.click()");
     await sleep(300);
     english = await renderer(`({ lang: document.documentElement.lang, visible: document.getElementById('view-triggers')?.classList.contains('hidden') === false, body: document.getElementById('view-triggers')?.innerText || '', dialog: document.getElementById('trigger-dialog')?.innerText || '', active: [...document.querySelectorAll('.utility-nav.active')].map((entry)=>entry.id) })`);
-    const requiredEnglish = ["Triggers", "Run an enabled recurring Routine", "Last event", "Path", "Status", "Disable", "Remove"];
+    const requiredEnglish = ["Triggers", "Run an enabled recurring Routine", "Events are observed only while SovereignBot is running.", "File contents are never read automatically.", "Last event", "Path", "Status", "Failures", "Disable", "Remove"];
     check("English Triggers UI shows explicit event state and controls", english.lang === "en" && english.visible && english.active.length === 1 && english.active[0] === "nav-triggers" && requiredEnglish.every((label) => english.body.includes(label)), JSON.stringify({ lang: english.lang, active: english.active }));
+    check("storm-protected trigger card is visibly Blocked with failure state", english.body.includes("Blocked") && english.body.includes("Failures"), JSON.stringify({ body: english.body }));
     check("Triggers form exposes only governed fields", ["Name", "Routine", "Trusted workspace", "Path prefix"].every((label) => english.dialog.includes(label)) && !/(webhook|cron|shell|script|manual authority|provider session)/i.test(`${english.body}\n${english.dialog}`), JSON.stringify({ dialog: english.dialog }));
 
     visual = await captureVisualEvidence(win);
@@ -487,8 +578,9 @@ export async function runVerifyV44EventTriggers({ app }) {
     await renderer("document.getElementById('nav-triggers')?.click()");
     await sleep(300);
     chinese = await renderer(`({ lang: document.documentElement.lang, body: document.getElementById('view-triggers')?.innerText || '', dialog: document.getElementById('trigger-dialog')?.innerText || '' })`);
-    const requiredChinese = ["触发器", "最近事件", "路径", "状态", "已阻断", "名称", "例行任务", "受信任工作区", "路径前缀"];
+    const requiredChinese = ["触发器", "仅在 SovereignBot 运行时观察新事件。", "系统不会自动读取文件内容。", "最近事件", "路径", "状态", "失败次数", "已阻断", "名称", "例行任务", "受信任工作区", "路径前缀"];
     check("zh-CN Triggers UI", chinese.lang === "zh-CN" && requiredChinese.every((label) => `${chinese.body}\n${chinese.dialog}`.includes(label)), JSON.stringify({ lang: chinese.lang, requiredChinese }));
+    check("zh-CN storm-protected trigger card is visibly 已阻断", chinese.body.includes("已阻断"), JSON.stringify({ body: chinese.body }));
     await renderer("document.getElementById('setting-language').value='en'; document.getElementById('setting-language').dispatchEvent(new Event('change',{bubbles:true}))");
     await sleep(350);
 
@@ -523,12 +615,13 @@ export async function runVerifyV44EventTriggers({ app }) {
     trigger: triggerProjection,
     routine: routineProjection,
     storm: stormState,
+    watcherError: watcherErrorState,
     restart: restartState,
     disabledRoutine: disabledRoutineState,
     removedWorkspace: removedWorkspaceState,
     eventJobIds,
     jobs: jobProjection,
-    runtimeTasks: runtimeHarness?.tasks?.map((task) => ({ id: task.id, planId: task.planId, status: task.status, title: task.title, supervisorId: task.supervisorId, executionContext: task.executionContext })) ?? [],
+    runtimeTasks: runtimeHarness?.tasks?.map((task) => ({ id: task.id, planId: task.planId, status: task.status, title: task.title, input: task.input, supervisorId: task.supervisorId, executionContext: task.executionContext })) ?? [],
     fatal: fatal ? String(fatal?.message ?? fatal) : undefined,
   };
   await writeFile(join(EVIDENCE_DIR, "verify-v44-event-triggers.json"), `${JSON.stringify(summary, null, 2)}\n`, "utf8");

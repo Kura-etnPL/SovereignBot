@@ -182,6 +182,7 @@ export const IPC_CHANNELS = Object.freeze({
         validateRequest: (payload) => {
             if (!isPlainObject(payload)) throw new Error("request payload must be an object");
             assertNoForbiddenKeys(payload);
+            assertOnlyKnownKeys(payload, ["title", "objective", "ownerCoworkerId", "parentJobId", "priority", "nextActionAt"]);
             if (typeof payload.title !== "string" || !payload.title.trim()) throw new Error("missing request field: title");
             if (payload.title.length > 120) throw new Error("title exceeds 120 characters");
             if (typeof payload.objective !== "string" || !payload.objective.trim()) throw new Error("missing request field: objective");
@@ -320,6 +321,14 @@ function assertNoForbiddenKeys(payload) {
         if (FORBIDDEN_KEYS.some((forbidden) => squeezed.includes(forbidden))) {
             throw new Error(`ipc payload field is not accepted from the renderer: ${key.slice(0, 40)}`);
         }
+    }
+}
+
+function assertOnlyKnownKeys(payload, allowedKeys) {
+    const allowed = new Set(allowedKeys);
+    for (const key of Object.keys(payload)) {
+        if (!allowed.has(key))
+            throw new Error(`unexpected request field: ${key.slice(0, 40)}`);
     }
 }
 

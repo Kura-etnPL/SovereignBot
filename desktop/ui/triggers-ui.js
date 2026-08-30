@@ -12,7 +12,7 @@
     section.id = "view-triggers";
     section.className = "main-view settings-view hidden";
     section.innerHTML = `
-      <header class="page-header"><div><span class="eyebrow" data-i18n="triggers.title">Triggers</span><h1 data-i18n="triggers.title">Triggers</h1><p data-i18n="triggers.subtitle">Run an enabled recurring Routine when a trusted workspace changes.</p></div><div style="display:flex;gap:8px;align-items:center"><button id="triggers-refresh" class="quiet-action" type="button" data-i18n="action.refresh">Refresh</button><button id="triggers-new" class="hero-action" type="button" data-i18n="triggers.create">New trigger</button></div></header>
+      <header class="page-header"><div><span class="eyebrow" data-i18n="triggers.title">Triggers</span><h1 data-i18n="triggers.title">Triggers</h1><p data-i18n="triggers.subtitle">Run an enabled recurring Routine when a trusted workspace changes.</p><p class="setting-feedback" data-i18n="triggers.safetyCopy">Events are observed only while SovereignBot is running. File contents are never read automatically.</p></div><div style="display:flex;gap:8px;align-items:center"><button id="triggers-refresh" class="quiet-action" type="button" data-i18n="action.refresh">Refresh</button><button id="triggers-new" class="hero-action" type="button" data-i18n="triggers.create">New trigger</button></div></header>
       <p id="triggers-error" class="inline-error hidden"></p>
       <div id="trigger-list" class="workspace-cards"></div>
       <dialog id="trigger-dialog" class="modal"><form id="trigger-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="triggers.title">TRIGGERS</span><h2 data-i18n="triggers.create">New trigger</h2></div><button class="modal-x" data-close-dialog="trigger-dialog" type="button">×</button></div><label><span data-i18n="triggers.name">Name</span><input id="trigger-name" maxlength="120" required></label><label><span data-i18n="triggers.routine">Routine</span><select id="trigger-routine" required></select></label><label><span data-i18n="triggers.workspace">Trusted workspace</span><select id="trigger-workspace" required></select></label><label><span data-i18n="triggers.pathPrefix">Path prefix</span><input id="trigger-prefix" maxlength="512" placeholder="inbox/reports"><small data-i18n="triggers.pathPrefixHint">Optional relative path prefix; leave empty for the whole workspace.</small></label><p id="trigger-form-error" class="inline-error hidden"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="trigger-dialog" type="button" data-i18n="action.cancel">Cancel</button><button class="hero-action" type="submit" data-i18n="triggers.create">New trigger</button></div></form></dialog>`;
@@ -35,9 +35,9 @@
   }
 
   function statusLabel(status, enabled) {
-    if (!enabled) return t("triggers.disabled", "Disabled");
     if (status === "blocked") return t("triggers.blocked", "Blocked");
     if (status === "error") return t("triggers.error", "Error");
+    if (!enabled) return t("triggers.disabled", "Disabled");
     if (status === "fired") return t("triggers.fired", "Fired");
     if (status === "pending") return t("triggers.pending", "Pending");
     return t("triggers.ready", "Ready");
@@ -56,7 +56,7 @@
       const card = document.createElement("div"); card.className = "job-card";
       const head = document.createElement("div"); head.className = "job-card-head";
       const title = document.createElement("strong"); title.textContent = trigger.name;
-      const badge = document.createElement("span"); badge.className = `job-status ${trigger.enabled ? (trigger.lastStatus === "blocked" || trigger.lastStatus === "error" ? "failed" : "completed") : "waiting"}`; badge.textContent = statusLabel(trigger.lastStatus, trigger.enabled);
+      const badge = document.createElement("span"); badge.className = `job-status ${trigger.lastStatus === "blocked" || trigger.lastStatus === "error" ? "failed" : trigger.enabled ? "completed" : "waiting"}`; badge.textContent = statusLabel(trigger.lastStatus, trigger.enabled);
       head.append(title, badge);
       const routine = routineById.get(trigger.routineId);
       const workspace = workspaceById.get(trigger.workspaceId);
@@ -64,7 +64,7 @@
       meta.textContent = `${t("triggers.routine", "Routine")}: ${routine?.name ?? trigger.routineId} · ${t("triggers.workspace", "Workspace")}: ${workspace?.path ?? trigger.workspaceId} · ${t("triggers.pathPrefix", "Path prefix")}: ${trigger.pathPrefix || t("triggers.wholeWorkspace", "whole workspace")}`;
       const event = document.createElement("div"); event.className = "setting-feedback"; event.style.margin = "8px 0 0";
       const eventTime = trigger.lastEventAt ? new Date(trigger.lastEventAt).toLocaleString() : "—";
-      event.textContent = `${t("triggers.lastEvent", "Last event")}: ${eventTime} · ${t("triggers.lastPath", "Path")}: ${trigger.lastRelativePath || "—"} · ${t("triggers.lastStatus", "Status")}: ${statusLabel(trigger.lastStatus, trigger.enabled)}`;
+      event.textContent = `${t("triggers.lastEvent", "Last event")}: ${eventTime} · ${t("triggers.lastPath", "Path")}: ${trigger.lastRelativePath || "—"} · ${t("triggers.lastStatus", "Status")}: ${statusLabel(trigger.lastStatus, trigger.enabled)} · ${t("triggers.failureCount", "Failures")}: ${trigger.failureCount ?? 0}`;
       const actions = document.createElement("div"); actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-top:10px";
       const toggle = document.createElement("button"); toggle.className = "quiet-action"; toggle.type = "button"; toggle.textContent = trigger.enabled ? t("triggers.disable", "Disable") : t("triggers.enable", "Enable");
       toggle.addEventListener("click", async () => { try { await window.sovereignbot.eventTriggers.setEnabled({ triggerId: trigger.id, enabled: !trigger.enabled }); await refresh(); } catch (error) { showError(error?.message ?? error); } });

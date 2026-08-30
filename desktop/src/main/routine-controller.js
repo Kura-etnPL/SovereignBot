@@ -1,12 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
+import { normalizeEventMetadata, normalizeEventRelativePath } from "./lib/event-metadata.js";
 
 export const ROUTINES_SCHEMA = "sovereignbot.desktop.routines.v1";
 export const ROUTINE_HISTORY_LIMIT = 100;
 const MAX_NAME = 120;
 const MAX_INSTRUCTION = 8000;
-const MAX_EVENT_PATH = 512;
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
 const SCHEDULE_TYPES = new Set(["one-time", "hourly", "daily", "weekly"]);
 const TERMINAL_JOB = new Set(["completed", "failed", "cancelled"]);
@@ -24,21 +24,9 @@ function exactKeys(value, allowed, label) {
   for (const key of Object.keys(value)) if (!allowed.has(key)) throw new Error(`unexpected ${label} field: ${key}`);
 }
 
-// Event metadata is deliberately narrower than a normal Job objective. The watcher may
-// report an untrusted filename, but it must never be able to turn that filename into a
-// working directory, shell fragment, or file-content lookup.
-export function normalizeEventRelativePath(value, label = "relativePath") {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${label} must be a relative path`);
-  const raw = value.trim().replaceAll("\\", "/");
-  if (raw.includes("\0") || raw.startsWith("/") || /^[A-Za-z]:/.test(raw) || raw.includes(":"))
-    throw new Error(`${label} must stay inside the trusted workspace`);
-  const parts = raw.split("/");
-  if (parts.some((part) => !part || part === "." || part === ".."))
-    throw new Error(`${label} must not contain traversal segments`);
-  const normalized = parts.join("/");
-  if (normalized.length > MAX_EVENT_PATH) throw new Error(`${label} exceeds ${MAX_EVENT_PATH} characters`);
-  return normalized;
-}
+// Keep the historical export stable while the path and event-metadata contract lives
+// in one shared module used by the watcher, Routine, Job, and IPC boundaries.
+export { normalizeEventRelativePath } from "./lib/event-metadata.js";
 
 export function normalizeRoutineSchedule(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("schedule must be an object");
@@ -117,6 +105,7 @@ function sanitizeHistory(value) {
         }
         if (EVENT_TYPES.has(entry.eventType)) run.eventType = entry.eventType;
         if (typeof entry.workspaceId === "string" && /^[A-Za-z0-9][\w:.-]{0,159}$/.test(entry.workspaceId)) run.workspaceId = entry.workspaceId;
+        if (typeof entry.observedAt === "string" && Number.isFinite(Date.parse(entry.observedAt))) run.observedAt = new Date(entry.observedAt).toISOString();
       }
       return run;
     })
@@ -243,10 +232,10 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
     if (anyDirty) save();
   }
 
-  function submitRoutineRun(routine, { scheduledFor, source = "schedule", event } = {}) {
+  function submitRoutineRun(routine, { scheduledFor, source = "schedule", eventHistory, eventMetadata } = {}) {
     const startedAt = nowIso(now);
     const run = { id: makeHistoryId(), scheduledFor, startedAt, status: "submitting", source };
-    if (source === "event") Object.assign(run, event);
+    if (source === "event") Object.assign(run, eventHistory);
     routine.history.push(run);
     trimHistory(routine);
     routine.lastRunAt = startedAt;
@@ -272,6 +261,7 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
           skillId: routine.skillId,
           workspaceId: routine.workspaceId,
           deferSchedule: true,
+          ...(eventMetadata ? { eventMetadata } : {}),
         },
       });
       run.jobId = job.id;
@@ -307,15 +297,28 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
     const eventId = event.eventId ?? makeEventId();
     if (typeof eventId !== "string" || !/^event_[a-f0-9]{16}$/i.test(eventId)) throw new Error("eventId must be an event identifier");
     if (!EVENT_TYPES.has(event.eventType)) throw new Error("eventType must be change or rename");
-    const metadata = {
+    const relativePath = normalizeEventRelativePath(event.relativePath);
+    const observedAt = asIso(event.observedAt ?? nowIso(now), "event.observedAt");
+    const eventMetadata = normalizeEventMetadata({
+      source: "workspace-file-change",
       triggerId: event.triggerId,
       eventId,
-      relativePath: normalizeEventRelativePath(event.relativePath),
-      eventType: event.eventType,
-      workspaceId: event.workspaceId,
-    };
-    const observedAt = asIso(event.observedAt ?? nowIso(now), "event.observedAt");
-    const result = submitRoutineRun(routine, { scheduledFor: observedAt, source: "event", event: metadata });
+      relativePath,
+      observedAt,
+    });
+    const result = submitRoutineRun(routine, {
+      scheduledFor: observedAt,
+      source: "event",
+      eventMetadata,
+      eventHistory: {
+        triggerId: eventMetadata.triggerId,
+        eventId: eventMetadata.eventId,
+        relativePath: eventMetadata.relativePath,
+        observedAt: eventMetadata.observedAt,
+        eventType: event.eventType,
+        workspaceId: event.workspaceId,
+      },
+    });
     if (!result) throw new Error("event-triggered Routine Job could not be created");
     return result;
   }

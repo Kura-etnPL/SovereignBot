@@ -1,6 +1,7 @@
 import { ipcMain } from "electron";
 import { IPC_CHANNELS, validateIpcRequest } from "./lib/ipc-schema.js";
 import { V3_IPC_CHANNELS, validateV3IpcRequest } from "./lib/v3-ipc-schema.js";
+import { normalizeEventRelativePath } from "./lib/event-metadata.js";
 
 const LIVE_FRAME_CHANNEL = "computer:frame";
 const ATTACH_CHANNEL = "artifact:attachViaDialog";
@@ -193,13 +194,7 @@ function validateRoutineRequest(channel, payload) {
 function validateEventPathPrefix(value) {
     const clean = boundedString(value ?? "", "pathPrefix", 512) ?? "";
     if (!clean) return "";
-    const normalized = clean.replaceAll("\\", "/");
-    if (normalized.includes("\0") || normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized) || normalized.includes(":"))
-        throw new Error("pathPrefix must stay inside the trusted workspace");
-    const parts = normalized.split("/");
-    if (parts.some((part) => !part || part === "." || part === ".."))
-        throw new Error("pathPrefix must not contain traversal segments");
-    return parts.join("/");
+    return normalizeEventRelativePath(clean, "pathPrefix");
 }
 
 function validateEventTriggerRequest(channel, payload) {
