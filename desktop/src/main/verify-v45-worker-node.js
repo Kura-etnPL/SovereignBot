@@ -692,6 +692,22 @@ export async function runVerifyV45WorkerNode({ app }) {
     const firstBinding = await waitForRemoteBinding(firstJob.id);
     firstRemoteTaskId = firstBinding.remoteTaskId;
     firstDesktopTask = firstBinding.task;
+    const inputRequestId = firstDesktopTask.input?.requestId;
+    const harnessRequestId = firstDesktopTask.harnessState?.requestId;
+    const inputRequestCreatedAt = firstDesktopTask.input?.requestCreatedAt;
+    const harnessRequestCreatedAt = firstDesktopTask.harnessState?.requestCreatedAt;
+    const stableRequestCreatedAt = firstDesktopTask.input?.requestCreatedAt
+      ?? firstDesktopTask.harnessState?.requestCreatedAt;
+    const stableRequestId = typeof inputRequestId === "string"
+      && typeof harnessRequestId === "string"
+      && inputRequestId === harnessRequestId;
+    const stableRequestCreatedAtValid = typeof stableRequestCreatedAt === "string"
+      && Number.isFinite(Date.parse(stableRequestCreatedAt))
+      && (inputRequestCreatedAt === undefined
+        || harnessRequestCreatedAt === undefined
+        || inputRequestCreatedAt === harnessRequestCreatedAt);
+    check("STABLE_REQUEST_ID", stableRequestId, { inputRequestId, harnessRequestId });
+    check("STABLE_REQUEST_CREATED_AT", stableRequestCreatedAtValid, { inputRequestCreatedAt, harnessRequestCreatedAt, stableRequestCreatedAt });
     const remoteStatus = await client.getTask(firstRemoteTaskId);
     const transcript = await readTranscript(transcriptPath);
     firstTranscriptCount = transcript.length;
@@ -718,33 +734,57 @@ export async function runVerifyV45WorkerNode({ app }) {
     check("PUBLIC_SURFACES_REDACTED", !containsSensitive(`${desktopPublicStateText}\n${desktopStateText}`, forbiddenTransfer), { jobStatus: firstJob.status });
     check("PAIRING_TOKEN_CANARY_REDACTED", !containsSensitive(desktopPublicStateText, [pairingToken]), { tokenLength: pairingToken.length });
     check("FILE_BODY_CANARY_REDACTED", !containsSensitive(`${desktopPublicStateText}\n${desktopStateText}`, [FILE_BODY_CANARY]), { bodyCanary: FILE_BODY_CANARY });
-    check("IDEMPOTENCY", firstRemoteTaskId && (await client.dispatch({
-      protocol: WORKER_NODE_PROTOCOL,
-      requestId: firstDesktopTask.input.requestId,
-      jobId: firstDesktopTask.input.jobId,
-      title: firstDesktopTask.title,
-      instruction: firstDesktopTask.input.instruction,
-      workspaceId: firstDesktopTask.executionContext.workspaceId,
-      requiredCapabilities: firstDesktopTask.input.requiredCapabilities,
-      attempt: firstDesktopTask.input.attempt,
-      createdAt: firstDesktopTask.createdAt,
-    })).duplicate === true, { sameRemoteTask: firstRemoteTaskId });
-    let conflict = false;
-    try {
-      await client.dispatch({
-        protocol: WORKER_NODE_PROTOCOL,
-        requestId: firstDesktopTask.input.requestId,
-        jobId: firstDesktopTask.input.jobId,
-        title: firstDesktopTask.title,
-        instruction: `${firstDesktopTask.input.instruction} changed`,
-        workspaceId: firstDesktopTask.executionContext.workspaceId,
-        requiredCapabilities: firstDesktopTask.input.requiredCapabilities,
-        attempt: firstDesktopTask.input.attempt,
-        createdAt: firstDesktopTask.createdAt,
-      });
+    let duplicateProbe;
+    let duplicateProbeError;
+    let transcriptAfterDuplicate = [];
+    if (firstRemoteTaskId && stableRequestCreatedAtValid) {
+      try {
+        duplicateProbe = await client.dispatch({
+          protocol: WORKER_NODE_PROTOCOL,
+          requestId: firstDesktopTask.input.requestId,
+          jobId: firstDesktopTask.input.jobId,
+          title: firstDesktopTask.title,
+          instruction: firstDesktopTask.input.instruction,
+          workspaceId: firstDesktopTask.executionContext.workspaceId,
+          requiredCapabilities: firstDesktopTask.input.requiredCapabilities,
+          attempt: firstDesktopTask.input.attempt,
+          createdAt: stableRequestCreatedAt,
+        });
+        transcriptAfterDuplicate = await readTranscript(transcriptPath);
+      }
+      catch (error) { duplicateProbeError = error; }
     }
-    catch (error) { conflict = /conflicts|different request body/i.test(String(error?.message ?? error)); }
-    check("DUPLICATE_CONFLICT_REJECTED", conflict, { sameRemoteTask: firstRemoteTaskId });
+    check("IDEMPOTENCY", duplicateProbe?.duplicate === true
+      && duplicateProbe.remoteTaskId === firstRemoteTaskId
+      && transcriptAfterDuplicate.length === firstTranscriptCount, {
+      duplicate: duplicateProbe?.duplicate,
+      remoteTaskId: duplicateProbe?.remoteTaskId,
+      sameRemoteTask: duplicateProbe?.remoteTaskId === firstRemoteTaskId,
+      providerEntries: transcriptAfterDuplicate.length,
+      error: duplicateProbeError?.message,
+    });
+    let conflict = false;
+    let conflictError;
+    try {
+      if (firstRemoteTaskId && stableRequestCreatedAtValid) {
+        await client.dispatch({
+          protocol: WORKER_NODE_PROTOCOL,
+          requestId: firstDesktopTask.input.requestId,
+          jobId: firstDesktopTask.input.jobId,
+          title: firstDesktopTask.title,
+          instruction: `${firstDesktopTask.input.instruction} changed`,
+          workspaceId: firstDesktopTask.executionContext.workspaceId,
+          requiredCapabilities: firstDesktopTask.input.requiredCapabilities,
+          attempt: firstDesktopTask.input.attempt,
+          createdAt: stableRequestCreatedAt,
+        });
+      }
+    }
+    catch (error) {
+      conflictError = error;
+      conflict = /conflicts|different request body/i.test(String(error?.message ?? error));
+    }
+    check("DUPLICATE_CONFLICT_REJECTED", conflict, { sameRemoteTask: firstRemoteTaskId, error: conflictError?.message });
 
     await renderer("document.getElementById('nav-work')?.click(); true");
     await sleep(300);
