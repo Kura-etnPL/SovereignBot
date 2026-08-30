@@ -1,6 +1,6 @@
-import { watch as fsWatch } from "node:fs";
+import { realpathSync, statSync, watch as fsWatch } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { isAbsolute, join, posix, relative, resolve, win32 } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, win32 } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 import { normalizeEventRelativePath, sanitizeRecentFireAt } from "./lib/event-metadata.js";
 
@@ -13,6 +13,8 @@ const MAX_NAME = 120;
 const MAX_PATH_PREFIX = 512;
 const MAX_ERROR = 500;
 const MAX_FAILURE_COUNT = 1000;
+const MAX_RAW_SAMPLES = 24;
+const MAX_RAW_SAMPLE_VALUE = 512;
 const EVENT_TYPES = new Set(["change", "rename"]);
 const IDENTIFIER = /^[A-Za-z0-9][\w:.-]{0,159}$/;
 const TRIGGER_ID = /^trigger_[a-f0-9]{16}$/i;
@@ -80,22 +82,220 @@ function sanitizeTrigger(entry) {
   }
 }
 
-function pathInside(root, filename) {
-  if (!root || filename === undefined || filename === null) return undefined;
-  const raw = Buffer.isBuffer(filename) ? filename.toString("utf8") : String(filename);
-  const relativeName = normalizeEventRelativePath(raw, "watcher filename");
+function realpath(value) {
+  const native = realpathSync.native;
+  return typeof native === "function" ? native(value) : realpathSync(value);
+}
+
+function realpathWithExistingAncestor(value) {
+  const absolute = resolve(value);
+  let probe = absolute;
+  const suffix = [];
+  while (true) {
+    try {
+      const resolved = realpath(probe);
+      return suffix.length ? join(resolved, ...suffix) : resolved;
+    } catch (error) {
+      const parent = dirname(probe);
+      if (parent === probe) throw error;
+      suffix.unshift(basename(probe));
+      probe = parent;
+    }
+  }
+}
+
+function safeRelative(root, candidate, { allowEmpty = false } = {}) {
+  const lexical = relative(resolve(root), resolve(candidate)).replaceAll("\\", "/");
+  if (!lexical || lexical === ".") {
+    if (!allowEmpty) throw new Error("path resolves to the trusted workspace root");
+    return "";
+  }
+  if (isAbsolute(lexical) || win32.isAbsolute(lexical) || posix.isAbsolute(lexical) || lexical === ".." || lexical.startsWith("../"))
+    throw new Error("path resolves outside the trusted workspace");
+  return normalizeEventRelativePath(lexical, "watcher path");
+}
+
+function realRelativeInside(root, candidate, { allowEmpty = false } = {}) {
   const rootPath = resolve(root);
-  const candidate = resolve(rootPath, ...relativeName.split("/"));
-  const check = relative(rootPath, candidate);
-  if (!check || check === "." || isAbsolute(check) || win32.isAbsolute(check) || posix.isAbsolute(check)) return undefined;
-  if (check === ".." || check.startsWith("..")) return undefined;
-  return normalizeEventRelativePath(check.replaceAll("\\", "/"), "watcher filename");
+  const candidatePath = resolve(candidate);
+  safeRelative(rootPath, candidatePath, { allowEmpty });
+  const realRoot = realpath(rootPath);
+  const realCandidate = realpathWithExistingAncestor(candidatePath);
+  return safeRelative(realRoot, realCandidate, { allowEmpty });
+}
+
+function isAbsoluteCallbackPath(value) {
+  return isAbsolute(value) || win32.isAbsolute(value) || posix.isAbsolute(value);
+}
+
+function filenameKind(filename) {
+  if (filename === null || filename === undefined) return "null";
+  if (Buffer.isBuffer(filename)) return "buffer";
+  return typeof filename;
+}
+
+function rawFilename(filename) {
+  if (filename === null || filename === undefined) return null;
+  if (Buffer.isBuffer(filename)) return filename.toString("utf8").slice(0, MAX_RAW_SAMPLE_VALUE);
+  if (typeof filename === "string") return filename.slice(0, MAX_RAW_SAMPLE_VALUE);
+  return `[${typeof filename}]`;
+}
+
+function sanitizeRawFilename(filename, workspaceRoot) {
+  let value = rawFilename(filename);
+  if (typeof value !== "string") return value;
+  const normalized = value.replaceAll("\\", "/");
+  const root = String(workspaceRoot ?? "").replaceAll("\\", "/").replace(/\/+$/, "");
+  const variants = normalized.startsWith("//?/") ? [normalized.slice(4), normalized] : [normalized];
+  const foldedRoot = pathKey(root);
+  const matched = variants.find((candidate) => {
+    const folded = pathKey(candidate);
+    return root && (folded === foldedRoot || folded.startsWith(`${foldedRoot}/`));
+  });
+  if (matched) value = `<workspace>${matched.slice(root.length)}`;
+  return value.slice(0, MAX_RAW_SAMPLE_VALUE);
+}
+
+function normalizeCallbackText(filename) {
+  if (filename === null || filename === undefined) throw new Error("filename-unavailable");
+  if (Buffer.isBuffer(filename)) {
+    const decoded = filename.toString("utf8");
+    if (!Buffer.from(decoded, "utf8").equals(filename)) throw new Error("filename-invalid-utf8");
+    return decoded;
+  }
+  if (typeof filename !== "string") throw new Error("filename-unsupported-type");
+  return filename;
+}
+
+function candidateFromRoot(descriptor, root, raw) {
+  const normalized = normalizeEventRelativePath(raw, "watcher filename");
+  const candidate = resolve(root, ...normalized.split("/"));
+  return realRelativeInside(descriptor.workspaceRoot, candidate);
+}
+
+function descriptorMatchesPath(pathPrefixes, relativePath) {
+  return !pathPrefixes.length || pathPrefixes.some((prefix) => pathMatches(prefix, relativePath));
+}
+
+function rejectedDecode(diagnostic, reason) {
+  return { diagnostic: { ...diagnostic, rejectedReason: reason } };
+}
+
+/**
+ * Decode a platform-dependent fs.watch filename into one canonical, trusted
+ * Workspace-relative path. This accepts the two documented relative callback
+ * shapes (watchRoot-relative and Workspace-relative), plus an absolute path
+ * only after real-path containment is proven. It never reads file contents.
+ */
+export function decodeWatcherCallback(descriptor, filename, { pathPrefixes = [] } = {}) {
+  const diagnostic = {
+    filenameKind: filenameKind(filename),
+    raw: sanitizeRawFilename(filename, descriptor?.workspaceRoot),
+  };
+  if (!descriptor?.workspaceRoot || !descriptor?.watchRoot) return rejectedDecode(diagnostic, "descriptor-unavailable");
+
+  let raw;
+  try { raw = normalizeCallbackText(filename); }
+  catch (error) { return rejectedDecode(diagnostic, error.message); }
+
+  if (isAbsoluteCallbackPath(raw)) {
+    try {
+      const relativePath = realRelativeInside(descriptor.workspaceRoot, raw);
+      if (!descriptorMatchesPath(pathPrefixes, relativePath)) return rejectedDecode({ ...diagnostic, workspaceCandidate: relativePath }, "no-matching-safe-candidate");
+      return { relativePath, diagnostic: { ...diagnostic, workspaceCandidate: relativePath, acceptedRelativePath: relativePath } };
+    } catch (error) {
+      return rejectedDecode(diagnostic, boundedError(error));
+    }
+  }
+
+  const candidates = [];
+  let anchoredCandidate;
+  let workspaceCandidate;
+  let normalizationError;
+  try { anchoredCandidate = candidateFromRoot(descriptor, descriptor.watchRoot, raw); }
+  catch (error) { normalizationError = error; }
+  try { workspaceCandidate = candidateFromRoot(descriptor, descriptor.workspaceRoot, raw); }
+  catch (error) { normalizationError ??= error; }
+
+  const candidateDiagnostics = { ...diagnostic, anchoredCandidate, workspaceCandidate };
+  for (const [candidateType, relativePath] of [["anchored", anchoredCandidate], ["workspace", workspaceCandidate]]) {
+    if (!relativePath || !descriptorMatchesPath(pathPrefixes, relativePath)) continue;
+    if (!candidates.some((entry) => pathKey(entry.relativePath) === pathKey(relativePath))) candidates.push({ candidateType, relativePath });
+  }
+  if (candidates.length > 1) return rejectedDecode(candidateDiagnostics, "ambiguous-callback");
+  if (!candidates.length) return rejectedDecode(candidateDiagnostics, normalizationError ? boundedError(normalizationError) : "no-matching-safe-candidate");
+  const [{ relativePath }] = candidates;
+  return { relativePath, diagnostic: { ...candidateDiagnostics, acceptedRelativePath: relativePath } };
+}
+
+function descriptorRelative(root, candidate) {
+  return realRelativeInside(root, candidate, { allowEmpty: true });
+}
+
+/**
+ * Derive a safe fs.watch anchor from a normalized trigger prefix. Existing
+ * files watch their parent non-recursively; existing directories and missing
+ * paths watch the deepest existing directory recursively. All anchors are
+ * realpath-contained in the trusted Workspace and no file body is read.
+ */
+export function deriveWatchDescriptor(trigger, workspaceRootValue) {
+  const workspaceRoot = realpath(resolve(workspaceRootValue));
+  if (!statSync(workspaceRoot).isDirectory()) throw new Error("trusted workspace root is not a directory");
+  const pathPrefix = normalizeEventPathPrefix(trigger?.pathPrefix);
+  const target = pathPrefix ? resolve(workspaceRoot, ...pathPrefix.split("/")) : workspaceRoot;
+  let probe = target;
+  const missingParts = [];
+  let stats;
+  while (true) {
+    try {
+      stats = statSync(probe);
+      break;
+    } catch (error) {
+      if (!['ENOENT', 'ENOTDIR'].includes(error?.code)) throw error;
+      const parent = dirname(probe);
+      if (parent === probe) throw new Error("trusted workspace anchor is unavailable");
+      missingParts.unshift(basename(probe));
+      probe = parent;
+    }
+  }
+
+  let watchRoot;
+  let recursive;
+  if (!missingParts.length && !stats.isDirectory()) {
+    if (!stats.isFile()) throw new Error("pathPrefix must resolve to a file or directory");
+    const realTarget = realpath(target);
+    descriptorRelative(workspaceRoot, realTarget);
+    watchRoot = dirname(realTarget);
+    recursive = false;
+  } else {
+    if (!stats.isDirectory()) throw new Error("pathPrefix cannot descend through a file");
+    watchRoot = realpath(probe);
+    descriptorRelative(workspaceRoot, watchRoot);
+    recursive = true;
+  }
+
+  const baseRelative = descriptorRelative(workspaceRoot, watchRoot);
+  return {
+    workspaceRoot,
+    watchRoot,
+    baseRelative,
+    recursive,
+  };
 }
 
 function pathMatches(prefix, relativePath) {
   const foldedPrefix = pathKey(prefix);
   const foldedPath = pathKey(relativePath);
   return !foldedPrefix || foldedPath === foldedPrefix || foldedPath.startsWith(`${foldedPrefix}/`);
+}
+
+function makeDescriptorKey(workspaceId, descriptor) {
+  return [
+    workspaceId,
+    pathKey(descriptor.workspaceRoot),
+    pathKey(descriptor.watchRoot),
+    descriptor.recursive ? "recursive" : "single",
+  ].join("\u0000");
 }
 
 function setField(target, key, value) {
@@ -181,17 +381,18 @@ export function createEventTriggerController({
     if (changed) trigger.failureCount = Math.min(MAX_FAILURE_COUNT, trigger.failureCount + 1);
     return changed;
   }
-  function closeWatcher(workspaceId) {
-    const existing = watchers.get(workspaceId);
+  function closeWatcher(key) {
+    const existing = watchers.get(key);
     if (!existing) return;
-    watchers.delete(workspaceId);
+    watchers.delete(key);
     try { existing.watcher.close(); } catch {}
   }
   function workspaceRoot(workspaceId) {
     try {
       const value = services.workspacePath(workspaceId);
       if (typeof value !== "string" || !value) return undefined;
-      return resolve(value);
+      const root = realpath(resolve(value));
+      return statSync(root).isDirectory() ? root : undefined;
     } catch {
       return undefined;
     }
@@ -250,11 +451,14 @@ export function createEventTriggerController({
   function cancelPendingForTrigger(triggerId, options) {
     for (const state of [...pending.values()]) if (state.triggerId === triggerId) cancelPendingState(state, options);
   }
-  function failWatcher(workspaceId, error) {
-    closeWatcher(workspaceId);
+  function failWatcher(descriptor, error) {
+    if (!descriptor) return;
+    if (descriptor.key && watchers.get(descriptor.key) === descriptor) closeWatcher(descriptor.key);
+    else try { descriptor.watcher?.close?.(); } catch {}
     const message = boundedError({ message: `workspace watcher failed: ${boundedError(error)}` });
     let changed = false;
-    for (const trigger of triggers.filter((entry) => entry.enabled && entry.workspaceId === workspaceId)) {
+    const triggerIds = new Set(descriptor.triggerIds ?? []);
+    for (const trigger of triggers.filter((entry) => entry.enabled && triggerIds.has(entry.id))) {
       cancelPendingForTrigger(trigger.id, { restoreReady: false });
       trigger.enabled = false;
       trigger.lastStatus = "blocked";
@@ -357,10 +561,28 @@ export function createEventTriggerController({
     if (state.timer && typeof state.timer.unref === "function") state.timer.unref();
   }
 
-  function enqueueFsEvent(workspaceId, eventType, filename) {
+  function triggerPrefixes(descriptor) {
+    return [...(descriptor.triggerIds ?? [])]
+      .map((triggerId) => triggers.find((entry) => entry.id === triggerId)?.pathPrefix)
+      .filter((prefix) => prefix !== undefined);
+  }
+
+  function recordRawSample(descriptor, eventType, decoded) {
+    if (descriptor.rawSamples.length >= MAX_RAW_SAMPLES) return;
+    const detail = decoded?.diagnostic ?? {};
+    const sample = {
+      eventType: String(eventType ?? "").slice(0, 40),
+      filenameKind: detail.filenameKind,
+      raw: detail.raw,
+    };
+    for (const key of ["anchoredCandidate", "workspaceCandidate", "acceptedRelativePath", "rejectedReason"])
+      if (detail[key] !== undefined) sample[key] = String(detail[key]).slice(0, MAX_RAW_SAMPLE_VALUE);
+    descriptor.rawSamples.push(sample);
+  }
+
+  function enqueueFsEvent(descriptor, eventType, relativePath) {
+    const workspaceId = descriptor.workspaceId;
     if (!running) return;
-    let relativePath;
-    try { relativePath = pathInside(workspaceRoot(workspaceId), filename); } catch { return; }
     if (!relativePath) return;
     const observedAtMs = nowMs(now);
     const observedAt = new Date(observedAtMs).toISOString();
@@ -404,23 +626,38 @@ export function createEventTriggerController({
     if (stateChanged) save();
   }
 
-  function ensureWatcher(workspaceId, root) {
-    const current = watchers.get(workspaceId);
-    if (current?.root === root) return;
-    closeWatcher(workspaceId);
-    let state;
+  function ensureWatcher(spec) {
+    const current = watchers.get(spec.key);
+    if (current) {
+      current.triggerIds = new Set(spec.triggerIds);
+      return;
+    }
+    const state = {
+      ...spec,
+      triggerIds: new Set(spec.triggerIds),
+      watcher: undefined,
+      rawCallbackCount: 0,
+      acceptedCallbackCount: 0,
+      rawSamples: [],
+    };
     try {
-      state = { root, watcher: undefined, rawCallbackCount: 0 };
-      const watcher = watchFactory(root, { persistent: false, recursive: true }, (eventType, filename) => {
+      const watcher = watchFactory(state.watchRoot, { persistent: false, recursive: state.recursive }, (eventType, filename) => {
+        if (watchers.get(state.key) !== state) return;
         state.rawCallbackCount += 1;
-        enqueueFsEvent(workspaceId, eventType, filename);
+        const decoded = decodeWatcherCallback(state, filename, { pathPrefixes: triggerPrefixes(state) });
+        recordRawSample(state, eventType, decoded);
+        if (!decoded.relativePath) return;
+        state.acceptedCallbackCount += 1;
+        enqueueFsEvent(state, eventType, decoded.relativePath);
       });
       state.watcher = watcher;
-      if (watcher && typeof watcher.on === "function") watcher.on("error", (error) => failWatcher(workspaceId, error));
-      watchers.set(workspaceId, state);
+      watchers.set(state.key, state);
       watcherInstallCount += 1;
+      if (watcher && typeof watcher.on === "function") watcher.on("error", (error) => {
+        if (watchers.get(state.key) === state) failWatcher(state, error);
+      });
     } catch (error) {
-      failWatcher(workspaceId, error);
+      failWatcher(state, error);
     }
   }
 
@@ -434,14 +671,28 @@ export function createEventTriggerController({
         if (setReferenceBlocked(trigger, validation.status, validation.error)) changed = true;
         continue;
       }
-      desired.set(trigger.workspaceId, validation.root);
+      let descriptor;
+      try {
+        descriptor = deriveWatchDescriptor(trigger, validation.root);
+      } catch (error) {
+        cancelPendingForTrigger(trigger.id, { restoreReady: false });
+        if (setReferenceBlocked(trigger, "blocked", `trusted workspace anchor unavailable: ${boundedError(error)}`)) changed = true;
+        continue;
+      }
+      const key = makeDescriptorKey(trigger.workspaceId, descriptor);
+      let spec = desired.get(key);
+      if (!spec) {
+        spec = { ...descriptor, key, workspaceId: trigger.workspaceId, triggerIds: new Set() };
+        desired.set(key, spec);
+      }
+      spec.triggerIds.add(trigger.id);
       if (!trigger.lastStatus || trigger.lastStatus === "blocked" || trigger.lastStatus === "pending") {
         if (setField(trigger, "lastStatus", "ready")) changed = true;
         if (setField(trigger, "lastError", undefined)) changed = true;
       }
     }
-    for (const workspaceId of watchers.keys()) if (!desired.has(workspaceId)) closeWatcher(workspaceId);
-    if (running) for (const [workspaceId, root] of desired) ensureWatcher(workspaceId, root);
+    for (const key of watchers.keys()) if (!desired.has(key)) closeWatcher(key);
+    if (running) for (const spec of desired.values()) ensureWatcher(spec);
     if (changed) {
       const stamp = nowIso(now);
       for (const trigger of triggers) if (trigger.lastStatus !== "pending") trigger.updatedAt = stamp;
@@ -501,7 +752,6 @@ export function createEventTriggerController({
       } else {
         trigger.lastStatus = "disabled";
         delete trigger.lastError;
-        if (!triggers.some((entry) => entry.enabled && entry.workspaceId === trigger.workspaceId)) closeWatcher(trigger.workspaceId);
       }
       trigger.updatedAt = nowIso(now);
       save();
@@ -513,7 +763,6 @@ export function createEventTriggerController({
       if (index < 0) throw new Error(`unknown event trigger id: ${triggerId}`);
       const [removed] = triggers.splice(index, 1);
       cancelPendingForTrigger(removed.id, { restoreReady: false });
-      if (!triggers.some((entry) => entry.enabled && entry.workspaceId === removed.workspaceId)) closeWatcher(removed.workspaceId);
       save();
       if (running) reconcile();
       return publicTrigger(removed);
@@ -523,7 +772,7 @@ export function createEventTriggerController({
     stop() {
       running = false;
       for (const state of [...pending.values()]) cancelPendingState(state, { restoreReady: true });
-      for (const workspaceId of watchers.keys()) closeWatcher(workspaceId);
+      for (const key of watchers.keys()) closeWatcher(key);
       save();
     },
     async flush() { await flush(); },
@@ -533,7 +782,19 @@ export function createEventTriggerController({
       return {
         running,
         watcherInstallCount,
-        watchers: [...watchers.entries()].map(([workspaceId, state]) => ({ workspaceId, root: state.root, rawCallbackCount: state.rawCallbackCount, emitError: (error) => failWatcher(workspaceId, error) })),
+        watchers: [...watchers.entries()].map(([key, state]) => ({
+          key,
+          workspaceId: state.workspaceId,
+          workspaceRoot: state.workspaceRoot,
+          watchRoot: state.watchRoot,
+          baseRelative: state.baseRelative,
+          recursive: state.recursive,
+          triggerIds: [...state.triggerIds],
+          rawCallbackCount: state.rawCallbackCount,
+          acceptedCallbackCount: state.acceptedCallbackCount,
+          rawSamples: clone(state.rawSamples),
+          emitError: (error) => { if (watchers.get(state.key) === state) failWatcher(state, error); },
+        })),
         pending: [...pending.values()].map((state) => ({ triggerId: state.triggerId, workspaceId: state.workspaceId, relativePath: state.relativePath, eventType: state.eventType, observedAt: state.observedAt, dueAt: state.dueAt })),
         rawCallbackCount: [...watchers.values()].reduce((total, state) => total + state.rawCallbackCount, 0),
       };

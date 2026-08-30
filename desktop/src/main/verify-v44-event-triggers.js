@@ -157,6 +157,7 @@ export async function runVerifyV44EventTriggers({ app }) {
   let stormRoutine;
   let stormTrigger;
   let eventJobIds = [];
+  let firstEventWatcherState;
   let restartState;
   let disabledRoutineState;
   let removedWorkspaceState;
@@ -228,7 +229,20 @@ export async function runVerifyV44EventTriggers({ app }) {
     await waitFor(label, async () => {
       const diagnostics = eventTriggers.diagnostics();
       const current = eventTriggers.get(triggerId);
-      return diagnostics.watchers.some((entry) => entry.workspaceId === workspaceId) && current?.enabled === true && !["blocked", "error", "disabled"].includes(current?.lastStatus);
+      const watcher = diagnostics.watchers.find((entry) => entry.triggerIds.includes(triggerId));
+      const expected = current?.pathPrefix === "inbox/order.json"
+        ? { baseRelative: "inbox", recursive: false }
+        : current?.pathPrefix === ""
+          ? { baseRelative: "", recursive: true }
+          : undefined;
+      return Boolean(watcher)
+        && watcher.workspaceId === workspaceId
+        && watcher.triggerIds.includes(triggerId)
+        && (!expected || (watcher.baseRelative === expected.baseRelative && watcher.recursive === expected.recursive))
+        && watcher.rawCallbackCount >= 0
+        && watcher.acceptedCallbackCount === 0
+        && current?.enabled === true
+        && !["blocked", "error", "disabled"].includes(current?.lastStatus);
     });
     await sleep(750);
   }
@@ -419,7 +433,10 @@ export async function runVerifyV44EventTriggers({ app }) {
     eventJobIds = eventHistory(routine.id).map((entry) => entry.jobId);
     const firstJob = jobs.getJob(firstEventJobId);
     const firstTask = runtimeHarness.tasks.find((entry) => firstJob.taskIds?.includes(entry.id));
+    firstEventWatcherState = eventTriggers.diagnostics().watchers.find((entry) => entry.triggerIds.includes(trigger.id));
     check("real fs.watch trailing-debounce burst creates exactly one event Routine run and Job", firstRunCount === 1 && jobs.listJobs().jobs.length === jobsBeforeEvent + 1, JSON.stringify({ firstRunCount, jobs: jobs.listJobs().jobs.length, diagnostics: eventTriggers.diagnostics() }));
+    check("watch descriptor anchors the existing file parent and accepts a real callback", firstEventWatcherState?.baseRelative === "inbox" && firstEventWatcherState?.recursive === false && firstEventWatcherState?.rawCallbackCount >= 1 && firstEventWatcherState?.acceptedCallbackCount >= 1 && firstEventWatcherState?.rawSamples?.some((sample) => sample.acceptedRelativePath === "inbox/order.json"), JSON.stringify({ watcher: firstEventWatcherState }));
+    check("raw callback diagnostics are bounded and contain no file body or absolute workspace path", Boolean(firstEventWatcherState) && firstEventWatcherState.rawSamples.length <= 24 && !JSON.stringify(firstEventWatcherState.rawSamples).includes(FILE_BODY_CANARY) && !JSON.stringify(firstEventWatcherState.rawSamples).includes(trustedWorkspace), JSON.stringify({ rawSamples: firstEventWatcherState?.rawSamples }));
     check("event Job uses the existing governed Chief/Job path", firstJob.status === "completed" && firstJob.routineId === routine.id && firstJob.workspaceId === workspaceId && firstTask?.supervisorId === "v44-gate-supervisor" && firstTask?.executionContext?.workspaceId === workspaceId, JSON.stringify({ job: { id: firstJob.id, status: firstJob.status, routineId: firstJob.routineId, workspaceId: firstJob.workspaceId }, task: firstTask && { id: firstTask.id, supervisorId: firstTask.supervisorId, executionContext: firstTask.executionContext } }));
     const firstRoutineAfter = routines.get(routine.id);
     check("Routine history links event source, path, workspace, and Job", firstEventRun.source === "event" && firstEventRun.triggerId === trigger.id && firstEventRun.workspaceId === workspaceId && firstEventRun.jobId === firstJob.id && firstEventRun.eventType === "change" && firstEventRun.observedAt, JSON.stringify(projectRoutine(firstRoutineAfter)));
@@ -523,6 +540,7 @@ export async function runVerifyV44EventTriggers({ app }) {
     stormTrigger = await renderer(`window.sovereignbot.eventTriggers.create(${JSON.stringify({ name: "Storm guard", routineId: stormRoutine.id, workspaceId, pathPrefix: "" })})`);
     check("second trigger uses the same trusted workspace watcher domain", stormTrigger.enabled && stormTrigger.pathPrefix === "", JSON.stringify(projectTrigger(stormTrigger)));
     await waitForWatcherReady(stormTrigger.id, "watcher for storm trigger");
+    check("different watcher anchors remain separate and descriptor trigger ownership is explicit", eventTriggers.diagnostics().watchers.length === 2 && eventTriggers.diagnostics().watchers.some((entry) => entry.triggerIds.includes(trigger.id) && entry.baseRelative === "inbox" && entry.recursive === false) && eventTriggers.diagnostics().watchers.some((entry) => entry.triggerIds.includes(stormTrigger.id) && entry.baseRelative === "" && entry.recursive === true), JSON.stringify({ watchers: eventTriggers.diagnostics().watchers }));
     const jobsBeforeStorm = jobs.listJobs().jobs.length;
     for (const path of stormPaths.slice(0, 3)) {
       const stormPriorRunIds = snapshotRunIds(stormRoutine.id);
@@ -617,6 +635,7 @@ export async function runVerifyV44EventTriggers({ app }) {
     storm: stormState,
     watcherError: watcherErrorState,
     restart: restartState,
+    firstEventWatcher: firstEventWatcherState,
     disabledRoutine: disabledRoutineState,
     removedWorkspace: removedWorkspaceState,
     eventJobIds,

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createEventTriggerController, EVENT_TRIGGERS_SCHEMA } from "../src/main/event-trigger-controller.js";
+import { createEventTriggerController, decodeWatcherCallback, deriveWatchDescriptor, EVENT_TRIGGERS_SCHEMA } from "../src/main/event-trigger-controller.js";
 
 function fakeTimers(clock) {
   let sequence = 0;
@@ -34,8 +35,10 @@ function fakeTimers(clock) {
 
 function harness(dataDir, calls, { clock = { value: Date.parse("2026-08-30T01:00:00.000Z") }, maxFires, quietMs = 1000, windowMs, routineState } = {}) {
   const root = join(dataDir, "trusted-workspace");
+  mkdirSync(join(root, "inbox"), { recursive: true });
   const timers = fakeTimers(clock);
   const watchers = new Map();
+  const installations = [];
   let triggerSeq = 0;
   const routine = { id: "routine_0000000000000001", name: "Recurring review", enabled: true, workspaceId: "workspace.test", schedule: { type: "hourly", minute: 15 } };
   const routineController = {
@@ -61,8 +64,11 @@ function harness(dataDir, calls, { clock = { value: Date.parse("2026-08-30T01:00
     cancelTimer: timers.cancel,
     makeId: () => `trigger_${(++triggerSeq).toString(16).padStart(16, "0")}`,
     makeEventId: () => `event_${(calls.length + 1).toString(16).padStart(16, "0")}`,
-    watchFactory: (watchRoot, _options, callback) => {
+    watchFactory: (watchRoot, options, callback) => {
       const entry = { callback, closed: false, emitError(error) { entry.errorHandler?.(error); } };
+      entry.watchRoot = watchRoot;
+      entry.options = { ...options };
+      installations.push(entry);
       watchers.set(watchRoot, entry);
       return {
         on(event, handler) { if (event === "error") entry.errorHandler = handler; },
@@ -70,12 +76,12 @@ function harness(dataDir, calls, { clock = { value: Date.parse("2026-08-30T01:00
       };
     },
   });
-  return { controller, routine, root, watchers, clock, timers };
+  return { controller, routine, root, watchers, installations, clock, timers };
 }
 
 async function fireAndFlush(harnessValue, filename, eventType = "change", elapsed = 1000) {
-  const watcher = harnessValue.watchers.get(harnessValue.root);
-  assert.ok(watcher, "one watcher should be installed for the trusted workspace");
+  const watcher = [...harnessValue.watchers.values()].find((entry) => !entry.closed);
+  assert.ok(watcher, "one active watcher should be installed for the trusted workspace");
   watcher.callback(eventType, filename);
   harnessValue.timers.advance(elapsed);
   await harnessValue.controller.flush();
@@ -86,16 +92,17 @@ test("trailing debounce resets on the final callback and emits one event only af
   const calls = [];
   try {
     const value = harness(dataDir, calls, { quietMs: 1000 });
-    const trigger = value.controller.create({ name: "Inbox review", routineId: value.routine.id, workspaceId: value.routine.workspaceId, pathPrefix: "./Inbox//" });
+    writeFileSync(join(value.root, "inbox", "order.json"), "baseline", "utf8");
+    const trigger = value.controller.create({ name: "Inbox review", routineId: value.routine.id, workspaceId: value.routine.workspaceId, pathPrefix: "./inbox/order.json//" });
     value.controller.start();
-    const watcher = value.watchers.get(value.root);
+    const watcher = value.watchers.get(join(value.root, "inbox"));
 
-    watcher.callback("change", "INBOX/order.json");
+    watcher.callback("change", "order.json");
     const beforeQuiet = value.controller.flush();
     await Promise.resolve();
     assert.equal(calls.length, 0, "the first callback must only create pending state");
     value.timers.advance(500);
-    watcher.callback("rename", "inbox/order.json");
+    watcher.callback("rename", "order.json");
     value.timers.advance(499);
     assert.equal(calls.length, 0, "a callback inside the quiet window must reset the timer");
     value.timers.advance(501);
@@ -115,6 +122,110 @@ test("trailing debounce resets on the final callback and emits one event only af
   }
 });
 
+test("watch descriptor anchors existing files and decodes every safe callback shape", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "sovereign-event-callback-shapes-"));
+  const calls = [];
+  try {
+    const value = harness(dataDir, calls, { quietMs: 0 });
+    writeFileSync(join(value.root, "inbox", "order.json"), "baseline", "utf8");
+    const trigger = { pathPrefix: "inbox/order.json" };
+    const descriptor = deriveWatchDescriptor(trigger, value.root);
+    assert.equal(descriptor.baseRelative, "inbox");
+    assert.equal(descriptor.watchRoot, join(value.root, "inbox"));
+    assert.equal(descriptor.recursive, false);
+    mkdirSync(join(value.root, "inbox", "existing"), { recursive: true });
+    const directoryDescriptor = deriveWatchDescriptor({ pathPrefix: "inbox/existing" }, value.root);
+    assert.equal(directoryDescriptor.baseRelative, "inbox/existing");
+    assert.equal(directoryDescriptor.recursive, true);
+    const missingDescriptor = deriveWatchDescriptor({ pathPrefix: "inbox/future/order.json" }, value.root);
+    assert.equal(missingDescriptor.baseRelative, "inbox");
+    assert.equal(missingDescriptor.recursive, true);
+    const options = { pathPrefixes: [trigger.pathPrefix] };
+
+    assert.equal(decodeWatcherCallback(descriptor, "order.json", options).relativePath, "inbox/order.json");
+    assert.equal(decodeWatcherCallback(descriptor, "inbox/order.json", options).relativePath, "inbox/order.json");
+    assert.equal(decodeWatcherCallback(descriptor, Buffer.from("order.json"), options).relativePath, "inbox/order.json");
+    assert.equal(decodeWatcherCallback(descriptor, join(value.root, "inbox", "order.json"), options).relativePath, "inbox/order.json");
+    assert.equal(decodeWatcherCallback(descriptor, join(dataDir, "outside.json"), options).relativePath, undefined);
+    assert.equal(decodeWatcherCallback(descriptor, null, options).diagnostic.rejectedReason, "filename-unavailable");
+    assert.match(decodeWatcherCallback(descriptor, "../escape", options).diagnostic.rejectedReason, /traversal/);
+    assert.equal(decodeWatcherCallback(descriptor, "inbox-old/order.json", options).relativePath, undefined);
+    assert.equal(decodeWatcherCallback(descriptor, Buffer.from([0xff]), options).relativePath, undefined);
+
+    const ambiguous = decodeWatcherCallback({ ...descriptor, watchRoot: join(value.root, "inbox") }, "inbox/order.json", { pathPrefixes: ["inbox"] });
+    assert.equal(ambiguous.relativePath, undefined);
+    assert.equal(ambiguous.diagnostic.rejectedReason, "ambiguous-callback");
+    if (process.platform === "win32") {
+      assert.equal(decodeWatcherCallback(descriptor, "ORDER.JSON", options).relativePath, "inbox/order.json");
+    }
+
+    const publicDescriptor = value.controller.create({ name: "Anchored file", routineId: value.routine.id, workspaceId: value.routine.workspaceId, pathPrefix: trigger.pathPrefix });
+    value.controller.start();
+    const watcher = value.watchers.get(join(value.root, "inbox"));
+    watcher.callback("change", "order.json");
+    value.timers.advance(0);
+    await value.controller.flush();
+    const diagnostics = value.controller.diagnostics();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].relativePath, "inbox/order.json");
+    assert.equal(diagnostics.watchers[0].acceptedCallbackCount, 1);
+    assert.equal(diagnostics.watchers[0].rawSamples[0].acceptedRelativePath, "inbox/order.json");
+    assert.equal("rawSamples" in value.controller.get(publicDescriptor.id), false);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("shared watcher descriptors preserve surviving triggers and isolate different anchors", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "sovereign-event-shared-watchers-"));
+  const calls = [];
+  try {
+    const value = harness(dataDir, calls, { quietMs: 0 });
+    writeFileSync(join(value.root, "inbox", "order.json"), "baseline", "utf8");
+    writeFileSync(join(value.root, "inbox", "reports"), "baseline", "utf8");
+    const first = value.controller.create({ name: "Order file", routineId: value.routine.id, workspaceId: value.routine.workspaceId, pathPrefix: "inbox/order.json" });
+    const second = value.controller.create({ name: "Reports file", routineId: value.routine.id, workspaceId: value.routine.workspaceId, pathPrefix: "inbox/reports" });
+    value.controller.start();
+    assert.equal(value.installations.length, 1, "same parent anchor should install one shared watcher");
+    let diagnostics = value.controller.diagnostics();
+    assert.equal(diagnostics.watchers.length, 1);
+    assert.deepEqual(new Set(diagnostics.watchers[0].triggerIds), new Set([first.id, second.id]));
+    assert.equal(diagnostics.watchers[0].baseRelative, "inbox");
+    assert.equal(diagnostics.watchers[0].recursive, false);
+
+    const watcher = value.installations[0];
+    watcher.callback("change", "order.json");
+    value.timers.advance(0);
+    await value.controller.flush();
+    watcher.callback("change", "reports");
+    value.timers.advance(0);
+    await value.controller.flush();
+    assert.deepEqual(calls.map((entry) => entry.relativePath), ["inbox/order.json", "inbox/reports"]);
+
+    value.controller.setEnabled(first.id, false);
+    diagnostics = value.controller.diagnostics();
+    assert.equal(diagnostics.watchers.length, 1, "disabling one trigger must preserve the shared watcher");
+    assert.deepEqual(diagnostics.watchers[0].triggerIds, [second.id]);
+    watcher.callback("change", "reports");
+    value.timers.advance(0);
+    await value.controller.flush();
+    assert.equal(calls.length, 3);
+
+    const third = value.controller.create({ name: "Exports", routineId: value.routine.id, workspaceId: value.routine.workspaceId, pathPrefix: "exports" });
+    diagnostics = value.controller.diagnostics();
+    assert.equal(diagnostics.watchers.length, 2, "a different anchor must not reuse the inbox watcher");
+    assert.ok(diagnostics.watchers.some((entry) => entry.triggerIds.includes(third.id) && entry.baseRelative === "" && entry.recursive === true));
+    value.controller.setEnabled(third.id, false);
+    assert.equal(value.controller.diagnostics().watchers.length, 1, "closing one anchor must preserve the other anchor");
+
+    value.controller.remove(second.id);
+    assert.equal(value.controller.diagnostics().watchers.length, 0);
+    assert.equal(watcher.closed, true, "removing the last trigger closes the shared watcher");
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
 test("disable, remove, and stop cancel pending events without creating Jobs", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "sovereign-event-cancel-"));
   const calls = [];
@@ -122,7 +233,7 @@ test("disable, remove, and stop cancel pending events without creating Jobs", as
     const value = harness(dataDir, calls, { quietMs: 1000 });
     const trigger = value.controller.create({ name: "Cancel me", routineId: value.routine.id, workspaceId: value.routine.workspaceId });
     value.controller.start();
-    let watcher = value.watchers.get(value.root);
+    let watcher = [...value.watchers.values()].find((entry) => !entry.closed);
     watcher.callback("change", "one.json");
     value.controller.setEnabled(trigger.id, false);
     value.timers.advance(2000);
@@ -130,7 +241,7 @@ test("disable, remove, and stop cancel pending events without creating Jobs", as
     assert.equal(calls.length, 0, "disabled pending event must not create a Job");
 
     value.controller.setEnabled(trigger.id, true);
-    watcher = value.watchers.get(value.root);
+    watcher = [...value.watchers.values()].find((entry) => !entry.closed);
     watcher.callback("change", "two.json");
     value.controller.remove(trigger.id);
     value.timers.advance(2000);
@@ -138,7 +249,7 @@ test("disable, remove, and stop cancel pending events without creating Jobs", as
     assert.equal(calls.length, 0, "removed pending event must not create a Job");
 
     const second = value.controller.create({ name: "Stop me", routineId: value.routine.id, workspaceId: value.routine.workspaceId });
-    watcher = value.watchers.get(value.root);
+    watcher = [...value.watchers.values()].find((entry) => !entry.closed);
     watcher.callback("change", "three.json");
     value.controller.stop();
     value.timers.advance(2000);
@@ -175,7 +286,7 @@ test("persisted storm accounting survives restart while recentFireAt stays out o
     assert.equal(state.enabled, false);
     assert.equal(state.lastStatus, "blocked");
     assert.match(state.lastError, /event storm protection/);
-    assert.equal(restarted.watchers.get(restarted.root).closed, true);
+    assert.equal(restarted.installations.at(-1)?.closed, true);
 
     const persistedAfter = JSON.parse(await readFile(join(dataDir, "desktop-state", "event-triggers.json"), "utf8"));
     assert.equal(persistedAfter.triggers[0].recentFireAt.length, 2);
@@ -191,7 +302,7 @@ test("watcher failure latches all triggers, list/get/reconcile do not reopen, ex
     const value = harness(dataDir, calls, { quietMs: 1000 });
     const trigger = value.controller.create({ name: "Watcher failure", routineId: value.routine.id, workspaceId: value.routine.workspaceId });
     value.controller.start();
-    const firstWatcher = value.watchers.get(value.root);
+    const firstWatcher = [...value.watchers.values()].find((entry) => !entry.closed);
     firstWatcher.callback("change", "pending.json");
     firstWatcher.emitError(new Error("simulated fatal"));
     await value.controller.flush();
@@ -223,6 +334,7 @@ test("missing workspace, disabled Routine, one-time Routine, and unsafe paths fa
   try {
     const state = { workspace: true, routine: true, schedule: { type: "daily", time: "09:00" } };
     const root = join(dataDir, "trusted-workspace");
+    mkdirSync(root, { recursive: true });
     const routine = { id: "routine_0000000000000001", enabled: true, workspaceId: "workspace.test", schedule: { type: "daily", time: "09:00" } };
     const watchers = [];
     const controller = createEventTriggerController({
