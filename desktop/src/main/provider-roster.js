@@ -11,6 +11,8 @@ export const WORKER_NODE_SUPERVISOR = "worker-node-supervisor";
 export const WORKER_NODE_DISPATCHER = "worker-node-dispatcher";
 
 import { join } from "node:path";
+import { normalizeModelBinding } from "./model-binding.js";
+import { accountIsolationNamespace } from "./provider-account.js";
 
 const ROLE_CAPABILITIES = Object.freeze({
     codex: Object.freeze({
@@ -93,14 +95,16 @@ function agentName(provider, role) {
     return `${providerLabel} ${roleLabel}`;
 }
 
-function harnessConfig(provider, _role, fakeLaunchers) {
+function harnessConfig(provider, _role, fakeLaunchers, model) {
     const fake = fakeLaunchers?.[provider];
     if (fake)
         return { kind: provider === "codex" ? "codex" : "claude-code", command: fake.command, prefixArgs: [...fake.prefixArgs] };
     // Workspaces chosen by the operator may be plain folders; Codex must not refuse
     // non-git directories. The execution cwd itself arrives per task through the
     // trusted execution context, never through static harness configuration.
-    return provider === "codex" ? { kind: "codex", skipGitRepoCheck: true } : { kind: "claude-code" };
+    return provider === "codex"
+        ? { kind: "codex", skipGitRepoCheck: true, ...(model ? { model } : {}) }
+        : { kind: "claude-code" };
 }
 
 export function coworkerAgentId(coworkerId) {
@@ -114,19 +118,49 @@ export function coworkerCapability(coworkerId) {
     return `coworker:${coworkerId}`;
 }
 
-function chooseCoworkerProvider(coworker, usableProviders) {
-    const preference = coworker?.providerPreference ?? "auto";
-    if (preference === "codex")
-        return usableProviders.codex ? "codex" : undefined;
-    if (preference === "claude")
-        return usableProviders.claude ? "claude" : undefined;
-    // Auto favors Claude for conversational/coordination work when both are present;
-    // Coding Lead's default blueprint explicitly prefers Codex. This is a trusted product
-    // default, not a model-selected provider decision.
-    if (usableProviders.claude)
-        return "claude";
+function effectiveModelBinding(coworker) {
+    const legacy = coworker?.providerPreference ?? "auto";
+    const raw = coworker?.modelBinding;
+    // Public coworker projections retain the legacy preference but intentionally omit
+    // provider/model details.  Rehydrate only the safe legacy provider for compatibility
+    // with older callers; the full main-process list already carries the binding.
+    if (raw && typeof raw === "object" && raw.provider === undefined && legacy !== "auto")
+        return normalizeModelBinding({ ...raw, provider: legacy, ...(legacy === "codex" && raw.model === undefined ? { model: "luna" } : {}) }, { legacyPreference: legacy });
+    return normalizeModelBinding(raw, { legacyPreference: legacy });
+}
+
+export function chooseCoworkerProvider(coworker, usableProviders = {}) {
+    const binding = effectiveModelBinding(coworker);
+    const explicit = binding.provider;
+    if (binding.profile === "deep") {
+        // Deep never silently falls back to an efficient/lighter model.  A future healthy
+        // Web Sol discovery can satisfy this profile; an explicitly pinned strong Codex
+        // model can also satisfy it without changing the user's requested tier.
+        if (usableProviders["chatgpt-web"])
+            return "chatgpt-web";
+        if (explicit === "codex" && /(?:sol|strong)/i.test(binding.model ?? "") && usableProviders.codex)
+            return "codex";
+        if (!explicit && usableProviders["codex-strong"] && usableProviders.codex)
+            return "codex";
+        return undefined;
+    }
+    if (binding.profile === "economy") {
+        if (explicit && usableProviders[explicit] && usableProviders.economy === true)
+            return explicit;
+        if (!explicit && usableProviders.economy === true) {
+            if (usableProviders.codex) return "codex";
+            if (usableProviders.claude) return "claude";
+        }
+        return undefined;
+    }
+    if (explicit)
+        return usableProviders[explicit] ? explicit : undefined;
+    // Automatic and Efficient are deliberately Codex-first.  This is a product routing
+    // default, never a model-generated authority decision.
     if (usableProviders.codex)
         return "codex";
+    if (usableProviders.claude)
+        return "claude";
     return undefined;
 }
 
@@ -136,13 +170,22 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
     for (const coworker of Array.isArray(coworkers) ? coworkers : []) {
         if (!coworker || coworker.state !== "active")
             continue;
+        const modelBinding = effectiveModelBinding(coworker);
         const provider = chooseCoworkerProvider(coworker, usableProviders);
+        const accountNamespace = provider && modelBinding.providerAccountId
+            ? accountIsolationNamespace(provider, modelBinding.providerAccountId)
+            : undefined;
         if (!provider) {
             bindings[coworker.id] = {
                 ready: false,
-                reason: coworker.providerPreference && coworker.providerPreference !== "auto"
-                    ? `preferred provider ${coworker.providerPreference} is unavailable`
-                    : "no usable provider",
+                profile: modelBinding.profile,
+                reason: modelBinding.profile === "deep"
+                    ? "Deep profile is unavailable; configure a healthy Deep provider or pinned strong model"
+                    : modelBinding.profile === "economy"
+                        ? "Economy profile is unavailable; configure an economy provider"
+                        : modelBinding.provider
+                            ? `preferred provider ${modelBinding.provider} is unavailable`
+                            : "no usable provider",
             };
             continue;
         }
@@ -152,7 +195,7 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
             name: `${coworker.name} · ${provider === "codex" ? "Codex" : "Claude Code"}`,
             role: "worker",
             capabilities: ["general", coworkerCapability(coworker.id)],
-            harness: harnessConfig(provider, "coworker", fakeLaunchers),
+            harness: harnessConfig(provider, "coworker", fakeLaunchers, modelBinding.model),
             maxConcurrency: 1,
         };
         agents.push(agent);
@@ -160,6 +203,8 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
             ready: true,
             agentId: id,
             provider,
+            profile: modelBinding.profile,
+            ...(accountNamespace ? { accountNamespace } : {}),
             harnessKind: agent.harness.kind,
         };
     }

@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
     workspaces: Object.freeze({ addViaDialog: invoke("workspace:addViaDialog"), list: invoke("workspace:list"), setDefault: invoke("workspace:setDefault"), remove: invoke("workspace:remove") }),
     settings: Object.freeze({ get: invoke("settings:get"), update: invoke("settings:update") }),
     coworkers: Object.freeze({ list: invoke("coworker:list"), get: invoke("coworker:get"), create: invoke("coworker:create"), update: invoke("coworker:update"), archive: invoke("coworker:archive"), restore: invoke("coworker:restore") }),
+    teams: Object.freeze({ list: invoke("team:list"), get: invoke("team:get"), installPack: invoke("team:installPack") }),
+    channels: Object.freeze({ list: invoke("channel:list"), get: invoke("channel:get") }),
     skills: Object.freeze({ list: invoke("skill:list"), get: invoke("skill:get"), create: invoke("skill:create"), update: invoke("skill:update"), archive: invoke("skill:archive"), restore: invoke("skill:restore") }),
     conversations: Object.freeze({ list: invoke("conversation:list"), get: invoke("conversation:get"), createDirect: invoke("conversation:createDirect"), createTeam: invoke("conversation:createTeam"), send: invoke("conversation:send") }),
     artifacts: Object.freeze({ list: invoke("artifact:list"), get: invoke("artifact:get"), preview: invoke("artifact:preview"), reveal: invoke("artifact:reveal"), attachViaDialog: invoke("artifact:attachViaDialog") }),

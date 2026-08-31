@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createId } from "./id.js";
+import { sanitizeRuntimeData } from "./runtime-data-redaction.js";
 
 export class TaskEventStore {
     #path;
@@ -70,7 +71,7 @@ export class TaskEventStore {
             at: new Date().toISOString(),
             type: input.type,
             actor: input.actor,
-            data: input.data,
+            data: sanitizeRuntimeData(input.data, undefined, input.type),
         };
         await appendFile(this.#path, `${JSON.stringify(event)}\n`, "utf8");
         this.#events.push(event);

@@ -14,6 +14,55 @@ const VENDOR_MANIFEST_PATH = join(VENDOR_ROOT, "core-manifest.json");
 
 const ACTIVE_TASK_STATUSES = new Set(["queued", "accepted", "running", "awaiting_review", "changes_requested"]);
 
+function isGeneratedRosterAllowRule(rule) {
+    if (!rule || rule.effect !== "allow" || typeof rule.id !== "string" || !rule.id.startsWith("allow-"))
+        return false;
+    const agentId = rule.id.slice("allow-".length);
+    return Boolean(agentId)
+        && JSON.stringify(rule.match) === JSON.stringify({ category: "harness", operation: "run", agentId });
+}
+
+function reconcileRosterPolicy(currentPolicy, agents) {
+    const generated = buildPolicyRules(agents);
+    const desiredAllows = generated.filter((rule) => rule.effect === "allow");
+    const desiredById = new Map(desiredAllows.map((rule) => [rule.id, rule]));
+    const retained = [];
+    for (const rule of currentPolicy.rules) {
+        if (isGeneratedRosterAllowRule(rule))
+            continue;
+        retained.push(rule);
+    }
+    const conflicts = retained.filter((rule) => desiredById.has(rule.id));
+    if (conflicts.length)
+        throw new Error(`policy contains conflicting roster rule ids: ${conflicts.map((rule) => rule.id).join(", ")}`);
+
+    const rules = [...retained, ...desiredAllows];
+    if (JSON.stringify(rules) === JSON.stringify(currentPolicy.rules))
+        return { policy: currentPolicy, changed: false, checks: [] };
+
+    const policy = { ...currentPolicy, rules };
+    const checks = desiredAllows.map((rule) => ({
+        action: {
+            category: "harness",
+            operation: "run",
+            agentId: rule.match.agentId,
+        },
+        expect: { allowed: true, ruleId: rule.id },
+    }));
+    const guard = rules.find((rule) => rule.id === "deny-runaway-loop" && rule.effect === "deny");
+    const probeAgentId = desiredAllows[0]?.match.agentId ?? "roster-policy-probe";
+    if (guard) {
+        checks.push({
+            action: { category: "harness", operation: "run", agentId: probeAgentId },
+            repeatCount: 10,
+            expect: { allowed: false, ruleId: guard.id },
+        });
+    }
+    if (!checks.length)
+        throw new Error("cannot reconcile roster policy without a dry-run check");
+    return { policy, changed: true, checks };
+}
+
 function readVendorManifest() {
     return JSON.parse(readFileSync(VENDOR_MANIFEST_PATH, "utf8"));
 }
@@ -205,17 +254,39 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             coworkers: coworkerSnapshot(),
             includeWorkerNodeDispatcher: Boolean(workerNodeClientResolver),
         });
-        const nextRuntime = await createRuntime({
-            dataDir,
-            bindHost: "127.0.0.1",
-            port: 0,
-            agents: nextRoster.agents,
-            ...(computer.config ? { computer: computer.config } : {}),
-            policy: {
-                repeatWindowMs: 180000,
-                rules: buildPolicyRules(nextRoster.agents),
-            },
-        }, workerNodeClientResolver ? { workerNodeClientResolver } : {});
+        let nextRuntime;
+        try {
+            nextRuntime = await createRuntime({
+                dataDir,
+                bindHost: "127.0.0.1",
+                port: 0,
+                agents: nextRoster.agents,
+                ...(computer.config ? { computer: computer.config } : {}),
+                policy: {
+                    repeatWindowMs: 180000,
+                    rules: buildPolicyRules(nextRoster.agents),
+                },
+            }, workerNodeClientResolver ? { workerNodeClientResolver } : {});
+
+            // PolicyVersionStore intentionally keeps the active policy across a runtime
+            // rebuild.  Reconcile only the exact per-agent rules generated from the
+            // trusted roster, preserving operator rules and the runaway deny guard.  This
+            // keeps a newly installed Coworker fail-closed until its additive rule has
+            // passed the core PolicyManager dry-run/apply transaction.
+            const reconciliation = reconcileRosterPolicy(nextRuntime.policyManager.current().policy, nextRoster.agents);
+            if (reconciliation.changed) {
+                await nextRuntime.policyManager.apply({
+                    policy: reconciliation.policy,
+                    checks: reconciliation.checks,
+                    actor: "desktop-runtime-roster",
+                    label: "reconcile active Coworker roster",
+                });
+            }
+        }
+        catch (error) {
+            try { await nextRuntime?.close(); } catch {}
+            throw error;
+        }
         discovery = nextDiscovery;
         roster = nextRoster;
         summary = summarizeRoster(roster, discovery);

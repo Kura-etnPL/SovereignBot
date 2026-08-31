@@ -27,11 +27,27 @@ function string(value, name, max, required = false) { if (value === undefined ||
 function idArray(value, name, max) { if (value === undefined) return undefined; if (!Array.isArray(value) || value.length > max) throw new Error(`${name} must be an array of at most ${max} identifiers`); return [...new Set(value.map((entry) => identifier(entry, name)))]; }
 function exact(value, allowed) { for (const key of Object.keys(value)) { if (!allowed.has(key)) throw new Error(`unexpected request field: ${key}`); } }
 function positiveInteger(value, name, min, max) { if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer from ${min} to ${max}`); return value; }
+function modelBindingShape(value) {
+    if (!isPlainObject(value)) throw new Error("modelBinding must be an object");
+    exact(value, new Set(["profile", "provider", "providerAccountId", "model"]));
+    if (![
+        "automatic", "efficient", "deep", "economy", "custom",
+    ].includes(value.profile ?? "automatic")) throw new Error("modelBinding.profile is invalid");
+    if (value.provider !== undefined && !["codex", "claude", "antigravity", "chatgpt-web"].includes(value.provider))
+        throw new Error("modelBinding.provider is invalid");
+    for (const [key, child] of [["providerAccountId", value.providerAccountId], ["model", value.model]]) {
+        if (child !== undefined && (typeof child !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(child)))
+            throw new Error(`modelBinding.${key} must be a safe opaque identifier`);
+    }
+    if ((value.profile ?? "automatic") === "custom" && (!value.provider || !value.model))
+        throw new Error("custom modelBinding requires provider and model");
+    return structuredClone(value);
+}
 
 function coworkerShape(value, { patch = false } = {}) {
     if (!isPlainObject(value)) throw new Error(patch ? "patch must be an object" : "coworker must be an object");
     assertNoAuthority(value, patch ? "patch" : "coworker");
-    const allowed = new Set(["name", "role", "instructions", "avatar", "providerPreference", "skillIds", "workspaceIds", "approvalProfileId", "computerProfileId", "state"]);
+    const allowed = new Set(["name", "role", "instructions", "avatar", "providerPreference", "modelBinding", "skillIds", "workspaceIds", "approvalProfileId", "computerProfileId", "state"]);
     exact(value, allowed);
     if (!patch) { string(value.name, "name", 80, true); string(value.role, "role", 120, true); }
     else if (Object.keys(value).length === 0) throw new Error("coworker patch must not be empty");
@@ -40,6 +56,7 @@ function coworkerShape(value, { patch = false } = {}) {
     if (value.instructions !== undefined) string(value.instructions, "instructions", 12_000);
     if (value.avatar !== undefined) string(value.avatar, "avatar", 120);
     if (value.providerPreference !== undefined && !["auto", "codex", "claude"].includes(value.providerPreference)) throw new Error("providerPreference must be auto, codex, or claude");
+    if (value.modelBinding !== undefined) modelBindingShape(value.modelBinding);
     idArray(value.skillIds, "skillIds", 64);
     idArray(value.workspaceIds, "workspaceIds", 64);
     if (value.approvalProfileId !== undefined) string(value.approvalProfileId, "approvalProfileId", 128);
@@ -68,6 +85,11 @@ export const V3_IPC_CHANNELS = Object.freeze({
         if (leadCoworkerId && !coworkerIds.includes(leadCoworkerId)) throw new Error("leadCoworkerId must be a team member");
         return { title: string(value.title, "title", 120), coworkerIds, ...(leadCoworkerId ? { leadCoworkerId } : {}) };
     }),
+    "team:list": spec(1024, empty),
+    "team:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId"])); return { teamId: identifier(value.teamId, "teamId") }; }),
+    "team:installPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["packId"])); return { packId: identifier(value.packId, "packId") }; }),
+    "channel:list": spec(1024, (payload) => { if (payload === undefined || payload === null) return {}; const value = objectPayload(payload); exact(value, new Set(["teamId"])); return value.teamId === undefined ? {} : { teamId: identifier(value.teamId, "teamId") }; }),
+    "channel:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["channelId"])); return { channelId: identifier(value.channelId, "channelId") }; }),
     "conversation:send": spec(32 * 1024, (payload) => {
         const value = objectPayload(payload);
         const allowed = new Set(["conversationId", "text", "mentions", "replyTo", "artifactIds", "clientMessageId"]);

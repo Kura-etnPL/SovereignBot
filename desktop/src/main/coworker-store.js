@@ -1,5 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
+import {
+    modelBindingFromLegacy,
+    modelBindingProviderPreference,
+    normalizeModelBinding,
+    publicModelBinding,
+} from "./model-binding.js";
 
 export const COWORKERS_SCHEMA = "sovereignbot.desktop.coworkers.v1";
 
@@ -100,18 +106,26 @@ function normalizeCreate(input) {
     rejectAuthorityBearingFields(input);
     const allowed = new Set([
         "name", "role", "instructions", "avatar", "providerPreference", "skillIds",
-        "workspaceIds", "approvalProfileId", "computerProfileId", "state",
+        "workspaceIds", "approvalProfileId", "computerProfileId", "modelBinding", "state",
     ]);
     for (const key of Object.keys(input)) {
         if (!allowed.has(key))
             throw new Error(`unknown coworker field: ${key}`);
     }
+    const legacyPreference = normalizeProviderPreference(input.providerPreference) ?? "auto";
+    const modelBinding = normalizeModelBinding(input.modelBinding, { legacyPreference });
     return {
         name: boundedString(input.name, "name", MAX_NAME, { required: true }),
         role: boundedString(input.role, "role", MAX_ROLE, { required: true }),
         instructions: boundedString(input.instructions, "instructions", MAX_INSTRUCTIONS) ?? "",
         avatar: boundedString(input.avatar, "avatar", 120),
-        providerPreference: normalizeProviderPreference(input.providerPreference) ?? "auto",
+        // Keep this compatibility field for v3 callers and old state files.  New code
+        // routes from modelBinding, while the legacy value is derived when a binding is
+        // supplied explicitly.
+        providerPreference: Object.hasOwn(input, "modelBinding")
+            ? modelBindingProviderPreference(modelBinding)
+            : legacyPreference,
+        modelBinding,
         skillIds: identifierList(input.skillIds, "skillIds") ?? [],
         workspaceIds: identifierList(input.workspaceIds, "workspaceIds") ?? [],
         approvalProfileId: boundedString(input.approvalProfileId, "approvalProfileId", 128),
@@ -125,7 +139,7 @@ function normalizePatch(input) {
     rejectAuthorityBearingFields(input);
     const allowed = new Set([
         "name", "role", "instructions", "avatar", "providerPreference", "skillIds",
-        "workspaceIds", "approvalProfileId", "computerProfileId", "state",
+        "workspaceIds", "approvalProfileId", "computerProfileId", "modelBinding", "state",
     ]);
     for (const key of Object.keys(input)) {
         if (!allowed.has(key))
@@ -142,6 +156,12 @@ function normalizePatch(input) {
         patch.avatar = boundedString(input.avatar, "avatar", 120);
     if (Object.hasOwn(input, "providerPreference"))
         patch.providerPreference = normalizeProviderPreference(input.providerPreference);
+    if (Object.hasOwn(input, "modelBinding"))
+        patch.modelBinding = normalizeModelBinding(input.modelBinding, {
+            legacyPreference: patch.providerPreference ?? "auto",
+        });
+    else if (Object.hasOwn(input, "providerPreference"))
+        patch.modelBinding = modelBindingFromLegacy(patch.providerPreference);
     if (Object.hasOwn(input, "skillIds"))
         patch.skillIds = identifierList(input.skillIds, "skillIds");
     if (Object.hasOwn(input, "workspaceIds"))
@@ -167,6 +187,7 @@ function sanitizePersisted(entry) {
             instructions: entry.instructions,
             avatar: entry.avatar,
             providerPreference: entry.providerPreference,
+            modelBinding: entry.modelBinding,
             skillIds: entry.skillIds,
             workspaceIds: entry.workspaceIds,
             approvalProfileId: entry.approvalProfileId,
@@ -183,6 +204,12 @@ function sanitizePersisted(entry) {
 }
 
 function publicView(entry) {
+    const view = structuredClone(entry);
+    view.modelBinding = publicModelBinding(entry.modelBinding);
+    return view;
+}
+
+function internalView(entry) {
     return structuredClone(entry);
 }
 
@@ -195,6 +222,7 @@ export function defaultCoworkerBlueprints() {
             instructions: "Turn high-level goals into coordinated work. Delegate to the right coworkers, monitor progress, request review, and keep the user informed without exposing internal orchestration machinery.",
             avatar: "✦",
             providerPreference: "auto",
+            modelBinding: { profile: "automatic" },
         },
         {
             key: "coding-lead",
@@ -203,6 +231,7 @@ export function defaultCoworkerBlueprints() {
             instructions: "Take ownership of software changes. Inspect the workspace, make focused changes, run relevant checks, and hand important changes to an independent reviewer before declaring success.",
             avatar: "⌘",
             providerPreference: "codex",
+            modelBinding: { profile: "efficient", provider: "codex", model: "luna" },
         },
         {
             key: "researcher",
@@ -211,6 +240,7 @@ export function defaultCoworkerBlueprints() {
             instructions: "Research thoroughly, distinguish evidence from inference, preserve source provenance, and deliver concise findings that another coworker can act on.",
             avatar: "◈",
             providerPreference: "auto",
+            modelBinding: { profile: "automatic" },
         },
     ];
 }
@@ -253,6 +283,21 @@ export function createCoworkerStore({ persistPath, now = () => new Date().toISOS
             return publicView(requireCoworker(id));
         },
 
+        // Main-process consumers use the full binding.  Keeping this separate from get/list
+        // prevents provider account/model identifiers from crossing into the renderer.
+        getInternal(id) {
+            return internalView(requireCoworker(id));
+        },
+
+        listInternal({ includeArchived = false } = {}) {
+            return {
+                schema: COWORKERS_SCHEMA,
+                coworkers: coworkers
+                    .filter((entry) => includeArchived || entry.state !== "archived")
+                    .map(internalView),
+            };
+        },
+
         create(input) {
             if (coworkers.length >= MAX_COWORKERS)
                 throw new Error(`coworker registry limit reached (${MAX_COWORKERS})`);
@@ -272,6 +317,8 @@ export function createCoworkerStore({ persistPath, now = () => new Date().toISOS
         update(id, patchInput) {
             const coworker = requireCoworker(id);
             const patch = normalizePatch(patchInput);
+            if (patch.modelBinding)
+                patch.providerPreference = modelBindingProviderPreference(patch.modelBinding);
             Object.assign(coworker, patch, { updatedAt: now() });
             save();
             return publicView(coworker);

@@ -16,6 +16,7 @@
         "package": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs package",
         "start": "npm run prepare-runtime && electron .",
         "smoke:packaged": "node scripts/run-packaged-smoke.mjs",
+        "verify:software-team": "node scripts/verify-software-team.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",

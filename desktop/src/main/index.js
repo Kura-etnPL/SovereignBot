@@ -25,6 +25,7 @@ import { validateRoleAssignment } from "./provider-roster.js";
 import { attachWindowLifecycle } from "./lifecycle.js";
 import { createTrayController } from "./tray.js";
 import { createWorkerNodeStore } from "./worker-node-store.js";
+import { createTeamService } from "./team-service.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -106,13 +107,19 @@ async function main() {
     const attachmentAwareConversationStore = createAttachmentAwareConversationStore(conversationStore, artifactStore);
     const skillStore = createSkillStore({ persistPath: join(dataDir, "desktop-state", "skills.json") });
     const workerNodeStore = createWorkerNodeStore({ dataDir });
+    const teamService = createTeamService({
+        dataDir,
+        coworkerStore,
+        conversationStore,
+        services,
+    });
 
     let host;
     try {
         host = await startRuntimeHost({
             dataDir,
             getSettings: () => services.getSettings(),
-            getCoworkers: () => coworkerStore.list().coworkers,
+            getCoworkers: () => (coworkerStore.listInternal?.() ?? coworkerStore.list()).coworkers,
             workerNodeClientResolver: (nodeId) => workerNodeStore.client(nodeId),
         });
     }
@@ -235,6 +242,7 @@ async function main() {
             conversationStore: createSkillAwareConversationStore(attachmentAwareConversationStore, skillStore),
             artifactStore,
             services,
+            teamFlow: teamService,
         });
     }
 
@@ -314,6 +322,15 @@ async function main() {
                     const updated = coworkerStore.restore(coworkerId);
                     return { coworker: updated, refresh: await refreshCoworkerRuntime() };
                 },
+                "team:list": () => teamService.list(),
+                "team:get": ({ teamId }) => teamService.get(teamId),
+                "team:installPack": async ({ packId }) => {
+                    const result = teamService.installPack(packId);
+                    const refresh = await refreshCoworkerRuntime();
+                    return { ...result, refresh };
+                },
+                "channel:list": ({ teamId }) => teamService.listChannels({ teamId }),
+                "channel:get": ({ channelId }) => teamService.getChannel(channelId),
                 ...createSkillHandlers({
                     skillStore,
                     conversationStore,
@@ -322,7 +339,7 @@ async function main() {
                 "conversation:list": () => conversationStore.list(),
                 "conversation:get": ({ conversationId }) => conversationStore.get(conversationId),
                 "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
-                "conversation:createTeam": ({ title, coworkerIds }) => conversationStore.createTeam({ title, coworkerIds }),
+                "conversation:createTeam": ({ title, coworkerIds, leadCoworkerId }) => conversationStore.createTeam({ title, coworkerIds, leadCoworkerId }),
                 "artifact:list": ({ conversationId, coworkerId, limit }) => artifactStore.list({ conversationId, coworkerId, limit }),
                 "artifact:get": ({ artifactId }) => artifactStore.get(artifactId),
                 "artifact:preview": ({ artifactId }) => artifactStore.previewText(artifactId),
@@ -389,6 +406,23 @@ async function main() {
         win.on("closed", () => (win = undefined));
     };
     await start();
+
+    if (process.argv.includes("--verify-software-team")) {
+        const { runVerifySoftwareTeam } = await import("./verify-software-team.js");
+        const result = await runVerifySoftwareTeam({
+            win,
+            dataDir,
+            getHost: () => host,
+            getServices: () => services,
+            getCoworkerStore: () => coworkerStore,
+            getConversationStore: () => conversationStore,
+            getTeamService: () => teamService,
+            evidenceDir: process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR,
+        });
+        process.stdout.write(`${JSON.stringify(result)}\n`);
+        await requestQuit("verify-software-team");
+        return;
+    }
 
     if (host.mode !== "demo") {
         void host.refreshProviders({ isBusy: goalsBusy })

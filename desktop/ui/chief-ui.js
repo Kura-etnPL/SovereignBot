@@ -27,7 +27,7 @@
     if (!lead || !isChiefRoom(conversation)) return;
     if (!state.mentionIds.size) {
       state.mentionIds.add(lead.id);
-      renderMentions();
+      renderMentionRow(conversation);
     }
   }
 
@@ -36,6 +36,14 @@
     const lead = chief();
     if (!target || !lead || target.id !== lead.id)
       return baseOpenDirectCoworker(coworkerId);
+
+    const installedTeam = state.teams?.find((entry) => entry.packId === "software-team");
+    const projectChannel = installedTeam?.channels?.find((entry) => entry.kind === "project")
+      ?? state.channels?.find((entry) => entry.teamId === installedTeam?.id && entry.kind === "project");
+    if (projectChannel?.conversationId) {
+      await openConversation(projectChannel.conversationId);
+      return;
+    }
 
     const activeIds = state.coworkers.filter((entry) => entry.state === "active").slice(0, 7).map((entry) => entry.id);
     if (activeIds.length < 2)

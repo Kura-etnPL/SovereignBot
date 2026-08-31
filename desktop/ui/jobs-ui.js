@@ -22,7 +22,7 @@
     if ($("job-execution") || !$("job-form-error")) return;
     const makeLabel = (caption, control) => { const label = document.createElement("label"); label.textContent = caption; label.append(control); return label; };
     const execution = document.createElement("select"); execution.id = "job-execution";
-    for (const [value, caption] of [["local", "This computer / 本机"], ["worker-node", "Paired Worker Node / 已配对工作节点"]]) { const option = document.createElement("option"); option.value = value; option.textContent = caption; execution.append(option); }
+    for (const [value, caption] of [["local", "This PC / 此电脑"], ["worker-node", "Paired Worker Node / 已配对工作节点"]]) { const option = document.createElement("option"); option.value = value; option.textContent = caption; execution.append(option); }
     const node = document.createElement("select"); node.id = "job-node";
     const workspace = document.createElement("select"); workspace.id = "job-node-workspace";
     const nodeFields = document.createElement("div"); nodeFields.id = "job-node-fields"; nodeFields.className = "hidden";
@@ -56,7 +56,7 @@
       const meta = document.createElement("div");
       meta.className = "setting-feedback";
       meta.style.margin = "0";
-       const target = job.executionTarget?.kind === "worker-node" ? ` · ${job.workerNodeName ?? job.executionTarget.nodeId} / ${job.workerWorkspaceName ?? job.executionTarget.workspaceId}` : " · This computer";
+       const target = job.executionTarget?.kind === "worker-node" ? ` · ${job.workerNodeName ?? job.executionTarget.nodeId} / ${job.workerWorkspaceName ?? job.executionTarget.workspaceId}` : " · This PC / 此电脑";
        meta.textContent = `${job.ownerCoworkerId} · ${job.priority}${target}${job.nextActionAt ? ` · next ${new Date(job.nextActionAt).toLocaleString()}` : ""}${job.error ? ` · ${job.error.slice(0,80)}` : ""}`;
       const actions = document.createElement("div");
       actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
