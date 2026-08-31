@@ -9,7 +9,8 @@
 // Every invocation appends one transcript line to $FAKE_PROVIDER_TRANSCRIPT for the
 // E2E canary: phase coverage, trusted-cwd equality and session-resume continuity.
 
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const args = process.argv.slice(2);
 let prompt = "";
@@ -90,7 +91,12 @@ else if (kind === "synthesis") {
     text = `SYNTHESIS(fake): goal completed. ${String(goal).slice(0, 120)}`;
 }
 else {
-    text = `WORKER RESULT(fake)\ncwd=${cwd}\n${prompt.trim().slice(0, 200)}`;
+    const cwdLine = process.env.FAKE_PROVIDER_INCLUDE_CWD === "0" ? "" : `\ncwd=${cwd}`;
+    text = `WORKER RESULT(fake)${cwdLine}\n${prompt.trim().slice(0, 200)}`;
+    if (process.env.FAKE_PROVIDER_TEAM_CANARY === "1" && /You are Reviewer\./m.test(prompt)) {
+        writeFileSync(join(cwd, "delivery-result.md"), "# Software delivery result\n\nDeterministic reviewer artifact.\n", "utf8");
+        text = `${text}\nSOVEREIGN_ARTIFACTS: [{"path":"delivery-result.md","title":"Software delivery result"}]`;
+    }
 }
 
 const emit = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);

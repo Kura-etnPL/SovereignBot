@@ -194,7 +194,8 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         },
         createTeam({ title, coworkerIds, leadCoworkerId }) {
             if (leadCoworkerId) {
-                const existing = conversations.find((entry) => entry.kind === "team" && entry.leadCoworkerId === leadCoworkerId);
+                const requestedTitle = title === undefined ? undefined : boundedText(title, "title", MAX_TITLE);
+                const existing = conversations.find((entry) => entry.kind === "team" && entry.leadCoworkerId === leadCoworkerId && (!requestedTitle || entry.title === requestedTitle));
                 if (existing) return summarize(existing);
             }
             return createConversation({ kind: "team", title, coworkerIds, leadCoworkerId });

@@ -64,12 +64,22 @@ export function createWorkspaceStore({ now = () => new Date().toISOString(), mak
         snapshot() {
             return structuredClone(state);
         },
-        add(rawPath, canonicalize = canonicalizeWorkspacePath) {
+        add(rawPath, canonicalize = canonicalizeWorkspacePath, restored = {}) {
             const real = canonicalize(rawPath);
             const existing = state.workspaces.find((workspace) => workspace.path.toLowerCase() === real.toLowerCase());
             if (existing)
                 return { added: false, workspace: structuredClone(existing), reason: "already-registered" };
-            const workspace = { id: makeId(), path: real, label: real.split(sep).pop() || real, addedAt: now() };
+            const restoredId = typeof restored?.id === "string" && /^[A-Za-z0-9][\w:.-]{0,159}$/.test(restored.id)
+                ? restored.id
+                : undefined;
+            const workspace = {
+                id: restoredId ?? makeId(),
+                path: real,
+                label: typeof restored?.label === "string" && restored.label.trim() ? restored.label.trim() : real.split(sep).pop() || real,
+                addedAt: typeof restored?.addedAt === "string" ? restored.addedAt : now(),
+            };
+            if (state.workspaces.some((entry) => entry.id === workspace.id))
+                return { added: false, workspace: structuredClone(state.workspaces.find((entry) => entry.id === workspace.id)), reason: "duplicate-id" };
             state.workspaces.push(workspace);
             if (!state.defaultWorkspaceId)
                 state.defaultWorkspaceId = workspace.id;

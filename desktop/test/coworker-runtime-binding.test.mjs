@@ -36,7 +36,7 @@ test("provider roster creates one dedicated provider-backed runtime identity per
             coworkers: store.list().coworkers,
         });
 
-        assert.equal(roster.coworkerBindings[chief.id].provider, "claude");
+        assert.equal(roster.coworkerBindings[chief.id].provider, "codex");
         assert.equal(roster.coworkerBindings[coder.id].provider, "codex");
         assert.equal(roster.coworkerBindings[coder.id].agentId, coworkerAgentId(coder.id));
 

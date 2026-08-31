@@ -4,6 +4,9 @@ const state = {
   handshake: undefined,
   coworkers: [],
   conversations: [],
+  teams: [],
+  teamPacks: [],
+  channels: [],
   roster: { ready: false, mode: "provider", roles: {}, agents: [], coworkerBindings: {}, providers: {} },
   settings: undefined,
   workspaces: { workspaces: [], defaultWorkspaceId: undefined },
@@ -43,6 +46,15 @@ function conversationById(id) {
   return state.conversations.find((entry) => entry.id === id);
 }
 
+function channelForConversation(conversationId) {
+  return state.channels.find((entry) => entry.conversationId === conversationId);
+}
+
+function teamForConversation(conversationId) {
+  const channel = channelForConversation(conversationId);
+  return channel ? state.teams.find((entry) => entry.id === channel.teamId) : undefined;
+}
+
 function bindingFor(coworkerId) {
   return state.roster?.coworkerBindings?.[coworkerId];
 }
@@ -51,6 +63,14 @@ function humanProvider(provider) {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude Code";
   return "Automatic";
+}
+
+function humanModelProfile(profile) {
+  if (profile === "efficient") return "Efficient / 高效";
+  if (profile === "deep") return "Deep / 深度";
+  if (profile === "economy") return "Economy / 经济";
+  if (profile === "custom") return "Custom / 自定义";
+  return "Automatic / 自动";
 }
 
 function formatTime(iso) {
@@ -136,6 +156,25 @@ function renderCoworkers() {
 function renderTeams() {
   const list = $("team-list");
   clearNode(list);
+  if (state.teams.length) {
+    for (const team of state.teams) {
+      const channel = team.channels?.[0] ?? state.channels.find((entry) => entry.teamId === team.id);
+      const flow = team.flow;
+      const rosterSize = team.coworkerIds?.length ?? 0;
+      const activeCount = flow?.status === "active" && flow.currentOwner ? 1 : 0;
+      const availableCount = Math.max(0, rosterSize - activeCount);
+      const counts = `${activeCount} active · ${availableCount} available`;
+      list.append(makeNavItem({
+        avatar: "#",
+        title: team.name,
+        subtitle: channel?.name ?? "Project Channel",
+        meta: counts,
+        active: channel?.conversationId === state.selectedConversationId,
+        onClick: () => channel?.conversationId && openConversation(channel.conversationId),
+      }));
+    }
+    return;
+  }
   const teams = state.conversations
     .filter((entry) => entry.kind === "team")
     .sort((a, b) => text(b.updatedAt).localeCompare(text(a.updatedAt)));
@@ -148,6 +187,21 @@ function renderTeams() {
       active: conversation.id === state.selectedConversationId,
       onClick: () => openConversation(conversation.id),
     }));
+  }
+}
+
+function renderTeamPackActions() {
+  const container = $("team-pack-actions");
+  if (!container) return;
+  clearNode(container);
+  for (const pack of state.teamPacks.filter((entry) => entry?.id !== "software-team" && !entry.installed)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "quiet-action";
+    button.textContent = `Install ${pack.name}`;
+    button.title = pack.description ?? "Install this team";
+    button.addEventListener("click", () => installTeamPack(pack.id, button));
+    container.append(button);
   }
 }
 
@@ -217,6 +271,22 @@ async function refreshConversations() {
     const target = $("provider-action-result");
     if (target && error) target.textContent = String(error?.message ?? error).slice(0, 200);
   }
+  renderSidebar();
+}
+
+async function refreshTeams() {
+  try {
+    const result = await window.sovereignbot.teams.list({});
+    state.teams = result?.teams ?? [];
+    state.teamPacks = result?.packs ?? state.teamPacks;
+    state.channels = state.teams.flatMap((team) => team.channels ?? []);
+  } catch (error) {
+    state.teams = state.teams ?? [];
+    state.channels = state.channels ?? [];
+    const target = $("provider-action-result");
+    if (target && error) target.textContent = String(error?.message ?? error).slice(0, 200);
+  }
+  renderTeamPackActions();
   renderSidebar();
 }
 
@@ -308,11 +378,13 @@ function renderMentionRow(conversation) {
 function renderConversationHeader(conversation) {
   const members = participantCoworkers(conversation);
   const direct = conversation.kind === "direct" ? members[0] : undefined;
+  const channel = channelForConversation(conversation.id);
+  const team = teamForConversation(conversation.id);
   $("conversation-avatar").textContent = conversation.kind === "team" ? "#" : avatarFor(direct);
-  $("conversation-title").textContent = conversation.title;
-  $("conversation-kind").textContent = conversation.kind === "team" ? "Team" : "Coworker";
+  $("conversation-title").textContent = channel?.name ?? conversation.title;
+  $("conversation-kind").textContent = channel ? "Project Channel" : conversation.kind === "team" ? "Team" : "Coworker";
   $("conversation-subtitle").textContent = conversation.kind === "team"
-    ? members.map((entry) => entry.name).join(" · ")
+    ? channel && team ? `${team.name} · ${members.map((entry) => entry.name).join(" · ")}` : members.map((entry) => entry.name).join(" · ")
     : direct?.role || "Persistent coworker conversation";
   $("demo-banner").classList.toggle("hidden", state.roster?.mode !== "demo");
 
@@ -425,6 +497,7 @@ async function refreshConversation(forceScroll = false) {
     renderConversationHeader(conversation);
     renderMessages(conversation, forceScroll);
     await refreshConversations();
+    if (state.teams.length) await refreshTeams();
   } catch (error) {
     $("composer-error").textContent = text(error?.message || error);
     show($("composer-error"));
@@ -483,13 +556,30 @@ function renderDetails(conversation) {
     membersEl.append(row);
   }
 
-  const providers = [...new Set(members.map((entry) => bindingFor(entry.id)?.provider).filter(Boolean).map(humanProvider))];
-  $("details-provider").textContent = providers.length ? providers.join(" + ") : "Provider unavailable";
-  const workspaceIds = [...new Set(members.flatMap((entry) => entry.workspaceIds ?? []))];
-  const workspaces = workspaceIds.map((id) => state.workspaces.workspaces?.find((entry) => entry.id === id)?.path).filter(Boolean);
-  $("details-workspace").textContent = workspaces.length ? workspaces.join("\n") : "Private coworker workspace";
+  const profiles = [...new Set(members.map((entry) => bindingFor(entry.id)?.profile).filter(Boolean))];
+  $("details-provider").textContent = profiles.length ? profiles.map(humanModelProfile).join(" + ") : "Automatic / 自动";
+  const team = teamForConversation(conversation.id);
+  $("details-workspace").textContent = team ? "Shared project workspace" : "Private workspace";
+  const roster = $("details-roster");
+  clearNode(roster);
+  if (team) {
+    const flow = team.flow ?? {};
+    for (const member of team.coworkers ?? members.map((entry) => ({ id: entry.id, name: entry.name }))) {
+      const row = document.createElement("div");
+      row.className = "member-row";
+      const name = document.createElement("span");
+      name.textContent = member.name;
+      const status = document.createElement("small");
+      status.className = "member-status";
+      status.textContent = member.id === flow.currentOwnerId && flow.status === "active" ? "Active" : member.id === flow.currentOwnerId ? "Waiting" : "Available";
+      row.append(name, status);
+      roster.append(row);
+    }
+  }
   const pending = pendingUserRecipients(conversation);
-  $("details-current-work").textContent = pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
+  $("details-current-work").textContent = team?.flow?.currentOwner
+    ? `${team.flow.status === "active" ? "Active" : "Waiting"} · ${team.flow.currentOwner}`
+    : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
 }
 
 function populateTeamPicker() {
@@ -521,12 +611,12 @@ async function createCoworker(event) {
   hide($("coworker-form-error"));
   try {
     const result = await window.sovereignbot.coworkers.create({
-      coworker: {
-        name: $("coworker-name").value.trim(),
-        role: $("coworker-role").value.trim(),
-        instructions: $("coworker-instructions").value.trim(),
-        providerPreference: $("coworker-provider").value,
-      },
+        coworker: {
+          name: $("coworker-name").value.trim(),
+          role: $("coworker-role").value.trim(),
+          instructions: $("coworker-instructions").value.trim(),
+          modelBinding: { profile: $("coworker-provider").value },
+        },
     });
     $("coworker-dialog").close();
     $("coworker-form").reset();
@@ -536,6 +626,30 @@ async function createCoworker(event) {
     $("coworker-form-error").textContent = text(error?.message || error).replace(/^.*Error: /, "");
     show($("coworker-form-error"));
   }
+}
+
+async function installTeamPack(packId, button = $("welcome-install-software-team")) {
+  const result = $("team-install-result");
+  if (!button || !window.sovereignbot?.teams) return;
+  button.disabled = true;
+  hide(result);
+  try {
+    const installed = await window.sovereignbot.teams.installPack({ packId });
+    await Promise.all([refreshCoworkers(), refreshConversations(), refreshTeams(), refreshRoster()]);
+    const channel = installed?.team?.channels?.[0] ?? state.channels.find((entry) => entry.teamId === installed?.team?.id);
+    if (channel?.conversationId) await openConversation(channel.conversationId);
+  } catch (error) {
+    if (result) {
+      result.textContent = text(error?.message || error).replace(/^.*Error: /, "");
+      show(result);
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function installSoftwareTeam() {
+  return installTeamPack("software-team");
 }
 
 async function createTeam(event) {
@@ -664,8 +778,8 @@ function renderWorkspaces() {
       await window.sovereignbot.workspaces.setDefault({ id: workspace.id });
       await refreshSettingsData();
     });
-    const path = document.createElement("code");
-    path.textContent = workspace.path;
+    const label = document.createElement("span");
+    label.textContent = workspace.kind === "shared-project" ? "Shared project workspace" : workspace.label || "Private workspace";
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "Remove";
@@ -673,7 +787,7 @@ function renderWorkspaces() {
       await window.sovereignbot.workspaces.remove({ id: workspace.id });
       await refreshSettingsData();
     });
-    card.append(radio, path, remove);
+    card.append(radio, label, remove);
     root.append(card);
   }
 }
@@ -751,6 +865,7 @@ function bindEvents() {
   $("refresh-coworkers").addEventListener("click", () => Promise.all([refreshCoworkers(), refreshConversations(), refreshRoster()]));
   $("new-team").addEventListener("click", () => { populateTeamPicker(); openDialog("team-dialog"); });
   $("welcome-create-team").addEventListener("click", () => { populateTeamPicker(); openDialog("team-dialog"); });
+  $("welcome-install-software-team")?.addEventListener("click", installSoftwareTeam);
   $("welcome-open-chief").addEventListener("click", () => {
     const chief = state.coworkers.find((entry) => /chief of staff/i.test(entry.name)) ?? state.coworkers[0];
     if (chief) openDirect(chief.id);
@@ -843,7 +958,7 @@ async function bootstrap() {
     return;
   }
 
-  const results = await Promise.allSettled([refreshCoworkers(), refreshConversations(), refreshRoster(), refreshSettingsData()]);
+  const results = await Promise.allSettled([refreshCoworkers(), refreshConversations(), refreshTeams(), refreshRoster(), refreshSettingsData()]);
   const rejected = results.filter((entry) => entry.status === "rejected");
   if (rejected.length) {
     const first = rejected[0]?.reason;

@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createWorkspaceStore, canonicalizeWorkspacePath } from "./lib/workspaces.js";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
@@ -70,10 +71,13 @@ export function createDesktopServices({ dataDir, dialog }) {
 
     const persistedWorkspaces = loadJsonState(workspacesPath, null);
     const store = createWorkspaceStore();
+    const workspaceKinds = new Map();
     if (persistedWorkspaces?.schema === "sovereignbot.desktop.workspaces.v1" && Array.isArray(persistedWorkspaces.workspaces)) {
         for (const workspace of persistedWorkspaces.workspaces) {
             try {
-                store.add(workspace.path);
+                const result = store.add(workspace.path, canonicalizeWorkspacePath, workspace);
+                if (workspace.kind && result.workspace?.id)
+                    workspaceKinds.set(result.workspace.id, String(workspace.kind).slice(0, 64));
             }
             catch {
                 // A previously valid directory may be gone; skip it rather than fail startup.
@@ -96,11 +100,40 @@ export function createDesktopServices({ dataDir, dialog }) {
         settings = normalizeSettings(persistedSettings);
     }
 
+    function workspaceSnapshot() {
+        const snapshot = store.snapshot();
+        snapshot.workspaces = snapshot.workspaces.map((workspace) => ({
+            ...workspace,
+            ...(workspaceKinds.has(workspace.id) ? { kind: workspaceKinds.get(workspace.id) } : {}),
+        }));
+        return snapshot;
+    }
+
+    function publicWorkspace(workspace) {
+        if (!workspace)
+            return undefined;
+        return {
+            id: workspace.id,
+            label: workspace.label,
+            ...(workspace.kind ? { kind: workspace.kind } : {}),
+            addedAt: workspace.addedAt,
+        };
+    }
+
+    function saveWorkspaces() {
+        saveJsonState(workspacesPath, workspaceSnapshot());
+    }
+
     return {
         stateDir,
 
         listWorkspaces() {
-            return store.snapshot();
+            const snapshot = workspaceSnapshot();
+            return {
+                schema: snapshot.schema,
+                defaultWorkspaceId: snapshot.defaultWorkspaceId,
+                workspaces: snapshot.workspaces.map(publicWorkspace),
+            };
         },
 
         async addWorkspaceViaDialog(parentWindow) {
@@ -114,30 +147,53 @@ export function createDesktopServices({ dataDir, dialog }) {
             // The native picker returns exactly one absolute directory; canonicalization is
             // still enforced here so nothing bypasses the registry rules.
             const outcome = store.add(result.filePaths[0], canonicalizeWorkspacePath);
-            saveJsonState(workspacesPath, store.snapshot());
-            return { added: outcome.added, workspace: outcome.workspace ?? undefined, reason: outcome.reason };
+            saveWorkspaces();
+            return { added: outcome.added, workspace: publicWorkspace({ ...outcome.workspace, kind: workspaceKinds.get(outcome.workspace?.id) }), reason: outcome.reason };
         },
 
         addWorkspacePath(path) {
             const outcome = store.add(path, canonicalizeWorkspacePath);
-            saveJsonState(workspacesPath, store.snapshot());
-            return { added: outcome.added, workspace: outcome.workspace ?? undefined, reason: outcome.reason };
+            saveWorkspaces();
+            // This is a main-process/test helper, not an IPC projection.  Keep the
+            // canonical path available to trusted acceptance helpers and controllers.
+            return { added: outcome.added, workspace: outcome.workspace ? { ...outcome.workspace, kind: workspaceKinds.get(outcome.workspace.id) } : undefined, reason: outcome.reason };
+        },
+
+        // Internal Team Pack provisioning.  Only the workspace id/label is returned to
+        // product projections; this path is consumed by trusted main-process services.
+        createManagedWorkspace({ label, kind = "shared-project", idHint } = {}) {
+            const safeHint = String(idHint ?? `workspace-${Date.now().toString(36)}`)
+                .replace(/[^A-Za-z0-9._-]/g, "-")
+                .slice(0, 80);
+            const managedPath = join(stateDir, "managed-workspaces", safeHint);
+            mkdirSync(managedPath, { recursive: true });
+            const outcome = store.add(managedPath, canonicalizeWorkspacePath, { label });
+            if (outcome.workspace?.id)
+                workspaceKinds.set(outcome.workspace.id, String(kind).slice(0, 64));
+            saveWorkspaces();
+            const workspace = { ...outcome.workspace, kind: workspaceKinds.get(outcome.workspace?.id) };
+            return { workspace: structuredClone(workspace), path: workspace.path };
         },
 
         removeWorkspace(id) {
             const removed = store.remove(String(id));
-            saveJsonState(workspacesPath, store.snapshot());
+            workspaceKinds.delete(String(id));
+            saveWorkspaces();
             return removed;
         },
 
         setDefaultWorkspace(id) {
             const ok = store.setDefault(String(id));
-            saveJsonState(workspacesPath, store.snapshot());
+            saveWorkspaces();
             return ok;
         },
 
         workspacePath(id) {
             return store.byId(String(id))?.path;
+        },
+
+        workspaceLabel(id) {
+            return store.byId(String(id))?.label;
         },
 
         defaultWorkspacePath() {

@@ -142,6 +142,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .welcome-card h1, .page-header h1 { margin: 9px 0 12px; font-size: clamp(34px, 4.2vw, 56px); line-height: 1.02; letter-spacing: -.045em; font-weight: 680; }
 .welcome-card > p { max-width: 610px; margin: 0 auto; color: var(--text-2); font-size: 16px; line-height: 1.65; }
 .welcome-actions { margin-top: 28px; display: flex; justify-content: center; gap: 9px; }
+.team-pack-actions { margin-top: 10px; display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; }
+.team-pack-actions .quiet-action { min-height: 32px; padding: 0 11px; font-size: 10px; }
 .hero-action, .quiet-action { min-height: 38px; padding: 0 15px; border-radius: 10px; cursor: pointer; }
 .hero-action { border: 0; }
 .quiet-action { border: 1px solid var(--line-strong); background: var(--panel-2); color: var(--text); font-weight: 560; }
@@ -257,6 +259,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .member-row { display: flex; align-items: center; gap: 8px; }
 .member-row .avatar { width: 27px; height: 27px; border-radius: 9px; font-size: 11px; }
 .member-row span { color: var(--text-2); font-size: 11px; }
+.member-row .member-status { margin-left: auto; color: var(--text-3); font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
 .future-chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
 .future-chip-row span { padding: 4px 7px; border-radius: 7px; background: var(--panel-2); color: var(--text-3); font-size: 9px; }
 .activity-drawer { position: fixed; z-index: 30; right: 16px; top: 16px; bottom: 16px; width: min(460px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line-strong); border-radius: 18px; background: color-mix(in srgb, var(--panel) 96%, transparent); box-shadow: var(--shadow); overflow-y: auto; }

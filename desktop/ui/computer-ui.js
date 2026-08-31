@@ -150,7 +150,7 @@
     const name = document.createElement("strong");
     name.textContent = coworker?.name || binding?.agentId || "Coworker";
     const agent = document.createElement("span");
-    agent.textContent = binding?.provider ? `${humanProvider(binding.provider)} computer` : "Computer";
+    agent.textContent = "Computer";
     copy.append(name, agent);
     identity.append(icon, copy);
     const stateEl = document.createElement("span");
@@ -162,7 +162,7 @@
     if (!binding?.agentId) {
       const note = document.createElement("p");
       note.className = "computer-note";
-      note.textContent = "This coworker has no provider lane yet.";
+      note.textContent = "This coworker has no computer lane yet.";
       card.append(note);
       return card;
     }

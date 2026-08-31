@@ -30,6 +30,14 @@ function providerKindForHarness(harnessKind) {
     return harnessKind === "codex" ? "codex" : harnessKind === "claude-code" ? "claude-code" : undefined;
 }
 
+function redactWorkspacePath(value, workspacePath) {
+    const text = String(value ?? "");
+    if (!workspacePath)
+        return text;
+    const escaped = String(workspacePath).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return text.replace(new RegExp(escaped, "gi"), "<workspace>");
+}
+
 function publicConversationContext(conversation, coworkerId) {
     return conversation.messages.slice(-MAX_CONTEXT_MESSAGES).map((message) => ({
         sender: message.senderId === "user" ? "user" : message.senderId === coworkerId ? "self" : message.senderId,
@@ -48,6 +56,7 @@ export function createCoworkerDispatcher({
     conversationStore,
     artifactStore,
     services,
+    teamFlow,
     persistPath = join(dataDir, "desktop-state", "coworker-dispatch.json"),
     now = () => new Date().toISOString(),
 } = {}) {
@@ -79,7 +88,14 @@ export function createCoworkerDispatcher({
         return { snapshot, binding };
     }
 
-    function workspaceContext(coworker) {
+    function workspaceContext(coworker, conversation) {
+        const sharedWorkspaceId = teamFlow?.workspaceIdForConversation?.(conversation?.id);
+        if (sharedWorkspaceId) {
+            const sharedPath = services.workspacePath(sharedWorkspaceId);
+            if (sharedPath)
+                return { workspaceId: sharedWorkspaceId, cwd: sharedPath };
+            throw new Error("team shared project workspace is unavailable");
+        }
         const configured = coworker.workspaceIds ?? [];
         if (configured.length) {
             for (const workspaceId of configured) {
@@ -117,11 +133,13 @@ export function createCoworkerDispatcher({
             .map((entry) => ({ id: entry.id, name: entry.name, role: entry.role }));
     }
 
-    async function bindContinuation(task, previousTaskId, agentId, harnessKind) {
+    async function bindContinuation(task, previousTaskId, agentId, harnessKind, accountNamespace, previousAccountNamespace) {
         if (!previousTaskId)
             return task;
         const previous = (await runtime.orchestrator.listTasks()).find((entry) => entry.id === previousTaskId);
         if (!previous || previous.assignedAgentId !== agentId)
+            return task;
+        if (previousAccountNamespace !== accountNamespace)
             return task;
         const expectedKind = providerKindForHarness(harnessKind);
         const continuity = safeSessionState(previous.harnessState, expectedKind);
@@ -199,7 +217,7 @@ export function createCoworkerDispatcher({
             return { skipped: true, reason: "delivery-not-pending" };
 
         const { snapshot, binding } = requireBinding(coworkerId);
-        const context = workspaceContext(coworker);
+        const context = workspaceContext(coworker, conversation);
         const supervisorAgentId = snapshot.roles?.planner;
         if (!supervisorAgentId)
             throw new Error("coworker dispatch requires a ready supervisor/planner identity");
@@ -230,18 +248,20 @@ export function createCoworkerDispatcher({
             },
         }, context, supervisorAgentId);
 
-        task = await bindContinuation(task, turn.lastTaskId, binding.agentId, binding.harnessKind);
+        task = await bindContinuation(task, turn.lastTaskId, binding.agentId, binding.harnessKind, binding.accountNamespace, turn.accountNamespace);
         await runtime.orchestrator.runUntilIdle();
         const finished = (await runtime.orchestrator.listTasks()).find((entry) => entry.id === task.id);
         if (finished?.status !== "completed") {
             const detail = String(finished?.error ?? `coworker turn ended as ${finished?.status ?? "unknown"}`).slice(0, 500);
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail);
-            state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, updatedAt: now() };
+            state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
             save();
             return { ok: false, taskId: task.id, error: detail };
         }
 
-        const rawText = typeof finished.result?.text === "string" ? finished.result.text.trim().slice(0, MAX_REPLY_TEXT) : "";
+        const rawText = typeof finished.result?.text === "string"
+            ? redactWorkspacePath(finished.result.text, context.cwd).trim().slice(0, MAX_REPLY_TEXT)
+            : "";
         if (!rawText) {
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "provider returned no text reply");
             return { ok: false, taskId: task.id, error: "provider returned no text reply" };
@@ -265,26 +285,31 @@ export function createCoworkerDispatcher({
             taskId: task.id,
         });
         const visibleText = artifactResult.text || (artifactResult.artifactIds.length ? `Created ${artifactResult.artifactIds.length} artifact${artifactResult.artifactIds.length === 1 ? "" : "s"}.` : "Completed the requested work.");
+        const productHandoff = teamFlow?.nextHandoff?.({ conversation, coworkerId, source, replyText: artifactResult.text });
+        // A Team Pack may own a bounded playbook sequence.  Its next stage is a
+        // product routing decision, not authority supplied by model output; explicit
+        // manifests remain available for ordinary user-created teams.
+        const nextCoworkerIds = productHandoff ? [productHandoff] : handoffResult.coworkerIds;
         const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, {
             text: visibleText.slice(0, MAX_REPLY_TEXT),
             replyTo: source.id,
-            ...(handoffResult.coworkerIds.length ? { mentions: handoffResult.coworkerIds } : {}),
+            ...(nextCoworkerIds.length ? { mentions: nextCoworkerIds } : {}),
             ...(artifactResult.artifactIds.length ? { artifactIds: artifactResult.artifactIds } : {}),
         });
         conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
-        state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, updatedAt: now() };
+        state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
         save();
 
-        if (handoffResult.coworkerIds.length) {
+        if (nextCoworkerIds.length) {
             await runtime.audit.append({
                 type: "coworker.handoff",
                 actor: coworkerAgentId(coworkerId),
                 subject: reply.id,
-                data: { conversationId, fromCoworkerId: coworkerId, toCoworkerIds: handoffResult.coworkerIds, depth: handoffDepth(conversation, source) + 1 },
+                data: { conversationId, fromCoworkerId: coworkerId, toCoworkerIds: nextCoworkerIds, depth: handoffDepth(conversation, source) + 1 },
             });
             dispatchMessage(conversationId, reply.id);
         }
-        return { ok: true, taskId: task.id, reply, artifacts: artifactResult.artifactIds, handoffs: handoffResult.coworkerIds };
+        return { ok: true, taskId: task.id, reply, artifacts: artifactResult.artifactIds, handoffs: nextCoworkerIds };
     }
 
     function scheduleDelivery(conversationId, messageId, coworkerId) {
@@ -310,6 +335,7 @@ export function createCoworkerDispatcher({
         const message = conversation.messages.find((entry) => entry.id === messageId);
         if (!message)
             throw new Error(`unknown message id: ${messageId}`);
+        teamFlow?.onMessageQueued?.({ conversation, message });
         const recipients = Object.entries(message.delivery ?? {})
             .filter(([, delivery]) => delivery?.status === "pending")
             .map(([recipientId]) => recipientId);
