@@ -407,12 +407,25 @@ function sanitizePersisted(value) {
         for (const [teamId, flow] of Object.entries(value.flows)) {
             if (!teamIds.has(teamId) || !flow || typeof flow !== "object") continue;
             const stage = ["chief", "coding-lead", "specialist", "reviewer", "synthesis", "complete"].includes(flow.stage) ? flow.stage : "complete";
+            const routingDecision = flow.routingDecision && typeof flow.routingDecision === "object"
+                && typeof flow.routingDecision.targetCoworkerId === "string"
+                && typeof flow.routingDecision.reason === "string"
+                && flow.routingDecision.handoffType === "delegate"
+                && typeof flow.routingDecision.boundedTask === "string"
+                ? {
+                    targetCoworkerId: flow.routingDecision.targetCoworkerId.slice(0, 160),
+                    reason: flow.routingDecision.reason.slice(0, 240),
+                    handoffType: "delegate",
+                    boundedTask: flow.routingDecision.boundedTask.slice(0, 1_000),
+                }
+                : undefined;
             flows[teamId] = {
                 stage,
                 ...(Number.isInteger(flow.handoffIndex) && flow.handoffIndex >= 0 && flow.handoffIndex <= 16 ? { handoffIndex: flow.handoffIndex } : {}),
                 ...(typeof flow.userMessageId === "string" ? { userMessageId: flow.userMessageId } : {}),
                 ...(typeof flow.lastHandoffSourceId === "string" ? { lastHandoffSourceId: flow.lastHandoffSourceId } : {}),
                 ...(typeof flow.lastHandoffTargetId === "string" ? { lastHandoffTargetId: flow.lastHandoffTargetId } : {}),
+                ...(routingDecision ? { routingDecision } : {}),
                 ...(typeof flow.updatedAt === "string" ? { updatedAt: flow.updatedAt } : {}),
             };
         }

@@ -511,6 +511,15 @@ function renderMessage(conversation, message) {
   const time = document.createElement("time");
   time.textContent = formatTime(message.createdAt);
   meta.append(author, time);
+  if (!user && conversation.kind === "team" && Array.isArray(message.mentions) && message.mentions.length === 1) {
+    const target = coworkerById(message.mentions[0]);
+    if (target) {
+      const handoff = document.createElement("div");
+      handoff.className = "handoff-card";
+      handoff.textContent = `Handoff → ${target.name} / 交接 → ${target.name}`;
+      content.append(handoff);
+    }
+  }
   const body = document.createElement("div");
   body.className = "chat-text";
   body.textContent = message.text;

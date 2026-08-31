@@ -1,9 +1,9 @@
 const INTENTS = [
-  ["software", "code implement build bug fix debug test electron ipc api software"],
-  ["research", "research investigate evidence source cite compare study web"],
-  ["content", "write draft article copy content translate edit"],
-  ["operations", "operate operations runbook monitor workflow execute"],
-  ["review", "review audit verify check quality security risk approve"],
+  ["software", "code implement build bug fix debug test electron ipc api software 代码 开发 实现 修复 测试 调试 软件"],
+  ["research", "research investigate evidence source cite compare study web 研究 调查 证据 来源 引用 比较 搜索"],
+  ["content", "write draft article copy content translate edit 文案 写作 文章 内容 翻译 润色 编辑"],
+  ["operations", "operate operations runbook monitor workflow execute 运营 运维 运行 监控 流程 执行"],
+  ["review", "review audit verify check quality security risk approve 审查 审核 复核 验证 质量 安全 风险"],
 ];
 
 const clean = (value, max) => String(value ?? "").trim().slice(0, max).toLocaleLowerCase();
