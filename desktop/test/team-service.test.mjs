@@ -25,6 +25,7 @@ test("Software Team installation is idempotent and keeps workspace paths out of 
         assert.equal(first.team.name, "Software Team");
         assert.deepEqual(first.team.coworkers.map((entry) => entry.name), ["Chief of Staff", "Coding Lead", "Reviewer"]);
         assert.equal(first.team.channels[0].name, "Project Channel");
+        assert.equal(first.team.sharedWorkspaceLabel, "Software Team project");
         assert.equal(first.team.privateWorkspaceLabel, "Private workspace");
         assert.equal(JSON.stringify(first.team).includes("managed-workspaces"), false);
         assert.equal(Object.hasOwn(services.listWorkspaces().workspaces[0], "path"), false);
@@ -71,6 +72,7 @@ test("declarative secondary Team Packs reuse the governed team path", () => {
         const installed = teams.installPack("research-team");
         assert.equal(installed.installed, true);
         assert.equal(installed.team.name, "Research Team");
+        assert.equal(installed.team.sharedWorkspaceLabel, "Research Team project");
         assert.deepEqual(installed.team.coworkers.map((entry) => entry.name), ["Chief of Staff", "Research Lead", "Reviewer"]);
         assert.equal(installed.team.channels[0].name, "Research Room");
         assert.equal(installed.team.playbooks[0].name, "Research Brief");

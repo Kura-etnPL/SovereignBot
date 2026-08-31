@@ -389,7 +389,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const coworkerIds = pack.coworkers.map((definition) => idsByKey.get(definition.key));
         const teamId = makeTeamId();
         safeId(teamId, "teamId", TEAM_ID);
-        const managed = services.createManagedWorkspace({ label: "Software Team project", kind: "shared-project", idHint: teamId });
+        const managed = services.createManagedWorkspace({ label: `${pack.name} project`, kind: "shared-project", idHint: teamId });
         const sharedWorkspaceId = managed.workspace?.id;
         safeId(sharedWorkspaceId, "sharedWorkspaceId");
         const timestamp = now();
