@@ -196,6 +196,27 @@ test("Playbook export/import is bounded and idempotent", () => {
     }
 });
 
+test("Playbook Library edits update the assigned team's reusable procedure", () => {
+    const { root, teams } = fixture();
+    try {
+        const installed = teams.installPack("software-team");
+        const updated = teams.updatePlaybook(installed.team.id, "software-delivery", {
+            name: "Software Delivery v2",
+            description: "",
+            steps: ["chief", "coding-lead", "reviewer", "chief"],
+        });
+        assert.equal(updated.playbook.name, "Software Delivery v2");
+        assert.equal(updated.playbook.description, "");
+        const current = teams.get(installed.team.id);
+        assert.equal(current.playbooks[0].name, "Software Delivery v2");
+        assert.equal(current.playbooks[0].description, "");
+        assert.deepEqual(current.playbooks[0].steps, ["chief", "coding-lead", "reviewer", "chief"]);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("channel templates create governed team channels idempotently", () => {
     const { root, conversations, teams } = fixture();
     try {

@@ -200,6 +200,12 @@ function safeString(value, label, max = 200) {
     return value.trim();
 }
 
+function safeOptionalString(value, label, max = 200) {
+    if (typeof value !== "string" || value.length > max)
+        throw new Error(`${label} must be a bounded string`);
+    return value.trim();
+}
+
 function safeId(value, label, pattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/) {
     if (typeof value !== "string" || !pattern.test(value))
         throw new Error(`${label} must be an identifier`);
@@ -766,6 +772,30 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return { imported: true, playbook: clone(playbook), team: publicTeam(team) };
     }
 
+    function updatePlaybook(teamId, playbookId, patch = {}) {
+        const team = requireTeam(teamId);
+        const playbook = team.playbooks.find((entry) => entry.id === String(playbookId));
+        if (!playbook) throw new Error(`unknown playbook id: ${playbookId}`);
+        if (!patch || typeof patch !== "object" || Array.isArray(patch))
+            throw new Error("playbook patch must be an object");
+        const allowed = new Set(["name", "description", "steps"]);
+        for (const key of Object.keys(patch))
+            if (!allowed.has(key)) throw new Error(`playbook field is not editable: ${key}`);
+        if (!Object.keys(patch).length) throw new Error("playbook patch must not be empty");
+        const next = {
+            name: patch.name === undefined ? playbook.name : safeString(patch.name, "playbook name", 120),
+            description: patch.description === undefined ? playbook.description : safeOptionalString(patch.description, "playbook description", 500),
+            steps: patch.steps === undefined ? [...playbook.steps] : patch.steps,
+        };
+        if (!Array.isArray(next.steps) || next.steps.length > 12)
+            throw new Error("playbook steps must be an array of at most 12 identifiers");
+        next.steps = next.steps.map((step) => safeId(step, "playbook step"));
+        Object.assign(playbook, next);
+        team.updatedAt = now();
+        save();
+        return { playbook: clone(playbook), team: publicTeam(team) };
+    }
+
     function createChannelFromTemplate(teamId, templateId) {
         const team = requireTeam(teamId);
         const template = CHANNEL_TEMPLATE_BY_ID.get(String(templateId));
@@ -1090,6 +1120,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         importPack,
         exportPlaybook,
         importPlaybook,
+        updatePlaybook,
         createChannelFromTemplate,
         createChannel,
         updateChannel,

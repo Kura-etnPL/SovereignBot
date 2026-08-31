@@ -74,7 +74,14 @@ function normalizePack(input, { generatedId } = {}) {
 }
 
 function safeHistoryText(value, max = 180) {
-    const out = text(value ?? "", "history text", max).replace(/[A-Za-z]:[\\/][^\s]*/g, "[redacted-path]").replace(/(?:token|secret|password|cookie|session|credential)\s*[:=]\s*[^\s]+/gi, "$1=[redacted]");
+    const out = text(value ?? "", "history text", max)
+        .replace(/[A-Za-z]:[\\/][^\s"'<>]*/g, "[redacted-path]")
+        .replace(/(?:^|\s)\/(?:Users|home|tmp|var|private|workspace|worktrees?)[^\s"'<>]*/gi, "$1[redacted-path]")
+        .replace(/https?:\/\/[^\s"'<>]+/gi, (value) => {
+            try { return new URL(value).origin; }
+            catch { return "[redacted-url]"; }
+        })
+        .replace(/(?:token|secret|password|cookie|session|credential)\s*[:=]\s*[^\s]+/gi, "$1=[redacted]");
     return out;
 }
 
@@ -113,7 +120,13 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
     }
     function updatePlaybook(playbookId, patch) {
         const entry = playbookById(playbookId); if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new Error("playbook patch must be an object");
-        const next = normalizePlaybook({ id: entry.id, name: patch.name ?? entry.name, description: patch.description ?? entry.description, steps: patch.steps ?? entry.steps }); Object.assign(entry, next, { updatedAt: now() }); save(); return publicPlaybook(entry);
+        const next = normalizePlaybook({ id: entry.id, name: patch.name ?? entry.name, description: patch.description ?? entry.description, steps: patch.steps ?? entry.steps });
+        const assignedTeams = teamService.list().teams.filter((team) => team.playbooks?.some((item) => item.id === entry.id));
+        if (typeof teamService.updatePlaybook !== "function" && assignedTeams.length)
+            throw new Error("assigned playbook updates are unavailable");
+        for (const team of assignedTeams)
+            teamService.updatePlaybook(team.id, entry.id, next);
+        Object.assign(entry, next, { updatedAt: now() }); save(); return publicPlaybook(entry);
     }
     function setPlaybookState(playbookId, value) { const entry = playbookById(playbookId); entry.state = value; entry.updatedAt = now(); save(); return publicPlaybook(entry); }
     function duplicatePlaybook(playbookId) { const entry = playbookById(playbookId); return createPlaybook({ name: `${entry.name} copy`, description: entry.description, steps: entry.steps }); }
@@ -140,7 +153,8 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
     function artifactHub({ limit = 100, teamId, channelId, coworkerId } = {}) {
         const teams = teamService.list().teams; const channels = teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         const allowedConversationIds = new Set(channels.filter((channel) => (!teamId || channel.teamId === teamId) && (!channelId || channel.id === channelId)).map((channel) => channel.conversationId));
-        const result = artifactStore.list({ limit, coworkerId }).artifacts.filter((artifact) => !artifact.conversationId || allowedConversationIds.has(artifact.conversationId)).map((artifact) => {
+        const locationScoped = teamId !== undefined || channelId !== undefined;
+        const result = artifactStore.list({ limit, coworkerId }).artifacts.filter((artifact) => !locationScoped ? true : Boolean(artifact.conversationId) && allowedConversationIds.has(artifact.conversationId)).map((artifact) => {
             const channel = channels.find((item) => item.conversationId === artifact.conversationId); const creator = artifact.createdByCoworkerId ? coworkerStore.get(artifact.createdByCoworkerId) : undefined;
             return { id: artifact.id, title: artifact.title, fileName: artifact.fileName, mimeType: artifact.mimeType, size: artifact.size, createdAt: artifact.createdAt, creator: creator ? { id: creator.id, name: creator.name } : undefined, coworkerId: artifact.createdByCoworkerId, team: channel ? { id: channel.teamId, name: channel.teamName } : undefined, channel: channel ? { id: channel.id, name: channel.name } : undefined, conversationId: artifact.conversationId, status: "available" };
         });
@@ -149,9 +163,10 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
     async function computerHistory({ limit = 100 } = {}) {
         const rows = await runtime.audit.readAll(); const result = [];
         for (const row of rows.slice(-Math.min(500, Math.max(1, limit * 4))).reverse()) {
-            const type = String(row?.type ?? ""); if (!/(computer|takeover)/i.test(type)) continue;
+            const type = String(row?.type ?? ""); if (!/(?:^|[._:-])(computer|takeover|task|job)(?:[._:-]|$)/i.test(type)) continue;
             const data = row?.data && typeof row.data === "object" ? row.data : {}; const forbidden = JSON.stringify(data).match(/token|secret|password|cookie|session|credential|webdriver|profile|lease|path|coord|typed/i); if (forbidden) continue;
-            result.push({ id: row.id, activity: safeHistoryText(type), coworkerId: typeof data.coworkerId === "string" ? data.coworkerId : undefined, summary: safeHistoryText(data.summary ?? data.action ?? type), app: data.app ? safeHistoryText(data.app, 80) : undefined, site: data.site ? safeHistoryText(data.site, 180) : undefined, timestamp: row.at, status: data.ok === false || /failed/i.test(type) ? "failed" : "completed" });
+            const status = data.ok === false || /failed|error|rejected/i.test(type) ? "failed" : /attention|takeover|paused/i.test(type) ? "attention" : "completed";
+            result.push({ id: row.id, activity: safeHistoryText(data.activity ?? type), coworkerId: typeof data.coworkerId === "string" ? data.coworkerId : undefined, summary: safeHistoryText(data.summary ?? data.action ?? data.title ?? type), app: data.app ? safeHistoryText(data.app, 80) : undefined, site: data.site ? safeHistoryText(data.site, 180) : undefined, timestamp: row.at, status });
             if (result.length >= limit) break;
         }
         return { history: result };

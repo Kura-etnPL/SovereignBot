@@ -14,6 +14,7 @@ function fixture() {
     get: (id) => teams.find((entry) => entry.id === id),
     getChannel: (id) => teams.flatMap((entry) => entry.channels).find((entry) => entry.id === id),
     importPlaybook: (teamId, playbook) => { teams.find((entry) => entry.id === teamId).playbooks.push({ id: playbook.id, name: playbook.name, description: playbook.description, steps: [...playbook.steps] }); },
+    updatePlaybook: (teamId, playbookId, patch) => { const entry = teams.find((item) => item.id === teamId).playbooks.find((item) => item.id === playbookId); Object.assign(entry, { name: patch.name, description: patch.description, steps: [...patch.steps] }); },
     updateChannel: (channelId, patch) => { const channel = teamService.getChannel(channelId); Object.assign(channel, patch); },
     exportPack: () => ({ schema: "sovereignbot.desktop.team-pack.v1", id: "custom-team", name: "Software", description: "Software", coworkers: [{ key: "chief", name: "Chief", role: "Chief", instructions: "Lead" }, { key: "reviewer", name: "Reviewer", role: "Reviewer", instructions: "Review" }], channels: [{ key: "project", name: "Project", kind: "project", instructions: "Work", playbookId: "delivery" }], playbooks: [{ id: "delivery", name: "Delivery", description: "Ship safely", steps: ["chief", "reviewer"] }] }),
   };
@@ -25,8 +26,8 @@ test("product surfaces provide safe playbook, artifact, computer, and pack proje
   const service = createProductSurfaceService({
     dataDir: mkdtempSync(join(tmpdir(), "sovereign-product-")), teamService,
     coworkerStore: { get: (id) => ({ id, name: id === "coworker_1111111111111111" ? "Coding Lead" : "Coworker" }) },
-    artifactStore: { list: () => ({ artifacts: [{ id: "artifact_1111111111111111", title: "result", fileName: "result.md", mimeType: "text/markdown", size: 10, createdAt: "2026-09-01T00:00:00.000Z", createdByCoworkerId: "coworker_1111111111111111", conversationId: "conv_1111111111111111", storageRelativePath: "secret", sourceRelativePath: "private/result.md" }] }) },
-    runtime: { audit: { readAll: async () => [{ id: "audit_1", at: "2026-09-01T00:00:00.000Z", type: "computer.action_succeeded", data: { action: "click", app: "Browser", ok: true } }, { id: "audit_2", at: "2026-09-01T00:00:01.000Z", type: "computer.secret_supplied", data: { password: "never-show" } }] } },
+    artifactStore: { list: () => ({ artifacts: [{ id: "artifact_1111111111111111", title: "result", fileName: "result.md", mimeType: "text/markdown", size: 10, createdAt: "2026-09-01T00:00:00.000Z", createdByCoworkerId: "coworker_1111111111111111", conversationId: "conv_1111111111111111", storageRelativePath: "secret", sourceRelativePath: "private/result.md" }, { id: "artifact_2222222222222222", title: "loose", fileName: "loose.md", mimeType: "text/markdown", size: 5, createdAt: "2026-09-01T00:00:00.000Z" }] }) },
+    runtime: { audit: { readAll: async () => [{ id: "audit_1", at: "2026-09-01T00:00:00.000Z", type: "computer.action_succeeded", data: { action: "click", app: "Browser", ok: true } }, { id: "audit_2", at: "2026-09-01T00:00:00.500Z", type: "task.completed", data: { title: "Review result", app: "Editor", ok: true } }, { id: "audit_3", at: "2026-09-01T00:00:01.000Z", type: "computer.secret_supplied", data: { password: "never-show" } }] } },
     now: () => "2026-09-01T00:00:02.000Z",
   });
   const library = service.listPlaybooks();
@@ -35,8 +36,11 @@ test("product surfaces provide safe playbook, artifact, computer, and pack proje
   assert.equal(service.duplicatePlaybook(created.id).name, "Release copy");
   service.assignPlaybook(created.id, { channelId: team.channels[0].id });
   assert.equal(team.channels[0].playbookId, created.id);
+  service.updatePlaybook("delivery", { name: "Delivery updated", description: "Updated", steps: ["chief", "reviewer"] });
+  assert.equal(team.playbooks.find((entry) => entry.id === "delivery").name, "Delivery updated");
   assert.equal(service.artifactHub().artifacts[0].storageRelativePath, undefined);
-  assert.equal((await service.computerHistory()).history.length, 1);
+  assert.equal(service.artifactHub({ teamId: team.id }).artifacts.some((entry) => entry.id === "artifact_2222222222222222"), false);
+  assert.equal((await service.computerHistory()).history.length, 2);
   const pack = service.duplicatePack("custom-team");
   assert.match(pack.id, /^custom-pack-/);
   assert.equal(service.editPack(pack.id, { name: "Edited" }).name, "Edited");
