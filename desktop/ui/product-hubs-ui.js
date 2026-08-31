@@ -113,13 +113,21 @@
     root.append(button("Import skill / 导入技能", async () => { const raw = window.prompt("Paste safe Skill JSON"); if (!raw) return; await api.skills.import({ skill: JSON.parse(raw) }); await refresh(); }));
   }
   function renderPacks(items) {
+    const query = $("team-pack-search")?.value.trim().toLowerCase() ?? "";
+    if (query) items = items.filter((item) => [item.name, item.description, ...(item.coworkerNames ?? []), ...(item.channelNames ?? []), ...(item.playbookNames ?? [])].join(" ").toLowerCase().includes(query));
     const root = $("product-packs"); clear(root);
     for (const item of items) { const card = document.createElement("article"); card.className = "settings-card"; const h = document.createElement("h3"); h.textContent = item.name; card.append(h, line("Contents", `${item.coworkerNames?.length ?? 0} coworkers · ${item.channelNames?.length ?? 0} channels · ${item.playbookNames?.length ?? 0} playbooks`), line("Status", item.installed ? "Installed" : "Available")); const actions = document.createElement("div"); actions.className = "detail-actions"; if (!item.installed) actions.append(button("Install", async () => { await api.teams.installPack({ packId: item.id }); await refresh(); })); actions.append(button("Export", async () => { const teams = typeof state !== "undefined" ? state.teams : []; const team = teams.find((entry) => entry.packId === item.id); const pack = team ? await api.teams.exportPack({ teamId: team.id }) : await api.teams.exportPackRecipe({ packId: item.id }); await copy(pack); })); actions.append(button("Duplicate", async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); })); if (item.custom) actions.append(button("Edit", async () => { const name = window.prompt("Pack name", item.name); if (!name) return; await api.teams.editPack({ packId: item.id, patch: { name, description: item.description } }); await refresh(); })); card.append(actions); root.append(card); }
   }
   async function refresh() {
-    const teams = await api.teams.list({});
+    const [teams, coworkers] = await Promise.all([api.teams.list({}), api.coworkers.list({})]);
     const filter = $("artifact-hub-filter");
-    if (filter && filter.options.length === 1) for (const team of teams.teams ?? []) { const option = document.createElement("option"); option.value = `team:${team.id}`; option.textContent = `By Team / 团队: ${team.name}`; filter.append(option); for (const channel of team.channels ?? []) { const channelOption = document.createElement("option"); channelOption.value = `channel:${channel.id}`; channelOption.textContent = `By Channel / 频道: ${channel.name}`; filter.append(channelOption); } }
+    if (filter && filter.options.length === 1) {
+      for (const team of teams.teams ?? []) {
+        const option = document.createElement("option"); option.value = `team:${team.id}`; option.textContent = `By Team / 团队: ${team.name}`; filter.append(option);
+        for (const channel of team.channels ?? []) { const channelOption = document.createElement("option"); channelOption.value = `channel:${channel.id}`; channelOption.textContent = `By Channel / 频道: ${channel.name}`; filter.append(channelOption); }
+      }
+      for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = `coworker:${coworker.id}`; option.textContent = `By Coworker / 同事: ${coworker.name}`; filter.append(option); }
+    }
     const scope = filter?.value ?? "recent"; const artifactPayload = { limit: 100 }; if (scope.startsWith("team:")) artifactPayload.teamId = scope.slice(5); if (scope.startsWith("channel:")) artifactPayload.channelId = scope.slice(8); if (scope.startsWith("coworker:")) artifactPayload.coworkerId = scope.slice(9);
     const [playbooks, artifacts, history, skills, channels, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations.list({})]);
     renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? []); renderSkills(skills.skills ?? []); renderPacks(teams.packs ?? []);
@@ -127,4 +135,17 @@
   async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description") ?? ""; const rawSteps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; await api.playbooks.create({ playbook: { name, description, steps: rawSteps.split(",").map((x) => x.trim()).filter(Boolean) } }); await refresh(); }
   function setup() { const artifactRoot = $("product-artifacts"); const heading = artifactRoot?.parentElement?.querySelector(".card-heading"); if (heading && !$("artifact-hub-filter")) { const filter = document.createElement("select"); filter.id = "artifact-hub-filter"; filter.setAttribute("aria-label", "Artifact filter"); const option = document.createElement("option"); option.value = "recent"; option.textContent = "Recent / 最近"; filter.append(option); heading.append(filter); } $("nav-product-hubs")?.addEventListener("click", async () => { switchView("product-hubs"); try { await refresh(); } catch (e) { error($("product-playbooks"), e); } }); $("product-hubs-refresh")?.addEventListener("click", () => void refresh()); $("artifact-hub-filter")?.addEventListener("change", () => void refresh()); $("product-channel-filter")?.addEventListener("change", () => void refresh()); $("product-channel-switch")?.addEventListener("change", (event) => { if (event.target.value && typeof openConversation === "function") void openConversation(event.target.value); }); $("playbook-create")?.addEventListener("click", () => void createPlaybook()); }
   window.addEventListener("DOMContentLoaded", setup);
+  window.addEventListener("DOMContentLoaded", () => {
+    const root = $("product-packs");
+    const heading = root?.parentElement?.querySelector(".card-heading");
+    if (!heading || $("team-pack-search")) return;
+    const input = document.createElement("input");
+    input.id = "team-pack-search";
+    input.type = "search";
+    input.maxLength = 120;
+    input.placeholder = "Search packs / 搜索团队包";
+    input.setAttribute("aria-label", "Search Team Packs");
+    input.addEventListener("input", () => void refresh());
+    heading.append(input);
+  });
 })();
