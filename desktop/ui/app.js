@@ -26,6 +26,13 @@ const state = {
   conversationSignature: undefined,
 };
 
+const READ_MARKERS_KEY = "sovereignbot.conversation-read-v1";
+let readMarkers = {};
+try {
+  const stored = JSON.parse(window.localStorage.getItem(READ_MARKERS_KEY) || "{}");
+  if (stored && typeof stored === "object" && !Array.isArray(stored)) readMarkers = stored;
+} catch {}
+
 const $ = (id) => document.getElementById(id);
 const show = (el) => el?.classList.remove("hidden");
 const hide = (el) => el?.classList.add("hidden");
@@ -51,6 +58,19 @@ function coworkerById(id) {
 
 function conversationById(id) {
   return state.conversations.find((entry) => entry.id === id);
+}
+
+function conversationUnread(conversation) {
+  const last = conversation?.lastMessage;
+  return Boolean(conversation?.id && last?.senderId !== "user" && last?.createdAt && conversation.id !== state.selectedConversationId
+    && (!readMarkers[conversation.id] || readMarkers[conversation.id] < last.createdAt));
+}
+
+function markConversationRead(conversation) {
+  const stamp = conversation?.messages?.at(-1)?.createdAt;
+  if (!conversation?.id || !stamp) return;
+  readMarkers[conversation.id] = stamp;
+  try { window.localStorage.setItem(READ_MARKERS_KEY, JSON.stringify(readMarkers)); } catch {}
 }
 
 function channelForConversation(conversationId) {
@@ -111,7 +131,7 @@ function clearNode(node) {
   if (node) node.textContent = "";
 }
 
-function makeNavItem({ avatar, title, subtitle, meta, status, active, compact, onClick }) {
+function makeNavItem({ avatar, title, subtitle, meta, status, unread, active, compact, onClick }) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `nav-item${active ? " active" : ""}${compact ? " compact" : ""}`;
@@ -135,6 +155,13 @@ function makeNavItem({ avatar, title, subtitle, meta, status, active, compact, o
     right.textContent = meta ?? "";
   }
   button.append(icon, copy, right);
+  if (unread) {
+    const badge = document.createElement("span");
+    badge.className = "nav-unread";
+    badge.textContent = "1";
+    badge.title = "Unread activity / 未读动态";
+    button.append(badge);
+  }
   button.addEventListener("click", onClick);
   return button;
 }
@@ -154,6 +181,7 @@ function renderCoworkers() {
       title: coworker.name,
       subtitle: coworker.role,
       status: coworker.state === "paused" ? "offline" : binding?.ready ? "ready" : "offline",
+      unread: conversationUnread(direct),
       active: direct?.id === state.selectedConversationId,
       onClick: () => openDirect(coworker.id),
     }));
@@ -167,6 +195,7 @@ function renderTeams() {
     for (const team of state.teams) {
       const channel = team.channels?.[0] ?? state.channels.find((entry) => entry.teamId === team.id);
       const flow = team.flow;
+      const conversation = conversationById(channel?.conversationId);
       const rosterSize = team.coworkerIds?.length ?? 0;
       const activeCount = flow?.status === "active" && flow.currentOwner ? 1 : 0;
       const attentionCount = flow?.attentionCoworkerIds?.length ?? 0;
@@ -177,6 +206,7 @@ function renderTeams() {
         title: team.name,
         subtitle: channel?.name ?? "Project Channel",
         meta: counts,
+        unread: conversationUnread(conversation),
         active: channel?.conversationId === state.selectedConversationId,
         onClick: () => channel?.conversationId && openConversation(channel.conversationId),
       }));
@@ -192,6 +222,7 @@ function renderTeams() {
       title: conversation.title,
       subtitle: `${Math.max(0, (conversation.participants?.length ?? 1) - 1)} coworkers`,
       meta: formatRelative(conversation.updatedAt),
+      unread: conversationUnread(conversation),
       active: conversation.id === state.selectedConversationId,
       onClick: () => openConversation(conversation.id),
     }));
@@ -599,6 +630,7 @@ async function refreshConversation(forceScroll = false) {
     const conversation = await window.sovereignbot.conversations.get({ conversationId: id });
     if (state.selectedConversationId !== id) return;
     state.selectedConversation = conversation;
+    markConversationRead(conversation);
     renderConversationHeader(conversation);
     renderMessages(conversation, forceScroll);
     await refreshConversations();
