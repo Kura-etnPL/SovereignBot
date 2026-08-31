@@ -275,6 +275,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .member-row .avatar { width: 27px; height: 27px; border-radius: 9px; font-size: 11px; }
 .member-row span { color: var(--text-2); font-size: 11px; }
 .member-row .member-status { margin-left: auto; color: var(--text-3); font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
+.member-row .member-edit { margin-left: auto; }
+.member-row .member-status + .member-edit { margin-left: 8px; }
 .future-chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
 .future-chip-row span { padding: 4px 7px; border-radius: 7px; background: var(--panel-2); color: var(--text-3); font-size: 9px; }
 .activity-drawer { position: fixed; z-index: 30; right: 16px; top: 16px; bottom: 16px; width: min(460px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line-strong); border-radius: 18px; background: color-mix(in srgb, var(--panel) 96%, transparent); box-shadow: var(--shadow); overflow-y: auto; }
