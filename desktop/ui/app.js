@@ -1135,6 +1135,7 @@ function resetCoworkerDialog() {
   $("coworker-dialog-title").textContent = "Who are you adding?";
   $("coworker-save").textContent = "Create coworker";
   $("coworker-advanced-help").textContent = "Optional safe binding hints. These select a provider/model; they never grant tools or permissions.";
+  $("coworker-state-field").classList.add("hidden");
   document.querySelector("#coworker-dialog .quick-role-row")?.classList.remove("hidden");
   for (const id of ["coworker-advanced-provider", "coworker-advanced-account", "coworker-advanced-model"]) $(id).disabled = false;
   $("coworker-form")?.reset();
@@ -1148,11 +1149,13 @@ function openCoworkerDialog(coworker) {
   $("coworker-dialog-title").textContent = "Shape how this coworker works";
   $("coworker-save").textContent = "Save changes / 保存修改";
   $("coworker-advanced-help").textContent = "Existing provider/account/model binding is preserved while editing. Change the profile above to replace it safely.";
+  $("coworker-state-field").classList.remove("hidden");
   document.querySelector("#coworker-dialog .quick-role-row")?.classList.add("hidden");
   $("coworker-name").value = coworker?.name ?? "";
   $("coworker-role").value = coworker?.role ?? "";
   $("coworker-instructions").value = coworker?.instructions ?? "";
   $("coworker-provider").value = coworker?.modelBinding?.profile ?? "automatic";
+  $("coworker-state").value = coworker?.state === "paused" ? "paused" : "active";
   $("coworker-workspace").value = coworker?.workspaceIds?.[0] ?? "";
   $("coworker-computer-profile").value = coworker?.computerProfileId ?? "";
   $("coworker-advanced-provider").value = "";
@@ -1242,6 +1245,8 @@ async function saveCoworker(event) {
               ? { workspaceIds: $("coworker-workspace").value ? [$("coworker-workspace").value] : [] } : {}),
             ...($("coworker-computer-profile").value.trim() !== (state.editingCoworkerSnapshot?.computerProfileId ?? "")
               ? { computerProfileId: $("coworker-computer-profile").value.trim() || undefined } : {}),
+            ...($("coworker-state").value !== (state.editingCoworkerSnapshot?.state ?? "active")
+              ? { state: $("coworker-state").value } : {}),
           }),
     };
     const wasEditing = Boolean(state.editingCoworkerId);
