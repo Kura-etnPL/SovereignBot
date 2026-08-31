@@ -552,7 +552,11 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                         role: coworker.role,
                         instructions: coworker.instructions,
                         modelProfile: coworker.modelBinding?.profile,
-                        appCapabilities: access.capabilities ?? access.tools ?? [],
+                        appCapabilities: [
+                            ...(access.capabilities ?? []),
+                            ...(access.tools ?? []),
+                            ...(access.appIds ?? []),
+                        ],
                         state: coworker.state,
                         pendingCount: pending.get(id) ?? 0,
                     };
