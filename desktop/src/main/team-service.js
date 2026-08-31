@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
+import { selectSpecialist } from "./lib/specialist-router.js";
 
 export const TEAMS_SCHEMA = "sovereignbot.desktop.teams.v1";
 export const TEAM_PACK_EXPORT_SCHEMA = "sovereignbot.desktop.team-pack.v1";
@@ -441,6 +442,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         throw new Error("team service requires dataDir, stores and managed workspace services");
     const loaded = sanitizePersisted(loadJsonState(persistPath, null));
     const state = { schema: TEAMS_SCHEMA, ...loaded };
+    let resolveCoworkerAppAccess;
 
     function save() {
         saveJsonState(persistPath, state);
@@ -508,7 +510,37 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             currentOwner: currentOwnerId ? coworkerName(currentOwnerId) : undefined,
             pendingCoworkerIds: pending,
             channelId: channel?.id,
+            ...(flow.routingDecision ? { routingDecision: clone(flow.routingDecision) } : {}),
         };
+    }
+
+    function routingCandidates(conversation, currentCoworkerId) {
+        const pending = new Map();
+        for (const message of conversation?.messages ?? []) {
+            for (const [id, delivery] of Object.entries(message.delivery ?? [])) {
+                if (delivery?.status === "pending") pending.set(id, (pending.get(id) ?? 0) + 1);
+            }
+        }
+        return (conversation?.participants ?? [])
+            .filter((id) => id !== "user" && id !== currentCoworkerId)
+            .map((id) => {
+                try {
+                    const coworker = coworkerStore.get(id);
+                    const access = resolveCoworkerAppAccess?.(id) ?? {};
+                    return {
+                        id: coworker.id,
+                        name: coworker.name,
+                        role: coworker.role,
+                        instructions: coworker.instructions,
+                        modelProfile: coworker.modelBinding?.profile,
+                        appCapabilities: access.capabilities ?? access.tools ?? [],
+                        state: coworker.state,
+                        pendingCount: pending.get(id) ?? 0,
+                    };
+                }
+                catch { return undefined; }
+            })
+            .filter(Boolean);
     }
 
     function publicTeam(team) {
@@ -853,10 +885,14 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                 const requested = team.packId === "custom-team" && Array.isArray(requestedCoworkerIds)
                     ? requestedCoworkerIds.find((id) => id !== coworkerId && team.coworkerIds.includes(id))
                     : undefined;
-                target = requested ?? order[currentIndex + 1];
+                const dynamic = !requested && source?.senderId === "user"
+                    ? selectSpecialist({ objective: source.text, currentCoworkerId: coworkerId, candidates: routingCandidates(conversation, coworkerId) })
+                    : undefined;
+                target = requested ?? dynamic?.targetCoworkerId ?? order[currentIndex + 1];
                 flow.handoffIndex = currentIndex + 1;
                 if (target !== order[currentIndex + 1]) flow.handoffIndex = Math.max(0, order.indexOf(target));
                 flow.stage = stageForIndex(flow.handoffIndex, order);
+                if (dynamic && target === dynamic.targetCoworkerId) flow.routingDecision = dynamic;
             }
             else {
                 flow.stage = "complete";
@@ -934,6 +970,15 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         workspaceIdForConversation,
         currentOwnerForConversation,
         isManagedConversation,
+        setCoworkerAppAccessResolver(resolver) {
+            if (resolver !== undefined && typeof resolver !== "function") throw new Error("coworker app access resolver must be a function");
+            resolveCoworkerAppAccess = resolver;
+        },
+        routeSpecialist({ conversationId, coworkerId, objective } = {}) {
+            const conversation = conversationStore.get(conversationId);
+            if (conversation.kind !== "team" || !conversation.participants.includes(coworkerId)) return undefined;
+            return selectSpecialist({ objective, currentCoworkerId: coworkerId, candidates: routingCandidates(conversation, coworkerId) });
+        },
         status(teamId) { return flowStatus(requireTeam(teamId)); },
     };
 }

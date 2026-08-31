@@ -119,6 +119,7 @@ async function main() {
     });
     conversationStore.setTeamRouteResolver((conversation) => teamService.currentOwnerForConversation(conversation.id));
     const connectedApps = createConnectedAppsService({ dataDir, teamService, coworkerStore });
+    teamService.setCoworkerAppAccessResolver((coworkerId) => connectedApps.assignedToolsForCoworker(coworkerId));
 
     let host;
     try {
