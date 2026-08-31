@@ -1,3 +1,5 @@
+import { sanitizeRuntimeData } from "./runtime-data-redaction.js";
+
 const RESUMABLE_PROVIDER_KINDS = new Set(["codex", "claude-code"]);
 const PROCESS_HARNESS_KINDS = new Set(["command", "codex", "claude-code"]);
 const TASK_RESULT_TAGS = new Set(["task-result", "candidate-result"]);
@@ -146,7 +148,9 @@ export function publicMemoryRecords(records = [], tasks = []) {
 
 export function publicRuntimeRecords(records = [], tasks = []) {
     const refs = providerContinuityRefs(tasks);
-    return refs.size
-        ? records.map((record) => redactProviderContinuityRefs(record, refs))
-        : records;
+    return records.map((record) => sanitizeRuntimeData(
+        refs.size ? redactProviderContinuityRefs(record, refs) : record,
+        undefined,
+        record?.type,
+    ));
 }

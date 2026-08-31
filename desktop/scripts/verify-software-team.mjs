@@ -9,7 +9,11 @@ const DESKTOP_ROOT = join(fileURLToPath(new URL("../", import.meta.url)));
 const CONTROL_ROOT = join(DESKTOP_ROOT, "..", "..", "..", "runtime", "sovereign-control");
 const EVIDENCE_DIR = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR ?? join(CONTROL_ROOT, "v45-software-team");
 const RUN_DIR = join(EVIDENCE_DIR, "run");
-const DATA_DIR = join(RUN_DIR, "desktop-data");
+// Task persistence includes private provider continuity needed for safe resume. Keep it
+// outside the public evidence directory; only redacted screenshots/diagnostics belong there.
+const PRIVATE_RUNTIME_DIR = process.env.SOVEREIGNBOT_PRODUCT_RUNTIME_DIR ?? join(CONTROL_ROOT, "v45-software-team-private-runtime");
+const DATA_DIR = process.env.SOVEREIGNBOT_DESKTOP_DATA_DIR ?? join(PRIVATE_RUNTIME_DIR, "desktop-data");
+const ELECTRON_USER_DATA_DIR = process.env.SOVEREIGNBOT_ELECTRON_USER_DATA_DIR ?? join(PRIVATE_RUNTIME_DIR, "electron-user-data");
 const TRANSCRIPT = join(RUN_DIR, "fake-provider-transcript.jsonl");
 const ELECTRON = process.platform === "win32"
     ? join(DESKTOP_ROOT, "node_modules", "electron", "dist", "electron.exe")
@@ -20,6 +24,7 @@ const TIMEOUT_MS = 180_000;
 
 await mkdir(RUN_DIR, { recursive: true });
 await rm(DATA_DIR, { recursive: true, force: true });
+await rm(TRANSCRIPT, { force: true });
 if (!existsSync(ELECTRON)) throw new Error(`Electron binary missing: ${ELECTRON}`);
 if (!existsSync(INTERNAL_NODE)) throw new Error(`internal Node binary missing: ${INTERNAL_NODE}`);
 
@@ -37,9 +42,12 @@ for (const key of Object.keys(env)) {
     if (/^(OPENAI|ANTHROPIC|AZURE|AWS|GITHUB|GH)_.*/i.test(key) || /(API_KEY|ACCESS_TOKEN|AUTH_TOKEN|PASSWORD|COOKIE|PRIVATE_KEY)/i.test(key))
         delete env[key];
 }
+// Keep host automation flags out of the product canary environment; they are not
+// part of the SovereignBot renderer contract.
+delete env.ELECTRON_FORCE_RENDERER_ACCESSIBILITY;
 
 console.error(`[software-team] spawning production Electron canary (${TIMEOUT_MS / 1000}s)`);
-const child = spawn(ELECTRON, ["src/main/index.js", "--verify-software-team"], {
+const child = spawn(ELECTRON, [`--user-data-dir=${ELECTRON_USER_DATA_DIR}`, "src/main/index.js", "--verify-software-team"], {
     cwd: DESKTOP_ROOT,
     env,
     stdio: ["ignore", "pipe", "pipe"],

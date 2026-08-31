@@ -105,15 +105,17 @@ emit({ type: "item.completed", item: { type: "agent_message", text } });
 emit({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } });
 
 try {
-    if (process.env.FAKE_PROVIDER_TRANSCRIPT)
-        appendFileSync(process.env.FAKE_PROVIDER_TRANSCRIPT, `${JSON.stringify({
+    if (process.env.FAKE_PROVIDER_TRANSCRIPT) {
+        const productCanary = process.env.FAKE_PROVIDER_TEAM_CANARY === "1";
+        const transcriptEntry = {
             provider: "codex",
             phase: kind,
-            cwd,
             resumed,
-            sessionId,
             at: new Date().toISOString(),
-        })}\n`, "utf8");
+            ...(productCanary ? {} : { cwd, sessionId }),
+        };
+        appendFileSync(process.env.FAKE_PROVIDER_TRANSCRIPT, `${JSON.stringify(transcriptEntry)}\n`, "utf8");
+    }
 }
 catch {
     // Transcript is a CI diagnostic; never fail the fake provider over it.

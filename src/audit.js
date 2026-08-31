@@ -2,11 +2,7 @@ import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { createId } from "./id.js";
-
-// Keep ordinary domain fields such as `value`, `text`, and `content` usable in the audit log. The
-// actual computer type/write paths never put their payloads into audit metadata. Redact credential-
-// shaped fields globally, and make the secret channel stricter below.
-const SENSITIVE_AUDIT_KEY = /^(password|passwd|secret|secret[_-]?value|token|authorization|cookie|set-cookie|api[_-]?key|session[_-]?id)$/i;
+import { sanitizeRuntimeData } from "./runtime-data-redaction.js";
 
 function stable(value) {
     if (Array.isArray(value))
@@ -22,24 +18,6 @@ function stable(value) {
 
 function digest(record) {
     return createHash("sha256").update(stable(record)).digest("hex");
-}
-
-function sanitize(value, key, eventType) {
-    if (key && SENSITIVE_AUDIT_KEY.test(key))
-        return "[REDACTED]";
-    if (eventType?.startsWith("computer.secret_") && key === "error")
-        return "secret operation failed";
-    if (eventType?.startsWith("computer.secret_") && /^(text|content|value)$/i.test(key ?? ""))
-        return "[REDACTED]";
-    if (Array.isArray(value))
-        return value.map((item) => sanitize(item, undefined, eventType));
-    if (value && typeof value === "object") {
-        const out = {};
-        for (const [childKey, child] of Object.entries(value))
-            out[childKey] = sanitize(child, childKey, eventType);
-        return out;
-    }
-    return value;
 }
 
 export class AuditLog {
@@ -73,9 +51,9 @@ export class AuditLog {
     async append(input) {
         const safeInput = {
             ...input,
-            actor: sanitize(input.actor, "actor", input.type),
-            subject: sanitize(input.subject, "subject", input.type),
-            data: sanitize(input.data, undefined, input.type),
+            actor: sanitizeRuntimeData(input.actor, "actor", input.type, { preserveProviderSessionMarker: true }),
+            subject: sanitizeRuntimeData(input.subject, "subject", input.type, { preserveProviderSessionMarker: true }),
+            data: sanitizeRuntimeData(input.data, undefined, input.type, { preserveProviderSessionMarker: true }),
         };
         const operation = this.#appendQueue.then(() => this.#appendNow(safeInput));
         this.#appendQueue = operation.catch(() => undefined);
