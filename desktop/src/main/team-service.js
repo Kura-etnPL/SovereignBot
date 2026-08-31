@@ -162,6 +162,29 @@ export const TEAM_PACKS = Object.freeze([
 
 const TEAM_PACK_BY_ID = new Map(TEAM_PACKS.map((pack) => [pack.id, pack]));
 
+export const CHANNEL_TEMPLATES = Object.freeze([
+    Object.freeze({
+        id: "work",
+        name: "Work Channel",
+        kind: "work",
+        instructions: "A focused work room for bounded tasks, progress updates, and teammate handoffs.",
+    }),
+    Object.freeze({
+        id: "personal",
+        name: "Personal Channel",
+        kind: "personal",
+        instructions: "A private-feeling planning room for the user's own context and next actions.",
+    }),
+    Object.freeze({
+        id: "project",
+        name: "Project Channel",
+        kind: "project",
+        instructions: "A shared project room for goals, artifacts, ownership, and a visible final result.",
+    }),
+]);
+
+const CHANNEL_TEMPLATE_BY_ID = new Map(CHANNEL_TEMPLATES.map((template) => [template.id, template]));
+
 function idFactory(prefix) {
     return `${prefix}_${randomBytes(8).toString("hex")}`;
 }
@@ -345,6 +368,7 @@ function sanitizePersisted(value) {
                 kind: ["work", "personal", "project"].includes(entry.kind) ? entry.kind : "project",
                 name: safeString(entry.name, "channel name", 120),
                 instructions: safeString(entry.instructions ?? "", "channel instructions", 12_000),
+                ...(entry.templateId === undefined ? {} : { templateId: safeId(entry.templateId, "channel templateId") }),
                 coworkerIds: safeCoworkerIds(entry.coworkerIds),
                 workspaceId: safeId(entry.workspaceId, "workspaceId"),
                 conversationId: safeId(entry.conversationId, "conversationId"),
@@ -402,6 +426,7 @@ function publicChannel(channel) {
         kind: channel.kind,
         name: channel.name,
         instructions: channel.instructions,
+        ...(channel.templateId ? { templateId: channel.templateId } : {}),
         coworkerIds: [...channel.coworkerIds],
         workspaceId: channel.workspaceId,
         conversationId: channel.conversationId,
@@ -487,7 +512,6 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
     }
 
     function publicTeam(team) {
-        const channel = state.channels.find((entry) => entry.teamId === team.id);
         return {
             id: team.id,
             packId: team.packId,
@@ -495,7 +519,10 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             coworkerIds: [...team.coworkerIds],
             coworkers: team.coworkerIds.map((id) => ({ id, name: coworkerName(id) })),
             channelIds: [...team.channelIds],
-            channels: channel ? [publicChannel(channel)] : [],
+            channels: team.channelIds
+                .map((channelId) => state.channels.find((entry) => entry.id === channelId))
+                .filter(Boolean)
+                .map(publicChannel),
             sharedWorkspaceId: team.sharedWorkspaceId,
             sharedWorkspaceLabel: services.workspaceLabel?.(team.sharedWorkspaceId) ?? "Shared project workspace",
             privateWorkspaceLabel: "Private workspace",
@@ -682,6 +709,45 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return { imported: true, playbook: clone(playbook), team: publicTeam(team) };
     }
 
+    function createChannelFromTemplate(teamId, templateId) {
+        const team = requireTeam(teamId);
+        const template = CHANNEL_TEMPLATE_BY_ID.get(String(templateId));
+        if (!template) throw new Error(`unknown channel template: ${templateId}`);
+        const existing = state.channels.find((entry) => entry.teamId === team.id && entry.templateId === template.id);
+        if (existing) return { created: false, channel: publicChannel(existing), team: publicTeam(team) };
+        if (state.channels.length >= MAX_CHANNELS) throw new Error(`channel limit reached (${MAX_CHANNELS})`);
+        const playbookId = team.playbooks[0]?.id;
+        if (!playbookId) throw new Error("team has no available playbook for a new channel");
+        const channelId = makeChannelId();
+        safeId(channelId, "channelId", CHANNEL_ID);
+        const conversation = conversationStore.createTeam({
+            title: template.name,
+            coworkerIds: team.coworkerIds,
+            leadCoworkerId: team.coworkerIds[0],
+            deduplicate: false,
+        });
+        const timestamp = now();
+        const channel = {
+            id: channelId,
+            teamId: team.id,
+            templateId: template.id,
+            kind: template.kind,
+            name: template.name,
+            instructions: template.instructions,
+            coworkerIds: [...team.coworkerIds],
+            workspaceId: team.sharedWorkspaceId,
+            conversationId: conversation.id,
+            playbookId,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+        };
+        state.channels.push(channel);
+        team.channelIds.push(channel.id);
+        team.updatedAt = timestamp;
+        save();
+        return { created: true, channel: publicChannel(channel), conversation, team: publicTeam(team) };
+    }
+
     function createTeam({ title, coworkerIds, leadCoworkerId } = {}) {
         if (state.teams.length >= MAX_TEAMS)
             throw new Error(`team limit reached (${MAX_TEAMS})`);
@@ -845,6 +911,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                     description: pack.description,
                     installed: state.teams.some((entry) => entry.packId === pack.id),
                 })),
+                channelTemplates: CHANNEL_TEMPLATES.map((template) => ({ ...template })),
             };
         },
         get(teamId) { return publicTeam(requireTeam(teamId)); },
@@ -852,6 +919,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         importPack,
         exportPlaybook,
         importPlaybook,
+        createChannelFromTemplate,
         listChannels({ teamId } = {}) {
             const channels = teamId === undefined ? state.channels : state.channels.filter((entry) => entry.teamId === String(teamId));
             if (teamId !== undefined) requireTeam(teamId);

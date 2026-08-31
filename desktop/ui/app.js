@@ -6,6 +6,7 @@ const state = {
   conversations: [],
   teams: [],
   teamPacks: [],
+  channelTemplates: [],
   channels: [],
   roster: { ready: false, mode: "provider", roles: {}, agents: [], coworkerBindings: {}, providers: {} },
   settings: undefined,
@@ -289,6 +290,7 @@ async function refreshTeams() {
     const result = await window.sovereignbot.teams.list({});
     state.teams = result?.teams ?? [];
     state.teamPacks = result?.packs ?? state.teamPacks;
+    state.channelTemplates = result?.channelTemplates ?? state.channelTemplates;
     state.channels = state.teams.flatMap((team) => team.channels ?? []);
   } catch (error) {
     state.teams = state.teams ?? [];
@@ -649,6 +651,27 @@ function renderDetails(conversation) {
       playbookSelect.append(option);
     }
   }
+  const channelSelect = $("team-channel-select");
+  if (channelSelect) {
+    channelSelect.textContent = "";
+    for (const channel of team?.channels ?? []) {
+      const option = document.createElement("option");
+      option.value = channel.conversationId;
+      option.textContent = `${channel.name} / ${channel.kind}`;
+      option.selected = channel.conversationId === conversation.id;
+      channelSelect.append(option);
+    }
+  }
+  const templateSelect = $("team-channel-template-select");
+  if (templateSelect) {
+    templateSelect.textContent = "";
+    for (const template of state.channelTemplates) {
+      const option = document.createElement("option");
+      option.value = template.id;
+      option.textContent = `${template.name} / ${template.kind}`;
+      templateSelect.append(option);
+    }
+  }
   const roster = $("details-roster");
   clearNode(roster);
   if (team) {
@@ -801,6 +824,26 @@ async function copyPlaybook() {
   } catch {
     result.textContent = "Clipboard is unavailable; select the JSON and copy it manually.";
     show(result);
+  }
+}
+
+async function openSelectedTeamChannel() {
+  const conversationId = $("team-channel-select")?.value;
+  if (conversationId) await openConversation(conversationId);
+}
+
+async function addChannelFromTemplate() {
+  const team = teamForConversation(state.selectedConversationId);
+  const templateId = $("team-channel-template-select")?.value;
+  if (!team || !templateId || !window.sovereignbot?.teams?.createChannelFromTemplate) return;
+  const result = $("team-pack-transfer-result");
+  try {
+    const created = await window.sovereignbot.teams.createChannelFromTemplate({ teamId: team.id, templateId });
+    await Promise.all([refreshConversations(), refreshTeams()]);
+    if (created?.channel?.conversationId) await openConversation(created.channel.conversationId);
+    if (result) result.textContent = created.created ? "Channel added." : "That channel is already in this team.";
+  } catch (error) {
+    if (result) result.textContent = text(error?.message || error).replace(/^.*Error: /, "");
   }
 }
 
@@ -1292,6 +1335,8 @@ function bindEvents() {
   $("team-import-playbook")?.addEventListener("click", () => openPlaybookDialog());
   $("playbook-copy")?.addEventListener("click", copyPlaybook);
   $("playbook-form")?.addEventListener("submit", importPlaybook);
+  $("team-channel-select")?.addEventListener("change", openSelectedTeamChannel);
+  $("team-add-channel-from-template")?.addEventListener("click", addChannelFromTemplate);
   $("welcome-open-chief").addEventListener("click", () => {
     const chief = state.coworkers.find((entry) => /chief of staff/i.test(entry.name)) ?? state.coworkers[0];
     if (chief) openDirect(chief.id);

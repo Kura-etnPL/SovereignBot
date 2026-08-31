@@ -6,7 +6,7 @@ import test from "node:test";
 import { createConversationStore } from "../src/main/conversation-store.js";
 import { createCoworkerStore } from "../src/main/coworker-store.js";
 import { createDesktopServices } from "../src/main/services.js";
-import { TEAM_PACK_EXPORT_SCHEMA, TEAM_PLAYBOOK_EXPORT_SCHEMA, createTeamService } from "../src/main/team-service.js";
+import { CHANNEL_TEMPLATES, TEAM_PACK_EXPORT_SCHEMA, TEAM_PLAYBOOK_EXPORT_SCHEMA, createTeamService } from "../src/main/team-service.js";
 
 function fixture() {
     const root = mkdtempSync(join(tmpdir(), "sovereign-team-"));
@@ -188,6 +188,30 @@ test("Playbook export/import is bounded and idempotent", () => {
             () => teams.importPlaybook(installed.team.id, { ...exported, id: "bad", workspacePath: "E:/private" }),
             /field is not allowed/,
         );
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("channel templates create governed team channels idempotently", () => {
+    const { root, conversations, teams } = fixture();
+    try {
+        const installed = teams.installPack("software-team");
+        assert.deepEqual(CHANNEL_TEMPLATES.map((template) => template.id), ["work", "personal", "project"]);
+        const created = teams.createChannelFromTemplate(installed.team.id, "work");
+        assert.equal(created.created, true);
+        assert.equal(created.channel.kind, "work");
+        assert.equal(created.channel.templateId, "work");
+        assert.equal(created.channel.workspaceId, installed.team.sharedWorkspaceId);
+        assert.equal(created.team.channels.length, 2);
+        assert.equal(conversations.list().conversations.length, 2);
+        assert.equal(JSON.stringify(created.team).includes("path"), false);
+
+        const repeated = teams.createChannelFromTemplate(installed.team.id, "work");
+        assert.equal(repeated.created, false);
+        assert.equal(repeated.channel.id, created.channel.id);
+        assert.equal(teams.get(installed.team.id).channels.length, 2);
     }
     finally {
         rmSync(root, { recursive: true, force: true });

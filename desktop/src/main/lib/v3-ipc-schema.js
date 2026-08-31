@@ -191,6 +191,7 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "team:importPack": spec(64 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["pack"])); return { pack: teamPackShape(value.pack) }; }),
     "team:exportPlaybook": spec(2048, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId", "playbookId"])); return { teamId: identifier(value.teamId, "teamId"), playbookId: identifier(value.playbookId, "playbookId") }; }),
     "team:importPlaybook": spec(8 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId", "playbook"])); return { teamId: identifier(value.teamId, "teamId"), playbook: teamPlaybookShape(value.playbook) }; }),
+    "team:createChannelFromTemplate": spec(2048, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId", "templateId"])); return { teamId: identifier(value.teamId, "teamId"), templateId: identifier(value.templateId, "templateId") }; }),
     "channel:list": spec(1024, (payload) => { if (payload === undefined || payload === null) return {}; const value = objectPayload(payload); exact(value, new Set(["teamId"])); return value.teamId === undefined ? {} : { teamId: identifier(value.teamId, "teamId") }; }),
     "channel:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["channelId"])); return { channelId: identifier(value.channelId, "channelId") }; }),
     "connectedApps:list": spec(1024, empty),

@@ -8,7 +8,7 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     const expected = [
         "coworker:list", "coworker:get", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
         "conversation:list", "conversation:get", "conversation:createDirect", "conversation:createTeam", "conversation:send",
-        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:exportPlaybook", "team:importPlaybook", "channel:list", "channel:get",
+        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:exportPlaybook", "team:importPlaybook", "team:createChannelFromTemplate", "channel:list", "channel:get",
         "connectedApps:list", "connectedApps:assign",
     ];
     for (const channel of expected)
@@ -138,6 +138,18 @@ test("playbook transfer is declarative and rejects runtime state", () => {
     );
     assert.throws(
         () => validateV3IpcRequest("team:importPlaybook", { teamId: "team_1111111111111111", playbook: { ...playbook, workspacePath: "E:/private" } }),
+        /unexpected request field: workspacePath/,
+    );
+});
+
+test("channel template creation accepts only a bounded team/template selection", () => {
+    const payload = {
+        teamId: "team_1111111111111111",
+        templateId: "work",
+    };
+    assert.deepEqual(validateV3IpcRequest("team:createChannelFromTemplate", payload), payload);
+    assert.throws(
+        () => validateV3IpcRequest("team:createChannelFromTemplate", { ...payload, workspacePath: "E:/private" }),
         /unexpected request field: workspacePath/,
     );
 });

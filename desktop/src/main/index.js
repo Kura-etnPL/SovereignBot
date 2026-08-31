@@ -380,6 +380,7 @@ async function main() {
                 },
                 "team:exportPlaybook": ({ teamId, playbookId }) => teamService.exportPlaybook(teamId, playbookId),
                 "team:importPlaybook": ({ teamId, playbook }) => teamService.importPlaybook(teamId, playbook),
+                "team:createChannelFromTemplate": ({ teamId, templateId }) => teamService.createChannelFromTemplate(teamId, templateId),
                 "channel:list": ({ teamId }) => teamService.listChannels({ teamId }),
                 "channel:get": ({ channelId }) => teamService.getChannel(channelId),
                 "connectedApps:list": () => connectedApps.list(),
