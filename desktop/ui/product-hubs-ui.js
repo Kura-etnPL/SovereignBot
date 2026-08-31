@@ -43,10 +43,13 @@
     }
     if (!items.length) { const p = document.createElement("p"); p.textContent = "No artifacts yet."; root.append(p); }
   }
-  function renderHistory(items) {
+  function renderHistory(items, coworkers) {
     const root = $("product-computer-history"); clear(root);
-    for (const item of items) { const card = document.createElement("article"); card.className = "settings-card"; const h = document.createElement("h3"); h.textContent = item.activity; card.append(h, line("Activity", item.summary), line("App", item.app), line("Site", item.site), line("Time", item.timestamp), line("Status", item.status)); root.append(card); }
-    if (!items.length) { const p = document.createElement("p"); p.textContent = "No safe Computer activity recorded yet."; root.append(p); }
+    const selectedCoworker = $("computer-history-filter")?.value ?? "all";
+    const visible = items.filter((item) => selectedCoworker === "all" || item.coworkerId === selectedCoworker);
+    const names = new Map((coworkers ?? []).map((coworker) => [coworker.id, coworker.name]));
+    for (const item of visible) { const card = document.createElement("article"); card.className = "settings-card"; const h = document.createElement("h3"); h.textContent = item.activity; card.append(h, line("Coworker", names.get(item.coworkerId) ?? "Coworker"), line("Activity", item.summary), line("App", item.app), line("Site", item.site), line("Time", item.timestamp), line("Status", item.status)); root.append(card); }
+    if (!visible.length) { const p = document.createElement("p"); p.textContent = selectedCoworker === "all" ? "No safe Computer activity recorded yet." : "No activity for this coworker."; root.append(p); }
   }
   function renderChannels(items, teams, conversations, templates) {
     const root = $("product-channels");
@@ -144,8 +147,10 @@
       for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = `coworker:${coworker.id}`; option.textContent = `By Coworker / 同事: ${coworker.name}`; filter.append(option); }
     }
     const scope = filter?.value ?? "recent"; const artifactPayload = { limit: 100 }; if (scope.startsWith("team:")) artifactPayload.teamId = scope.slice(5); if (scope.startsWith("channel:")) artifactPayload.channelId = scope.slice(8); if (scope.startsWith("coworker:")) artifactPayload.coworkerId = scope.slice(9);
+    const historyFilter = $("computer-history-filter");
+    if (historyFilter && historyFilter.options.length === 1) for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = coworker.id; option.textContent = `By Coworker / 同事: ${coworker.name}`; historyFilter.append(option); }
     const [playbooks, artifacts, history, skills, channels, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations.list({})]);
-    renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? [], teams.channelTemplates ?? []); renderSkills(skills.skills ?? []); renderPacks(teams.packs ?? []);
+    renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? [], coworkers.coworkers ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? [], teams.channelTemplates ?? []); renderSkills(skills.skills ?? []); renderPacks(teams.packs ?? []);
   }
   async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description") ?? ""; const rawSteps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; await api.playbooks.create({ playbook: { name, description, steps: rawSteps.split(",").map((x) => x.trim()).filter(Boolean) } }); await refresh(); }
   function setup() { const artifactRoot = $("product-artifacts"); const heading = artifactRoot?.parentElement?.querySelector(".card-heading"); if (heading && !$("artifact-hub-filter")) { const filter = document.createElement("select"); filter.id = "artifact-hub-filter"; filter.setAttribute("aria-label", "Artifact filter"); const option = document.createElement("option"); option.value = "recent"; option.textContent = "Recent / 最近"; filter.append(option); heading.append(filter); } $("nav-product-hubs")?.addEventListener("click", async () => { switchView("product-hubs"); try { await refresh(); } catch (e) { error($("product-playbooks"), e); } }); $("product-hubs-refresh")?.addEventListener("click", () => void refresh()); $("artifact-hub-filter")?.addEventListener("change", () => void refresh()); $("product-channel-filter")?.addEventListener("change", () => void refresh()); $("product-channel-switch")?.addEventListener("change", (event) => { if (event.target.value && typeof openConversation === "function") void openConversation(event.target.value); }); $("playbook-create")?.addEventListener("click", () => void createPlaybook()); }
@@ -162,6 +167,20 @@
     input.setAttribute("aria-label", "Search Team Packs");
     input.addEventListener("input", () => void refresh());
     heading.append(input);
+  });
+  window.addEventListener("DOMContentLoaded", () => {
+    const root = $("product-computer-history");
+    const heading = root?.parentElement?.querySelector(".card-heading");
+    if (!heading || $("computer-history-filter")) return;
+    const filter = document.createElement("select");
+    filter.id = "computer-history-filter";
+    filter.setAttribute("aria-label", "Computer activity coworker filter");
+    const option = document.createElement("option");
+    option.value = "all";
+    option.textContent = "All coworkers / 全部同事";
+    filter.append(option);
+    filter.addEventListener("change", () => void refresh());
+    heading.append(filter);
   });
   window.addEventListener("DOMContentLoaded", () => {
     const root = $("product-channels");
