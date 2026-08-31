@@ -905,7 +905,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         let target;
         if (currentIndex !== undefined && order[currentIndex] === coworkerId) {
             if (currentIndex < order.length - 1) {
-                const requested = team.packId === "custom-team" && Array.isArray(requestedCoworkerIds)
+                const requested = Array.isArray(requestedCoworkerIds)
                     ? requestedCoworkerIds.find((id) => id !== coworkerId && team.coworkerIds.includes(id))
                     : undefined;
                 const dynamic = !requested && source?.senderId === "user"
