@@ -161,6 +161,54 @@
     }
     if ([...select.options].some((option) => option.value === selected)) select.value = selected;
   }
+  function renderActivityFeed(teams, coworkers, conversations) {
+    const root = $("product-activity-feed");
+    if (!root) return;
+    clear(root);
+    const names = new Map((coworkers ?? []).map((coworker) => [coworker.id, coworker.name]));
+    const channels = new Map();
+    for (const team of teams ?? []) {
+      for (const channel of team.channels ?? []) channels.set(channel.conversationId, { teamId: team.id, teamName: team.name, channelName: channel.name });
+    }
+    const filter = $("product-activity-filter")?.value ?? "all";
+    const entries = (conversations ?? [])
+      .filter((conversation) => conversation.messageCount > 0 && conversation.lastMessage)
+      .map((conversation) => {
+        const scope = channels.get(conversation.id);
+        const senderId = conversation.lastMessage.senderId;
+        const sender = senderId === "user" ? "You / 你" : (names.get(senderId) ?? "Coworker / 同事");
+        return {
+          conversation,
+          sender,
+          coworkerId: senderId === "user" ? undefined : senderId,
+          teamId: scope?.teamId,
+          teamName: scope?.teamName ?? (conversation.kind === "team" ? "Team" : "Personal"),
+          channelName: scope?.channelName ?? conversation.title,
+          time: conversation.lastMessage.createdAt || conversation.updatedAt,
+          summary: conversation.lastMessage.textPreview || "Activity updated",
+          status: scope?.teamId ? (teams.find((team) => team.id === scope.teamId)?.flow?.status ?? "available") : "recent",
+        };
+      })
+      .filter((entry) => filter === "all" || (filter.startsWith("coworker:") && entry.coworkerId === filter.slice(9)) || (filter.startsWith("team:") && entry.teamId === filter.slice(5)))
+      .sort((a, b) => String(b.time).localeCompare(String(a.time)))
+      .slice(0, 24);
+    for (const entry of entries) {
+      const card = document.createElement("article");
+      card.className = "settings-card";
+      const heading = document.createElement("div");
+      heading.className = "card-heading";
+      const title = document.createElement("h3");
+      title.textContent = `${entry.sender} · ${entry.channelName}`;
+      heading.append(title);
+      card.append(heading, line("Team", entry.teamName), line("Activity", entry.summary), line("Time", entry.time), line("Status", entry.status));
+      const actions = document.createElement("div");
+      actions.className = "detail-actions";
+      if (entry.conversation.id && typeof openConversation === "function") actions.append(button("Open conversation / 打开会话", () => openConversation(entry.conversation.id)));
+      card.append(actions);
+      root.append(card);
+    }
+    if (!entries.length) { const p = document.createElement("p"); p.textContent = "No recent coworker activity yet. / 暂无最近同事动态。"; root.append(p); }
+  }
   async function refresh() {
     const [teams, coworkers, workspaces] = await Promise.all([
       api.teams.list({}),
@@ -179,8 +227,13 @@
     const scope = filter?.value ?? "recent"; const artifactPayload = { limit: 100 }; if (scope.startsWith("team:")) artifactPayload.teamId = scope.slice(5); if (scope.startsWith("channel:")) artifactPayload.channelId = scope.slice(8); if (scope.startsWith("coworker:")) artifactPayload.coworkerId = scope.slice(9);
     const historyFilter = $("computer-history-filter");
     if (historyFilter && historyFilter.options.length === 1) for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = coworker.id; option.textContent = `By Coworker / 同事: ${coworker.name}`; historyFilter.append(option); }
+    const activityFilter = $("product-activity-filter");
+    if (activityFilter && activityFilter.options.length === 1) {
+      for (const team of teams.teams ?? []) { const option = document.createElement("option"); option.value = `team:${team.id}`; option.textContent = `By Team / 团队: ${team.name}`; activityFilter.append(option); }
+      for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = `coworker:${coworker.id}`; option.textContent = `By Coworker / 同事: ${coworker.name}`; activityFilter.append(option); }
+    }
     const [playbooks, artifacts, history, skills, channels, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations.list({})]);
-    renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? [], coworkers.coworkers ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? [], teams.channelTemplates ?? []); renderSkills(skills.skills ?? []); renderPacks(teams.packs ?? []);
+    renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? [], coworkers.coworkers ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? [], teams.channelTemplates ?? []); renderActivityFeed(teams.teams ?? [], coworkers.coworkers ?? [], conversations.conversations ?? []); renderSkills(skills.skills ?? []); renderPacks(teams.packs ?? []);
   }
   async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description") ?? ""; const rawSteps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; await api.playbooks.create({ playbook: { name, description, steps: rawSteps.split(",").map((x) => x.trim()).filter(Boolean) } }); await refresh(); }
   function setup() {
@@ -232,6 +285,20 @@
     input.setAttribute("aria-label", "Search Team Packs");
     input.addEventListener("input", () => void refresh());
     heading.append(input);
+  });
+  window.addEventListener("DOMContentLoaded", () => {
+    const root = $("product-activity-feed");
+    const heading = root?.parentElement?.querySelector(".card-heading");
+    if (!heading || $("product-activity-filter")) return;
+    const filter = document.createElement("select");
+    filter.id = "product-activity-filter";
+    filter.setAttribute("aria-label", "Recent activity filter");
+    const all = document.createElement("option");
+    all.value = "all";
+    all.textContent = "All activity / 全部动态";
+    filter.append(all);
+    filter.addEventListener("change", () => void refresh());
+    heading.append(filter);
   });
   window.addEventListener("DOMContentLoaded", () => {
     const root = $("product-computer-history");
