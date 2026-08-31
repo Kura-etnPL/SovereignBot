@@ -15,7 +15,10 @@ export function selectSpecialist({ objective, currentCoworkerId, candidates = []
   const intent = INTENTS.map(([id, terms], index) => ({ id, terms: terms.split(" "), score: terms.split(" ").filter((term) => task.includes(term)).length, index })).sort((a, b) => b.score - a.score || a.index - b.index)[0];
   if (!intent?.score) return undefined;
   const ranked = eligible.map((candidate, index) => {
-    const capabilities = clean([candidate.name, candidate.role, candidate.instructions, candidate.modelProfile].join(" "), 2_000);
+    const appCapabilities = Array.isArray(candidate.appCapabilities)
+      ? candidate.appCapabilities.filter((value) => typeof value === "string").join(" ")
+      : "";
+    const capabilities = clean([candidate.name, candidate.role, candidate.instructions, candidate.modelProfile, appCapabilities].join(" "), 2_000);
     const matched = intent.terms.filter((term) => capabilities.includes(term));
     const workloadPenalty = Math.min(1.5, Math.max(0, Number(candidate.pendingCount) || 0) * 0.25);
     return { candidate, index, matched, score: intent.score * 3 + matched.length - workloadPenalty };

@@ -24,3 +24,18 @@ test("specialist router uses goal and workload without waking inactive or curren
   assert.equal(decision.boundedTask.length <= 1_000, true);
   assert.equal(selectSpecialist({ objective: "Coordinate this", currentCoworkerId: chief.id, candidates: [chief, coder] }), undefined);
 });
+
+test("specialist router uses safe app capability evidence without changing authority or eligibility", () => {
+  const base = { name: "Bounded Specialist", role: "Handle bounded work", instructions: "Work on the assigned outcome", modelProfile: "automatic" };
+  const appMatched = { id: "app-matched", ...base, state: "active", appCapabilities: ["evidence", { secret: "ignored" }, 42] };
+  const noApp = { id: "no-app", ...base, state: "active" };
+  const decision = selectSpecialist({ objective: "Investigate evidence and cite sources", currentCoworkerId: chief.id, candidates: [noApp, appMatched] });
+  assert.equal(decision.targetCoworkerId, appMatched.id);
+  assert.deepEqual(Object.keys(decision).sort(), ["boundedTask", "handoffType", "reason", "targetCoworkerId"].sort());
+  assert.equal("appCapabilities" in decision, false);
+  assert.equal("authority" in decision, false);
+
+  const inactiveMatched = { ...appMatched, state: "paused" };
+  assert.equal(selectSpecialist({ objective: "Investigate evidence and cite sources", currentCoworkerId: chief.id, candidates: [noApp, inactiveMatched] }).targetCoworkerId, noApp.id);
+  assert.equal(selectSpecialist({ objective: "Investigate evidence and cite sources", currentCoworkerId: chief.id, candidates: [inactiveMatched] }), undefined);
+});
