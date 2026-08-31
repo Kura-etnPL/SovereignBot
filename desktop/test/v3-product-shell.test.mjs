@@ -6,6 +6,7 @@ import test from "node:test";
 const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
 const html = read("../ui/index.html");
 const app = read("../ui/app.js");
+const productHubs = read("../ui/product-hubs-ui.js");
 const css = read("../ui/style.css");
 
 test("V3 default shell is coworker-first rather than Goal/Control-Center-first", () => {
@@ -68,4 +69,12 @@ test("V3 shell carries a coherent responsive design system rather than legacy ad
     assert.match(css, /\.details-panel/);
     assert.match(css, /\.settings-grid/);
     assert.match(css, /@media \(max-width: 980px\)/);
+});
+
+test("Product hubs expose governed Connected Apps assignment without raw authority", () => {
+    assert.match(productHubs, /product-connected-apps/);
+    assert.match(productHubs, /connectedApps\.list/);
+    assert.match(productHubs, /connectedApps\.assign/);
+    assert.match(productHubs, /appId: item\.id/);
+    assert.doesNotMatch(productHubs, /providerToken|sessionId|rawPath|capabilityGrant/);
 });
