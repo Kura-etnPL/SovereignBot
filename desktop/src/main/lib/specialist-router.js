@@ -6,7 +6,7 @@ const INTENTS = [
   ["review", "review audit verify check quality security risk approve 审查 审核 复核 验证 质量 安全 风险"],
 ];
 
-const clean = (value, max) => String(value ?? "").trim().slice(0, max).toLocaleLowerCase();
+const clean = (value, max) => String(value ?? "").replace(/[\x00-\x1f\x7f]/g, " ").trim().slice(0, max).toLocaleLowerCase();
 
 export function selectSpecialist({ objective, currentCoworkerId, candidates = [] } = {}) {
   const task = clean(objective, 2_000);

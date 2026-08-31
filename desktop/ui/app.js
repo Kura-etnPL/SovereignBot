@@ -169,8 +169,9 @@ function renderTeams() {
       const flow = team.flow;
       const rosterSize = team.coworkerIds?.length ?? 0;
       const activeCount = flow?.status === "active" && flow.currentOwner ? 1 : 0;
-      const availableCount = Math.max(0, rosterSize - activeCount);
-      const counts = `${activeCount} active · ${availableCount} available`;
+      const attentionCount = flow?.attentionCoworkerIds?.length ?? 0;
+      const availableCount = Math.max(0, rosterSize - activeCount - attentionCount);
+      const counts = `${activeCount} active · ${availableCount} available${attentionCount ? ` · ${attentionCount} attention` : ""}`;
       list.append(makeNavItem({
         avatar: "#",
         title: team.name,
