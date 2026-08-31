@@ -19,6 +19,7 @@ const state = {
   mentionIds: new Set(),
   replyTo: undefined,
   redirectMode: false,
+  voice: { listening: false },
   pollTimer: undefined,
   conversationSignature: undefined,
 };
@@ -465,6 +466,20 @@ function replyPreview(conversation, replyTo) {
   return conversation.messages.find((entry) => entry.id === replyTo)?.text;
 }
 
+function speakMessage(messageText, button) {
+  const synthesis = window.speechSynthesis;
+  const Utterance = window.SpeechSynthesisUtterance;
+  if (!synthesis || typeof Utterance !== "function") return;
+  synthesis.cancel();
+  const utterance = new Utterance(messageText);
+  utterance.lang = document.documentElement.lang?.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
+  button?.classList.add("speaking");
+  const clear = () => button?.classList.remove("speaking");
+  utterance.onend = clear;
+  utterance.onerror = clear;
+  synthesis.speak(utterance);
+}
+
 function renderMessage(conversation, message) {
   const row = document.createElement("li");
   const user = message.senderId === "user";
@@ -511,6 +526,14 @@ function renderMessage(conversation, message) {
     try { $("composer-input")?.focus({ preventScroll: true }); } catch { $("composer-input")?.focus(); }
   });
   actions.append(reply);
+  if (!user && window.speechSynthesis && typeof window.SpeechSynthesisUtterance === "function") {
+    const speak = document.createElement("button");
+    speak.type = "button";
+    speak.className = "message-action";
+    speak.textContent = "Speak / 播放";
+    speak.addEventListener("click", () => speakMessage(message.text, speak));
+    actions.append(speak);
+  }
   content.append(actions);
 
   if (user && Object.keys(message.delivery ?? {}).length) {
@@ -845,6 +868,98 @@ async function addChannelFromTemplate() {
   } catch (error) {
     if (result) result.textContent = text(error?.message || error).replace(/^.*Error: /, "");
   }
+}
+
+function setupVoiceInput() {
+  const button = $("voice-input");
+  if (!button) return;
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (typeof Recognition !== "function") {
+    button.disabled = true;
+    button.title = "Voice input is unavailable in this environment / 当前环境不支持语音输入";
+    return;
+  }
+  let recognition;
+  try {
+    recognition = new Recognition();
+  } catch {
+    button.disabled = true;
+    button.title = "Voice input is unavailable in this environment / 当前环境不支持语音输入";
+    return;
+  }
+  let held = false;
+  const setListening = (listening) => {
+    state.voice.listening = listening;
+    button.classList.toggle("recording", listening);
+    button.setAttribute("aria-pressed", String(listening));
+    button.textContent = listening ? "■" : "🎙";
+    button.title = listening ? "Release to finish / 松开完成" : "Hold to talk / 按住说话";
+    if (listening) $("composer-hint").textContent = "Listening… release to finish · 松开完成";
+  };
+  const start = () => {
+    held = true;
+    if (state.voice.listening) return;
+    recognition.lang = document.documentElement.lang?.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
+    try { recognition.start(); }
+    catch (error) {
+      held = false;
+      if (error?.name !== "InvalidStateError") {
+        $("composer-error").textContent = "Voice input could not start / 语音输入无法启动";
+        show($("composer-error"));
+      }
+    }
+  };
+  const stop = () => {
+    held = false;
+    if (!state.voice.listening) return;
+    try { recognition.stop(); } catch { /* recognition may already be ending */ }
+  };
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.onstart = () => {
+    setListening(true);
+    if (!held) stop();
+  };
+  recognition.onresult = (event) => {
+    const transcript = [...event.results].map((result) => result[0]?.transcript ?? "").join(" ").trim();
+    if (!transcript) return;
+    const input = $("composer-input");
+    const existing = input.value.trim();
+    input.value = existing ? `${existing} ${transcript}` : transcript;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  recognition.onerror = (event) => {
+    if (event.error === "aborted" || event.error === "no-speech") return;
+    $("composer-error").textContent = "Voice input needs permission or is unavailable / 语音输入需要权限或暂不可用";
+    show($("composer-error"));
+  };
+  recognition.onend = () => {
+    setListening(false);
+    const conversation = state.selectedConversation;
+    const pending = conversation ? pendingUserRecipients(conversation).size : 0;
+    if ($("composer-hint")) $("composer-hint").textContent = state.redirectMode
+      ? "Enter to redirect the active work · Shift+Enter for a new line"
+      : pending ? "Active work is running · Redirect changes its direction" : "Enter to send · Shift+Enter for a new line";
+  };
+  const keyStart = (event) => {
+    if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+      event.preventDefault();
+      start();
+    }
+  };
+  const keyStop = (event) => {
+    if (event.key === " " || event.key === "Enter") {
+      event.preventDefault();
+      stop();
+    }
+  };
+  button.addEventListener("pointerdown", (event) => { event.preventDefault(); start(); });
+  button.addEventListener("pointerup", stop);
+  button.addEventListener("pointercancel", stop);
+  button.addEventListener("pointerleave", stop);
+  button.addEventListener("keydown", keyStart);
+  button.addEventListener("keyup", keyStop);
 }
 
 function renderConnectedApps() {
@@ -1356,6 +1471,7 @@ function bindEvents() {
       sendMessage(event);
     }
   });
+  setupVoiceInput();
   // composer-add is wired by skills-ui.js to open the real attachment dialog.
 
   $("conversation-stop")?.addEventListener("click", stopCurrentConversation);

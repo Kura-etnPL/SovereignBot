@@ -215,6 +215,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-bottom { height: 40px; padding: 0 8px 7px 9px; display: flex; align-items: flex-end; justify-content: space-between; }
 .composer-tools { display: flex; align-items: center; gap: 7px; color: var(--text-3); font-size: 9.5px; }
 .composer-tool { width: 29px; height: 29px; display: grid; place-items: center; font-size: 18px; }
+.composer-tool.recording { background: var(--bad); color: var(--accent-ink); }
+.composer-tool:disabled { opacity: .42; cursor: not-allowed; }
 .send-button { width: 31px; height: 31px; padding: 0; border-radius: 10px; font-size: 18px; }
 .send-button:disabled { opacity: .35; cursor: default; }
 .inline-error { margin: 6px 3px 0; color: var(--bad); font-size: 10.5px; }
