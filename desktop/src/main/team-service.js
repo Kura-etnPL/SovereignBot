@@ -713,7 +713,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const team = requireTeam(teamId);
         const template = CHANNEL_TEMPLATE_BY_ID.get(String(templateId));
         if (!template) throw new Error(`unknown channel template: ${templateId}`);
-        const existing = state.channels.find((entry) => entry.teamId === team.id && entry.templateId === template.id);
+        const existing = state.channels.find((entry) => entry.teamId === team.id
+            && (entry.templateId === template.id || (template.id === "project" && entry.kind === "project" && entry.name === template.name)));
         if (existing) return { created: false, channel: publicChannel(existing), team: publicTeam(team) };
         if (state.channels.length >= MAX_CHANNELS) throw new Error(`channel limit reached (${MAX_CHANNELS})`);
         const playbookId = team.playbooks[0]?.id;

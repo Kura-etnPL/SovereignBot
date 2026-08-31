@@ -208,6 +208,10 @@ test("channel templates create governed team channels idempotently", () => {
         assert.equal(conversations.list().conversations.length, 2);
         assert.equal(JSON.stringify(created.team).includes("path"), false);
 
+        const existingProject = teams.createChannelFromTemplate(installed.team.id, "project");
+        assert.equal(existingProject.created, false);
+        assert.equal(existingProject.channel.name, "Project Channel");
+
         const repeated = teams.createChannelFromTemplate(installed.team.id, "work");
         assert.equal(repeated.created, false);
         assert.equal(repeated.channel.id, created.channel.id);
