@@ -774,6 +774,7 @@ function renderDetails(conversation) {
   $("details-provider").textContent = profiles.length ? profiles.map(humanModelProfile).join(" + ") : "Automatic / 自动";
   const team = teamForConversation(conversation.id);
   $("details-workspace").textContent = team ? "Shared project workspace" : "Private workspace";
+  renderCoworkerConnectedApps(conversation.kind === "direct" ? members[0] : undefined);
   const teamTools = $("details-team-tools");
   teamTools?.classList.toggle("hidden", !team);
   if (!team) $("team-pack-transfer-result") && ($("team-pack-transfer-result").textContent = "");
@@ -833,6 +834,46 @@ function renderDetails(conversation) {
   $("details-current-work").textContent = team?.flow?.currentOwner
     ? `${team.flow.status === "needs-attention" ? "Needs attention" : team.flow.status === "active" ? "Active" : "Waiting"} · ${team.flow.currentOwner}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
+}
+
+function renderCoworkerConnectedApps(coworker) {
+  const section = $("details-connected-apps");
+  const root = $("details-connected-app-list");
+  if (!section || !root) return;
+  section.classList.toggle("hidden", !coworker);
+  clearNode(root);
+  if (!coworker) return;
+  const apps = state.connectedApps?.apps ?? [];
+  if (!apps.length) {
+    const empty = document.createElement("small");
+    empty.textContent = "No governed connections are available yet.";
+    root.append(empty);
+    return;
+  }
+  for (const app of apps) {
+    const label = document.createElement("label");
+    label.className = "member-row";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = (app.assignedCoworkerIds ?? []).includes(coworker.id);
+    checkbox.disabled = app.state !== "available";
+    checkbox.addEventListener("change", async () => {
+      checkbox.disabled = true;
+      try {
+        const updated = await window.sovereignbot.connectedApps.assign({ appId: app.id, coworkerId: coworker.id, enabled: checkbox.checked });
+        state.connectedApps = { apps: (state.connectedApps?.apps ?? []).map((entry) => entry.id === updated.id ? updated : entry) };
+        renderCoworkerConnectedApps(coworker);
+      } catch (error) {
+        checkbox.checked = !checkbox.checked;
+        showToastError(error);
+        checkbox.disabled = app.state !== "available";
+      }
+    });
+    const textEl = document.createElement("span");
+    textEl.textContent = `${app.name} · ${app.state === "available" ? "Available / 可用" : "Unavailable / 不可用"}`;
+    label.append(checkbox, textEl);
+    root.append(label);
+  }
 }
 
 function openTeamPackDialog(pack) {
