@@ -66,12 +66,17 @@
       for (const channel of items.filter((entry) => !entry.archived)) {
         const option = document.createElement("option");
         option.value = channel.conversationId;
-        option.textContent = channel.name;
+        const conversation = conversations.find((entry) => entry.id === channel.conversationId);
+        option.textContent = `${conversationUnread(conversation) ? "• " : ""}${channel.name}`;
         switcher.append(option);
       }
     }
     const mode = filter?.value ?? "active";
-    const visible = items.filter((channel) => mode === "all" || (mode === "archived" ? channel.archived : !channel.archived));
+    const visible = items.filter((channel) => {
+      const conversation = conversations.find((entry) => entry.id === channel.conversationId);
+      if (mode === "unread") return !channel.archived && conversationUnread(conversation);
+      return mode === "all" || (mode === "archived" ? channel.archived : !channel.archived);
+    });
     const teamById = new Map(teams.map((team) => [team.id, team]));
     for (const channel of visible) {
       const conversation = conversations.find((entry) => entry.id === channel.conversationId);
@@ -113,7 +118,7 @@
       card.append(actions);
       root.append(card);
     }
-    if (!visible.length) { const p = document.createElement("p"); p.textContent = mode === "archived" ? "No archived channels." : "No active channels yet."; root.append(p); }
+    if (!visible.length) { const p = document.createElement("p"); p.textContent = mode === "archived" ? "No archived channels." : mode === "unread" ? "No unread channels." : "No active channels yet."; root.append(p); }
     const teamSelect = $("product-channel-template-team");
     const templateSelect = $("product-channel-template");
     if (teamSelect && templateSelect) {
@@ -262,6 +267,8 @@
     const artifactRoot = $("product-artifacts");
     const heading = artifactRoot?.parentElement?.querySelector(".card-heading");
     if (heading && !$("artifact-hub-filter")) { const filter = document.createElement("select"); filter.id = "artifact-hub-filter"; filter.setAttribute("aria-label", "Artifact filter"); const option = document.createElement("option"); option.value = "recent"; option.textContent = "Recent / 最近"; filter.append(option); heading.append(filter); }
+    const channelFilter = $("product-channel-filter");
+    if (channelFilter && ![...channelFilter.options].some((option) => option.value === "unread")) { const option = document.createElement("option"); option.value = "unread"; option.textContent = "Unread / 未读"; channelFilter.insertBefore(option, channelFilter.options[channelFilter.options.length - 1] ?? null); }
     const productHeader = $("view-product-hubs")?.querySelector(".page-header");
     if (productHeader && !$("product-workspace-switch") && api.workspaces?.list && api.workspaces?.setDefault) {
       const controls = document.createElement("div");
