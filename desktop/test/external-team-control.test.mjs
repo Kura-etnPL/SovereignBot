@@ -50,6 +50,8 @@ test("external team control exposes bounded opaque team operations and idempoten
         assert.equal(listed.teams[0].name, "Software Team");
         assert.equal(JSON.stringify(listed).includes("managed-workspaces"), false);
         assert.equal(JSON.stringify(api.listCoworkers()).includes("providerAccountId"), false);
+        assert.throws(() => api.listChannels({ includeArchived: "true" }), /boolean/);
+        assert.throws(() => api.listSkills({ includeArchived: "true" }), /boolean/);
 
         const first = api.submitOutcome({
             teamId: installed.id,
@@ -167,6 +169,12 @@ test("external product projections remain bounded and reuse governed channel del
         assert.equal(api.listRoutines().routines[0].name, "Daily review");
         assert.equal(api.runRoutineNow({ routineId: "routine_0000000000000001" }).result.job.status, "queued");
         assert.equal(api.getAttention().jobs[0].status, "needs_attention");
+        const takeover = api.requestTakeover(sent.id, { reason: "operator needs a human token=secret C:\\private\\takeover.txt" });
+        assert.equal(takeover.status, "needs_attention");
+        const attention = api.getAttention();
+        assert.equal(attention.jobs.some((job) => job.id === sent.id && job.status === "needs_attention"), true);
+        assert.equal(JSON.stringify(attention).includes("secret"), false);
+        assert.equal(JSON.stringify(attention).includes("C:\\private"), false);
         assert.throws(() => api.getConversation({ teamId: installed.id, channelId: channel.id, path: "E:/private" }), /not allowed/);
     }
     finally {

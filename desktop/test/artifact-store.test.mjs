@@ -37,6 +37,7 @@ test("artifact store copies trusted workspace output into durable managed storag
         assert.equal(artifact.mimeType, "text/markdown");
         assert.match(artifact.sha256, /^[a-f0-9]{64}$/);
         assert.equal(Object.hasOwn(artifact, "storageRelativePath"), false);
+        assert.equal(Object.hasOwn(artifact, "sourceRelativePath"), false);
         assert.equal(readFileSync(store.managedPath(artifact.id), "utf8"), "# Result\n\nUseful output.\n");
         const preview = store.previewText(artifact.id);
         assert.equal(preview.preview.includes("Useful output"), true);
@@ -80,6 +81,7 @@ test("artifact state reloads from its versioned metadata without exposing manage
         assert.equal(reloaded.get(artifact.id).fileName, "data.json");
         assert.equal(reloaded.previewText(artifact.id).preview, '{"ok":true}');
         assert.equal(Object.hasOwn(reloaded.get(artifact.id), "storageRelativePath"), false);
+        assert.equal(Object.hasOwn(reloaded.get(artifact.id), "sourceRelativePath"), false);
     }
     finally {
         rmSync(root, { recursive: true, force: true });

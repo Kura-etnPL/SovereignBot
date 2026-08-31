@@ -162,6 +162,12 @@ export const TEAM_PACKS = Object.freeze([
 ]);
 
 const TEAM_PACK_BY_ID = new Map(TEAM_PACKS.map((pack) => [pack.id, pack]));
+const TEAM_PACK_CATEGORY = new Map([
+    ["software-team", "Software"],
+    ["research-team", "Research"],
+    ["content-team", "Content"],
+    ["operations-team", "Operations"],
+]);
 
 export const CHANNEL_TEMPLATES = Object.freeze([
     Object.freeze({
@@ -741,6 +747,19 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return exportablePack(safePackDefinition(pack));
     }
 
+    // Gallery actions need the same portable, declarative document for an
+    // installed team and for a first-party recipe that has not been installed
+    // yet. No workspace, credential, provider session, or filesystem path is
+    // included in either branch.
+    function exportPackRecipe(packId) {
+        const builtIn = TEAM_PACK_BY_ID.get(String(packId));
+        if (builtIn) return exportablePack(builtIn);
+        const team = state.teams.find((entry) => entry.packId === String(packId));
+        if (!team) throw new Error(`unknown team pack: ${packId}`);
+        const exported = exportPack(team.id);
+        return exported.id === String(packId) ? exported : { ...exported, id: String(packId) };
+    }
+
     function importPack(input) {
         const pack = safePackDefinition(input, { requireSchema: true });
         return {
@@ -1029,7 +1048,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                     ? requestedCoworkerIds.find((id) => id !== coworkerId && team.coworkerIds.includes(id))
                     : undefined;
                 const sourceIsTeamMember = source?.senderId && team.coworkerIds.includes(source.senderId);
-                const dynamic = !requested && (source?.senderId === "user" || sourceIsTeamMember)
+                const followsDeclaredPackSequence = team.packId !== "custom-team";
+                const dynamic = !requested && (source?.senderId === "user" || (!followsDeclaredPackSequence && sourceIsTeamMember))
                     ? selectSpecialist({ objective: source.text, currentCoworkerId: coworkerId, candidates: routingCandidates(conversation, coworkerId) })
                     : undefined;
                 target = requested ?? dynamic?.targetCoworkerId ?? order[currentIndex + 1];
@@ -1095,6 +1115,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                         id: pack.id,
                         name: pack.name,
                         description: pack.description,
+                        category: TEAM_PACK_CATEGORY.get(pack.id) ?? "Operations",
                         coworkerNames: pack.coworkers.map((entry) => entry.name),
                         channelNames: pack.channels.map((entry) => entry.name),
                         playbookNames: pack.playbooks.map((entry) => entry.name),
@@ -1106,6 +1127,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                             id: entry.packId,
                             name: entry.name,
                             description: "A reusable team recipe saved in SovereignBot.",
+                            category: "Custom",
+                            custom: true,
                             coworkerNames: entry.coworkerIds.map(coworkerName),
                             channelNames: entry.channelIds.map((channelId) => state.channels.find((channel) => channel.id === channelId)?.name).filter(Boolean),
                             playbookNames: entry.playbooks.map((playbook) => playbook.name),
@@ -1117,6 +1140,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         },
         get(teamId) { return publicTeam(requireTeam(teamId)); },
         exportPack,
+        exportPackRecipe,
         importPack,
         exportPlaybook,
         importPlaybook,

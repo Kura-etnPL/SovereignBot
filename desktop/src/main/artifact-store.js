@@ -95,7 +95,10 @@ function clone(value) {
 }
 
 function publicView(entry) {
-    const { storageRelativePath: _internal, ...visible } = entry;
+    // Both paths are main-process-only implementation details. `sourceRelativePath`
+    // points back into a trusted workspace and is just as sensitive as the managed
+    // storage path; renderer-facing artifact APIs must never carry either one.
+    const { storageRelativePath: _storagePath, sourceRelativePath: _sourcePath, ...visible } = entry;
     return clone(visible);
 }
 

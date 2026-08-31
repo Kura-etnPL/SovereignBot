@@ -392,3 +392,191 @@
     heading.append(controls);
   });
 })();
+
+// Independent product pages. The original Product Hubs overview remains a
+// compact dashboard; these page controllers provide full-library workflows
+// without creating another store or execution engine.
+(() => {
+  const api = window.sovereignbot;
+  if (!api?.playbooks || !api?.artifacts?.hub || !api?.skills || !api?.teams) return;
+  const $ = (id) => document.getElementById(id);
+  const pageRoots = {
+    playbooks: $("product-playbooks-page"),
+    artifacts: $("product-artifacts-page"),
+    history: $("product-computer-history-page"),
+    skills: $("product-skills-page"),
+    packs: $("product-packs-page"),
+    channels: $("product-channels-page"),
+  };
+  const cache = { teams: [], coworkers: [], workspaces: [], conversations: [], templates: [] };
+  const navViews = new Map([
+    ["nav-product-hubs", "product-hubs"], ["nav-playbooks", "playbooks"], ["nav-artifacts", "artifacts"],
+    ["nav-computer-history", "computer-history"], ["nav-skills", "skills"], ["nav-team-packs", "team-packs"], ["nav-channels", "channels"],
+  ]);
+  const clear = (node) => { if (node) node.textContent = ""; };
+  const text = (label, value) => { const node = document.createElement("span"); node.textContent = `${label}: ${value === undefined || value === null || value === "" ? "—" : value}`; return node; };
+  const showError = (root, reason) => { if (!root) return; const node = document.createElement("p"); node.className = "inline-error"; node.textContent = String(reason?.message ?? reason).slice(0, 240); root.append(node); };
+  const button = (label, fn, root, className = "quiet-action") => { const node = document.createElement("button"); node.type = "button"; node.className = className; node.textContent = label; node.addEventListener("click", () => Promise.resolve().then(fn).catch((reason) => showError(root, reason))); return node; };
+  const select = (label) => { const node = document.createElement("select"); node.setAttribute("aria-label", label); return node; };
+  const copy = async (value) => { try { await navigator.clipboard.writeText(JSON.stringify(value, null, 2)); } catch { window.alert("Clipboard is unavailable."); } };
+  const readJson = (label, value = "") => { const raw = window.prompt(label, value ? JSON.stringify(value, null, 2) : ""); if (!raw) return undefined; try { return JSON.parse(raw); } catch { throw new Error("Paste valid JSON."); } };
+  const openConversationSafe = (id) => id && typeof openConversation === "function" ? openConversation(id) : undefined;
+  const refreshHost = () => Promise.all([typeof refreshConversations === "function" ? refreshConversations() : undefined, typeof refreshTeams === "function" ? refreshTeams() : undefined, typeof refreshCoworkers === "function" ? refreshCoworkers() : undefined]);
+  const unread = (conversation) => typeof conversationUnread === "function" ? conversationUnread(conversation) : Boolean(conversation?.unread);
+  function nav(view) {
+    if (typeof switchView === "function") switchView(view);
+    for (const [id, target] of navViews) $(id)?.classList.toggle("active", target === view);
+    void refresh().catch((reason) => showError(pageRoots[view === "computer-history" ? "history" : view] ?? pageRoots.playbooks, reason));
+  }
+  function populate(id, options, selected) {
+    const node = $(id); if (!node) return;
+    node.textContent = "";
+    for (const entry of options) { const option = document.createElement("option"); option.value = entry.value; option.textContent = entry.label; node.append(option); }
+    if ([...node.options].some((option) => option.value === selected)) node.value = selected;
+  }
+  function selected(id, fallback) { return $(id)?.value || fallback; }
+
+  function playbooks(items) {
+    const root = pageRoots.playbooks; if (!root) return; clear(root);
+    for (const item of items) {
+      const card = document.createElement("article"); card.className = "settings-card";
+      const title = document.createElement("h3"); title.textContent = item.name;
+      card.append(title, text("Description", item.description), text("Steps", item.steps.join(" → ")), text("Teams", item.assignedTeams.map((entry) => entry.name).join(", ") || "None"), text("Channels", item.assignedChannels.map((entry) => entry.name).join(", ") || "None"), text("State", item.state), text("Updated", item.updatedAt));
+      const actions = document.createElement("div"); actions.className = "detail-actions";
+      actions.append(button("Export / 导出", () => api.playbooks.export({ playbookId: item.id }).then(copy), root), button("Duplicate / 复制", async () => { await api.playbooks.duplicate({ playbookId: item.id }); await refresh(); }, root), button(item.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (item.state === "archived" ? api.playbooks.restore : api.playbooks.archive)({ playbookId: item.id }); await refresh(); }, root), button("Edit / 编辑", async () => {
+        const name = window.prompt("Playbook name", item.name); if (!name) return;
+        const description = window.prompt("Description", item.description); if (description === null) return;
+        const steps = window.prompt("Steps, comma separated", item.steps.join(",")); if (steps === null) return;
+        await api.playbooks.update({ playbookId: item.id, patch: { name, description, steps: steps.split(",").map((entry) => entry.trim()).filter(Boolean) } }); await refresh();
+      }, root));
+      const teamSelect = select("Team for playbook " + item.name);
+      for (const team of cache.teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = `Team: ${team.name}`; teamSelect.append(option); }
+      if (teamSelect.options.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.playbooks.assign({ playbookId: item.id, teamId: teamSelect.value }); await refresh(); }, root));
+      const channelSelect = select("Channel for playbook " + item.name);
+      for (const team of cache.teams) for (const channel of team.channels ?? []) { const option = document.createElement("option"); option.value = channel.id; option.textContent = `Channel: ${team.name} / ${channel.name}`; channelSelect.append(option); }
+      if (channelSelect.options.length) actions.append(channelSelect, button("Assign Channel / 分配频道", async () => { await api.playbooks.assign({ playbookId: item.id, channelId: channelSelect.value }); await refresh(); }, root));
+      card.append(actions); root.append(card);
+    }
+    if (!items.length) root.append(text("Playbooks", "No methods yet. Create the first human-readable method."));
+    root.append(button("Import / 导入", async () => { const playbook = readJson("Paste Playbook JSON"); if (playbook) { await api.playbooks.import({ playbook }); await refresh(); } }, root));
+  }
+
+  function artifacts(items) {
+    const root = pageRoots.artifacts; if (!root) return; clear(root);
+    for (const item of items) {
+      const card = document.createElement("article"); card.className = "settings-card";
+      const title = document.createElement("h3"); title.textContent = item.title || item.fileName;
+      card.append(title, text("Type", item.mimeType), text("Creator", item.creator?.name), text("Team", item.team?.name), text("Channel", item.channel?.name), text("Created", item.createdAt), text("Status", item.status));
+      const actions = document.createElement("div"); actions.className = "detail-actions";
+      actions.append(button("Preview / 预览", async () => { const preview = await api.artifacts.preview({ artifactId: item.id }); window.alert(preview?.preview || "Preview is not available."); }, root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root));
+      if (item.conversationId) actions.append(button("Source conversation / 来源会话", () => openConversationSafe(item.conversationId), root));
+      card.append(actions); root.append(card);
+    }
+    if (!items.length) root.append(text("Artifacts", "No artifacts yet."));
+  }
+
+  function history(items) {
+    const root = pageRoots.history; if (!root) return; clear(root);
+    const coworkerId = selected("computer-history-filter-page", "all");
+    const names = new Map(cache.coworkers.map((entry) => [entry.id, entry.name]));
+    const visible = items.filter((entry) => coworkerId === "all" || entry.coworkerId === coworkerId);
+    for (const item of visible) { const card = document.createElement("article"); card.className = "settings-card"; const title = document.createElement("h3"); title.textContent = item.activity; card.append(title, text("Source", item.source), text("Event", item.eventType), text("Coworker", names.get(item.coworkerId) ?? "Coworker"), text("Activity", item.summary), text("App", item.app), text("Site", item.site), text("Time", item.timestamp), text("Status", item.status)); root.append(card); }
+    if (!visible.length) root.append(text("Computer History", coworkerId === "all" ? "No safe Computer activity recorded yet." : "No activity for this coworker."));
+  }
+
+  function skills(items) {
+    const root = pageRoots.skills; if (!root) return; clear(root);
+    for (const item of items) {
+      const card = document.createElement("article"); card.className = "settings-card";
+      const title = document.createElement("h3"); title.textContent = item.name;
+      const assigned = [...(item.assignedTeamIds ?? []).map((id) => `Team: ${cache.teams.find((entry) => entry.id === id)?.name ?? id}`), ...(item.assignedCoworkerIds ?? []).map((id) => `Coworker: ${cache.coworkers.find((entry) => entry.id === id)?.name ?? id}`)];
+      card.append(title, text("Description", item.description), text("Source", item.source), text("Status", item.state), text("Assigned", assigned.join(", ") || "Not assigned"), text("Last definition test", item.lastTestedAt));
+      const actions = document.createElement("div"); actions.className = "detail-actions";
+      actions.append(button("Export / 导出", () => api.skills.export({ skillId: item.id }).then(copy), root), button("Duplicate / 复制", async () => { await api.skills.duplicate({ skillId: item.id }); await refresh(); }, root), button("Retest definition / 重测定义", async () => { await api.skills.retest({ skillId: item.id }); await refresh(); }, root), button(item.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (item.state === "archived" ? api.skills.restore : api.skills.archive)({ skillId: item.id }); await refresh(); }, root), button("Edit / 编辑", async () => {
+        const name = window.prompt("Skill name", item.name); if (!name) return;
+        const description = window.prompt("Description", item.description); if (description === null) return;
+        const instructions = window.prompt("Instructions", item.instructions); if (instructions === null) return;
+        await api.skills.update({ skillId: item.id, patch: { name, description, instructions } }); await refresh();
+      }, root));
+      const teamSelect = select("Team for skill " + item.name); for (const team of cache.teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = `Team: ${team.name}`; teamSelect.append(option); }
+      if (teamSelect.options.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.skills.assign({ skillId: item.id, targetKind: "team", targetId: teamSelect.value, enabled: !(item.assignedTeamIds ?? []).includes(teamSelect.value) }); await refresh(); }, root));
+      const coworkerSelect = select("Coworker for skill " + item.name); for (const coworker of cache.coworkers) { const option = document.createElement("option"); option.value = coworker.id; option.textContent = `Coworker: ${coworker.name}`; coworkerSelect.append(option); }
+      if (coworkerSelect.options.length) actions.append(coworkerSelect, button("Assign Coworker / 分配同事", async () => { await api.skills.assign({ skillId: item.id, targetKind: "coworker", targetId: coworkerSelect.value, enabled: !(item.assignedCoworkerIds ?? []).includes(coworkerSelect.value) }); await refresh(); }, root));
+      card.append(actions); root.append(card);
+    }
+    if (!items.length) root.append(text("Skills", "No skills yet. Create a declarative skill."));
+    root.append(button("Import skill / 导入技能", async () => { const skill = readJson("Paste safe Skill JSON"); if (skill) { await api.skills.import({ skill }); await refresh(); } }, root));
+  }
+
+  function packs(items) {
+    const root = pageRoots.packs; if (!root) return; clear(root);
+    const query = (selected("team-pack-search-page", "") || "").trim().toLowerCase();
+    const category = selected("team-pack-category-page", "all");
+    const visible = items.filter((item) => (!query || [item.name, item.description, item.category, ...(item.coworkerNames ?? []), ...(item.channelNames ?? []), ...(item.playbookNames ?? [])].join(" ").toLowerCase().includes(query)) && (category === "all" || item.category === category));
+    for (const item of visible) {
+      const card = document.createElement("article"); card.className = "settings-card"; const title = document.createElement("h3"); title.textContent = item.name;
+      card.append(title, text("Category", item.category), text("Contents", `${item.coworkerNames?.length ?? 0} coworkers · ${item.channelNames?.length ?? 0} channels · ${item.playbookNames?.length ?? 0} playbooks`), text("Status", item.installed ? "Installed" : "Available"));
+      const actions = document.createElement("div"); actions.className = "detail-actions";
+      if (!item.installed) actions.append(button("Install / 安装", async () => { await api.teams.installPack({ packId: item.id }); await refreshHost(); await refresh(); }, root));
+      actions.append(button("Export / 导出", async () => { const team = cache.teams.find((entry) => entry.packId === item.id || entry.packId === `imported:${item.id}`); const recipe = item.custom ? await api.teams.exportPackRecipe({ packId: item.id }) : team ? await api.teams.exportPack({ teamId: team.id }) : await api.teams.exportPackRecipe({ packId: item.id }); await copy(recipe); }, root), button("Duplicate / 复制", async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); }, root));
+      if (item.custom) actions.append(button("Edit recipe / 编辑配方", async () => { const current = await api.teams.exportPackRecipe({ packId: item.id }); const edited = readJson("Edit declarative Team Pack JSON", current); if (!edited) return; await api.teams.editPack({ packId: item.id, patch: { name: edited.name, description: edited.description, coworkers: edited.coworkers, channels: edited.channels, playbooks: edited.playbooks } }); await refresh(); }, root));
+      card.append(actions); root.append(card);
+    }
+    if (!visible.length) root.append(text("Team Packs", "No matching recipes."));
+  }
+
+  function channels(items) {
+    const root = pageRoots.channels; if (!root) return; clear(root);
+    const mode = selected("product-channel-filter-page", "active");
+    const conversations = new Map(cache.conversations.map((entry) => [entry.id, entry]));
+    const teams = new Map(cache.teams.map((entry) => [entry.id, entry]));
+    const visible = items.filter((channel) => { const conversation = conversations.get(channel.conversationId); if (mode === "unread") return !channel.archived && unread(conversation); return mode === "all" || (mode === "archived" ? channel.archived : !channel.archived); });
+    const switcher = $("product-channel-switch-page"); if (switcher) { const current = switcher.value; switcher.textContent = ""; const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Quick switch / 快速切换"; switcher.append(placeholder); for (const channel of items.filter((entry) => !entry.archived)) { const option = document.createElement("option"); option.value = channel.conversationId; option.textContent = `${unread(conversations.get(channel.conversationId)) ? "• " : ""}${channel.name}`; switcher.append(option); } if ([...switcher.options].some((option) => option.value === current)) switcher.value = current; }
+    for (const channel of visible) {
+      const team = teams.get(channel.teamId); const conversation = conversations.get(channel.conversationId); const card = document.createElement("article"); card.className = "settings-card"; const title = document.createElement("h3"); title.textContent = channel.name; const meta = document.createElement("p"); meta.textContent = `${team?.name ?? "Team"} · ${channel.kind} · ${channel.archived ? "Read-only / 只读" : "Available / 可用"}`; card.append(title, meta, text("Instructions", channel.instructions), text("Last activity", conversation?.updatedAt || channel.updatedAt), text("Latest", conversation?.lastMessage?.textPreview));
+      const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(button(channel.archived ? "View / 查看" : "Open / 打开", () => openConversationSafe(channel.conversationId), root), button("Edit / 编辑", () => openEditor(channel.teamId, channel.id), root), button("Duplicate / 复制", async () => { await api.channels.create({ teamId: channel.teamId, name: `${channel.name} copy`.slice(0, 120), kind: channel.kind, instructions: channel.instructions, workspaceId: channel.workspaceId, playbookId: channel.playbookId }); await refreshHost(); await refresh(); }, root), button(channel.archived ? "Restore / 恢复" : "Archive / 归档", async () => { await (channel.archived ? api.channels.restore : api.channels.archive)({ channelId: channel.id }); await refreshHost(); await refresh(); }, root));
+      card.append(actions); root.append(card);
+    }
+    if (!visible.length) root.append(text("Channels", mode === "archived" ? "No archived channels." : mode === "unread" ? "No unread channels." : "No active channels yet."));
+    populate("product-channel-template-team-page", cache.teams.map((team) => ({ value: team.id, label: team.name })), selected("product-channel-template-team-page", cache.teams[0]?.id ?? ""));
+    populate("product-channel-template-page", cache.templates.map((template) => ({ value: template.id, label: `${template.name} / ${template.kind}` })), selected("product-channel-template-page", cache.templates[0]?.id ?? ""));
+  }
+  function openEditor(teamId, channelId) {
+    if (typeof window.openProductChannelEditor === "function") { window.openProductChannelEditor({ teamId, channelId }); return; }
+    const team = cache.teams.find((entry) => entry.id === teamId); const channel = team?.channels?.find((entry) => entry.id === channelId); if (!team) throw new Error("Choose a team first.");
+    const name = window.prompt("Channel name", channel?.name ?? "Project Channel"); if (!name) return; const instructions = window.prompt("Instructions", channel?.instructions ?? "") ?? ""; const payload = { name, kind: channel?.kind ?? "project", instructions, ...(team.sharedWorkspaceId ? { workspaceId: team.sharedWorkspaceId } : {}), ...(team.playbooks?.[0]?.id ? { playbookId: team.playbooks[0].id } : {}) };
+    return channelId ? api.channels.update({ channelId, patch: payload }).then(refreshHost).then(refresh) : api.channels.create({ teamId, ...payload }).then(refreshHost).then(refresh);
+  }
+  async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description", "") ?? ""; const steps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; await api.playbooks.create({ playbook: { name, description, steps: steps.split(",").map((entry) => entry.trim()).filter(Boolean) } }); await refresh(); }
+  async function createSkill() { const name = window.prompt("Skill name"); if (!name) return; const description = window.prompt("Description", "") ?? ""; const instructions = window.prompt("Instructions"); if (!instructions) return; await api.skills.create({ skill: { name, description, instructions } }); await refresh(); }
+  async function importPack() { const pack = readJson("Paste Team Pack JSON"); if (!pack) return; await api.teams.importPack({ pack }); await refreshHost(); await refresh(); }
+
+  async function refresh() {
+    const [teams, coworkers, workspaces] = await Promise.all([api.teams.list({}), api.coworkers.list({}), api.workspaces?.list ? api.workspaces.list({}) : Promise.resolve({ workspaces: [] })]);
+    cache.teams = teams.teams ?? []; cache.coworkers = coworkers.coworkers ?? []; cache.workspaces = workspaces.workspaces ?? []; cache.templates = teams.channelTemplates ?? [];
+    const artifactScope = selected("artifact-hub-filter-page", "recent");
+    const artifactOptions = [{ value: "recent", label: "Recent / 最近" }, ...cache.teams.flatMap((team) => [{ value: `team:${team.id}`, label: `By Team / 团队: ${team.name}` }, ...(team.channels ?? []).map((channel) => ({ value: `channel:${channel.id}`, label: `By Channel / 频道: ${channel.name}` }))]), ...cache.coworkers.map((coworker) => ({ value: `coworker:${coworker.id}`, label: `By Coworker / 同事: ${coworker.name}` }))];
+    populate("artifact-hub-filter-page", artifactOptions, artifactScope); const artifactPayload = { limit: 100 }; const resolvedScope = selected("artifact-hub-filter-page", artifactScope); if (resolvedScope.startsWith("team:")) artifactPayload.teamId = resolvedScope.slice(5); if (resolvedScope.startsWith("channel:")) artifactPayload.channelId = resolvedScope.slice(8); if (resolvedScope.startsWith("coworker:")) artifactPayload.coworkerId = resolvedScope.slice(9);
+    const historyScope = selected("computer-history-filter-page", "all"); populate("computer-history-filter-page", [{ value: "all", label: "All coworkers / 全部同事" }, ...cache.coworkers.map((coworker) => ({ value: coworker.id, label: `By Coworker / 同事: ${coworker.name}` }))], historyScope);
+    const [playbookResult, artifactResult, historyResult, skillResult, channelResult, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations?.list ? api.conversations.list({}) : Promise.resolve({ conversations: [] })]);
+    cache.conversations = conversations.conversations ?? [];
+    playbooks(playbookResult.playbooks ?? []); artifacts(artifactResult.artifacts ?? []); history(historyResult.history ?? []); skills(skillResult.skills ?? []); packs(teams.packs ?? []); channels(channelResult.channels ?? []);
+  }
+
+  function setup() {
+    for (const [id, view] of navViews) $(id)?.addEventListener("click", () => { if (view === "product-hubs") { for (const [navId, target] of navViews) $(navId)?.classList.toggle("active", target === view); } else nav(view); });
+    $("playbook-page-create")?.addEventListener("click", () => void createPlaybook().catch((reason) => showError(pageRoots.playbooks, reason)));
+    $("playbook-page-import")?.addEventListener("click", () => void (async () => { const playbook = readJson("Paste Playbook JSON"); if (playbook) { await api.playbooks.import({ playbook }); await refresh(); } })().catch((reason) => showError(pageRoots.playbooks, reason)));
+    $("skill-page-create")?.addEventListener("click", () => void createSkill().catch((reason) => showError(pageRoots.skills, reason)));
+    $("skill-page-import")?.addEventListener("click", () => void (async () => { const skill = readJson("Paste safe Skill JSON"); if (skill) { await api.skills.import({ skill }); await refresh(); } })().catch((reason) => showError(pageRoots.skills, reason)));
+    $("team-pack-page-import")?.addEventListener("click", () => void importPack().catch((reason) => showError(pageRoots.packs, reason)));
+    $("team-pack-search-page")?.addEventListener("input", () => void refresh()); $("team-pack-category-page")?.addEventListener("change", () => void refresh());
+    $("product-channel-create-page")?.addEventListener("click", () => { const teamId = $("product-channel-template-team-page")?.value || cache.teams[0]?.id; if (teamId) { try { openEditor(teamId); } catch (reason) { showError(pageRoots.channels, reason); } } });
+    $("product-channel-template-add-page")?.addEventListener("click", () => void (async () => { const teamId = $("product-channel-template-team-page")?.value; const templateId = $("product-channel-template-page")?.value; if (!teamId || !templateId) return; await api.teams.createChannelFromTemplate({ teamId, templateId }); await refreshHost(); await refresh(); })().catch((reason) => showError(pageRoots.channels, reason)));
+    for (const id of ["artifact-hub-filter-page", "computer-history-filter-page", "product-channel-filter-page"]) $(id)?.addEventListener("change", () => void refresh());
+    $("product-channel-switch-page")?.addEventListener("change", (event) => openConversationSafe(event.target.value));
+    api.onNavigate?.((target) => { if (navViews.has("nav-" + target) || ["product-hubs", "playbooks", "artifacts", "computer-history", "skills", "team-packs", "channels"].includes(target)) nav(target); });
+    window.refreshIndependentProductPages = refresh;
+  }
+  window.addEventListener("DOMContentLoaded", setup);
+})();

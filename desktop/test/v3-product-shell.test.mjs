@@ -78,3 +78,32 @@ test("Product hubs expose governed Connected Apps assignment without raw authori
     assert.match(productHubs, /appId: item\.id/);
     assert.doesNotMatch(productHubs, /providerToken|sessionId|rawPath|capabilityGrant/);
 });
+
+test("Product burst exposes independent Playbooks, Artifacts, History, Skills, Packs, and Channels pages", () => {
+    for (const id of [
+        "view-playbooks",
+        "view-artifacts",
+        "view-computer-history",
+        "view-skills",
+        "view-team-packs",
+        "view-channels",
+        "product-playbooks-page",
+        "artifact-hub-filter-page",
+        "computer-history-filter-page",
+        "product-skills-page",
+        "product-packs-page",
+        "product-channels-page",
+    ]) assert.match(html, new RegExp(`id="${id}"`), id);
+    for (const expression of [
+        /playbooks\.duplicate/,
+        /playbooks\.assign/,
+        /artifacts\.hub/,
+        /computer\.history/,
+        /skills\.retest/,
+        /teams\.duplicatePack/,
+        /openProductChannelEditor/,
+        /team-pack-page-import/,
+    ]) assert.match(productHubs, expression);
+    assert.doesNotMatch(productHubs, /innerHTML\s*=/);
+    assert.doesNotMatch(productHubs, /eval\s*\(/);
+});

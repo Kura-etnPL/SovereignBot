@@ -101,7 +101,7 @@ function normalizeMetadata(input) {
         expectedOutput: boundedText(input.expectedOutput ?? "", "skill expectedOutput", 1_000) ?? "",
         requestedCapabilities: normalizeCapabilities(input.requestedCapabilities),
         validators: normalizeStringArray(input.validators, "skill validators", MAX_VALIDATORS, 500),
-        source: ["manual", "taught"].includes(input.source) ? input.source : "manual",
+        source: ["manual", "taught", "imported"].includes(input.source) ? input.source : "manual",
     };
 }
 
@@ -137,7 +137,7 @@ function normalizePatch(input) {
     if (Object.hasOwn(input, "requestedCapabilities")) patch.requestedCapabilities = normalizeCapabilities(input.requestedCapabilities);
     if (Object.hasOwn(input, "validators")) patch.validators = normalizeStringArray(input.validators, "skill validators", MAX_VALIDATORS, 500);
     if (Object.hasOwn(input, "source")) {
-        if (!["manual", "taught"].includes(input.source)) throw new Error("skill source must be manual or taught");
+        if (!["manual", "taught", "imported"].includes(input.source)) throw new Error("skill source must be manual, taught, or imported");
         patch.source = input.source;
     }
     if (Object.hasOwn(input, "state")) {
@@ -332,6 +332,28 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
         duplicateSkill(id) {
             const skill = requireSkill(id);
             return this.create({ name: `${skill.name} copy`, description: skill.description, instructions: skill.instructions, inputs: clone(skill.inputs), steps: [...skill.steps], expectedOutput: skill.expectedOutput, requestedCapabilities: [...skill.requestedCapabilities], validators: [...skill.validators], source: "manual" });
+        },
+        retestSkill(id) {
+            const skill = requireSkill(id);
+            if (skill.state !== "active") throw new Error(`skill is archived: ${id}`);
+            // Skills are declarative definitions. A retest validates the complete
+            // stored definition and records the check; executing Computer or
+            // Workspace work still requires a normal governed Job/Routine path.
+            normalizeCreate({
+                name: skill.name,
+                description: skill.description,
+                instructions: skill.instructions,
+                inputs: clone(skill.inputs),
+                steps: [...skill.steps],
+                expectedOutput: skill.expectedOutput,
+                requestedCapabilities: [...skill.requestedCapabilities],
+                validators: [...skill.validators],
+                source: skill.source,
+            });
+            skill.lastTestedAt = now();
+            skill.updatedAt = skill.lastTestedAt;
+            save();
+            return { tested: true, mode: "declarative-validation", skill: publicSkill(skill) };
         },
         assignedSkillIdsForCoworkers,
         requireActive(id) {

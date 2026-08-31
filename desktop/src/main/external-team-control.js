@@ -73,16 +73,20 @@ function artifactIds(value) {
 }
 
 function safeError(error) {
-    return String(error?.message ?? error ?? "external team control failed")
-        .replace(/[\r\n]+/g, " ")
-        .slice(0, 500);
+    return publicText(String(error?.message ?? error ?? "external team control failed").replace(/[\r\n]+/g, " ")).slice(0, 500);
 }
 
 function publicText(value) {
     return String(value ?? "")
-        .replace(/[A-Za-z]:[\\/][^\s]+/g, "<private-path>")
-        .replace(/(?:^|\s)\/(?:Users|home|tmp|var|private|workspace|worktrees?)\/[^\s]+/gi, " <private-path>")
-        .replace(/\b((?:bearer|token|secret|password|cookie|session(?:id)?|api[-_ ]?key))\s*[:=]\s*\S+/gi, "$1=<redacted>")
+        .replace(/[A-Za-z]:[\\/][^"'<>\r\n]*/g, "<private-path>")
+        .replace(/\\\\[^"'<>\r\n]+/g, "<private-path>")
+        .replace(/(?:^|\s)\/(?:Users|home|tmp|var|private|workspace|worktrees?)[^\s"'<>\r\n]*/gi, " <private-path>")
+        .replace(/file:\/\/[^\s"'<>]+/gi, "<private-path>")
+        .replace(/https?:\/\/[^\s"'<>]+/gi, (url) => {
+            try { return new URL(url).origin; }
+            catch { return "<redacted-url>"; }
+        })
+        .replace(/\b(?:bearer\s+\S+|authorization\s*[:=]\s*\S+|api[-_ ]?key\s*[:=]\s*\S+|token|secret|password|cookie|session(?:id)?|credential)\s*[:=]?\s*\S*/gi, "<redacted>")
         .slice(0, 4_000);
 }
 
@@ -94,7 +98,6 @@ function publicArtifact(artifact) {
         fileName: publicText(artifact.fileName),
         mimeType: artifact.mimeType,
         size: artifact.size,
-        sha256: artifact.sha256,
         createdAt: artifact.createdAt,
     };
 }
@@ -195,14 +198,14 @@ function publicTeam(team) {
     return {
         id: team.id,
         packId: team.packId,
-        name: team.name,
+        name: publicText(team.name),
         coworkerIds: [...(team.coworkerIds ?? [])],
         channelIds: [...(team.channelIds ?? [])],
         flow: team.flow ? {
             stage: team.flow.stage,
             status: team.flow.status,
             currentOwnerId: team.flow.currentOwnerId,
-            currentOwner: team.flow.currentOwner,
+            currentOwner: team.flow.currentOwner ? publicText(team.flow.currentOwner) : undefined,
         } : undefined,
     };
 }
@@ -212,7 +215,7 @@ function publicChannel(channel) {
         id: channel.id,
         teamId: channel.teamId,
         kind: channel.kind,
-        name: channel.name,
+        name: publicText(channel.name),
         coworkerIds: [...(channel.coworkerIds ?? [])],
         conversationId: channel.conversationId,
         playbookId: channel.playbookId,
@@ -521,8 +524,8 @@ export function createExternalTeamControlApi({
                 protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
                 coworkers: coworkerStore.list().coworkers.map((entry) => ({
                     id: entry.id,
-                    name: entry.name,
-                    role: entry.role,
+                    name: publicText(entry.name),
+                    role: publicText(entry.role),
                     state: entry.state,
                     modelProfile: entry.modelBinding?.profile ?? "automatic",
                 })),
@@ -532,6 +535,7 @@ export function createExternalTeamControlApi({
         listChannels(input = {}) {
             rejectAuthority(input);
             exactKeys(input, new Set(["teamId", "includeArchived"]), "listChannels");
+            if (input.includeArchived !== undefined && typeof input.includeArchived !== "boolean") throw new Error("listChannels.includeArchived must be boolean");
             const teamId = input.teamId === undefined ? undefined : opaqueId(input.teamId, "teamId");
             if (teamId) requireTeam(teamId);
             const channels = teamService.listChannels(teamId ? { teamId, includeArchived: input.includeArchived === true } : { includeArchived: input.includeArchived === true }).channels;
@@ -558,6 +562,7 @@ export function createExternalTeamControlApi({
             if (!skillStore?.list) throw new Error("skills are unavailable");
             rejectAuthority(input, "listSkills");
             exactKeys(input, new Set(["includeArchived"]), "listSkills");
+            if (input.includeArchived !== undefined && typeof input.includeArchived !== "boolean") throw new Error("listSkills.includeArchived must be boolean");
             const skills = skillStore.list({ includeArchived: input.includeArchived === true }).skills ?? [];
             return {
                 protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
@@ -596,10 +601,11 @@ export function createExternalTeamControlApi({
             if (!isPlainObject(input)) throw new Error("runRoutineNow payload must be an object");
             rejectAuthority(input, "runRoutineNow");
             exactKeys(input, new Set(["routineId"]), "runRoutineNow");
-            const result = routineController.runNow(input.routineId);
+            const routineId = opaqueId(input.routineId, "routineId");
+            const result = routineController.runNow(routineId);
             return {
                 protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
-                routineId: opaqueId(input.routineId, "routineId"),
+                routineId,
                 result: {
                     routine: result?.routine ? { id: result.routine.id, name: publicText(result.routine.name), enabled: result.routine.enabled === true, lastStatus: result.routine.lastStatus, lastRunAt: result.routine.lastRunAt, nextRunAt: result.routine.nextRunAt } : undefined,
                     job: result?.job ? { id: result.job.id, title: publicText(result.job.title), status: result.job.status, createdAt: result.job.createdAt, updatedAt: result.job.updatedAt } : undefined,
@@ -611,9 +617,22 @@ export function createExternalTeamControlApi({
         getAttention() {
             if (!jobs?.attentionJobs) throw new Error("attention center is unavailable");
             const attention = jobs.attentionJobs().jobs ?? [];
+            const takeoverAttention = [...outcomes.values()]
+                .filter((outcome) => outcome.status === "needs_attention")
+                .map((outcome) => ({
+                    id: outcome.id,
+                    title: `External takeover: ${outcome.inputPreview}`,
+                    status: outcome.status,
+                    priority: "high",
+                    ownerCoworkerId: outcome.coworkerId,
+                    conversationId: outcome.conversationId,
+                    createdAt: outcome.createdAt,
+                    updatedAt: outcome.updatedAt,
+                    attentionState: { reason: outcome.takeoverReason },
+                }));
             return {
                 protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
-                jobs: attention.slice(0, MAX_LIST_ITEMS).map((job) => ({
+                jobs: [...attention, ...takeoverAttention].slice(0, MAX_LIST_ITEMS).map((job) => ({
                     id: job.id,
                     title: publicText(job.title),
                     status: job.status,
@@ -622,6 +641,7 @@ export function createExternalTeamControlApi({
                     conversationId: job.conversationId,
                     createdAt: job.createdAt,
                     updatedAt: job.updatedAt,
+                    ...(job.attentionState?.reason ? { reason: publicText(job.attentionState.reason) } : {}),
                 })),
             };
         },

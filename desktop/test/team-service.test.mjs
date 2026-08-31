@@ -48,9 +48,9 @@ test("Software Team installation is idempotent and keeps workspace paths out of 
         assert.equal(teams.status(first.team.id).routingDecision.targetCoworkerId, first.team.coworkerIds[1]);
         assert.equal(teams.status(first.team.id).routingDecision.handoffType, "delegate");
         assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: userMessage }), chiefHandoff);
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[1] }), first.team.coworkerIds[2]);
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[2] }), first.team.coworkerIds[0]);
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0] }), undefined);
+        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[1], source: { id: "message-coding", senderId: first.team.coworkerIds[0], text: "Implement the requested software change." } }), first.team.coworkerIds[2]);
+        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[2], source: { id: "message-review", senderId: first.team.coworkerIds[1], text: "Review the implementation." } }), first.team.coworkerIds[0]);
+        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: { id: "message-synthesis", senderId: first.team.coworkerIds[2], text: "Synthesize the reviewed result." } }), undefined);
         assert.equal(teams.status(first.team.id).stage, "complete");
 
         const disk = JSON.parse(readFileSync(join(root, "desktop-state", "teams.json"), "utf8"));
@@ -150,6 +150,9 @@ test("Team Pack export/import carries only reusable product declarations", () =>
         assert.equal(imported.team.name, "Software Team");
         assert.notEqual(imported.team.id, installed.team.id);
         assert.equal(imported.team.channels[0].name, "Project Channel");
+        const recipe = teams.exportPackRecipe(imported.team.packId);
+        assert.equal(recipe.id, imported.team.packId);
+        assert.equal(teams.list().packs.find((pack) => pack.id === imported.team.packId).custom, true);
         assert.equal(teams.importPack(exported).installed, false);
         assert.equal(conversations.list().conversations.length, 2);
 

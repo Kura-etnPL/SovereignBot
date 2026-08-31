@@ -74,19 +74,26 @@ function normalizePack(input, { generatedId } = {}) {
 }
 
 function safeHistoryText(value, max = 180) {
-    const out = text(value ?? "", "history text", max)
+    const out = text(value === undefined || value === null ? "" : String(value), "history text", max)
         .replace(/[A-Za-z]:[\\/][^\s"'<>]*/g, "[redacted-path]")
+        .replace(/\\\\[^\s"'<>]+/g, "[redacted-path]")
         .replace(/(?:^|\s)\/(?:Users|home|tmp|var|private|workspace|worktrees?)[^\s"'<>]*/gi, "$1[redacted-path]")
+        .replace(/file:\/\/[^\s"'<>]+/gi, "[redacted-path]")
         .replace(/https?:\/\/[^\s"'<>]+/gi, (value) => {
             try { return new URL(value).origin; }
             catch { return "[redacted-url]"; }
         })
-        .replace(/(?:token|secret|password|cookie|session|credential)\s*[:=]\s*[^\s]+/gi, "$1=[redacted]");
+        .replace(/(?:bearer\s+|authorization\s*[:=]\s*|api[-_]?key\s*[:=]\s*|token|secret|password|cookie|session|credential)\s*[:=]?\s*[^\s]+/gi, "[redacted]");
     return out;
 }
 
-export function createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime, now = () => new Date().toISOString() } = {}) {
+function safeOpaqueId(value) {
+    return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value) ? value : undefined;
+}
+
+export function createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime, getRuntime, now = () => new Date().toISOString() } = {}) {
     if (!dataDir || !teamService || !coworkerStore || !artifactStore || !runtime) throw new Error("product surface service requires existing stores and runtime");
+    const resolveRuntime = typeof getRuntime === "function" ? getRuntime : () => runtime;
     const persistPath = join(dataDir, "desktop-state", "product-surfaces.json");
     const loaded = loadJsonState(persistPath, null);
     const state = loaded?.schema === PRODUCT_SURFACES_SCHEMA ? {
@@ -125,7 +132,7 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
         if (typeof teamService.updatePlaybook !== "function" && assignedTeams.length)
             throw new Error("assigned playbook updates are unavailable");
         for (const team of assignedTeams)
-            teamService.updatePlaybook(team.id, entry.id, next);
+            teamService.updatePlaybook(team.id, entry.id, { name: next.name, description: next.description, steps: next.steps });
         Object.assign(entry, next, { updatedAt: now() }); save(); return publicPlaybook(entry);
     }
     function setPlaybookState(playbookId, value) { const entry = playbookById(playbookId); entry.state = value; entry.updatedAt = now(); save(); return publicPlaybook(entry); }
@@ -151,32 +158,87 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
     }
     function exportPlaybook(playbookId) { const entry = playbookById(playbookId); return { schema: PLAYBOOK_SCHEMA, id: entry.id, name: entry.name, description: entry.description, steps: [...entry.steps] }; }
     function artifactHub({ limit = 100, teamId, channelId, coworkerId } = {}) {
+        if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact hub limit must be 1..500");
         const teams = teamService.list().teams; const channels = teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         const allowedConversationIds = new Set(channels.filter((channel) => (!teamId || channel.teamId === teamId) && (!channelId || channel.id === channelId)).map((channel) => channel.conversationId));
         const locationScoped = teamId !== undefined || channelId !== undefined;
-        const result = artifactStore.list({ limit, coworkerId }).artifacts.filter((artifact) => !locationScoped ? true : Boolean(artifact.conversationId) && allowedConversationIds.has(artifact.conversationId)).map((artifact) => {
+        // Fetch the bounded store maximum before applying the location filter. A
+        // recent unrelated artifact must not hide an older result from the selected
+        // Team or Channel merely because the store sliced first.
+        const result = artifactStore.list({ limit: 500, coworkerId }).artifacts.filter((artifact) => !locationScoped ? true : Boolean(artifact.conversationId) && allowedConversationIds.has(artifact.conversationId)).slice(0, limit).map((artifact) => {
             const channel = channels.find((item) => item.conversationId === artifact.conversationId); const creator = artifact.createdByCoworkerId ? coworkerStore.get(artifact.createdByCoworkerId) : undefined;
-            return { id: artifact.id, title: artifact.title, fileName: artifact.fileName, mimeType: artifact.mimeType, size: artifact.size, createdAt: artifact.createdAt, creator: creator ? { id: creator.id, name: creator.name } : undefined, coworkerId: artifact.createdByCoworkerId, team: channel ? { id: channel.teamId, name: channel.teamName } : undefined, channel: channel ? { id: channel.id, name: channel.name } : undefined, conversationId: artifact.conversationId, status: "available" };
+            return {
+                id: safeOpaqueId(artifact.id),
+                title: safeHistoryText(artifact.title, 180),
+                fileName: safeHistoryText(artifact.fileName, 180),
+                mimeType: artifact.mimeType,
+                size: artifact.size,
+                createdAt: artifact.createdAt,
+                creator: creator ? { id: safeOpaqueId(creator.id), name: safeHistoryText(creator.name, 120) } : undefined,
+                coworkerId: safeOpaqueId(artifact.createdByCoworkerId),
+                team: channel ? { id: safeOpaqueId(channel.teamId), name: safeHistoryText(channel.teamName, 120) } : undefined,
+                channel: channel ? { id: safeOpaqueId(channel.id), name: safeHistoryText(channel.name, 120) } : undefined,
+                conversationId: safeOpaqueId(artifact.conversationId),
+                sourceMessageId: safeOpaqueId(artifact.sourceMessageId),
+                status: "available",
+            };
         });
         return { artifacts: result };
     }
     async function computerHistory({ limit = 100 } = {}) {
-        const rows = await runtime.audit.readAll(); const result = [];
+        if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("computer history limit must be 1..500");
+        const activeRuntime = resolveRuntime();
+        if (!activeRuntime?.audit?.readAll) throw new Error("computer history audit is unavailable");
+        const rows = await activeRuntime.audit.readAll(); const result = [];
         for (const row of rows.slice(-Math.min(500, Math.max(1, limit * 4))).reverse()) {
-            const type = String(row?.type ?? ""); if (!/(?:^|[._:-])(computer|takeover|task|job)(?:[._:-]|$)/i.test(type)) continue;
-            const data = row?.data && typeof row.data === "object" ? row.data : {}; const forbidden = JSON.stringify(data).match(/token|secret|password|cookie|session|credential|webdriver|profile|lease|path|coord|typed/i); if (forbidden) continue;
-            const status = data.ok === false || /failed|error|rejected/i.test(type) ? "failed" : /attention|takeover|paused/i.test(type) ? "attention" : "completed";
-            result.push({ id: row.id, activity: safeHistoryText(data.activity ?? type), coworkerId: typeof data.coworkerId === "string" ? data.coworkerId : undefined, summary: safeHistoryText(data.summary ?? data.action ?? data.title ?? type), app: data.app ? safeHistoryText(data.app, 80) : undefined, site: data.site ? safeHistoryText(data.site, 180) : undefined, timestamp: row.at, status });
+            const type = String(row?.type ?? "");
+            if (!/(?:^|[._:-])(computer|takeover|task|job)(?:[._:-]|$)/i.test(type)) continue;
+            // Secret, auth and continuity records are deliberately not activity
+            // history. Do not make the decision from arbitrary values: only the
+            // event name and a small data allowlist are used below.
+            if (/secret|credential|auth|login|session|webdriver|continuity/i.test(type)) continue;
+            const data = row?.data && typeof row.data === "object" && !Array.isArray(row.data) ? row.data : {};
+            const status = data.ok === false || /failed|error|rejected|denied/i.test(type) ? "failed" : /attention|takeover|paused|help_requested/i.test(type) ? "attention" : /requested/i.test(type) ? "requested" : "completed";
+            const source = /computer/i.test(type) ? "computer" : /takeover/i.test(type) ? "takeover" : /task|job/i.test(type) ? "task" : "audit";
+            const activity = data.activity ?? data.operation ?? data.action ?? type;
+            const summary = data.summary ?? data.intent ?? data.title ?? data.action ?? data.operation ?? type;
+            const coworkerId = safeOpaqueId(data.coworkerId) ?? safeOpaqueId(data.agentId) ?? safeOpaqueId(row?.actor);
+            result.push({ id: safeOpaqueId(row?.id) ?? `history-${result.length + 1}`, eventType: safeHistoryText(type, 100), source, activity: safeHistoryText(activity), coworkerId, summary: safeHistoryText(summary), app: data.app ? safeHistoryText(data.app, 80) : undefined, site: data.site ? safeHistoryText(data.site, 180) : undefined, timestamp: typeof row?.at === "string" ? row.at : undefined, status });
             if (result.length >= limit) break;
         }
         return { history: result };
     }
     function recipeFor(packId) { return state.packRecipes.find((entry) => entry.recipe.id === String(packId)); }
     function findInstalledTeam(packId) { return teamService.list().teams.find((team) => team.packId === String(packId)); }
-    function sourceRecipe(packId) { const saved = recipeFor(packId); if (saved) return normalizePack(saved.recipe); const team = findInstalledTeam(packId); if (!team) throw new Error(`unknown team pack: ${packId}`); return normalizePack(teamService.exportPack(team.id)); }
-    function saveRecipe(recipe) { const current = recipeFor(recipe.id); if (current) current.recipe = recipe; else state.packRecipes.push({ recipe, updatedAt: now() }); save(); return clone(recipe); }
+    function sourceRecipe(packId) {
+        const saved = recipeFor(packId);
+        if (saved) return normalizePack(saved.recipe);
+        if (typeof teamService.exportPackRecipe === "function") return normalizePack(teamService.exportPackRecipe(packId));
+        const team = findInstalledTeam(packId);
+        if (!team) throw new Error(`unknown team pack: ${packId}`);
+        return normalizePack(teamService.exportPack(team.id));
+    }
+    function saveRecipe(recipe) {
+        const current = recipeFor(recipe.id);
+        if (current) {
+            current.recipe = recipe;
+            current.updatedAt = now();
+        }
+        else {
+            if (state.packRecipes.length >= MAX_PACK_RECIPES) throw new Error(`team pack recipe limit reached (${MAX_PACK_RECIPES})`);
+            state.packRecipes.push({ recipe, updatedAt: now() });
+        }
+        save();
+        return clone(recipe);
+    }
     function duplicatePack(packId) { const source = sourceRecipe(packId); return saveRecipe(normalizePack(source, { generatedId: `custom-pack-${randomBytes(6).toString("hex")}` })); }
-    function editPack(packId, patch) { const source = sourceRecipe(packId); if (!String(packId).startsWith("custom") && !recipeFor(packId)) throw new Error("only custom team pack recipes can be edited"); return saveRecipe(normalizePack({ ...source, ...patch, id: source.id })); }
-    function recipeList() { return state.packRecipes.map((entry) => ({ id: entry.recipe.id, name: entry.recipe.name, description: entry.recipe.description, coworkerNames: entry.recipe.coworkers.map((item) => item.name), channelNames: entry.recipe.channels.map((item) => item.name), playbookNames: entry.recipe.playbooks.map((item) => item.name), installed: teamService.list().teams.some((team) => team.packId === entry.recipe.id || team.packId === `imported:${entry.recipe.id}`), custom: true })); }
+    function editPack(packId, patch) {
+        const source = sourceRecipe(packId);
+        const packKey = String(packId);
+        const installed = teamService.list().teams.some((team) => team.packId === packKey);
+        if (!packKey.startsWith("custom") && !recipeFor(packId) && !installed) throw new Error("only custom team pack recipes can be edited");
+        return saveRecipe(normalizePack({ ...source, ...patch, id: source.id }));
+    }
+    function recipeList() { return state.packRecipes.map((entry) => ({ id: entry.recipe.id, name: entry.recipe.name, description: entry.recipe.description, category: "Custom", coworkerNames: entry.recipe.coworkers.map((item) => item.name), channelNames: entry.recipe.channels.map((item) => item.name), playbookNames: entry.recipe.playbooks.map((item) => item.name), installed: teamService.list().teams.some((team) => team.packId === entry.recipe.id || team.packId === `imported:${entry.recipe.id}`), custom: true })); }
     return { listPlaybooks, createPlaybook, updatePlaybook, archivePlaybook: (id) => setPlaybookState(id, "archived"), restorePlaybook: (id) => setPlaybookState(id, "active"), duplicatePlaybook, importPlaybook, exportPlaybook, assignPlaybook, artifactHub, computerHistory, recipeList, duplicatePack, editPack, getPackRecipe: (id) => sourceRecipe(id), exportPack: (id) => sourceRecipe(id) };
 }

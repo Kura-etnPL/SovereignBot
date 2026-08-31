@@ -16,6 +16,7 @@ const SKILL_CHANNELS = Object.freeze({
     "skill:export": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:import": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 24_000 }),
     "skill:duplicate": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "skill:retest": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
 const TEACH_CHANNELS = Object.freeze({
     "teach:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
@@ -37,6 +38,7 @@ const ROUTINE_CHANNELS = Object.freeze({
     "routine:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:get": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:history": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "routine:runNow": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:setEnabled": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:remove": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
@@ -178,6 +180,7 @@ function validateSkillRequest(channel, payload) {
         case "skill:restore":
         case "skill:export":
         case "skill:duplicate":
+        case "skill:retest":
             exactKeys(payload, new Set(["skillId"]), channel);
             return { skillId: skillId(payload.skillId) };
         case "skill:assign":
@@ -310,7 +313,7 @@ function validateRoutineRequest(channel, payload) {
         exactKeys(payload, new Set(), channel);
         return {};
     }
-    if (["routine:get", "routine:history", "routine:remove"].includes(channel)) {
+    if (["routine:get", "routine:history", "routine:runNow", "routine:remove"].includes(channel)) {
         exactKeys(payload, new Set(["routineId"]), channel);
         return { routineId: routineId(payload.routineId) };
     }

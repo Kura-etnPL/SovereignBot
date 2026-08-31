@@ -27,6 +27,7 @@ export function createSkillHandlers({ skillStore, conversationStore, dispatchMes
         "skill:export": ({ skillId }) => skillStore.exportSkill(skillId),
         "skill:import": ({ skill }) => skillStore.importSkill(skill),
         "skill:duplicate": ({ skillId }) => skillStore.duplicateSkill(skillId),
+        "skill:retest": ({ skillId }) => skillStore.retestSkill(skillId),
         "conversation:send": ({ conversationId, text, mentions, replyTo, artifactIds, clientMessageId, skillIds = [] }) => {
             if (isConversationArchived?.(conversationId)) throw new Error("archived channel is read-only");
             for (const skillId of skillIds)

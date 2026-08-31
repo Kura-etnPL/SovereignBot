@@ -156,7 +156,7 @@ async function main() {
     let coworkerDispatcher;
     let teachOnce;
     let externalTeamControl;
-    const productSurfaces = createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime: host.runtime });
+    const productSurfaces = createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime: host.runtime, getRuntime: () => host.runtime });
     const blockedConversations = new Set();
     let quitting = false;
     let shutdownStarted = false;
@@ -390,7 +390,14 @@ async function main() {
                     const updated = coworkerStore.restore(coworkerId);
                     return { coworker: updated, refresh: await refreshCoworkerRuntime() };
                 },
-                "team:list": () => { const listed = teamService.list(); const known = new Set(listed.packs.map((pack) => pack.id)); return { ...listed, packs: [...listed.packs, ...productSurfaces.recipeList().filter((pack) => !known.has(pack.id))] }; },
+                "team:list": () => {
+                    const listed = teamService.list();
+                    const recipes = productSurfaces.recipeList();
+                    const recipeById = new Map(recipes.map((pack) => [pack.id, pack]));
+                    const packs = listed.packs.map((pack) => recipeById.has(pack.id) ? { ...pack, ...recipeById.get(pack.id) } : pack);
+                    const known = new Set(packs.map((pack) => pack.id));
+                    return { ...listed, packs: [...packs, ...recipes.filter((pack) => !known.has(pack.id))] };
+                },
                 "team:get": ({ teamId }) => teamService.get(teamId),
                 "team:installPack": async ({ packId }) => {
                     const result = productSurfaces.recipeList().some((pack) => pack.id === packId)
@@ -493,6 +500,7 @@ async function main() {
                 "routine:list": () => routines.list(),
                 "routine:get": ({ routineId }) => routines.get(routineId),
                 "routine:history": ({ routineId }) => routines.history(routineId),
+                "routine:runNow": ({ routineId }) => routines.runNow(routineId),
                 "routine:setEnabled": ({ routineId, enabled }) => {
                     const result = routines.setEnabled(routineId, enabled);
                     eventTriggers?.reconcile();

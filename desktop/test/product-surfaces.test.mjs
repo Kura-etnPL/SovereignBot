@@ -26,8 +26,8 @@ test("product surfaces provide safe playbook, artifact, computer, and pack proje
   const service = createProductSurfaceService({
     dataDir: mkdtempSync(join(tmpdir(), "sovereign-product-")), teamService,
     coworkerStore: { get: (id) => ({ id, name: id === "coworker_1111111111111111" ? "Coding Lead" : "Coworker" }) },
-    artifactStore: { list: () => ({ artifacts: [{ id: "artifact_1111111111111111", title: "result", fileName: "result.md", mimeType: "text/markdown", size: 10, createdAt: "2026-09-01T00:00:00.000Z", createdByCoworkerId: "coworker_1111111111111111", conversationId: "conv_1111111111111111", storageRelativePath: "secret", sourceRelativePath: "private/result.md" }, { id: "artifact_2222222222222222", title: "loose", fileName: "loose.md", mimeType: "text/markdown", size: 5, createdAt: "2026-09-01T00:00:00.000Z" }] }) },
-    runtime: { audit: { readAll: async () => [{ id: "audit_1", at: "2026-09-01T00:00:00.000Z", type: "computer.action_succeeded", data: { action: "click", app: "Browser", ok: true } }, { id: "audit_2", at: "2026-09-01T00:00:00.500Z", type: "task.completed", data: { title: "Review result", app: "Editor", ok: true } }, { id: "audit_3", at: "2026-09-01T00:00:01.000Z", type: "computer.secret_supplied", data: { password: "never-show" } }] } },
+    artifactStore: { list: () => ({ artifacts: [{ id: "artifact_1111111111111111", title: "result C:\\private\\takeover.txt token=never-show", fileName: "result.md", mimeType: "text/markdown", size: 10, createdAt: "2026-09-01T00:00:00.000Z", createdByCoworkerId: "coworker_1111111111111111", conversationId: "conv_1111111111111111", storageRelativePath: "secret", sourceRelativePath: "private/result.md" }, { id: "artifact_2222222222222222", title: "loose", fileName: "loose.md", mimeType: "text/markdown", size: 5, createdAt: "2026-09-01T00:00:00.000Z" }] }) },
+    runtime: { audit: { readAll: async () => [{ id: "audit_1", at: "2026-09-01T00:00:00.000Z", type: "computer.action_succeeded", data: { action: "click", app: "Browser", ok: true } }, { id: "audit_2", at: "2026-09-01T00:00:00.500Z", type: "task.completed", data: { title: "Review result", app: "Editor", ok: true } }, { id: "audit_4", at: "2026-09-01T00:00:00.750Z", type: "computer.action_failed", actor: "coworker_1111111111111111", data: { operation: "click", intent: "Review result", app: "Browser", error: "C:\\private\\takeover.txt token=never-show" } }, { id: "audit_3", at: "2026-09-01T00:00:01.000Z", type: "computer.secret_supplied", data: { password: "never-show" } }] } },
     now: () => "2026-09-01T00:00:02.000Z",
   });
   const library = service.listPlaybooks();
@@ -39,8 +39,15 @@ test("product surfaces provide safe playbook, artifact, computer, and pack proje
   service.updatePlaybook("delivery", { name: "Delivery updated", description: "Updated", steps: ["chief", "reviewer"] });
   assert.equal(team.playbooks.find((entry) => entry.id === "delivery").name, "Delivery updated");
   assert.equal(service.artifactHub().artifacts[0].storageRelativePath, undefined);
+  assert.equal(service.artifactHub().artifacts[0].sourceRelativePath, undefined);
+  assert.equal(JSON.stringify(service.artifactHub()).includes("C:\\private"), false);
+  assert.equal(JSON.stringify(service.artifactHub()).includes("never-show"), false);
   assert.equal(service.artifactHub({ teamId: team.id }).artifacts.some((entry) => entry.id === "artifact_2222222222222222"), false);
-  assert.equal((await service.computerHistory()).history.length, 2);
+  const history = await service.computerHistory();
+  assert.equal(history.history.length, 3);
+  assert.equal(history.history.some((entry) => entry.eventType === "computer.action_failed" && entry.status === "failed" && entry.coworkerId === "coworker_1111111111111111"), true);
+  assert.equal(JSON.stringify(history).includes("C:\\private"), false);
+  assert.equal(JSON.stringify(history).includes("never-show"), false);
   const pack = service.duplicatePack("custom-team");
   assert.match(pack.id, /^custom-pack-/);
   assert.equal(service.editPack(pack.id, { name: "Edited" }).name, "Edited");
@@ -52,8 +59,13 @@ test("skill transfer is declarative and duplicate starts unassigned", () => {
   const source = store.create({ name: "Review", description: "Safe review", instructions: "Review the result", steps: ["check"], requestedCapabilities: ["workspace"] });
   const exported = store.exportSkill(source.id);
   assert.equal(exported.assignedTeamIds, undefined);
-  const imported = store.importSkill(exported).skill;
+  const imported = store.importSkill({ ...exported, source: "imported" }).skill;
   const duplicate = store.duplicateSkill(source.id);
+  const retested = store.retestSkill(source.id);
   assert.equal(imported.assignedTeamIds.length, 0);
   assert.equal(duplicate.assignedTeamIds.length, 0);
+  assert.equal(imported.source, "imported");
+  assert.equal(retested.tested, true);
+  assert.equal(retested.mode, "declarative-validation");
+  assert.ok(retested.skill.lastTestedAt);
 });
