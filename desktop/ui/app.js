@@ -20,6 +20,8 @@ const state = {
   replyTo: undefined,
   redirectMode: false,
   voice: { listening: false },
+  editingCoworkerId: undefined,
+  editingCoworkerSnapshot: undefined,
   pollTimer: undefined,
   conversationSignature: undefined,
 };
@@ -653,7 +655,12 @@ function renderDetails(conversation) {
     avatar.textContent = avatarFor(coworker);
     const name = document.createElement("span");
     name.textContent = coworker.name;
-    row.append(avatar, name);
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "message-action member-edit";
+    edit.textContent = "Edit / 编辑";
+    edit.addEventListener("click", () => openCoworkerDialog(coworker));
+    row.append(avatar, name, edit);
     membersEl.append(row);
   }
 
@@ -1121,6 +1128,44 @@ function openDialog(id) {
   if (dialog?.showModal) dialog.showModal();
 }
 
+function resetCoworkerDialog() {
+  state.editingCoworkerId = undefined;
+  state.editingCoworkerSnapshot = undefined;
+  $("coworker-dialog-eyebrow").textContent = "NEW COWORKER / 新建同事";
+  $("coworker-dialog-title").textContent = "Who are you adding?";
+  $("coworker-save").textContent = "Create coworker";
+  $("coworker-advanced-help").textContent = "Optional safe binding hints. These select a provider/model; they never grant tools or permissions.";
+  $("coworker-state-field").classList.add("hidden");
+  document.querySelector("#coworker-dialog .quick-role-row")?.classList.remove("hidden");
+  for (const id of ["coworker-advanced-provider", "coworker-advanced-account", "coworker-advanced-model"]) $(id).disabled = false;
+  $("coworker-form")?.reset();
+}
+
+function openCoworkerDialog(coworker) {
+  populateCoworkerAdvanced();
+  state.editingCoworkerId = coworker?.id;
+  state.editingCoworkerSnapshot = coworker ? structuredClone(coworker) : undefined;
+  $("coworker-dialog-eyebrow").textContent = "EDIT COWORKER / 编辑同事";
+  $("coworker-dialog-title").textContent = "Shape how this coworker works";
+  $("coworker-save").textContent = "Save changes / 保存修改";
+  $("coworker-advanced-help").textContent = "Existing provider/account/model binding is preserved while editing. Change the profile above to replace it safely.";
+  $("coworker-state-field").classList.remove("hidden");
+  document.querySelector("#coworker-dialog .quick-role-row")?.classList.add("hidden");
+  $("coworker-name").value = coworker?.name ?? "";
+  $("coworker-role").value = coworker?.role ?? "";
+  $("coworker-instructions").value = coworker?.instructions ?? "";
+  $("coworker-provider").value = coworker?.modelBinding?.profile ?? "automatic";
+  $("coworker-state").value = coworker?.state === "paused" ? "paused" : "active";
+  $("coworker-workspace").value = coworker?.workspaceIds?.[0] ?? "";
+  $("coworker-computer-profile").value = coworker?.computerProfileId ?? "";
+  $("coworker-advanced-provider").value = "";
+  $("coworker-advanced-account").value = "";
+  $("coworker-advanced-model").value = "";
+  for (const id of ["coworker-advanced-provider", "coworker-advanced-account", "coworker-advanced-model"]) $(id).disabled = true;
+  hide($("coworker-form-error"));
+  openDialog("coworker-dialog");
+}
+
 function populateCoworkerAdvanced() {
   const select = $("coworker-workspace");
   if (!select) return;
@@ -1172,7 +1217,7 @@ function applyCoworkerRolePreset(roleKey) {
   $("coworker-provider").value = preset.profile;
 }
 
-async function createCoworker(event) {
+async function saveCoworker(event) {
   event.preventDefault();
   hide($("coworker-form-error"));
   try {
@@ -1181,25 +1226,39 @@ async function createCoworker(event) {
     const providerAccountId = $("coworker-advanced-account").value.trim();
     const model = $("coworker-advanced-model").value.trim();
     if (!provider && (providerAccountId || model)) throw new Error("Choose a provider before pinning an account or model.");
-    const result = await window.sovereignbot.coworkers.create({
-        coworker: {
+    const fields = {
           name: $("coworker-name").value.trim(),
           role: $("coworker-role").value.trim(),
           instructions: $("coworker-instructions").value.trim(),
-          modelBinding: {
-            profile,
-            ...(provider ? { provider } : {}),
-            ...(providerAccountId ? { providerAccountId } : {}),
-            ...(model ? { model } : {}),
-          },
-          ...($("coworker-workspace").value ? { workspaceIds: [$("coworker-workspace").value] } : {}),
-          ...($("coworker-computer-profile").value.trim() ? { computerProfileId: $("coworker-computer-profile").value.trim() } : {}),
-        },
-    });
+          ...(!state.editingCoworkerId ? {
+            modelBinding: {
+              profile,
+              ...(provider ? { provider } : {}),
+              ...(providerAccountId ? { providerAccountId } : {}),
+              ...(model ? { model } : {}),
+            },
+            ...($("coworker-workspace").value ? { workspaceIds: [$("coworker-workspace").value] } : {}),
+            ...($("coworker-computer-profile").value.trim() ? { computerProfileId: $("coworker-computer-profile").value.trim() } : {}),
+          } : {
+            ...(profile !== state.editingCoworkerSnapshot?.modelBinding?.profile ? { modelBinding: { profile } } : {}),
+            ...(JSON.stringify($("coworker-workspace").value ? [$("coworker-workspace").value] : []) !== JSON.stringify(state.editingCoworkerSnapshot?.workspaceIds ?? [])
+              ? { workspaceIds: $("coworker-workspace").value ? [$("coworker-workspace").value] : [] } : {}),
+            ...($("coworker-computer-profile").value.trim() !== (state.editingCoworkerSnapshot?.computerProfileId ?? "")
+              ? { computerProfileId: $("coworker-computer-profile").value.trim() || undefined } : {}),
+            ...($("coworker-state").value !== (state.editingCoworkerSnapshot?.state ?? "active")
+              ? { state: $("coworker-state").value } : {}),
+          }),
+    };
+    const wasEditing = Boolean(state.editingCoworkerId);
+    const result = wasEditing
+      ? await window.sovereignbot.coworkers.update({ coworkerId: state.editingCoworkerId, patch: fields })
+      : await window.sovereignbot.coworkers.create({ coworker: fields });
     $("coworker-dialog").close();
-    $("coworker-form").reset();
-    await Promise.all([refreshCoworkers(), refreshRoster()]);
-    if (result?.coworker?.id) await openDirect(result.coworker.id);
+    const createdId = result?.coworker?.id;
+    resetCoworkerDialog();
+    await Promise.all([refreshCoworkers(), refreshConversations(), refreshTeams(), refreshRoster()]);
+    if (!wasEditing && createdId) await openDirect(createdId);
+    else if (state.selectedConversation) renderDetails(state.selectedConversation);
   } catch (error) {
     $("coworker-form-error").textContent = text(error?.message || error).replace(/^.*Error: /, "");
     show($("coworker-form-error"));
@@ -1442,7 +1501,7 @@ function showToastError(error) {
 }
 
 function bindEvents() {
-  $("new-coworker").addEventListener("click", () => { populateCoworkerAdvanced(); openDialog("coworker-dialog"); });
+  $("new-coworker").addEventListener("click", () => { resetCoworkerDialog(); populateCoworkerAdvanced(); openDialog("coworker-dialog"); });
   $("refresh-coworkers").addEventListener("click", () => Promise.all([refreshCoworkers(), refreshConversations(), refreshRoster()]));
   $("new-team").addEventListener("click", () => { populateTeamPicker(); openDialog("team-dialog"); });
   $("welcome-create-team").addEventListener("click", () => { populateTeamPicker(); openDialog("team-dialog"); });
@@ -1461,7 +1520,7 @@ function bindEvents() {
     const chief = state.coworkers.find((entry) => /chief of staff/i.test(entry.name)) ?? state.coworkers[0];
     if (chief) openDirect(chief.id);
   });
-  $("coworker-form").addEventListener("submit", createCoworker);
+  $("coworker-form").addEventListener("submit", saveCoworker);
   $("team-form").addEventListener("submit", createTeam);
   for (const button of document.querySelectorAll(".quick-role")) button.addEventListener("click", () => applyCoworkerRolePreset(button.dataset.role));
   for (const button of document.querySelectorAll("[data-close-dialog]")) {
