@@ -48,7 +48,7 @@
     for (const item of items) { const card = document.createElement("article"); card.className = "settings-card"; const h = document.createElement("h3"); h.textContent = item.activity; card.append(h, line("Activity", item.summary), line("App", item.app), line("Site", item.site), line("Time", item.timestamp), line("Status", item.status)); root.append(card); }
     if (!items.length) { const p = document.createElement("p"); p.textContent = "No safe Computer activity recorded yet."; root.append(p); }
   }
-  function renderChannels(items, teams, conversations) {
+  function renderChannels(items, teams, conversations, templates) {
     const root = $("product-channels");
     const filter = $("product-channel-filter");
     const switcher = $("product-channel-switch");
@@ -97,6 +97,11 @@
       actions.append(button(channel.archived ? "View / 查看" : "Open / 打开", () => {
         if (channel.conversationId && typeof openConversation === "function") void openConversation(channel.conversationId);
       }));
+      actions.append(button("Duplicate / 复制", async () => {
+        await api.channels.create({ teamId: channel.teamId, name: `${channel.name} copy`.slice(0, 120), kind: channel.kind, instructions: channel.instructions, workspaceId: channel.workspaceId, playbookId: channel.playbookId });
+        if (typeof refreshConversations === "function" && typeof refreshTeams === "function") await Promise.all([refreshConversations(), refreshTeams()]);
+        await refresh();
+      }));
       actions.append(button(channel.archived ? "Restore / 恢复" : "Archive / 归档", async () => {
         await (channel.archived ? api.channels.restore : api.channels.archive)({ channelId: channel.id });
         if (typeof refreshConversations === "function" && typeof refreshTeams === "function") await Promise.all([refreshConversations(), refreshTeams()]);
@@ -106,6 +111,16 @@
       root.append(card);
     }
     if (!visible.length) { const p = document.createElement("p"); p.textContent = mode === "archived" ? "No archived channels." : "No active channels yet."; root.append(p); }
+    const teamSelect = $("product-channel-template-team");
+    const templateSelect = $("product-channel-template");
+    if (teamSelect && templateSelect) {
+      const selectedTeam = teamSelect.value;
+      teamSelect.textContent = "";
+      for (const team of teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = team.name; teamSelect.append(option); }
+      if ([...teamSelect.options].some((option) => option.value === selectedTeam)) teamSelect.value = selectedTeam;
+      templateSelect.textContent = "";
+      for (const template of templates ?? []) { const option = document.createElement("option"); option.value = template.id; option.textContent = `${template.name} / ${template.kind}`; templateSelect.append(option); }
+    }
   }
   function renderSkills(items) {
     const root = $("product-skills"); clear(root);
@@ -130,7 +145,7 @@
     }
     const scope = filter?.value ?? "recent"; const artifactPayload = { limit: 100 }; if (scope.startsWith("team:")) artifactPayload.teamId = scope.slice(5); if (scope.startsWith("channel:")) artifactPayload.channelId = scope.slice(8); if (scope.startsWith("coworker:")) artifactPayload.coworkerId = scope.slice(9);
     const [playbooks, artifacts, history, skills, channels, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations.list({})]);
-    renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? []); renderSkills(skills.skills ?? []); renderPacks(teams.packs ?? []);
+    renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? [], teams.channelTemplates ?? []); renderSkills(skills.skills ?? []); renderPacks(teams.packs ?? []);
   }
   async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description") ?? ""; const rawSteps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; await api.playbooks.create({ playbook: { name, description, steps: rawSteps.split(",").map((x) => x.trim()).filter(Boolean) } }); await refresh(); }
   function setup() { const artifactRoot = $("product-artifacts"); const heading = artifactRoot?.parentElement?.querySelector(".card-heading"); if (heading && !$("artifact-hub-filter")) { const filter = document.createElement("select"); filter.id = "artifact-hub-filter"; filter.setAttribute("aria-label", "Artifact filter"); const option = document.createElement("option"); option.value = "recent"; option.textContent = "Recent / 最近"; filter.append(option); heading.append(filter); } $("nav-product-hubs")?.addEventListener("click", async () => { switchView("product-hubs"); try { await refresh(); } catch (e) { error($("product-playbooks"), e); } }); $("product-hubs-refresh")?.addEventListener("click", () => void refresh()); $("artifact-hub-filter")?.addEventListener("change", () => void refresh()); $("product-channel-filter")?.addEventListener("change", () => void refresh()); $("product-channel-switch")?.addEventListener("change", (event) => { if (event.target.value && typeof openConversation === "function") void openConversation(event.target.value); }); $("playbook-create")?.addEventListener("click", () => void createPlaybook()); }
@@ -147,5 +162,29 @@
     input.setAttribute("aria-label", "Search Team Packs");
     input.addEventListener("input", () => void refresh());
     heading.append(input);
+  });
+  window.addEventListener("DOMContentLoaded", () => {
+    const root = $("product-channels");
+    const heading = root?.parentElement?.querySelector(".card-heading");
+    if (!heading || $("product-channel-template-team")) return;
+    const controls = document.createElement("div");
+    controls.className = "detail-actions";
+    const team = document.createElement("select");
+    team.id = "product-channel-template-team";
+    team.setAttribute("aria-label", "Team for channel template");
+    const template = document.createElement("select");
+    template.id = "product-channel-template";
+    template.setAttribute("aria-label", "Channel template");
+    const add = button("From template / 从模板创建", async () => {
+      if (!team.value || !template.value) return;
+      try {
+        const result = await api.teams.createChannelFromTemplate({ teamId: team.value, templateId: template.value });
+        if (typeof refreshConversations === "function" && typeof refreshTeams === "function") await Promise.all([refreshConversations(), refreshTeams()]);
+        await refresh();
+        if (result?.channel?.conversationId && typeof openConversation === "function") await openConversation(result.channel.conversationId);
+      } catch (e) { error(root, e); }
+    });
+    controls.append(team, template, add);
+    heading.append(controls);
   });
 })();
