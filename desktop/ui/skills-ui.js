@@ -271,6 +271,17 @@
         }
       });
       assignment.append(select);
+      const routine = el("button", "quiet-action skill-routine-button", "Create Routine / 创建例行任务");
+      routine.type = "button";
+      routine.title = "Turn this verified skill into a scheduled routine";
+      routine.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        document.dispatchEvent(new CustomEvent("sovereignbot:create-routine-from-skill", {
+          detail: { skillId: skill.id },
+        }));
+      });
+      assignment.append(routine);
       body.append(assignment);
       row.append(checkbox, icon, body);
       list.append(row);

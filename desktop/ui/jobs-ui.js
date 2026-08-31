@@ -434,6 +434,29 @@
     showScheduleFields();
   }
 
+  async function createRoutineFromSkill(skillId) {
+    if (typeof skillId !== "string" || !skillId) return;
+    const error = $("routine-form-error");
+    error?.classList.add("hidden");
+    try {
+      const skill = await window.sovereignbot.skills.get({ skillId });
+      await populateRoutineForm();
+      $("routine-name").value = `Routine · ${skill.name}`.slice(0, 120);
+      $("routine-instruction").value = String(skill.instructions ?? "").slice(0, 8000);
+      $("routine-skill").value = skill.id;
+      const preferredOwner = (skill.assignedCoworkerIds ?? []).find((id) =>
+        [...($("routine-owner")?.options ?? [])].some((option) => option.value === id));
+      if (preferredOwner) $("routine-owner").value = preferredOwner;
+      showRoutinesView();
+      $("routine-dialog")?.showModal?.();
+    } catch (reason) {
+      if (error) {
+        error.textContent = String(reason?.message ?? reason).replace(/^.*Error: /, "").slice(0, 400);
+        error.classList.remove("hidden");
+      }
+    }
+  }
+
   function showRoutinesView() {
     for (const v of document.querySelectorAll(".main-view")) v.classList.add("hidden");
     $("view-routines")?.classList.remove("hidden");
@@ -522,6 +545,9 @@
         await window.sovereignbot.routines.create({ name: $("routine-name").value.trim(), instruction: $("routine-instruction").value.trim(), coworkerId: $("routine-owner").value, skillId: $("routine-skill").value || undefined, workspaceId: $("routine-workspace").value || undefined, schedule: scheduleFromForm() });
         $("routine-dialog")?.close(); $("routine-form")?.reset(); await refreshRoutines();
       } catch (error) { if (err) { err.textContent = String(error?.message ?? error).replace(/^.*Error: /, "").slice(0,400); err.classList.remove("hidden"); } }
+    });
+    document.addEventListener("sovereignbot:create-routine-from-skill", (event) => {
+      void createRoutineFromSkill(event.detail?.skillId);
     });
     for (const b of document.querySelectorAll("[data-close-dialog]")) b.addEventListener("click", () => $(b.dataset.closeDialog)?.close());
   }

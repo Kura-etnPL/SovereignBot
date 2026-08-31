@@ -15,6 +15,7 @@
 .skill-assignment-label { color: var(--text-3); font-size: 10px; }
 .skill-assignment-chip { border: 1px solid var(--line); border-radius: 999px; padding: 2px 6px; background: var(--panel); color: var(--text-2); font-size: 10px; cursor: pointer; }
 .skill-assignment-select { max-width: 180px; border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px; background: var(--panel); color: var(--text-2); font-size: 10px; }
+.skill-routine-button { min-height: 22px; padding: 0 7px; font-size: 9px; }
 .skill-option-copy strong, .skill-option-copy span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .skill-option-copy strong { font-size: 11.5px; }
 .skill-option-copy span { margin-top: 2px; color: var(--text-3); font-size: 9.5px; }
