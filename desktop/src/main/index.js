@@ -26,6 +26,8 @@ import { attachWindowLifecycle } from "./lifecycle.js";
 import { createTrayController } from "./tray.js";
 import { createWorkerNodeStore } from "./worker-node-store.js";
 import { createTeamService } from "./team-service.js";
+import { createConnectedAppsService } from "./connected-apps.js";
+import { createExternalTeamControlServer } from "./external-team-control.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -113,6 +115,8 @@ async function main() {
         conversationStore,
         services,
     });
+    conversationStore.setTeamRouteResolver((conversation) => teamService.currentOwnerForConversation(conversation.id));
+    const connectedApps = createConnectedAppsService({ dataDir, teamService, coworkerStore });
 
     let host;
     try {
@@ -120,6 +124,7 @@ async function main() {
             dataDir,
             getSettings: () => services.getSettings(),
             getCoworkers: () => (coworkerStore.listInternal?.() ?? coworkerStore.list()).coworkers,
+            getCoworkerAppAccess: (coworkerId) => connectedApps.assignedToolsForCoworker(coworkerId),
             workerNodeClientResolver: (nodeId) => workerNodeStore.client(nodeId),
         });
     }
@@ -140,6 +145,8 @@ async function main() {
     let eventTriggers;
     let chiefLoop;
     let coworkerDispatcher;
+    let externalTeamControl;
+    const blockedConversations = new Set();
     let quitting = false;
     let shutdownStarted = false;
     const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -152,6 +159,7 @@ async function main() {
         try { eventTriggers?.stop(); } catch {}
         try { routines?.stop(); } catch {}
         try { chiefLoop?.stop(); } catch {}
+        try { await Promise.race([externalTeamControl?.close?.() ?? Promise.resolve(), delay(5_000)]); } catch {}
         try {
             await Promise.race([coworkerDispatcher?.flush?.() ?? Promise.resolve(), delay(15_000)]);
             if (goals) {
@@ -243,11 +251,37 @@ async function main() {
             artifactStore,
             services,
             teamFlow: teamService,
+            isConversationBlocked: (conversationId) => blockedConversations.has(conversationId),
         });
     }
 
     const firstRun = createFirstRunService({ host, services });
     rebuildRuntimeBoundServices();
+
+    const configuredExternalPort = process.env.SOVEREIGNBOT_EXTERNAL_TEAM_CONTROL_PORT;
+    const externalPort = configuredExternalPort === undefined ? 0 : Number(configuredExternalPort);
+    if (!Number.isInteger(externalPort) || externalPort < 0 || externalPort > 65_535)
+        throw new Error("SOVEREIGNBOT_EXTERNAL_TEAM_CONTROL_PORT must be an integer from 0 to 65535");
+    externalTeamControl = createExternalTeamControlServer({
+        host: "127.0.0.1",
+        port: externalPort,
+        authenticate: (token) => host.runtime.operatorSessions.authenticate(token),
+        dataDir,
+        teamService,
+        coworkerStore,
+        conversationStore,
+        artifactStore,
+        dispatchMessage: (conversationId, messageId) => coworkerDispatcher.dispatchMessage(conversationId, messageId),
+        blockConversation: (conversationId) => blockedConversations.add(conversationId),
+        isConversationBlocked: (conversationId) => blockedConversations.has(conversationId),
+        cancelConversation: (conversationId, reason) => coworkerDispatcher.cancelConversation(conversationId, reason),
+    });
+    try {
+        await externalTeamControl.start();
+    }
+    catch (error) {
+        logStartupError("external team control unavailable", error);
+    }
 
     async function applyProviderRefresh(refresh) {
         if (refresh.applied) {
@@ -265,7 +299,7 @@ async function main() {
         bindIpcChannels({
             win,
             handlers: {
-                "app:handshake": async () => ({ ok: true, version: desktopVersion(), platform: process.platform, locale: app.getLocale(), language: services.getSettings().language }),
+                "app:handshake": async () => ({ ok: true, version: desktopVersion(), platform: process.platform, locale: app.getLocale(), language: services.getSettings().language, externalTeamControl: externalTeamControl?.status?.() }),
                 ...bridge.handlers,
                 "firstrun:getStatus": () => firstRun.getStatus(),
                 "computer:browserStatus": async () => (await firstRun.getStatus()).browsers,
@@ -331,6 +365,12 @@ async function main() {
                 },
                 "channel:list": ({ teamId }) => teamService.listChannels({ teamId }),
                 "channel:get": ({ channelId }) => teamService.getChannel(channelId),
+                "connectedApps:list": () => connectedApps.list(),
+                "connectedApps:assign": async (payload) => {
+                    const app = connectedApps.setAssignment(payload);
+                    const refresh = await refreshCoworkerRuntime();
+                    return { ...app, refresh };
+                },
                 ...createSkillHandlers({
                     skillStore,
                     conversationStore,
@@ -339,7 +379,7 @@ async function main() {
                 "conversation:list": () => conversationStore.list(),
                 "conversation:get": ({ conversationId }) => conversationStore.get(conversationId),
                 "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
-                "conversation:createTeam": ({ title, coworkerIds, leadCoworkerId }) => conversationStore.createTeam({ title, coworkerIds, leadCoworkerId }),
+                "conversation:createTeam": ({ title, coworkerIds, leadCoworkerId }) => teamService.createTeam({ title, coworkerIds, leadCoworkerId }).conversation,
                 "artifact:list": ({ conversationId, coworkerId, limit }) => artifactStore.list({ conversationId, coworkerId, limit }),
                 "artifact:get": ({ artifactId }) => artifactStore.get(artifactId),
                 "artifact:preview": ({ artifactId }) => artifactStore.previewText(artifactId),

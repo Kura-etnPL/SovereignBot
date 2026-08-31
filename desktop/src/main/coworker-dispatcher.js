@@ -57,6 +57,7 @@ export function createCoworkerDispatcher({
     artifactStore,
     services,
     teamFlow,
+    isConversationBlocked = () => false,
     persistPath = join(dataDir, "desktop-state", "coworker-dispatch.json"),
     now = () => new Date().toISOString(),
 } = {}) {
@@ -72,6 +73,7 @@ export function createCoworkerDispatcher({
         ? { schema: DISPATCH_SCHEMA, turns: { ...persisted.turns } }
         : { schema: DISPATCH_SCHEMA, turns: {} };
     const chains = new Map();
+    const activeTasks = new Map();
 
     function save() {
         saveJsonState(persistPath, state);
@@ -206,6 +208,8 @@ export function createCoworkerDispatcher({
     }
 
     async function executeDelivery(conversationId, messageId, coworkerId) {
+        if (isConversationBlocked(conversationId))
+            return { ok: false, stopped: true, reason: "conversation is blocked for takeover or cancellation" };
         const coworker = coworkerStore.get(coworkerId);
         if (coworker.state !== "active")
             throw new Error(`${coworker.name} is not active`);
@@ -249,6 +253,12 @@ export function createCoworkerDispatcher({
         }, context, supervisorAgentId);
 
         task = await bindContinuation(task, turn.lastTaskId, binding.agentId, binding.harnessKind, binding.accountNamespace, turn.accountNamespace);
+        const activeKey = stateKey(conversationId, coworkerId);
+        activeTasks.set(activeKey, task.id);
+        if (isConversationBlocked(conversationId)) {
+            await runtime.orchestrator.cancel(task.id, { reason: "conversation was blocked before provider execution", actor: "external-team-control" }).catch(() => {});
+            return { ok: false, taskId: task.id, stopped: true, reason: "conversation is blocked for takeover or cancellation" };
+        }
         await runtime.orchestrator.runUntilIdle();
         const finished = (await runtime.orchestrator.listTasks()).find((entry) => entry.id === task.id);
         if (finished?.status !== "completed") {
@@ -257,6 +267,11 @@ export function createCoworkerDispatcher({
             state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
             save();
             return { ok: false, taskId: task.id, error: detail };
+        }
+
+        if (isConversationBlocked(conversationId)) {
+            conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "automation stopped for takeover or cancellation");
+            return { ok: false, taskId: task.id, stopped: true, reason: "conversation is blocked for takeover or cancellation" };
         }
 
         const rawText = typeof finished.result?.text === "string"
@@ -285,11 +300,22 @@ export function createCoworkerDispatcher({
             taskId: task.id,
         });
         const visibleText = artifactResult.text || (artifactResult.artifactIds.length ? `Created ${artifactResult.artifactIds.length} artifact${artifactResult.artifactIds.length === 1 ? "" : "s"}.` : "Completed the requested work.");
-        const productHandoff = teamFlow?.nextHandoff?.({ conversation, coworkerId, source, replyText: artifactResult.text });
+        const productHandoff = teamFlow?.nextHandoff?.({
+            conversation,
+            coworkerId,
+            source,
+            requestedCoworkerIds: handoffResult.coworkerIds,
+            replyText: artifactResult.text,
+        });
         // A Team Pack may own a bounded playbook sequence.  Its next stage is a
         // product routing decision, not authority supplied by model output; explicit
         // manifests remain available for ordinary user-created teams.
-        const nextCoworkerIds = productHandoff ? [productHandoff] : handoffResult.coworkerIds;
+        const managedTeam = conversation.kind === "team" && teamFlow?.isManagedConversation?.(conversation.id);
+        const nextCoworkerIds = productHandoff
+            ? [productHandoff]
+            : managedTeam
+                ? []
+                : handoffResult.coworkerIds.slice(0, 1);
         const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, {
             text: visibleText.slice(0, MAX_REPLY_TEXT),
             replyTo: source.id,
@@ -326,8 +352,24 @@ export function createCoworkerDispatcher({
         run.finally(() => {
             if (chains.get(key) === run)
                 chains.delete(key);
+            activeTasks.delete(key);
         }).catch(() => {});
         return run;
+    }
+
+    async function cancelConversation(conversationId, reason = "conversation cancelled by external operator") {
+        const prefix = `${conversationId}:`;
+        const taskIds = [...activeTasks.entries()]
+            .filter(([key]) => key.startsWith(prefix))
+            .map(([, taskId]) => taskId);
+        const results = await Promise.allSettled(taskIds.map((taskId) => runtime.orchestrator.cancel(taskId, {
+            reason,
+            actor: "external-team-control",
+        })));
+        return {
+            requested: taskIds.length,
+            cancelled: results.filter((entry) => entry.status === "fulfilled").length,
+        };
     }
 
     function dispatchMessage(conversationId, messageId) {
@@ -335,6 +377,8 @@ export function createCoworkerDispatcher({
         const message = conversation.messages.find((entry) => entry.id === messageId);
         if (!message)
             throw new Error(`unknown message id: ${messageId}`);
+        if (isConversationBlocked(conversationId))
+            return [];
         teamFlow?.onMessageQueued?.({ conversation, message });
         const recipients = Object.entries(message.delivery ?? {})
             .filter(([, delivery]) => delivery?.status === "pending")
@@ -344,6 +388,7 @@ export function createCoworkerDispatcher({
 
     return {
         dispatchMessage,
+        cancelConversation,
         async flush() {
             await Promise.allSettled([...chains.values()]);
         },

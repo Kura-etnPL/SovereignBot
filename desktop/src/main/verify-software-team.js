@@ -60,11 +60,41 @@ export async function runVerifySoftwareTeam({
         throw new Error(`timed out waiting for ${label}: ${JSON.stringify(last)}`);
     };
     const capture = async (name) => {
-        const image = await win.capturePage(undefined, { stayAwake: true });
-        if (!image || image.isEmpty()) throw new Error(`empty screenshot: ${name}`);
+        const attempts = [];
+        let image;
+        try {
+            win.show();
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            image = await win.capturePage(undefined, { stayAwake: true });
+        }
+        catch (error) {
+            attempts.push({ method: "BrowserWindow.capturePage", error: String(error?.message ?? error).slice(0, 300) });
+        }
+        if (!image || image.isEmpty()) {
+            try {
+                const { desktopCapturer } = await import("electron");
+                const bounds = win.getBounds();
+                const sourceId = win.getMediaSourceId();
+                const sources = await desktopCapturer.getSources({
+                    types: ["window"],
+                    thumbnailSize: { width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) },
+                    fetchWindowIcons: false,
+                });
+                const source = sources.find((entry) => entry.id === sourceId) ?? sources.find((entry) => entry.name === win.getTitle());
+                if (!source?.thumbnail || source.thumbnail.isEmpty()) throw new Error("desktopCapturer returned no BrowserWindow thumbnail");
+                image = source.thumbnail;
+            }
+            catch (error) {
+                attempts.push({ method: "desktopCapturer.window", error: String(error?.message ?? error).slice(0, 300) });
+            }
+        }
+        if (!image || image.isEmpty()) throw new Error(`screenshot failed for ${name}: ${JSON.stringify(attempts)}`);
         const path = join(evidenceDir, name);
-        await writeFile(path, image.toPNG());
-        return { name, path, bytes: image.toPNG().length };
+        let png;
+        try { png = image.toPNG(); }
+        catch (error) { throw new Error(`toPNG failed for ${name}: ${String(error?.stack ?? error)}`); }
+        await writeFile(path, png);
+        return { name, path, bytes: png.length };
     };
 
     const result = {
@@ -82,9 +112,17 @@ export async function runVerifySoftwareTeam({
             hasTeams: typeof window.sovereignbot?.teams?.installPack === "function",
             hasChannels: typeof window.sovereignbot?.channels?.list === "function",
             hasSend: typeof window.sovereignbot?.conversations?.send === "function",
+            hasConnectedApps: typeof window.sovereignbot?.connectedApps?.list === "function",
             installButton: !!document.getElementById("welcome-install-software-team")
         })`);
-        check("PRODUCTION_ELECTRON_IPC_SURFACE", boot.protocol === "sovereignbot:" && boot.hasTeams && boot.hasChannels && boot.hasSend && boot.installButton, boot);
+        check("PRODUCTION_ELECTRON_IPC_SURFACE", boot.protocol === "sovereignbot:" && boot.hasTeams && boot.hasChannels && boot.hasSend && boot.hasConnectedApps && boot.installButton, boot);
+        const handshake = await renderer("window.sovereignbot.handshake({})");
+        check("EXTERNAL_TEAM_CONTROL_READY", handshake?.externalTeamControl?.protocol === "sovereignbot.team-control.v1"
+            && handshake.externalTeamControl.transport === "loopback-http"
+            && Number.isInteger(handshake.externalTeamControl.port) && handshake.externalTeamControl.port > 0
+            && handshake.externalTeamControl.methods.includes("submitOutcome")
+            && handshake.externalTeamControl.methods.includes("getOutcomeStatus")
+            && handshake.externalTeamControl.methods.includes("requestTakeover"), handshake?.externalTeamControl);
 
         const initialTeams = await renderer("window.sovereignbot.teams.list({})");
         check("FRESH_TEAM_INSTALL_STATE", initialTeams?.teams?.length === 0, { teamCount: initialTeams?.teams?.length ?? -1 });
@@ -119,6 +157,12 @@ export async function runVerifySoftwareTeam({
         check("PUBLIC_WORKSPACE_REDACTION", publicWorkspaceShape(publicState.workspaces?.workspaces) && !containsAny(publicState.workspaces, ["path", dataDir]), { workspaceCount: publicState.workspaces?.workspaces?.length ?? -1 });
         check("PUBLIC_TEAM_SURFACE_REDACTION", !containsAny(publicText, [dataDir, ...FORBIDDEN_PUBLIC_MARKERS]), { forbidden: containsAny(publicText, [dataDir, ...FORBIDDEN_PUBLIC_MARKERS]) ?? null });
 
+        const connectedApps = await renderer("window.sovereignbot.connectedApps.list({})");
+        check("CONNECTED_APPS_PRODUCT_SURFACE", connectedApps?.apps?.length >= 2
+            && connectedApps.apps.some((entry) => entry.id === "sovereignbot-computer" && entry.name.includes("This PC") && entry.authority === "Governor-controlled")
+            && connectedApps.apps.some((entry) => entry.id === "sovereignbot-workspace" && entry.authority === "Governor-controlled")
+            && !containsAny(connectedApps, [dataDir, "governedTools", "profileDir", "workspacePath"]), connectedApps);
+
         const internalCoworkers = getCoworkerStore().listInternal().coworkers;
         const services = getServices();
         const sharedPath = services.workspacePath(team.sharedWorkspaceId);
@@ -142,7 +186,21 @@ export async function runVerifySoftwareTeam({
         await new Promise((resolve) => setTimeout(resolve, 200));
         const normalDetails = await renderer("document.getElementById('details-panel')?.innerText || ''");
         check("NORMAL_UI_MODEL_PROFILE_ONLY", /Model profile \/ 模型档位/i.test(normalDetails) && !/\bCodex\b|Claude Code|provider/i.test(normalDetails), normalDetails);
+        check("COMPUTER_MODE_PRODUCT_SURFACE", normalDetails.includes("This PC / 此电脑")
+            && normalDetails.includes("Shared computer/login / 共享电脑登录")
+            && normalDetails.includes("Private computer profile / 私有电脑配置"), normalDetails);
         result.screenshots.push(await capture("software-team-roster.png"));
+
+        await renderer("document.getElementById('details-panel')?.classList.add('hidden'); document.getElementById('nav-settings')?.click(); true");
+        const connectedAppsUi = await waitFor("Connected Apps settings surface", async () => await renderer(`(()=>{
+            const root = document.getElementById("connected-apps-list");
+            return root && root.innerText.includes("This PC / 此电脑") && root.innerText.includes("Project workspace / 项目工作区")
+                ? root.innerText : false;
+        })()`));
+        const connectedAppsUiLower = connectedAppsUi.toLowerCase();
+        check("CONNECTED_APPS_UI_VISIBLE", connectedAppsUiLower.includes("available to / 可分配给") && connectedAppsUi.includes("Governor-controlled"), connectedAppsUi);
+        await renderer("document.querySelector('#team-list button')?.click(); true");
+        await waitFor("Project Channel return after settings", async () => await renderer(`document.getElementById("conversation-title")?.textContent === ${JSON.stringify(channel.name)}`));
 
         const inputText = "Create a small delivery note, implement it in the shared project workspace, and return the result for review.";
         await renderer(`(()=>{

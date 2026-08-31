@@ -6,7 +6,11 @@
 // scheduling capability. Coworker product state still carries no execution authority.
 
 export const PROVIDER_ROLES = Object.freeze(["planner", "worker", "reviewer", "synthesizer"]);
-const PROVIDERS = Object.freeze(["codex", "claude"]);
+const PROVIDER_HARNESSES = Object.freeze({
+    codex: "codex",
+    claude: "claude-code",
+});
+const PROVIDERS = Object.freeze(Object.keys(PROVIDER_HARNESSES));
 export const WORKER_NODE_SUPERVISOR = "worker-node-supervisor";
 export const WORKER_NODE_DISPATCHER = "worker-node-dispatcher";
 
@@ -96,15 +100,22 @@ function agentName(provider, role) {
 }
 
 function harnessConfig(provider, _role, fakeLaunchers, model) {
+    const harnessKind = PROVIDER_HARNESSES[provider];
+    if (!harnessKind)
+        throw new Error(`provider ${provider} has no registered executable harness`);
     const fake = fakeLaunchers?.[provider];
     if (fake)
-        return { kind: provider === "codex" ? "codex" : "claude-code", command: fake.command, prefixArgs: [...fake.prefixArgs] };
+        return { kind: harnessKind, command: fake.command, prefixArgs: [...fake.prefixArgs] };
     // Workspaces chosen by the operator may be plain folders; Codex must not refuse
     // non-git directories. The execution cwd itself arrives per task through the
     // trusted execution context, never through static harness configuration.
     return provider === "codex"
         ? { kind: "codex", skipGitRepoCheck: true, ...(model ? { model } : {}) }
         : { kind: "claude-code" };
+}
+
+function hasRegisteredHarness(provider, usableProviders) {
+    return Boolean(PROVIDER_HARNESSES[provider]) && usableProviders?.[provider] === true;
 }
 
 export function coworkerAgentId(coworkerId) {
@@ -136,35 +147,35 @@ export function chooseCoworkerProvider(coworker, usableProviders = {}) {
         // Deep never silently falls back to an efficient/lighter model.  A future healthy
         // Web Sol discovery can satisfy this profile; an explicitly pinned strong Codex
         // model can also satisfy it without changing the user's requested tier.
-        if (usableProviders["chatgpt-web"])
+        if (hasRegisteredHarness("chatgpt-web", usableProviders))
             return "chatgpt-web";
-        if (explicit === "codex" && /(?:sol|strong)/i.test(binding.model ?? "") && usableProviders.codex)
+        if (explicit === "codex" && /(?:sol|strong)/i.test(binding.model ?? "") && hasRegisteredHarness("codex", usableProviders))
             return "codex";
-        if (!explicit && usableProviders["codex-strong"] && usableProviders.codex)
+        if (!explicit && usableProviders["codex-strong"] && hasRegisteredHarness("codex", usableProviders))
             return "codex";
         return undefined;
     }
     if (binding.profile === "economy") {
-        if (explicit && usableProviders[explicit] && usableProviders.economy === true)
+        if (explicit && hasRegisteredHarness(explicit, usableProviders) && usableProviders.economy === true)
             return explicit;
         if (!explicit && usableProviders.economy === true) {
-            if (usableProviders.codex) return "codex";
-            if (usableProviders.claude) return "claude";
+            if (hasRegisteredHarness("codex", usableProviders)) return "codex";
+            if (hasRegisteredHarness("claude", usableProviders)) return "claude";
         }
         return undefined;
     }
     if (explicit)
-        return usableProviders[explicit] ? explicit : undefined;
+        return hasRegisteredHarness(explicit, usableProviders) ? explicit : undefined;
     // Automatic and Efficient are deliberately Codex-first.  This is a product routing
     // default, never a model-generated authority decision.
-    if (usableProviders.codex)
+    if (hasRegisteredHarness("codex", usableProviders))
         return "codex";
-    if (usableProviders.claude)
+    if (hasRegisteredHarness("claude", usableProviders))
         return "claude";
     return undefined;
 }
 
-function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
+function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCoworkerAppAccess }) {
     const agents = [];
     const bindings = {};
     for (const coworker of Array.isArray(coworkers) ? coworkers : []) {
@@ -190,6 +201,8 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
             continue;
         }
         const id = coworkerAgentId(coworker.id);
+        const appAccess = typeof getCoworkerAppAccess === "function" ? getCoworkerAppAccess(coworker.id) : undefined;
+        const governedTools = Array.isArray(appAccess?.tools) ? [...new Set(appAccess.tools)] : [];
         const agent = {
             id,
             name: `${coworker.name} · ${provider === "codex" ? "Codex" : "Claude Code"}`,
@@ -197,6 +210,7 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
             capabilities: ["general", coworkerCapability(coworker.id)],
             harness: harnessConfig(provider, "coworker", fakeLaunchers, modelBinding.model),
             maxConcurrency: 1,
+            ...(governedTools.length ? { governedTools } : {}),
         };
         agents.push(agent);
         bindings[coworker.id] = {
@@ -206,12 +220,13 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
             profile: modelBinding.profile,
             ...(accountNamespace ? { accountNamespace } : {}),
             harnessKind: agent.harness.kind,
+            ...(governedTools.length ? { governedTools: [...governedTools], connectedAppIds: [...(appAccess?.appIds ?? [])] } : {}),
         };
     }
     return { agents, bindings };
 }
 
-export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false, coworkers = [], includeWorkerNodeDispatcher = false } = {}) {
+export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false, coworkers = [], includeWorkerNodeDispatcher = false, getCoworkerAppAccess } = {}) {
     if (!discovery || typeof discovery !== "object")
         throw new Error("provider roster requires discovery results");
 
@@ -307,7 +322,7 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
             workerAgent.governedTools = ["computer"];
     }
 
-    const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers });
+    const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCoworkerAppAccess });
     // This identity is a narrow protocol adapter. It is never a planner/reviewer role,
     // never receives browser/computer capabilities, and is only compatible with tasks
     // explicitly stamped with the worker-node trusted context.

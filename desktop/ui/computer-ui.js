@@ -72,6 +72,17 @@
     return "ready";
   }
 
+  function stageLabel(stage) {
+    return ({
+      chief: "Chief scopes",
+      "coding-lead": "Coding Lead works",
+      specialist: "Specialist works",
+      reviewer: "Reviewer checks",
+      synthesis: "Chief summarizes",
+      complete: "Ready",
+    })[stage] || "Team work";
+  }
+
   function makeButton(label, className = "computer-action") {
     const button = document.createElement("button");
     button.type = "button";
@@ -135,7 +146,7 @@
     card.append(box);
   }
 
-  function renderComputerCard({ coworker, binding, computer, refresh }) {
+  function renderComputerCard({ coworker, binding, computer, team, refresh }) {
     const card = document.createElement("article");
     card.className = "computer-card";
 
@@ -150,7 +161,7 @@
     const name = document.createElement("strong");
     name.textContent = coworker?.name || binding?.agentId || "Coworker";
     const agent = document.createElement("span");
-    agent.textContent = "Computer";
+    agent.textContent = "This PC / 此电脑";
     copy.append(name, agent);
     identity.append(icon, copy);
     const stateEl = document.createElement("span");
@@ -158,6 +169,41 @@
     stateEl.textContent = statusLabel(computer);
     head.append(identity, stateEl);
     card.append(head);
+
+    const modeRow = document.createElement("label");
+    modeRow.className = "computer-mode-row";
+    const modeLabel = document.createElement("span");
+    modeLabel.textContent = "Profile / 登录方式";
+    const mode = document.createElement("select");
+    mode.className = "computer-mode-select";
+    for (const option of [
+      ["shared-login", "Shared computer/login / 共享电脑登录"],
+      ["private-profile", "Private computer profile / 私有电脑配置"],
+    ]) {
+      const item = document.createElement("option");
+      item.value = option[0];
+      item.textContent = option[1];
+      mode.append(item);
+    }
+    mode.value = coworker?.computerMode || "shared-login";
+    mode.disabled = !coworker?.id || !window.sovereignbot.coworkers?.update;
+    mode.addEventListener("change", async () => {
+      mode.disabled = true;
+      try {
+        await window.sovereignbot.coworkers.update({ coworkerId: coworker.id, patch: { computerMode: mode.value } });
+      } catch (error) {
+        mode.value = coworker?.computerMode || "shared-login";
+        const errorEl = card.querySelector(".computer-error");
+        if (errorEl) {
+          errorEl.textContent = String(error?.message || error).replace(/^.*Error: /, "").slice(0, 220);
+          errorEl.classList.remove("hidden");
+        }
+      } finally {
+        mode.disabled = false;
+      }
+    });
+    modeRow.append(modeLabel, mode);
+    card.append(modeRow);
 
     if (!binding?.agentId) {
       const note = document.createElement("p");
@@ -179,6 +225,18 @@
     details.className = "computer-details";
     const control = document.createElement("span");
     control.textContent = `Control: ${computer.control?.mode || "agent"}`;
+    const activity = document.createElement("span");
+    const flow = team?.flow;
+    const ownsCurrentWork = flow?.currentOwnerId === coworker?.id;
+    activity.textContent = ownsCurrentWork && flow?.status === "active"
+      ? `Activity: ${flow.currentOwner || coworker.name} is working`
+      : computer.lifecycle?.instantiated === true
+        ? "Activity: governed browser lane active"
+        : "Activity: waiting for a governed browser lane";
+    const context = document.createElement("span");
+    context.textContent = team
+      ? `Context: Project Channel · ${stageLabel(flow?.stage)}`
+      : "Context: Private workspace";
     const runtime = document.createElement("span");
     runtime.textContent = !computer.lifecycle?.managed
       ? "Managed browser not configured"
@@ -187,7 +245,7 @@
         : computer.lifecycle?.instantiated === true
           ? "Browser runtime active"
           : "Browser runtime ready";
-    details.append(control, runtime);
+    details.append(control, activity, context, runtime);
     card.append(details);
 
     const actions = document.createElement("div");
@@ -238,11 +296,12 @@
       root.textContent = "";
       const coworkers = participantCoworkers(conversation);
       const computers = overview?.computers ?? [];
+      const team = typeof teamForConversation === "function" ? teamForConversation(conversation.id) : undefined;
       const refresh = () => renderComputers(conversation);
       for (const coworker of coworkers) {
         const binding = bindingFor(coworker.id);
         const computer = computers.find((entry) => entry.agentId === binding?.agentId);
-        root.append(renderComputerCard({ coworker, binding, computer, refresh }));
+        root.append(renderComputerCard({ coworker, binding, computer, team, refresh }));
       }
       if (!coworkers.length) {
         const empty = document.createElement("span");

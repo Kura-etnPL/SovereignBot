@@ -112,7 +112,11 @@ async function main() {
     const bootstrapPath = valueAfter(args, "--bootstrap");
     if (!bootstrapPath)
         throw new Error("governed MCP server requires --bootstrap <path>");
-    const bootstrap = await readBridgeBootstrap(bootstrapPath);
+const bootstrap = await readBridgeBootstrap(bootstrapPath);
+    const allowedTools = new Set(Array.isArray(bootstrap.allowedTools) ? bootstrap.allowedTools : GOVERNED_MCP_TOOLS);
+    if (![...allowedTools].every((name) => GOVERNED_MCP_TOOLS.includes(name)))
+        throw new Error("governed MCP bootstrap contains an unsupported tool");
+    const advertisedTools = TOOLS.filter((tool) => allowedTools.has(tool.name));
     let initialized = false;
 
     const invoke = async (name, input) => {
@@ -170,12 +174,12 @@ async function main() {
             continue;
         }
         if (request.method === "tools/list") {
-            result(request.id, { tools: TOOLS });
+            result(request.id, { tools: advertisedTools });
             continue;
         }
         if (request.method === "tools/call") {
             const name = request.params?.name;
-            if (!GOVERNED_MCP_TOOLS.includes(name)) {
+            if (!allowedTools.has(name) || !GOVERNED_MCP_TOOLS.includes(name)) {
                 result(request.id, { isError: true, content: [{ type: "text", text: "unknown governed tool" }] });
                 continue;
             }

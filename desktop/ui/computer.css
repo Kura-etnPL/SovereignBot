@@ -12,6 +12,8 @@
 .computer-state.attention { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--panel-3)); }
 .computer-state.human { color: var(--text); background: color-mix(in srgb, var(--text) 10%, var(--panel-3)); }
 .computer-details { display: grid; gap: 2px; margin-top: 8px; color: var(--text-3); font-size: 9.5px; line-height: 1.45; }
+.computer-mode-row { display: grid; gap: 4px; margin-top: 9px; color: var(--text-3); font-size: 9.5px; }
+.computer-mode-select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 6px 7px; background: var(--panel-3); color: var(--text-2); font: inherit; }
 .computer-actions-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .computer-action { min-height: 29px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); color: var(--text-2); cursor: pointer; font-size: 10px; font-weight: 600; }
 .computer-action:hover:not(:disabled) { background: var(--panel-3); color: var(--text); }

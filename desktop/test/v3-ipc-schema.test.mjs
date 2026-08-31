@@ -8,6 +8,8 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     const expected = [
         "coworker:list", "coworker:get", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
         "conversation:list", "conversation:get", "conversation:createDirect", "conversation:createTeam", "conversation:send",
+        "team:list", "team:get", "team:installPack", "channel:list", "channel:get",
+        "connectedApps:list", "connectedApps:assign",
     ];
     for (const channel of expected)
         assert.ok(V3_IPC_CHANNELS[channel], channel);
@@ -90,5 +92,22 @@ test("team creation requires a bounded explicit participant set", () => {
     assert.throws(
         () => validateV3IpcRequest("conversation:createTeam", { title: "Nope", coworkerIds: ["coworker_1111111111111111"] }),
         /at least two/,
+    );
+});
+
+test("connected app assignment accepts only an opaque target and no authority fields", () => {
+    const payload = {
+        appId: "sovereignbot-computer",
+        teamId: "team_1111111111111111",
+        enabled: true,
+    };
+    assert.deepEqual(validateV3IpcRequest("connectedApps:assign", payload), payload);
+    assert.throws(
+        () => validateV3IpcRequest("connectedApps:assign", { ...payload, path: "C:/private" }),
+        /unexpected request field/,
+    );
+    assert.throws(
+        () => validateV3IpcRequest("connectedApps:assign", { ...payload, coworkerId: "coworker_1111111111111111" }),
+        /exactly one/,
     );
 });

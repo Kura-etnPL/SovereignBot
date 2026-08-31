@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     buildProviderRoster,
     buildPolicyRules,
+    chooseCoworkerProvider,
     resolveFakeProviderLaunch,
     validateRoleAssignment,
 } from "../src/main/provider-roster.js";
@@ -187,4 +188,49 @@ test("a provisioned verified driver grants the worker governed browser tooling o
 
     const without = buildProviderRoster({ discovery: discovery(), settings: {} });
     assert.equal(without.agents.find((agent) => agent.id === "codex-worker").governedTools, undefined);
+});
+
+test("connected app assignments grant only the receiver's governed tool groups", () => {
+    const coworker = {
+        id: "coworker_bbbbbbbbbbbbbbbb",
+        name: "Assigned Coworker",
+        role: "worker",
+        state: "active",
+        modelBinding: { profile: "efficient", provider: "codex", model: "luna" },
+    };
+    const roster = buildProviderRoster({
+        discovery: discovery(),
+        settings: {},
+        coworkers: [coworker],
+        getCoworkerAppAccess: () => ({ tools: ["workspace"], appIds: ["sovereignbot-workspace"] }),
+    });
+    const agent = roster.agents.find((entry) => entry.id === "coworker-agent-bbbbbbbbbbbbbbbb");
+    assert.deepEqual(agent.governedTools, ["workspace"]);
+    assert.deepEqual(roster.coworkerBindings[coworker.id].governedTools, ["workspace"]);
+    assert.deepEqual(roster.coworkerBindings[coworker.id].connectedAppIds, ["sovereignbot-workspace"]);
+});
+
+test("reserved providers fail closed until an explicit executable adapter is registered", () => {
+    const antigravityCoworker = {
+        id: "coworker_aaaaaaaaaaaaaaaa",
+        name: "Reserved Provider Coworker",
+        state: "active",
+        modelBinding: { profile: "custom", provider: "antigravity", model: "gemini" },
+    };
+    const roster = buildProviderRoster({
+        discovery: discovery(),
+        settings: {},
+        coworkers: [antigravityCoworker],
+    });
+    assert.equal(roster.coworkerBindings[antigravityCoworker.id].ready, false);
+    assert.match(roster.coworkerBindings[antigravityCoworker.id].reason, /antigravity/);
+    assert.equal(roster.agents.some((agent) => agent.id.includes("aaaaaaaaaaaaaaaa")), false);
+    assert.equal(
+        chooseCoworkerProvider(antigravityCoworker, { antigravity: true, claude: true }),
+        undefined,
+    );
+    assert.equal(
+        chooseCoworkerProvider({ modelBinding: { profile: "deep" } }, { "chatgpt-web": true, claude: true }),
+        undefined,
+    );
 });

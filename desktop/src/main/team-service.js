@@ -183,7 +183,9 @@ function safeId(value, label, pattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/) {
 function safeCoworkerIds(value) {
     if (!Array.isArray(value) || value.length < 2 || value.length > 8)
         throw new Error("team coworker roster must contain 2 to 8 coworkers");
-    return [...new Set(value.map((entry) => safeId(entry, "coworkerId")))];
+    const ids = [...new Set(value.map((entry) => safeId(entry, "coworkerId")))];
+    if (ids.length < 2) throw new Error("team coworker roster must contain 2 to 8 unique coworkers");
+    return ids;
 }
 
 function safePlaybooks(value) {
@@ -244,9 +246,10 @@ function sanitizePersisted(value) {
     if (value.flows && typeof value.flows === "object" && !Array.isArray(value.flows)) {
         for (const [teamId, flow] of Object.entries(value.flows)) {
             if (!teamIds.has(teamId) || !flow || typeof flow !== "object") continue;
-            const stage = ["chief", "coding-lead", "reviewer", "synthesis", "complete"].includes(flow.stage) ? flow.stage : "complete";
+            const stage = ["chief", "coding-lead", "specialist", "reviewer", "synthesis", "complete"].includes(flow.stage) ? flow.stage : "complete";
             flows[teamId] = {
                 stage,
+                ...(Number.isInteger(flow.handoffIndex) && flow.handoffIndex >= 0 && flow.handoffIndex <= 16 ? { handoffIndex: flow.handoffIndex } : {}),
                 ...(typeof flow.userMessageId === "string" ? { userMessageId: flow.userMessageId } : {}),
                 ...(typeof flow.lastHandoffSourceId === "string" ? { lastHandoffSourceId: flow.lastHandoffSourceId } : {}),
                 ...(typeof flow.lastHandoffTargetId === "string" ? { lastHandoffTargetId: flow.lastHandoffTargetId } : {}),
@@ -300,13 +303,40 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         catch { return id; }
     }
 
+    function handoffOrder(team) {
+        const ids = [...team.coworkerIds];
+        if (ids.length < 2) return ids;
+        // The first teammate owns intake, the last is the reviewer, and any middle
+        // teammates are bounded specialists.  This keeps Team Packs declarative and
+        // lets ordinary user-created teams use the same one-owner handoff contract.
+        return ids.length === 2
+            ? [ids[0], ids[1], ids[0]]
+            : [ids[0], ...ids.slice(1, -1), ids.at(-1), ids[0]];
+    }
+
+    function indexForFlow(flow, order) {
+        if (Number.isInteger(flow.handoffIndex) && flow.handoffIndex >= 0 && flow.handoffIndex < order.length)
+            return flow.handoffIndex;
+        if (flow.stage === "chief") return 0;
+        if (flow.stage === "synthesis") return Math.max(0, order.length - 1);
+        if (flow.stage === "reviewer") return Math.max(0, order.length - 2);
+        if (flow.stage === "coding-lead") return Math.min(1, Math.max(0, order.length - 1));
+        return undefined;
+    }
+
+    function stageForIndex(index, order) {
+        if (index === 0) return "chief";
+        if (index === order.length - 1) return "synthesis";
+        if (index === order.length - 2) return "reviewer";
+        return index === 1 ? "coding-lead" : "specialist";
+    }
+
     function flowStatus(team) {
         const flow = state.flows[team.id] ?? { stage: "complete" };
         const channel = state.channels.find((entry) => entry.teamId === team.id);
-        let currentOwnerId;
-        if (flow.stage === "chief" || flow.stage === "synthesis") currentOwnerId = team.coworkerIds[0];
-        if (flow.stage === "coding-lead") currentOwnerId = team.coworkerIds[1];
-        if (flow.stage === "reviewer") currentOwnerId = team.coworkerIds[2];
+        const order = handoffOrder(team);
+        const ownerIndex = indexForFlow(flow, order);
+        const currentOwnerId = flow.stage === "complete" || ownerIndex === undefined ? undefined : order[ownerIndex];
         const conversation = channel ? conversationStore.get(channel.conversationId) : undefined;
         const pending = conversation
             ? Object.entries(conversation.messages.at(-1)?.delivery ?? {}).filter(([, value]) => value?.status === "pending").map(([id]) => id)
@@ -389,7 +419,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const coworkerIds = pack.coworkers.map((definition) => idsByKey.get(definition.key));
         const teamId = makeTeamId();
         safeId(teamId, "teamId", TEAM_ID);
-        const managed = services.createManagedWorkspace({ label: "Software Team project", kind: "shared-project", idHint: teamId });
+        const managed = services.createManagedWorkspace({ label: `${pack.name} project`, kind: "shared-project", idHint: teamId });
         const sharedWorkspaceId = managed.workspace?.id;
         safeId(sharedWorkspaceId, "sharedWorkspaceId");
         const timestamp = now();
@@ -435,6 +465,63 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return { installed: true, team: publicTeam(team) };
     }
 
+    function createTeam({ title, coworkerIds, leadCoworkerId } = {}) {
+        if (state.teams.length >= MAX_TEAMS)
+            throw new Error(`team limit reached (${MAX_TEAMS})`);
+        const ids = safeCoworkerIds(coworkerIds);
+        ids.forEach((id) => {
+            const coworker = coworkerStore.get(id);
+            if (coworker.state !== "active") throw new Error(`team coworker must be active: ${id}`);
+        });
+        const lead = leadCoworkerId ?? ids[0];
+        if (!ids.includes(lead)) throw new Error("lead coworker must be a member of the team");
+        const teamName = title === undefined ? "Team" : safeString(title, "team name", 120);
+        const teamId = makeTeamId();
+        safeId(teamId, "teamId", TEAM_ID);
+        const managed = services.createManagedWorkspace({ label: `${teamName} project`, kind: "shared-project", idHint: teamId });
+        const sharedWorkspaceId = managed.workspace?.id;
+        safeId(sharedWorkspaceId, "sharedWorkspaceId");
+        const timestamp = now();
+        const team = {
+            id: teamId,
+            packId: "custom-team",
+            name: teamName,
+            coworkerIds: [...ids],
+            sharedWorkspaceId,
+            channelIds: [],
+            playbooks: [{
+                id: "team-collaboration",
+                name: "Team Collaboration",
+                description: "The current owner delegates bounded work to the next teammate and returns the result to the user.",
+                steps: ["owner", "teammate", "owner"],
+            }],
+            createdAt: timestamp,
+            updatedAt: timestamp,
+        };
+        const channelId = makeChannelId();
+        safeId(channelId, "channelId", CHANNEL_ID);
+        const conversation = conversationStore.createTeam({ title: teamName, coworkerIds: ids, leadCoworkerId: lead });
+        const channel = {
+            id: channelId,
+            teamId: team.id,
+            kind: "project",
+            name: "Project Channel",
+            instructions: "Bounded team collaboration: one owner at a time, explicit handoffs, and a visible result.",
+            coworkerIds: [...ids],
+            workspaceId: sharedWorkspaceId,
+            conversationId: conversation.id,
+            playbookId: "team-collaboration",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+        };
+        team.channelIds.push(channel.id);
+        state.teams.push(team);
+        state.channels.push(channel);
+        state.flows[team.id] = { stage: "complete", updatedAt: timestamp };
+        save();
+        return { created: true, team: publicTeam(team), conversation };
+    }
+
     function channelForConversation(conversationId) {
         return state.channels.find((entry) => entry.conversationId === String(conversationId));
     }
@@ -444,36 +531,53 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const channel = channelForConversation(conversation?.id);
         if (!channel) return;
         const team = requireTeam(channel.teamId);
-        const current = state.flows[team.id];
-        if (current?.userMessageId === message.id) return;
-        state.flows[team.id] = { stage: "chief", userMessageId: message.id, updatedAt: now() };
-        team.updatedAt = now();
+        const current = state.flows[team.id] ?? { stage: "complete" };
+        if (current.userMessageId === message.id) return;
+        const order = handoffOrder(team);
+        const mentionedOwner = message.mentions?.length === 1 && message.mentions[0] !== "everyone" && team.coworkerIds.includes(message.mentions[0])
+            ? message.mentions[0]
+            : undefined;
+        let ownerIndex = current.stage === "complete" ? 0 : indexForFlow(current, order);
+        if (mentionedOwner) ownerIndex = Math.max(0, order.indexOf(mentionedOwner));
+        if (ownerIndex === undefined) ownerIndex = 0;
+        const updatedAt = now();
+        state.flows[team.id] = {
+            ...current,
+            stage: stageForIndex(ownerIndex, order),
+            handoffIndex: ownerIndex,
+            userMessageId: message.id,
+            updatedAt,
+        };
+        delete state.flows[team.id].lastHandoffSourceId;
+        delete state.flows[team.id].lastHandoffTargetId;
+        team.updatedAt = updatedAt;
         save();
     }
 
-    function nextHandoff({ conversation, coworkerId, source }) {
+    function nextHandoff({ conversation, coworkerId, source, requestedCoworkerIds = [] }) {
         const channel = channelForConversation(conversation?.id);
         if (!channel) return undefined;
         const team = requireTeam(channel.teamId);
         const flow = state.flows[team.id] ?? { stage: "complete" };
         if (source?.id && flow.lastHandoffSourceId === source.id)
             return flow.lastHandoffTargetId;
-        const [chiefId, codingLeadId, reviewerId] = team.coworkerIds;
+        const order = handoffOrder(team);
+        const currentIndex = indexForFlow(flow, order);
         let target;
-        if (flow.stage === "chief" && coworkerId === chiefId) {
-            target = codingLeadId;
-            flow.stage = "coding-lead";
-        }
-        else if (flow.stage === "coding-lead" && coworkerId === codingLeadId) {
-            target = reviewerId;
-            flow.stage = "reviewer";
-        }
-        else if (flow.stage === "reviewer" && coworkerId === reviewerId) {
-            target = chiefId;
-            flow.stage = "synthesis";
-        }
-        else if (flow.stage === "synthesis" && coworkerId === chiefId) {
-            flow.stage = "complete";
+        if (currentIndex !== undefined && order[currentIndex] === coworkerId) {
+            if (currentIndex < order.length - 1) {
+                const requested = team.packId === "custom-team" && Array.isArray(requestedCoworkerIds)
+                    ? requestedCoworkerIds.find((id) => id !== coworkerId && team.coworkerIds.includes(id))
+                    : undefined;
+                target = requested ?? order[currentIndex + 1];
+                flow.handoffIndex = currentIndex + 1;
+                if (target !== order[currentIndex + 1]) flow.handoffIndex = Math.max(0, order.indexOf(target));
+                flow.stage = stageForIndex(flow.handoffIndex, order);
+            }
+            else {
+                flow.stage = "complete";
+                delete flow.handoffIndex;
+            }
         }
         if (target) {
             const targetCoworker = coworkerStore.get(target);
@@ -494,6 +598,22 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
 
     function workspaceIdForConversation(conversationId) {
         return channelForConversation(conversationId)?.workspaceId;
+    }
+
+    function currentOwnerForConversation(conversationId) {
+        const channel = channelForConversation(conversationId);
+        if (!channel) return undefined;
+        const team = requireTeam(channel.teamId);
+        const status = flowStatus(team);
+        if (!status.currentOwnerId) return undefined;
+        try {
+            return coworkerStore.get(status.currentOwnerId).state === "active" ? status.currentOwnerId : undefined;
+        }
+        catch { return undefined; }
+    }
+
+    function isManagedConversation(conversationId) {
+        return Boolean(channelForConversation(conversationId));
     }
 
     return {
@@ -517,10 +637,13 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             return { schema: TEAMS_SCHEMA, channels: channels.map(publicChannel) };
         },
         getChannel(channelId) { return publicChannel(requireChannel(channelId)); },
+        createTeam,
         installPack,
         onMessageQueued,
         nextHandoff,
         workspaceIdForConversation,
+        currentOwnerForConversation,
+        isManagedConversation,
         status(teamId) { return flowStatus(requireTeam(teamId)); },
     };
 }

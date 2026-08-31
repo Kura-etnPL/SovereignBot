@@ -35,6 +35,7 @@ test("coworker registry creates durable public coworker identities without execu
         });
         assert.equal(created.id, "coworker_0000000000000001");
         assert.equal(created.state, "active");
+        assert.equal(created.computerMode, "shared-login");
         assert.deepEqual(created.skillIds, ["skill_research"]);
         assert.deepEqual(created.workspaceIds, ["workspace_docs"]);
 
@@ -88,6 +89,8 @@ test("coworker updates are bounded, versioned, archivable and restoreable", () =
         assert.equal(updated.name, "Principal Engineer");
         assert.equal(updated.providerPreference, "codex");
         assert.deepEqual(updated.skillIds, ["skill_code", "skill_review"]);
+        const privateComputer = store.update(coworker.id, { computerMode: "private-profile" });
+        assert.equal(privateComputer.computerMode, "private-profile");
         assert.notEqual(updated.updatedAt, updated.createdAt);
 
         store.archive(coworker.id);

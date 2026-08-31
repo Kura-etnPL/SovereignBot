@@ -10,6 +10,7 @@ import {
 export const COWORKERS_SCHEMA = "sovereignbot.desktop.coworkers.v1";
 
 const PROVIDER_PREFERENCES = new Set(["auto", "codex", "claude"]);
+const COMPUTER_MODES = new Set(["shared-login", "private-profile"]);
 const COWORKER_STATES = new Set(["active", "paused", "archived"]);
 const MAX_COWORKERS = 64;
 const MAX_NAME = 80;
@@ -101,12 +102,20 @@ function normalizeState(value) {
     return value;
 }
 
+function normalizeComputerMode(value) {
+    if (value === undefined)
+        return "shared-login";
+    if (typeof value !== "string" || !COMPUTER_MODES.has(value))
+        throw new Error("computerMode must be shared-login or private-profile");
+    return value;
+}
+
 function normalizeCreate(input) {
     assertPlainObject(input, "coworker");
     rejectAuthorityBearingFields(input);
     const allowed = new Set([
         "name", "role", "instructions", "avatar", "providerPreference", "skillIds",
-        "workspaceIds", "approvalProfileId", "computerProfileId", "modelBinding", "state",
+        "workspaceIds", "approvalProfileId", "computerProfileId", "computerMode", "modelBinding", "state",
     ]);
     for (const key of Object.keys(input)) {
         if (!allowed.has(key))
@@ -130,6 +139,7 @@ function normalizeCreate(input) {
         workspaceIds: identifierList(input.workspaceIds, "workspaceIds") ?? [],
         approvalProfileId: boundedString(input.approvalProfileId, "approvalProfileId", 128),
         computerProfileId: boundedString(input.computerProfileId, "computerProfileId", 128),
+        computerMode: normalizeComputerMode(input.computerMode),
         state: normalizeState(input.state) ?? "active",
     };
 }
@@ -139,7 +149,7 @@ function normalizePatch(input) {
     rejectAuthorityBearingFields(input);
     const allowed = new Set([
         "name", "role", "instructions", "avatar", "providerPreference", "skillIds",
-        "workspaceIds", "approvalProfileId", "computerProfileId", "modelBinding", "state",
+        "workspaceIds", "approvalProfileId", "computerProfileId", "computerMode", "modelBinding", "state",
     ]);
     for (const key of Object.keys(input)) {
         if (!allowed.has(key))
@@ -170,6 +180,8 @@ function normalizePatch(input) {
         patch.approvalProfileId = boundedString(input.approvalProfileId, "approvalProfileId", 128);
     if (Object.hasOwn(input, "computerProfileId"))
         patch.computerProfileId = boundedString(input.computerProfileId, "computerProfileId", 128);
+    if (Object.hasOwn(input, "computerMode"))
+        patch.computerMode = normalizeComputerMode(input.computerMode);
     if (Object.hasOwn(input, "state"))
         patch.state = normalizeState(input.state);
     return patch;
@@ -192,6 +204,7 @@ function sanitizePersisted(entry) {
             workspaceIds: entry.workspaceIds,
             approvalProfileId: entry.approvalProfileId,
             computerProfileId: entry.computerProfileId,
+            computerMode: entry.computerMode,
             state: entry.state,
         });
         if (typeof entry.createdAt !== "string" || typeof entry.updatedAt !== "string")

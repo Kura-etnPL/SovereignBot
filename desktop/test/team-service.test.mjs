@@ -25,6 +25,7 @@ test("Software Team installation is idempotent and keeps workspace paths out of 
         assert.equal(first.team.name, "Software Team");
         assert.deepEqual(first.team.coworkers.map((entry) => entry.name), ["Chief of Staff", "Coding Lead", "Reviewer"]);
         assert.equal(first.team.channels[0].name, "Project Channel");
+        assert.equal(first.team.sharedWorkspaceLabel, "Software Team project");
         assert.equal(first.team.privateWorkspaceLabel, "Private workspace");
         assert.equal(JSON.stringify(first.team).includes("managed-workspaces"), false);
         assert.equal(Object.hasOwn(services.listWorkspaces().workspaces[0], "path"), false);
@@ -71,6 +72,7 @@ test("declarative secondary Team Packs reuse the governed team path", () => {
         const installed = teams.installPack("research-team");
         assert.equal(installed.installed, true);
         assert.equal(installed.team.name, "Research Team");
+        assert.equal(installed.team.sharedWorkspaceLabel, "Research Team project");
         assert.deepEqual(installed.team.coworkers.map((entry) => entry.name), ["Chief of Staff", "Research Lead", "Reviewer"]);
         assert.equal(installed.team.channels[0].name, "Research Room");
         assert.equal(installed.team.playbooks[0].name, "Research Brief");
@@ -83,6 +85,42 @@ test("declarative secondary Team Packs reuse the governed team path", () => {
         assert.equal(teams.nextHandoff({ conversation: conversations.get(installed.team.channels[0].conversationId), coworkerId: installed.team.coworkerIds[0], source: userMessage }), installed.team.coworkerIds[1]);
         assert.equal(coworkers.list().coworkers.length, 3);
         assert.equal(JSON.stringify(teams.list()).includes("providerAccountId"), false);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("ordinary teams create a Project Channel and route the next user turn to the current owner", () => {
+    const { root, coworkers, conversations, teams } = fixture();
+    try {
+        const chief = coworkers.create({ name: "Chief", role: "Coordinate work" });
+        const coder = coworkers.create({ name: "Coder", role: "Build software" });
+        const reviewer = coworkers.create({ name: "Reviewer", role: "Review software" });
+        conversations.setTeamRouteResolver((conversation) => teams.currentOwnerForConversation(conversation.id));
+
+        const created = teams.createTeam({ title: "Product Team", coworkerIds: [chief.id, coder.id, reviewer.id] });
+        assert.equal(created.created, true);
+        assert.equal(created.team.packId, "custom-team");
+        assert.equal(created.team.channels[0].name, "Project Channel");
+        assert.equal(created.team.sharedWorkspaceLabel, "Product Team project");
+
+        const first = conversations.postUserMessage(created.conversation.id, { text: "Ship the bounded change." });
+        assert.deepEqual(Object.keys(first.delivery), [chief.id]);
+        teams.onMessageQueued({ conversation: conversations.get(created.conversation.id), message: first });
+        assert.equal(teams.currentOwnerForConversation(created.conversation.id), chief.id);
+
+        const handoff = teams.nextHandoff({
+            conversation: conversations.get(created.conversation.id),
+            coworkerId: chief.id,
+            source: first,
+            requestedCoworkerIds: [reviewer.id],
+        });
+        assert.equal(handoff, reviewer.id);
+        assert.equal(teams.currentOwnerForConversation(created.conversation.id), reviewer.id);
+
+        const followup = conversations.postUserMessage(created.conversation.id, { text: "Review the result." });
+        assert.deepEqual(Object.keys(followup.delivery), [reviewer.id]);
     }
     finally {
         rmSync(root, { recursive: true, force: true });

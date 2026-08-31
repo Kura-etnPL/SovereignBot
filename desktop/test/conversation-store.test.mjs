@@ -65,23 +65,32 @@ test("direct conversations are durable, idempotent per coworker, and user messag
     }
 });
 
-test("team messages default to all coworkers, mentions narrow routing, and delivery state is durable", () => {
+test("team messages default to one owner, explicit mentions narrow routing, and delivery state is durable", () => {
     const { root, conversations, chief, coder, researcher } = fixture();
     try {
         const team = conversations.createTeam({
             title: "Product Team",
             coworkerIds: [chief.id, coder.id, researcher.id],
         });
-        const broadcast = conversations.postUserMessage(team.id, { text: "Ship V3." });
+        assert.equal(team.leadCoworkerId, chief.id);
+        const first = conversations.postUserMessage(team.id, { text: "Ship V3." });
+        assert.deepEqual(Object.keys(first.delivery), [chief.id]);
+
+        conversations.setTeamRouteResolver(() => coder.id);
+        const routed = conversations.postUserMessage(team.id, { text: "Continue the implementation." });
+        assert.deepEqual(Object.keys(routed.delivery), [coder.id]);
+        conversations.setTeamRouteResolver(undefined);
+
+        const broadcast = conversations.postUserMessage(team.id, { text: "Notify the whole team.", mentions: ["everyone"] });
         assert.deepEqual(Object.keys(broadcast.delivery).sort(), [chief.id, coder.id, researcher.id].sort());
 
         const directed = conversations.postUserMessage(team.id, {
             text: "@Coder investigate this regression.",
             mentions: [coder.id],
-            replyTo: broadcast.id,
+            replyTo: first.id,
         });
         assert.deepEqual(Object.keys(directed.delivery), [coder.id]);
-        assert.equal(directed.replyTo, broadcast.id);
+        assert.equal(directed.replyTo, first.id);
 
         const marked = conversations.markDelivery(team.id, directed.id, coder.id, "delivered");
         assert.equal(marked.status, "delivered");
