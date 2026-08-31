@@ -378,6 +378,8 @@ async function main() {
                     const refresh = await refreshCoworkerRuntime();
                     return { ...result, refresh };
                 },
+                "team:exportPlaybook": ({ teamId, playbookId }) => teamService.exportPlaybook(teamId, playbookId),
+                "team:importPlaybook": ({ teamId, playbook }) => teamService.importPlaybook(teamId, playbook),
                 "channel:list": ({ teamId }) => teamService.listChannels({ teamId }),
                 "channel:get": ({ channelId }) => teamService.getChannel(channelId),
                 "connectedApps:list": () => connectedApps.list(),

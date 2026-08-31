@@ -8,7 +8,7 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     const expected = [
         "coworker:list", "coworker:get", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
         "conversation:list", "conversation:get", "conversation:createDirect", "conversation:createTeam", "conversation:send",
-        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "channel:list", "channel:get",
+        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:exportPlaybook", "team:importPlaybook", "channel:list", "channel:get",
         "connectedApps:list", "connectedApps:assign",
     ];
     for (const channel of expected)
@@ -116,6 +116,28 @@ test("team pack transfer is declarative and rejects provider/account or workspac
     );
     assert.throws(
         () => validateV3IpcRequest("team:importPack", { pack: { ...pack, workspacePath: "E:/private" } }),
+        /unexpected request field: workspacePath/,
+    );
+});
+
+test("playbook transfer is declarative and rejects runtime state", () => {
+    const playbook = {
+        schema: "sovereignbot.desktop.playbook.v1",
+        id: "delivery",
+        name: "Delivery",
+        description: "A bounded delivery method.",
+        steps: ["chief", "coding-lead", "reviewer", "chief"],
+    };
+    assert.deepEqual(
+        validateV3IpcRequest("team:importPlaybook", { teamId: "team_1111111111111111", playbook }),
+        { teamId: "team_1111111111111111", playbook },
+    );
+    assert.deepEqual(
+        validateV3IpcRequest("team:exportPlaybook", { teamId: "team_1111111111111111", playbookId: "delivery" }),
+        { teamId: "team_1111111111111111", playbookId: "delivery" },
+    );
+    assert.throws(
+        () => validateV3IpcRequest("team:importPlaybook", { teamId: "team_1111111111111111", playbook: { ...playbook, workspacePath: "E:/private" } }),
         /unexpected request field: workspacePath/,
     );
 });

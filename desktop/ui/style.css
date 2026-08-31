@@ -263,6 +263,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .detail-label { display: block; margin-bottom: 9px; color: var(--text-3); font-size: 9.5px; text-transform: uppercase; letter-spacing: .07em; }
 .detail-value { color: var(--text-2); font-size: 11px; line-height: 1.55; }
 .detail-help { margin: 6px 0 9px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.detail-sub-label { margin-top: 15px; }
+.detail-select { width: 100%; min-height: 32px; margin-bottom: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); padding: 0 8px; }
 .detail-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .detail-actions .quiet-action { flex: 1 1 90px; }
 .mono { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 10px; }

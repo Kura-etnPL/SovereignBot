@@ -4,6 +4,7 @@ import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 
 export const TEAMS_SCHEMA = "sovereignbot.desktop.teams.v1";
 export const TEAM_PACK_EXPORT_SCHEMA = "sovereignbot.desktop.team-pack.v1";
+export const TEAM_PLAYBOOK_EXPORT_SCHEMA = "sovereignbot.desktop.playbook.v1";
 
 const MAX_TEAMS = 32;
 const MAX_CHANNELS = 128;
@@ -197,6 +198,22 @@ function safePlaybooks(value) {
         description: safeString(entry.description ?? "", "playbook description", 500),
         steps: Array.isArray(entry.steps) ? entry.steps.slice(0, 12).map((step) => safeId(step, "playbook step")) : [],
     }));
+}
+
+function safePlaybookDefinition(value, { requireSchema = false } = {}) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new Error("playbook must be an object");
+    const allowed = new Set(["schema", "id", "name", "description", "steps"]);
+    for (const key of Object.keys(value)) {
+        if (!allowed.has(key)) throw new Error(`playbook field is not allowed: ${key}`);
+    }
+    if (requireSchema && value.schema !== TEAM_PLAYBOOK_EXPORT_SCHEMA)
+        throw new Error(`playbook schema must be ${TEAM_PLAYBOOK_EXPORT_SCHEMA}`);
+    if (!Array.isArray(value.steps) || value.steps.length > 12)
+        throw new Error("playbook steps must be an array of at most 12 identifiers");
+    const normalized = safePlaybooks([value])[0];
+    if (!normalized) throw new Error("playbook is invalid");
+    return { schema: TEAM_PLAYBOOK_EXPORT_SCHEMA, ...normalized };
 }
 
 function safePackModelBinding(value) {
@@ -642,6 +659,29 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         };
     }
 
+    function exportPlaybook(teamId, playbookId) {
+        const team = requireTeam(teamId);
+        const playbook = team.playbooks.find((entry) => entry.id === String(playbookId));
+        if (!playbook) throw new Error(`unknown playbook id: ${playbookId}`);
+        return { schema: TEAM_PLAYBOOK_EXPORT_SCHEMA, ...clone(playbook) };
+    }
+
+    function importPlaybook(teamId, input) {
+        const team = requireTeam(teamId);
+        const playbook = safePlaybookDefinition(input, { requireSchema: true });
+        const existing = team.playbooks.find((entry) => entry.id === playbook.id);
+        if (existing) {
+            if (JSON.stringify({ schema: TEAM_PLAYBOOK_EXPORT_SCHEMA, ...existing }) === JSON.stringify(playbook))
+                return { imported: false, playbook: clone(existing), team: publicTeam(team) };
+            throw new Error(`playbook id already exists in team: ${playbook.id}`);
+        }
+        if (team.playbooks.length >= 8) throw new Error("team playbook limit reached (8)");
+        team.playbooks.push({ id: playbook.id, name: playbook.name, description: playbook.description, steps: [...playbook.steps] });
+        team.updatedAt = now();
+        save();
+        return { imported: true, playbook: clone(playbook), team: publicTeam(team) };
+    }
+
     function createTeam({ title, coworkerIds, leadCoworkerId } = {}) {
         if (state.teams.length >= MAX_TEAMS)
             throw new Error(`team limit reached (${MAX_TEAMS})`);
@@ -810,6 +850,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         get(teamId) { return publicTeam(requireTeam(teamId)); },
         exportPack,
         importPack,
+        exportPlaybook,
+        importPlaybook,
         listChannels({ teamId } = {}) {
             const channels = teamId === undefined ? state.channels : state.channels.filter((entry) => entry.teamId === String(teamId));
             if (teamId !== undefined) requireTeam(teamId);

@@ -127,6 +127,21 @@ function teamPackShape(value) {
     return { schema: value.schema, id, name, description, coworkers, channels, playbooks };
 }
 
+function teamPlaybookShape(value) {
+    if (!isPlainObject(value)) throw new Error("playbook must be an object");
+    assertNoAuthority(value, "playbook");
+    exact(value, new Set(["schema", "id", "name", "description", "steps"]));
+    if (value.schema !== "sovereignbot.desktop.playbook.v1") throw new Error("playbook schema is invalid");
+    if (!Array.isArray(value.steps) || value.steps.length > 12) throw new Error("playbook steps are invalid");
+    return {
+        schema: value.schema,
+        id: identifier(value.id, "playbookId"),
+        name: string(value.name, "playbook name", 120, true),
+        description: string(value.description, "playbook description", 500, true),
+        steps: value.steps.map((step) => identifier(step, "playbook step")),
+    };
+}
+
 function coworkerShape(value, { patch = false } = {}) {
     if (!isPlainObject(value)) throw new Error(patch ? "patch must be an object" : "coworker must be an object");
     assertNoAuthority(value, patch ? "patch" : "coworker");
@@ -174,6 +189,8 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "team:installPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["packId"])); return { packId: identifier(value.packId, "packId") }; }),
     "team:exportPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId"])); return { teamId: identifier(value.teamId, "teamId") }; }),
     "team:importPack": spec(64 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["pack"])); return { pack: teamPackShape(value.pack) }; }),
+    "team:exportPlaybook": spec(2048, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId", "playbookId"])); return { teamId: identifier(value.teamId, "teamId"), playbookId: identifier(value.playbookId, "playbookId") }; }),
+    "team:importPlaybook": spec(8 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId", "playbook"])); return { teamId: identifier(value.teamId, "teamId"), playbook: teamPlaybookShape(value.playbook) }; }),
     "channel:list": spec(1024, (payload) => { if (payload === undefined || payload === null) return {}; const value = objectPayload(payload); exact(value, new Set(["teamId"])); return value.teamId === undefined ? {} : { teamId: identifier(value.teamId, "teamId") }; }),
     "channel:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["channelId"])); return { channelId: identifier(value.channelId, "channelId") }; }),
     "connectedApps:list": spec(1024, empty),

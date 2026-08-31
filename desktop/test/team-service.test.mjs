@@ -6,7 +6,7 @@ import test from "node:test";
 import { createConversationStore } from "../src/main/conversation-store.js";
 import { createCoworkerStore } from "../src/main/coworker-store.js";
 import { createDesktopServices } from "../src/main/services.js";
-import { TEAM_PACK_EXPORT_SCHEMA, createTeamService } from "../src/main/team-service.js";
+import { TEAM_PACK_EXPORT_SCHEMA, TEAM_PLAYBOOK_EXPORT_SCHEMA, createTeamService } from "../src/main/team-service.js";
 
 function fixture() {
     const root = mkdtempSync(join(tmpdir(), "sovereign-team-"));
@@ -152,6 +152,42 @@ test("Team Pack export/import carries only reusable product declarations", () =>
         assert.equal(conversations.list().conversations.length, 2);
 
         assert.throws(() => teams.importPack({ ...exported, coworkers: exported.coworkers.map((entry, index) => index ? entry : { ...entry, providerAccountId: "account" }) }), /field is not allowed/);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Playbook export/import is bounded and idempotent", () => {
+    const { root, teams } = fixture();
+    try {
+        const installed = teams.installPack("software-team");
+        const exported = teams.exportPlaybook(installed.team.id, "software-delivery");
+        assert.equal(exported.schema, TEAM_PLAYBOOK_EXPORT_SCHEMA);
+        assert.deepEqual(exported.steps, ["chief", "coding-lead", "reviewer", "chief"]);
+        const serialized = JSON.stringify(exported);
+        assert.equal(serialized.includes("workspace"), false);
+        assert.equal(serialized.includes("session"), false);
+        assert.equal(serialized.includes("capability"), false);
+
+        const imported = teams.importPlaybook(installed.team.id, {
+            ...exported,
+            id: "review-method",
+            name: "Review Method",
+            steps: ["chief", "reviewer"],
+        });
+        assert.equal(imported.imported, true);
+        assert.equal(imported.team.playbooks.some((playbook) => playbook.id === "review-method"), true);
+        assert.equal(teams.importPlaybook(installed.team.id, {
+            ...exported,
+            id: "review-method",
+            name: "Review Method",
+            steps: ["chief", "reviewer"],
+        }).imported, false);
+        assert.throws(
+            () => teams.importPlaybook(installed.team.id, { ...exported, id: "bad", workspacePath: "E:/private" }),
+            /field is not allowed/,
+        );
     }
     finally {
         rmSync(root, { recursive: true, force: true });

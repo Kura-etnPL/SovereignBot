@@ -639,6 +639,16 @@ function renderDetails(conversation) {
   const teamTools = $("details-team-tools");
   teamTools?.classList.toggle("hidden", !team);
   if (!team) $("team-pack-transfer-result") && ($("team-pack-transfer-result").textContent = "");
+  const playbookSelect = $("team-playbook-select");
+  if (playbookSelect) {
+    playbookSelect.textContent = "";
+    for (const playbook of team?.playbooks ?? []) {
+      const option = document.createElement("option");
+      option.value = playbook.id;
+      option.textContent = playbook.name;
+      playbookSelect.append(option);
+    }
+  }
   const roster = $("details-roster");
   clearNode(roster);
   if (team) {
@@ -721,6 +731,76 @@ async function copyTeamPack() {
   } catch {
     result.textContent = "Clipboard is unavailable; select the JSON and copy it manually.";
     result.classList.remove("hidden");
+  }
+}
+
+function openPlaybookDialog(playbook) {
+  const area = $("playbook-json");
+  const error = $("playbook-form-error");
+  if (!area) return;
+  area.value = playbook ? JSON.stringify(playbook, null, 2) : "";
+  hide(error);
+  $("playbook-dialog")?.showModal?.();
+  if (!playbook) area.focus();
+}
+
+async function exportCurrentPlaybook() {
+  const team = teamForConversation(state.selectedConversationId);
+  const playbookId = $("team-playbook-select")?.value;
+  if (!team || !playbookId || !window.sovereignbot?.teams?.exportPlaybook) return;
+  const result = $("team-pack-transfer-result");
+  try {
+    const playbook = await window.sovereignbot.teams.exportPlaybook({ teamId: team.id, playbookId });
+    openPlaybookDialog(playbook);
+    if (result) result.textContent = "Method export ready. Copy the JSON to share it.";
+  } catch (error) {
+    if (result) result.textContent = text(error?.message || error).replace(/^.*Error: /, "");
+  }
+}
+
+async function importPlaybook(event) {
+  event.preventDefault();
+  const team = teamForConversation(state.selectedConversationId);
+  const area = $("playbook-json");
+  const error = $("playbook-form-error");
+  hide(error);
+  if (!team) {
+    error.textContent = "Open a team channel first.";
+    show(error);
+    return;
+  }
+  let playbook;
+  try {
+    playbook = JSON.parse(area.value);
+  } catch {
+    error.textContent = "Paste a valid Playbook JSON.";
+    show(error);
+    return;
+  }
+  try {
+    const imported = await window.sovereignbot.teams.importPlaybook({ teamId: team.id, playbook });
+    $("playbook-dialog")?.close();
+    await refreshTeams();
+    if (state.selectedConversation) renderDetails(state.selectedConversation);
+    $("team-pack-transfer-result").textContent = imported.imported ? "Playbook imported." : "Playbook already exists.";
+  } catch (caught) {
+    error.textContent = text(caught?.message || caught).replace(/^.*Error: /, "");
+    show(error);
+  }
+}
+
+async function copyPlaybook() {
+  const area = $("playbook-json");
+  const result = $("playbook-form-error");
+  hide(result);
+  if (!area?.value.trim()) return;
+  try {
+    await navigator.clipboard.writeText(area.value);
+    result.textContent = "Copied to clipboard.";
+    show(result);
+  } catch {
+    result.textContent = "Clipboard is unavailable; select the JSON and copy it manually.";
+    show(result);
   }
 }
 
@@ -1208,6 +1288,10 @@ function bindEvents() {
   $("team-import-pack")?.addEventListener("click", () => openTeamPackDialog());
   $("team-pack-copy")?.addEventListener("click", copyTeamPack);
   $("team-pack-form")?.addEventListener("submit", importTeamPack);
+  $("team-export-playbook")?.addEventListener("click", exportCurrentPlaybook);
+  $("team-import-playbook")?.addEventListener("click", () => openPlaybookDialog());
+  $("playbook-copy")?.addEventListener("click", copyPlaybook);
+  $("playbook-form")?.addEventListener("submit", importPlaybook);
   $("welcome-open-chief").addEventListener("click", () => {
     const chief = state.coworkers.find((entry) => /chief of staff/i.test(entry.name)) ?? state.coworkers[0];
     if (chief) openDirect(chief.id);
