@@ -1012,7 +1012,12 @@ function renderConnectedApps() {
     description.textContent = app.description;
     const capabilities = document.createElement("small");
     capabilities.textContent = "Capabilities: " + (app.capabilities ?? []).join(" · ");
-    card.append(head, service, description, capabilities);
+    const approval = document.createElement("small");
+    approval.className = "connected-app-approval";
+    approval.textContent = app.approval?.mode === "governed"
+      ? "Approval: Governor review when required / 审批：需要时由 Governor 审核"
+      : "Approval: not specified / 审批：未说明";
+    card.append(head, service, description, capabilities, approval);
 
     const assignment = document.createElement("div");
     assignment.className = "connected-app-assignment";
