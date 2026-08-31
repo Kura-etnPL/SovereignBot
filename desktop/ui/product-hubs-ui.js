@@ -136,8 +136,38 @@
     const root = $("product-packs"); clear(root);
     for (const item of items) { const card = document.createElement("article"); card.className = "settings-card"; const h = document.createElement("h3"); h.textContent = item.name; card.append(h, line("Contents", `${item.coworkerNames?.length ?? 0} coworkers · ${item.channelNames?.length ?? 0} channels · ${item.playbookNames?.length ?? 0} playbooks`), line("Status", item.installed ? "Installed" : "Available")); const actions = document.createElement("div"); actions.className = "detail-actions"; if (!item.installed) actions.append(button("Install", async () => { await api.teams.installPack({ packId: item.id }); await refresh(); })); actions.append(button("Export", async () => { const teams = typeof state !== "undefined" ? state.teams : []; const team = teams.find((entry) => entry.packId === item.id); const pack = team ? await api.teams.exportPack({ teamId: team.id }) : await api.teams.exportPackRecipe({ packId: item.id }); await copy(pack); })); actions.append(button("Duplicate", async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); })); if (item.custom) actions.append(button("Edit", async () => { const name = window.prompt("Pack name", item.name); if (!name) return; await api.teams.editPack({ packId: item.id, patch: { name, description: item.description } }); await refresh(); })); card.append(actions); root.append(card); }
   }
+  function renderWorkspaceSwitcher(snapshot) {
+    const select = $("product-workspace-switch");
+    if (!select) return;
+    const selected = select.value || snapshot?.defaultWorkspaceId;
+    select.textContent = "";
+    const workspaces = snapshot?.workspaces ?? [];
+    if (!workspaces.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No trusted workspaces / 暂无可信工作区";
+      select.append(option);
+      select.disabled = true;
+      return;
+    }
+    select.disabled = false;
+    for (const workspace of workspaces) {
+      const option = document.createElement("option");
+      option.value = workspace.id;
+      option.textContent = workspace.kind === "shared-project"
+        ? "Shared project workspace / 共享项目工作区"
+        : workspace.label || "Private workspace / 私有工作区";
+      select.append(option);
+    }
+    if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+  }
   async function refresh() {
-    const [teams, coworkers] = await Promise.all([api.teams.list({}), api.coworkers.list({})]);
+    const [teams, coworkers, workspaces] = await Promise.all([
+      api.teams.list({}),
+      api.coworkers.list({}),
+      api.workspaces?.list ? api.workspaces.list({}) : Promise.resolve({ workspaces: [] }),
+    ]);
+    renderWorkspaceSwitcher(workspaces);
     const filter = $("artifact-hub-filter");
     if (filter && filter.options.length === 1) {
       for (const team of teams.teams ?? []) {
@@ -153,7 +183,42 @@
     renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? [], coworkers.coworkers ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? [], teams.channelTemplates ?? []); renderSkills(skills.skills ?? []); renderPacks(teams.packs ?? []);
   }
   async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description") ?? ""; const rawSteps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; await api.playbooks.create({ playbook: { name, description, steps: rawSteps.split(",").map((x) => x.trim()).filter(Boolean) } }); await refresh(); }
-  function setup() { const artifactRoot = $("product-artifacts"); const heading = artifactRoot?.parentElement?.querySelector(".card-heading"); if (heading && !$("artifact-hub-filter")) { const filter = document.createElement("select"); filter.id = "artifact-hub-filter"; filter.setAttribute("aria-label", "Artifact filter"); const option = document.createElement("option"); option.value = "recent"; option.textContent = "Recent / 最近"; filter.append(option); heading.append(filter); } $("nav-product-hubs")?.addEventListener("click", async () => { switchView("product-hubs"); try { await refresh(); } catch (e) { error($("product-playbooks"), e); } }); $("product-hubs-refresh")?.addEventListener("click", () => void refresh()); $("artifact-hub-filter")?.addEventListener("change", () => void refresh()); $("product-channel-filter")?.addEventListener("change", () => void refresh()); $("product-channel-switch")?.addEventListener("change", (event) => { if (event.target.value && typeof openConversation === "function") void openConversation(event.target.value); }); $("playbook-create")?.addEventListener("click", () => void createPlaybook()); }
+  function setup() {
+    const artifactRoot = $("product-artifacts");
+    const heading = artifactRoot?.parentElement?.querySelector(".card-heading");
+    if (heading && !$("artifact-hub-filter")) { const filter = document.createElement("select"); filter.id = "artifact-hub-filter"; filter.setAttribute("aria-label", "Artifact filter"); const option = document.createElement("option"); option.value = "recent"; option.textContent = "Recent / 最近"; filter.append(option); heading.append(filter); }
+    const productHeader = $("view-product-hubs")?.querySelector(".page-header");
+    if (productHeader && !$("product-workspace-switch") && api.workspaces?.list && api.workspaces?.setDefault) {
+      const controls = document.createElement("div");
+      controls.className = "detail-actions";
+      const label = document.createElement("span");
+      label.textContent = "Project / workspace / 项目工作区";
+      const select = document.createElement("select");
+      select.id = "product-workspace-switch";
+      select.setAttribute("aria-label", "Project workspace switcher");
+      const feedback = document.createElement("span");
+      feedback.id = "product-workspace-result";
+      feedback.className = "setting-feedback";
+      select.addEventListener("change", async () => {
+        if (!select.value) return;
+        select.disabled = true;
+        try {
+          const result = await api.workspaces.setDefault({ id: select.value });
+          if (!result?.ok) throw new Error("Workspace selection was not accepted.");
+          feedback.textContent = "Active workspace updated / 已切换工作区";
+          if (typeof refreshSettingsData === "function") await refreshSettingsData();
+          await refresh();
+        } catch (e) {
+          feedback.textContent = String(e?.message ?? e).slice(0, 180);
+        } finally {
+          select.disabled = false;
+        }
+      });
+      controls.append(label, select);
+      productHeader.append(controls, feedback);
+    }
+    $("nav-product-hubs")?.addEventListener("click", async () => { switchView("product-hubs"); try { await refresh(); } catch (e) { error($("product-playbooks"), e); } }); $("product-hubs-refresh")?.addEventListener("click", () => void refresh()); $("artifact-hub-filter")?.addEventListener("change", () => void refresh()); $("product-channel-filter")?.addEventListener("change", () => void refresh()); $("product-channel-switch")?.addEventListener("change", (event) => { if (event.target.value && typeof openConversation === "function") void openConversation(event.target.value); }); $("playbook-create")?.addEventListener("click", () => void createPlaybook());
+  }
   window.addEventListener("DOMContentLoaded", setup);
   window.addEventListener("DOMContentLoaded", () => {
     const root = $("product-packs");
