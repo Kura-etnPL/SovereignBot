@@ -401,8 +401,12 @@ async function main() {
                 "team:exportPlaybook": ({ teamId, playbookId }) => teamService.exportPlaybook(teamId, playbookId),
                 "team:importPlaybook": ({ teamId, playbook }) => teamService.importPlaybook(teamId, playbook),
                 "team:createChannelFromTemplate": ({ teamId, templateId }) => teamService.createChannelFromTemplate(teamId, templateId),
-                "channel:list": ({ teamId }) => teamService.listChannels({ teamId }),
+                "channel:list": ({ teamId, includeArchived }) => teamService.listChannels({ teamId, includeArchived }),
                 "channel:get": ({ channelId }) => teamService.getChannel(channelId),
+                "channel:create": (payload) => teamService.createChannel(payload),
+                "channel:update": ({ channelId, patch }) => teamService.updateChannel(channelId, patch),
+                "channel:archive": ({ channelId }) => teamService.archiveChannel(channelId),
+                "channel:restore": ({ channelId }) => teamService.restoreChannel(channelId),
                 "connectedApps:list": () => connectedApps.list(),
                 "connectedApps:assign": async (payload) => {
                     const app = connectedApps.setAssignment(payload);
@@ -413,6 +417,7 @@ async function main() {
                     skillStore,
                     conversationStore,
                     dispatchMessage: (conversationId, messageId) => coworkerDispatcher.dispatchMessage(conversationId, messageId),
+                    isConversationArchived: (conversationId) => teamService.isArchivedConversation(conversationId),
                 }),
                 "teach:list": () => teachOnce.list(),
                 "teach:start": (payload) => teachOnce.start(payload),
@@ -429,6 +434,7 @@ async function main() {
                 "conversation:createTeam": ({ title, coworkerIds, leadCoworkerId }) => teamService.createTeam({ title, coworkerIds, leadCoworkerId }).conversation,
                 "conversation:stop": async ({ conversationId }) => coworkerDispatcher.stopConversation(conversationId),
                 "conversation:redirect": async ({ conversationId, text, mentions, replyTo, clientMessageId }) => {
+                    if (teamService.isArchivedConversation(conversationId)) throw new Error("archived channel is read-only");
                     const stopped = await coworkerDispatcher.stopConversation(conversationId, "conversation redirected by the user");
                     const message = conversationStore.postUserMessage(conversationId, { text, mentions, replyTo, clientMessageId });
                     const deliveries = coworkerDispatcher.dispatchMessage(conversationId, message.id);

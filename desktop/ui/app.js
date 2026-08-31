@@ -22,6 +22,7 @@ const state = {
   voice: { listening: false },
   editingCoworkerId: undefined,
   editingCoworkerSnapshot: undefined,
+  editingChannelId: undefined,
   pollTimer: undefined,
   conversationSignature: undefined,
 };
@@ -729,11 +730,15 @@ function renderDetails(conversation) {
     for (const channel of team?.channels ?? []) {
       const option = document.createElement("option");
       option.value = channel.conversationId;
-      option.textContent = `${channel.name} / ${channel.kind}`;
+      option.textContent = `${channel.name} / ${channel.kind}${channel.archived ? " · archived / 已归档" : ""}`;
       option.selected = channel.conversationId === conversation.id;
       channelSelect.append(option);
     }
   }
+  const selectedChannel = team?.channels?.find((entry) => entry.conversationId === conversation.id);
+  $("team-edit-channel")?.classList.toggle("hidden", !selectedChannel);
+  $("team-archive-channel")?.classList.toggle("hidden", !selectedChannel || selectedChannel.archived);
+  $("team-restore-channel")?.classList.toggle("hidden", !selectedChannel?.archived);
   const templateSelect = $("team-channel-template-select");
   if (templateSelect) {
     templateSelect.textContent = "";
@@ -915,6 +920,89 @@ async function addChannelFromTemplate() {
     await Promise.all([refreshConversations(), refreshTeams()]);
     if (created?.channel?.conversationId) await openConversation(created.channel.conversationId);
     if (result) result.textContent = created.created ? "Channel added." : "That channel is already in this team.";
+  } catch (error) {
+    if (result) result.textContent = text(error?.message || error).replace(/^.*Error: /, "");
+  }
+}
+
+function populateChannelDialog(channel, team) {
+  state.editingChannelId = channel?.id;
+  $("channel-dialog-eyebrow").textContent = channel ? "EDIT CHANNEL / 编辑频道" : "NEW CHANNEL / 新建频道";
+  $("channel-dialog-title").textContent = channel ? "Shape this channel" : "Create a channel";
+  $("channel-save").textContent = channel ? "Save changes / 保存修改" : "Create channel / 创建频道";
+  $("channel-name").value = channel?.name ?? "";
+  $("channel-kind").value = channel?.kind ?? "project";
+  $("channel-instructions").value = channel?.instructions ?? "";
+  const workspace = $("channel-workspace");
+  workspace.textContent = "";
+  for (const entry of state.workspaces?.workspaces ?? []) {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.kind === "shared-project" ? "Shared project workspace / 共享项目工作区" : entry.label || "Private workspace / 私有工作区";
+    option.selected = (channel?.workspaceId ?? team?.sharedWorkspaceId) === entry.id;
+    workspace.append(option);
+  }
+  const playbook = $("channel-playbook");
+  playbook.textContent = "";
+  for (const entry of team?.playbooks ?? []) {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.name;
+    option.selected = (channel?.playbookId ?? team?.playbooks?.[0]?.id) === entry.id;
+    playbook.append(option);
+  }
+  hide($("channel-form-error"));
+  openDialog("channel-dialog");
+}
+
+function openNewChannelDialog() {
+  const team = teamForConversation(state.selectedConversationId);
+  if (team) populateChannelDialog(undefined, team);
+}
+
+function openEditChannelDialog() {
+  const team = teamForConversation(state.selectedConversationId);
+  const channel = team?.channels?.find((entry) => entry.conversationId === state.selectedConversationId);
+  if (team && channel) populateChannelDialog(channel, team);
+}
+
+async function saveChannel(event) {
+  event.preventDefault();
+  const team = teamForConversation(state.selectedConversationId);
+  const error = $("channel-form-error");
+  hide(error);
+  if (!team) return;
+  const payload = {
+    name: $("channel-name").value,
+    kind: $("channel-kind").value,
+    instructions: $("channel-instructions").value,
+    workspaceId: $("channel-workspace").value,
+    playbookId: $("channel-playbook").value,
+  };
+  try {
+    const result = state.editingChannelId
+      ? await window.sovereignbot.channels.update({ channelId: state.editingChannelId, patch: payload })
+      : await window.sovereignbot.channels.create({ teamId: team.id, ...payload });
+    $("channel-dialog")?.close();
+    await Promise.all([refreshConversations(), refreshTeams()]);
+    if (result?.channel?.conversationId) await openConversation(result.channel.conversationId);
+  } catch (caught) {
+    error.textContent = text(caught?.message || caught).replace(/^.*Error: /, "");
+    show(error);
+  }
+}
+
+async function setSelectedChannelArchived(archived) {
+  const team = teamForConversation(state.selectedConversationId);
+  const channel = team?.channels?.find((entry) => entry.conversationId === state.selectedConversationId);
+  if (!channel) return;
+  const result = $("team-pack-transfer-result");
+  try {
+    const operation = archived ? window.sovereignbot.channels.archive : window.sovereignbot.channels.restore;
+    await operation({ channelId: channel.id });
+    await refreshTeams();
+    if (state.selectedConversation) renderDetails(state.selectedConversation);
+    if (result) result.textContent = archived ? "Channel archived; it is now read-only." : "Channel restored.";
   } catch (error) {
     if (result) result.textContent = text(error?.message || error).replace(/^.*Error: /, "");
   }
@@ -1559,6 +1647,11 @@ function bindEvents() {
   $("playbook-form")?.addEventListener("submit", importPlaybook);
   $("team-channel-select")?.addEventListener("change", openSelectedTeamChannel);
   $("team-add-channel-from-template")?.addEventListener("click", addChannelFromTemplate);
+  $("team-create-channel")?.addEventListener("click", openNewChannelDialog);
+  $("team-edit-channel")?.addEventListener("click", openEditChannelDialog);
+  $("team-archive-channel")?.addEventListener("click", () => setSelectedChannelArchived(true));
+  $("team-restore-channel")?.addEventListener("click", () => setSelectedChannelArchived(false));
+  $("channel-form")?.addEventListener("submit", saveChannel);
   $("welcome-open-chief").addEventListener("click", () => {
     const chief = state.coworkers.find((entry) => /chief of staff/i.test(entry.name)) ?? state.coworkers[0];
     if (chief) openDirect(chief.id);

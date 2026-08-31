@@ -374,6 +374,7 @@ function sanitizePersisted(value) {
                 workspaceId: safeId(entry.workspaceId, "workspaceId"),
                 conversationId: safeId(entry.conversationId, "conversationId"),
                 playbookId: safeId(entry.playbookId, "playbookId"),
+                archived: entry.archived === true,
                 createdAt: safeString(entry.createdAt, "channel createdAt", 80),
                 updatedAt: safeString(entry.updatedAt, "channel updatedAt", 80),
             };
@@ -445,6 +446,7 @@ function publicChannel(channel) {
         workspaceId: channel.workspaceId,
         conversationId: channel.conversationId,
         playbookId: channel.playbookId,
+        archived: channel.archived === true,
         createdAt: channel.createdAt,
         updatedAt: channel.updatedAt,
     };
@@ -794,6 +796,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             workspaceId: team.sharedWorkspaceId,
             conversationId: conversation.id,
             playbookId,
+            archived: false,
             createdAt: timestamp,
             updatedAt: timestamp,
         };
@@ -802,6 +805,93 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         team.updatedAt = timestamp;
         save();
         return { created: true, channel: publicChannel(channel), conversation, team: publicTeam(team) };
+    }
+
+    function createChannel({ teamId, name, kind = "project", instructions = "", workspaceId, playbookId } = {}) {
+        const team = requireTeam(teamId);
+        const normalizedKind = ["work", "personal", "project"].includes(kind) ? kind : undefined;
+        if (!normalizedKind) throw new Error("channel kind is invalid");
+        const channelName = safeString(name, "channel name", 120);
+        const channelInstructions = instructions === undefined || instructions === ""
+            ? "A focused room for bounded work, updates, and teammate handoffs."
+            : safeString(instructions, "channel instructions", 12_000);
+        if (state.channels.length >= MAX_CHANNELS) throw new Error(`channel limit reached (${MAX_CHANNELS})`);
+        const boundWorkspaceId = workspaceId === undefined || workspaceId === "" ? team.sharedWorkspaceId : safeId(workspaceId, "workspaceId");
+        if (!services.workspacePath(boundWorkspaceId)) throw new Error(`unknown trusted workspace: ${boundWorkspaceId}`);
+        const boundPlaybookId = playbookId === undefined || playbookId === ""
+            ? team.playbooks[0]?.id
+            : safeId(playbookId, "playbookId");
+        if (!boundPlaybookId || !team.playbooks.some((entry) => entry.id === boundPlaybookId))
+            throw new Error(`unknown team playbook: ${boundPlaybookId}`);
+        const channelId = makeChannelId();
+        safeId(channelId, "channelId", CHANNEL_ID);
+        const conversation = conversationStore.createTeam({
+            title: channelName,
+            coworkerIds: team.coworkerIds,
+            leadCoworkerId: team.coworkerIds[0],
+            deduplicate: false,
+        });
+        const timestamp = now();
+        const channel = {
+            id: channelId,
+            teamId: team.id,
+            kind: normalizedKind,
+            name: channelName,
+            instructions: channelInstructions,
+            coworkerIds: [...team.coworkerIds],
+            workspaceId: boundWorkspaceId,
+            conversationId: conversation.id,
+            playbookId: boundPlaybookId,
+            archived: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+        };
+        state.channels.push(channel);
+        team.channelIds.push(channel.id);
+        team.updatedAt = timestamp;
+        save();
+        return { created: true, channel: publicChannel(channel), conversation, team: publicTeam(team) };
+    }
+
+    function updateChannel(channelId, patch = {}) {
+        const channel = requireChannel(channelId);
+        const team = requireTeam(channel.teamId);
+        const allowed = new Set(["name", "kind", "instructions", "workspaceId", "playbookId"]);
+        for (const key of Object.keys(patch)) if (!allowed.has(key)) throw new Error(`channel field is not editable: ${key}`);
+        if (!Object.keys(patch).length) throw new Error("channel patch must not be empty");
+        if (patch.name !== undefined) channel.name = safeString(patch.name, "channel name", 120);
+        if (patch.kind !== undefined) {
+            if (!["work", "personal", "project"].includes(patch.kind)) throw new Error("channel kind is invalid");
+            channel.kind = patch.kind;
+        }
+        if (patch.instructions !== undefined) channel.instructions = safeString(patch.instructions, "channel instructions", 12_000);
+        if (patch.workspaceId !== undefined) {
+            const workspaceId = safeId(patch.workspaceId, "workspaceId");
+            if (!services.workspacePath(workspaceId)) throw new Error(`unknown trusted workspace: ${workspaceId}`);
+            channel.workspaceId = workspaceId;
+        }
+        if (patch.playbookId !== undefined) {
+            const nextPlaybookId = safeId(patch.playbookId, "playbookId");
+            if (!team.playbooks.some((entry) => entry.id === nextPlaybookId)) throw new Error(`unknown team playbook: ${nextPlaybookId}`);
+            channel.playbookId = nextPlaybookId;
+        }
+        channel.updatedAt = now();
+        team.updatedAt = channel.updatedAt;
+        save();
+        return { channel: publicChannel(channel), team: publicTeam(team) };
+    }
+
+    function setChannelArchived(channelId, archived) {
+        const channel = requireChannel(channelId);
+        const team = requireTeam(channel.teamId);
+        if (!archived && channel.archived === false) return { channel: publicChannel(channel), team: publicTeam(team) };
+        if (archived && !channel.archived && state.channels.filter((entry) => entry.teamId === team.id && !entry.archived).length <= 1)
+            throw new Error("a team must keep at least one active channel");
+        channel.archived = archived === true;
+        channel.updatedAt = now();
+        team.updatedAt = channel.updatedAt;
+        save();
+        return { channel: publicChannel(channel), team: publicTeam(team) };
     }
 
     function createTeam({ title, coworkerIds, leadCoworkerId } = {}) {
@@ -959,6 +1049,10 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return Boolean(channelForConversation(conversationId));
     }
 
+    function isArchivedConversation(conversationId) {
+        return channelForConversation(conversationId)?.archived === true;
+    }
+
     return {
         schema: TEAMS_SCHEMA,
         list() {
@@ -980,8 +1074,13 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         exportPlaybook,
         importPlaybook,
         createChannelFromTemplate,
-        listChannels({ teamId } = {}) {
-            const channels = teamId === undefined ? state.channels : state.channels.filter((entry) => entry.teamId === String(teamId));
+        createChannel,
+        updateChannel,
+        archiveChannel(channelId) { return setChannelArchived(channelId, true); },
+        restoreChannel(channelId) { return setChannelArchived(channelId, false); },
+        listChannels({ teamId, includeArchived = false } = {}) {
+            const channels = (teamId === undefined ? state.channels : state.channels.filter((entry) => entry.teamId === String(teamId)))
+                .filter((entry) => includeArchived === true || !entry.archived);
             if (teamId !== undefined) requireTeam(teamId);
             return { schema: TEAMS_SCHEMA, channels: channels.map(publicChannel) };
         },
@@ -993,6 +1092,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         workspaceIdForConversation,
         currentOwnerForConversation,
         isManagedConversation,
+        isArchivedConversation,
         setCoworkerAppAccessResolver(resolver) {
             if (resolver !== undefined && typeof resolver !== "function") throw new Error("coworker app access resolver must be a function");
             resolveCoworkerAppAccess = resolver;

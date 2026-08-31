@@ -223,3 +223,38 @@ test("channel templates create governed team channels idempotently", () => {
         rmSync(root, { recursive: true, force: true });
     }
 });
+
+test("custom channels support bounded editing and fail-closed archive/restore", () => {
+    const { root, teams } = fixture();
+    try {
+        const installed = teams.installPack("software-team");
+        const created = teams.createChannel({
+            teamId: installed.team.id,
+            name: "Launch Room",
+            kind: "work",
+            instructions: "Coordinate the bounded launch.",
+        });
+        assert.equal(created.created, true);
+        assert.equal(created.channel.kind, "work");
+        assert.equal(created.channel.workspaceId, installed.team.sharedWorkspaceId);
+        assert.equal(created.channel.archived, false);
+        const updated = teams.updateChannel(created.channel.id, {
+            name: "Launch Review",
+            instructions: "Review the bounded launch outcome.",
+        });
+        assert.equal(updated.channel.name, "Launch Review");
+        assert.equal(updated.channel.conversationId, created.channel.conversationId);
+        assert.equal(teams.listChannels({ teamId: installed.team.id }).channels.some((entry) => entry.id === created.channel.id), true);
+        const archived = teams.archiveChannel(created.channel.id);
+        assert.equal(archived.channel.archived, true);
+        assert.equal(teams.listChannels({ teamId: installed.team.id }).channels.some((entry) => entry.id === created.channel.id), false);
+        assert.equal(teams.listChannels({ teamId: installed.team.id, includeArchived: true }).channels.some((entry) => entry.archived), true);
+        assert.throws(() => teams.archiveChannel(installed.team.channels[0].id), /at least one active channel/);
+        const restored = teams.restoreChannel(created.channel.id);
+        assert.equal(restored.channel.archived, false);
+        assert.throws(() => teams.createChannel({ teamId: installed.team.id, name: "Leak", workspaceId: "E:/private" }), /workspaceId must be an identifier/);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});

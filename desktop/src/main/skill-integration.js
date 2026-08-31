@@ -15,7 +15,7 @@ export function createSkillAwareConversationStore(conversationStore, skillStore)
     };
 }
 
-export function createSkillHandlers({ skillStore, conversationStore, dispatchMessage }) {
+export function createSkillHandlers({ skillStore, conversationStore, dispatchMessage, isConversationArchived }) {
     return {
         "skill:list": ({ includeArchived }) => skillStore.list({ includeArchived }),
         "skill:get": ({ skillId }) => skillStore.get(skillId),
@@ -25,6 +25,7 @@ export function createSkillHandlers({ skillStore, conversationStore, dispatchMes
         "skill:restore": ({ skillId }) => skillStore.restore(skillId),
         "skill:assign": ({ skillId, targetKind, targetId, enabled }) => skillStore.assign(skillId, { targetKind, targetId, enabled }),
         "conversation:send": ({ conversationId, text, mentions, replyTo, artifactIds, clientMessageId, skillIds = [] }) => {
+            if (isConversationArchived?.(conversationId)) throw new Error("archived channel is read-only");
             for (const skillId of skillIds)
                 skillStore.requireActive(skillId);
             const message = conversationStore.postUserMessage(conversationId, { text, mentions, replyTo, artifactIds, clientMessageId });

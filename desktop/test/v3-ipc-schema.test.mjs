@@ -8,7 +8,7 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     const expected = [
         "coworker:list", "coworker:get", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
         "conversation:list", "conversation:get", "conversation:createDirect", "conversation:createTeam", "conversation:send",
-        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:exportPlaybook", "team:importPlaybook", "team:createChannelFromTemplate", "channel:list", "channel:get",
+        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:exportPlaybook", "team:importPlaybook", "team:createChannelFromTemplate", "channel:list", "channel:get", "channel:create", "channel:update", "channel:archive", "channel:restore",
         "connectedApps:list", "connectedApps:assign",
     ];
     for (const channel of expected)
@@ -151,6 +151,40 @@ test("channel template creation accepts only a bounded team/template selection",
     assert.throws(
         () => validateV3IpcRequest("team:createChannelFromTemplate", { ...payload, workspacePath: "E:/private" }),
         /unexpected request field: workspacePath/,
+    );
+});
+
+test("channel management accepts only bounded product fields", () => {
+    const create = validateV3IpcRequest("channel:create", {
+        teamId: "team_1111111111111111",
+        name: "Launch Room",
+        kind: "work",
+        instructions: "Bounded launch work.",
+        workspaceId: "workspace_1111111111111111",
+        playbookId: "software-delivery",
+    });
+    assert.deepEqual(create, {
+        teamId: "team_1111111111111111",
+        name: "Launch Room",
+        kind: "work",
+        instructions: "Bounded launch work.",
+        workspaceId: "workspace_1111111111111111",
+        playbookId: "software-delivery",
+    });
+    assert.deepEqual(validateV3IpcRequest("channel:update", {
+        channelId: "channel_1111111111111111",
+        patch: { name: "Launch Review", kind: "project" },
+    }), {
+        channelId: "channel_1111111111111111",
+        patch: { name: "Launch Review", kind: "project" },
+    });
+    assert.throws(
+        () => validateV3IpcRequest("channel:create", { teamId: "team_1111111111111111", name: "Leak", workspacePath: "E:/private" }),
+        /unexpected request field: workspacePath/,
+    );
+    assert.throws(
+        () => validateV3IpcRequest("channel:update", { channelId: "channel_1111111111111111", patch: { conversationId: "conversation_1" } }),
+        /unexpected request field: conversationId/,
     );
 });
 
