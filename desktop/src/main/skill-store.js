@@ -107,7 +107,7 @@ function normalizeMetadata(input) {
 
 function normalizeCreate(input) {
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("skill must be an object");
-    const allowed = new Set(["name", "description", "instructions", "inputs", "steps", "expectedOutput", "requestedCapabilities", "validators", "source"]);
+    const allowed = new Set(["name", "description", "instructions", "inputs", "steps", "expectedOutput", "requestedCapabilities", "validators", "source", "lastTestedAt"]);
     for (const key of Object.keys(input)) {
         if (!allowed.has(key)) throw new Error(`unknown skill field: ${key}`);
     }
@@ -117,6 +117,7 @@ function normalizeCreate(input) {
         description: text(input.description, "skill description", MAX_DESCRIPTION) ?? "",
         instructions: text(input.instructions, "skill instructions", MAX_INSTRUCTIONS, { required: true }),
         ...metadata,
+        ...(input.lastTestedAt ? { lastTestedAt: text(input.lastTestedAt, "lastTestedAt", 64) } : {}),
     };
 }
 
@@ -159,10 +160,18 @@ function sanitize(entry) {
             requestedCapabilities: entry.requestedCapabilities,
             validators: entry.validators,
             source: entry.source,
+            lastTestedAt: entry.lastTestedAt,
         });
         if (!["active", "archived"].includes(entry.state)) return undefined;
         if (typeof entry.createdAt !== "string" || typeof entry.updatedAt !== "string") return undefined;
-        return { id: entry.id, ...normalized, state: entry.state, createdAt: entry.createdAt, updatedAt: entry.updatedAt };
+        return {
+            id: entry.id,
+            ...normalized,
+            ...(entry.lastUsedAt ? { lastUsedAt: text(entry.lastUsedAt, "lastUsedAt", 64) } : {}),
+            state: entry.state,
+            createdAt: entry.createdAt,
+            updatedAt: entry.updatedAt,
+        };
     }
     catch {
         return undefined;
@@ -322,6 +331,8 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
             const invocation = { messageId, skillIds: selected.map((entry) => entry.id), createdAt: existing?.createdAt ?? now() };
             if (existing) Object.assign(existing, invocation);
             else invocations.push(invocation);
+            const usedAt = now();
+            for (const skill of selected) skill.lastUsedAt = usedAt;
             if (invocations.length > MAX_INVOCATIONS) invocations.splice(0, invocations.length - MAX_INVOCATIONS);
             save();
             return clone(invocation);

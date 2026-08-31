@@ -222,6 +222,10 @@
       const body = document.createElement("div");
       body.className = "skill-option-copy";
       body.append(el("strong", "", skill.name), el("span", "", skill.description || "Reusable coworker workflow"));
+      const capabilities = (skill.requestedCapabilities ?? []).join(", ") || "none";
+      const tested = skill.lastTestedAt ? new Date(skill.lastTestedAt).toLocaleString() : "Not tested / 未测试";
+      const used = skill.lastUsedAt ? new Date(skill.lastUsedAt).toLocaleString() : "Not used / 未使用";
+      body.append(el("span", "skill-option-meta", (skill.source === "taught" ? "Taught by Teach Once / 教学创建" : "Created manually / 手动创建") + " · capabilities: " + capabilities + " · tested: " + tested + " · used: " + used));
       const assignment = el("div", "skill-assignment");
       assignment.append(el("span", "skill-assignment-label", "Usable by / 可用对象"));
       const assigned = [
