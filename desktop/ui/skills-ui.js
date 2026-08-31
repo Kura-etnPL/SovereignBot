@@ -222,6 +222,67 @@
       const body = document.createElement("div");
       body.className = "skill-option-copy";
       body.append(el("strong", "", skill.name), el("span", "", skill.description || "Reusable coworker workflow"));
+      const capabilities = (skill.requestedCapabilities ?? []).join(", ") || "none";
+      const tested = skill.lastTestedAt ? new Date(skill.lastTestedAt).toLocaleString() : "Not tested / 未测试";
+      const used = skill.lastUsedAt ? new Date(skill.lastUsedAt).toLocaleString() : "Not used / 未使用";
+      body.append(el("span", "skill-option-meta", (skill.source === "taught" ? "Taught by Teach Once / 教学创建" : "Created manually / 手动创建") + " · capabilities: " + capabilities + " · tested: " + tested + " · used: " + used));
+      const assignment = el("div", "skill-assignment");
+      assignment.append(el("span", "skill-assignment-label", "Usable by / 可用对象"));
+      const assigned = [
+        ...(skill.assignedCoworkerIds ?? []).map((id) => ({ kind: "coworker", id, label: state.coworkers.find((entry) => entry.id === id)?.name })),
+        ...(skill.assignedTeamIds ?? []).map((id) => ({ kind: "team", id, label: state.teams.find((entry) => entry.id === id)?.name })),
+      ].filter((entry) => entry.label);
+      for (const target of assigned) {
+        const chip = el("button", "skill-assignment-chip", target.label + " ×");
+        chip.type = "button";
+        chip.title = "Remove assignment / 移除分配";
+        chip.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          await window.sovereignbot.skills.assign({ skillId: skill.id, targetKind: target.kind, targetId: target.id, enabled: false });
+          await refreshSkills();
+        });
+        assignment.append(chip);
+      }
+      const select = document.createElement("select");
+      select.className = "skill-assignment-select";
+      select.title = "Assign this skill to a coworker or team";
+      select.append(el("option", "", "Assign… / 分配…"));
+      for (const coworker of state.coworkers ?? []) {
+        const option = el("option", "", "Coworker · " + coworker.name);
+        option.value = "coworker:" + coworker.id;
+        select.append(option);
+      }
+      for (const team of state.teams ?? []) {
+        const option = el("option", "", "Team · " + team.name);
+        option.value = "team:" + team.id;
+        select.append(option);
+      }
+      select.addEventListener("click", (event) => event.stopPropagation());
+      select.addEventListener("change", async () => {
+        const [targetKind, targetId] = select.value.split(":");
+        select.value = "";
+        if (!targetKind || !targetId) return;
+        try {
+          await window.sovereignbot.skills.assign({ skillId: skill.id, targetKind, targetId, enabled: true });
+          await refreshSkills();
+        } catch (error) {
+          select.title = String(error?.message || error).replace(/^.*Error: /, "").slice(0, 180);
+        }
+      });
+      assignment.append(select);
+      const routine = el("button", "quiet-action skill-routine-button", "Create Routine / 创建例行任务");
+      routine.type = "button";
+      routine.title = "Turn this verified skill into a scheduled routine";
+      routine.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        document.dispatchEvent(new CustomEvent("sovereignbot:create-routine-from-skill", {
+          detail: { skillId: skill.id },
+        }));
+      });
+      assignment.append(routine);
+      body.append(assignment);
       row.append(checkbox, icon, body);
       list.append(row);
     }

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createSkillStore } from "../src/main/skill-store.js";
+import { createSkillHandlers } from "../src/main/skill-integration.js";
 
 test("skills persist message invocation and decorate only the model-facing conversation copy", () => {
   const root = mkdtempSync(join(tmpdir(), "sovereign-skills-"));
@@ -33,6 +34,44 @@ test("skills persist message invocation and decorate only the model-facing conve
 
     const reloaded = createSkillStore({ persistPath });
     assert.deepEqual(reloaded.skillsForMessage("msg_0000000000000001").map((entry) => entry.id), [skill.id]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skills support validated Coworker and Team assignment with restart persistence", () => {
+  const root = mkdtempSync(join(tmpdir(), "sovereign-skill-assignment-"));
+  const persistPath = join(root, "skills.json");
+  const coworkerId = "coworker_0000000000000001";
+  const teamId = "team_0000000000000001";
+  try {
+    const store = createSkillStore({ persistPath, makeSkillId: () => "skill_0000000000000002" });
+    store.setTargetResolver({
+      hasCoworker: (id) => id === coworkerId,
+      hasTeam: (id) => id === teamId,
+      teamIdsForCoworker: (id) => id === coworkerId ? [teamId] : [],
+    });
+    const skill = store.create({ name: "Review", instructions: "Check the bounded result." });
+    assert.deepEqual(store.assign(skill.id, { targetKind: "coworker", targetId: coworkerId, enabled: true }).assignedCoworkerIds, [coworkerId]);
+    assert.deepEqual(store.assign(skill.id, { targetKind: "team", targetId: teamId, enabled: true }).assignedTeamIds, [teamId]);
+    assert.deepEqual(store.assignedSkillIdsForCoworkers([coworkerId]), [skill.id]);
+    assert.throws(() => store.assign(skill.id, { targetKind: "team", targetId: "team_ffffffffffffffff", enabled: true }), /unknown team/);
+    const handlers = createSkillHandlers({
+      skillStore: store,
+      conversationStore: {
+        postUserMessage() {
+          return { id: "msg_0000000000000002", delivery: { [coworkerId]: { status: "pending" } } };
+        },
+      },
+      dispatchMessage: () => [],
+    });
+    const sent = handlers["conversation:send"]({ conversationId: "conv_0000000000000001", text: "Use the assigned workflow." });
+    assert.deepEqual(sent.appliedSkillIds, [skill.id]);
+    assert.deepEqual(store.skillsForMessage("msg_0000000000000002").map((entry) => entry.id), [skill.id]);
+
+    const reloaded = createSkillStore({ persistPath });
+    assert.deepEqual(reloaded.get(skill.id).assignedCoworkerIds, [coworkerId]);
+    assert.deepEqual(reloaded.get(skill.id).assignedTeamIds, [teamId]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

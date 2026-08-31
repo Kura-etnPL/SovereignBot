@@ -117,8 +117,14 @@ async function main() {
         conversationStore,
         services,
     });
+    skillStore.setTargetResolver({
+        hasCoworker: (id) => coworkerStore.list().coworkers.some((entry) => entry.id === id),
+        hasTeam: (id) => teamService.list().teams.some((entry) => entry.id === id),
+        teamIdsForCoworker: (id) => teamService.list().teams.filter((team) => team.coworkerIds.includes(id)).map((team) => team.id),
+    });
     conversationStore.setTeamRouteResolver((conversation) => teamService.currentOwnerForConversation(conversation.id));
     const connectedApps = createConnectedAppsService({ dataDir, teamService, coworkerStore });
+    teamService.setCoworkerAppAccessResolver((coworkerId) => connectedApps.assignedToolsForCoworker(coworkerId));
 
     let host;
     try {

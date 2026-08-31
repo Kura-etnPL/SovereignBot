@@ -45,6 +45,8 @@ test("Software Team installation is idempotent and keeps workspace paths out of 
         assert.equal(teams.status(first.team.id).currentOwnerId, first.team.coworkerIds[0]);
         const chiefHandoff = teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: userMessage });
         assert.equal(chiefHandoff, first.team.coworkerIds[1]);
+        assert.equal(teams.status(first.team.id).routingDecision.targetCoworkerId, first.team.coworkerIds[1]);
+        assert.equal(teams.status(first.team.id).routingDecision.handoffType, "delegate");
         assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: userMessage }), chiefHandoff);
         assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[1] }), first.team.coworkerIds[2]);
         assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[2] }), first.team.coworkerIds[0]);

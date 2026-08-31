@@ -26,6 +26,13 @@ const state = {
   conversationSignature: undefined,
 };
 
+const READ_MARKERS_KEY = "sovereignbot.conversation-read-v1";
+let readMarkers = {};
+try {
+  const stored = JSON.parse(window.localStorage.getItem(READ_MARKERS_KEY) || "{}");
+  if (stored && typeof stored === "object" && !Array.isArray(stored)) readMarkers = stored;
+} catch {}
+
 const $ = (id) => document.getElementById(id);
 const show = (el) => el?.classList.remove("hidden");
 const hide = (el) => el?.classList.add("hidden");
@@ -51,6 +58,19 @@ function coworkerById(id) {
 
 function conversationById(id) {
   return state.conversations.find((entry) => entry.id === id);
+}
+
+function conversationUnread(conversation) {
+  const last = conversation?.lastMessage;
+  return Boolean(conversation?.id && last?.senderId !== "user" && last?.createdAt && conversation.id !== state.selectedConversationId
+    && (!readMarkers[conversation.id] || readMarkers[conversation.id] < last.createdAt));
+}
+
+function markConversationRead(conversation) {
+  const stamp = conversation?.messages?.at(-1)?.createdAt;
+  if (!conversation?.id || !stamp) return;
+  readMarkers[conversation.id] = stamp;
+  try { window.localStorage.setItem(READ_MARKERS_KEY, JSON.stringify(readMarkers)); } catch {}
 }
 
 function channelForConversation(conversationId) {
@@ -111,7 +131,7 @@ function clearNode(node) {
   if (node) node.textContent = "";
 }
 
-function makeNavItem({ avatar, title, subtitle, meta, status, active, compact, onClick }) {
+function makeNavItem({ avatar, title, subtitle, meta, status, unread, active, compact, onClick }) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `nav-item${active ? " active" : ""}${compact ? " compact" : ""}`;
@@ -135,6 +155,13 @@ function makeNavItem({ avatar, title, subtitle, meta, status, active, compact, o
     right.textContent = meta ?? "";
   }
   button.append(icon, copy, right);
+  if (unread) {
+    const badge = document.createElement("span");
+    badge.className = "nav-unread";
+    badge.textContent = "1";
+    badge.title = "Unread activity / 未读动态";
+    button.append(badge);
+  }
   button.addEventListener("click", onClick);
   return button;
 }
@@ -154,6 +181,7 @@ function renderCoworkers() {
       title: coworker.name,
       subtitle: coworker.role,
       status: coworker.state === "paused" ? "offline" : binding?.ready ? "ready" : "offline",
+      unread: conversationUnread(direct),
       active: direct?.id === state.selectedConversationId,
       onClick: () => openDirect(coworker.id),
     }));
@@ -167,15 +195,18 @@ function renderTeams() {
     for (const team of state.teams) {
       const channel = team.channels?.[0] ?? state.channels.find((entry) => entry.teamId === team.id);
       const flow = team.flow;
+      const conversation = conversationById(channel?.conversationId);
       const rosterSize = team.coworkerIds?.length ?? 0;
       const activeCount = flow?.status === "active" && flow.currentOwner ? 1 : 0;
-      const availableCount = Math.max(0, rosterSize - activeCount);
-      const counts = `${activeCount} active · ${availableCount} available`;
+      const attentionCount = flow?.attentionCoworkerIds?.length ?? 0;
+      const availableCount = Math.max(0, rosterSize - activeCount - attentionCount);
+      const counts = `${activeCount} active · ${availableCount} available${attentionCount ? ` · ${attentionCount} attention` : ""}`;
       list.append(makeNavItem({
         avatar: "#",
         title: team.name,
         subtitle: channel?.name ?? "Project Channel",
         meta: counts,
+        unread: conversationUnread(conversation),
         active: channel?.conversationId === state.selectedConversationId,
         onClick: () => channel?.conversationId && openConversation(channel.conversationId),
       }));
@@ -191,6 +222,7 @@ function renderTeams() {
       title: conversation.title,
       subtitle: `${Math.max(0, (conversation.participants?.length ?? 1) - 1)} coworkers`,
       meta: formatRelative(conversation.updatedAt),
+      unread: conversationUnread(conversation),
       active: conversation.id === state.selectedConversationId,
       onClick: () => openConversation(conversation.id),
     }));
@@ -511,6 +543,15 @@ function renderMessage(conversation, message) {
   const time = document.createElement("time");
   time.textContent = formatTime(message.createdAt);
   meta.append(author, time);
+  if (!user && conversation.kind === "team" && Array.isArray(message.mentions) && message.mentions.length === 1) {
+    const target = coworkerById(message.mentions[0]);
+    if (target) {
+      const handoff = document.createElement("div");
+      handoff.className = "handoff-card";
+      handoff.textContent = `Handoff → ${target.name} / 交接 → ${target.name}`;
+      content.append(handoff);
+    }
+  }
   const body = document.createElement("div");
   body.className = "chat-text";
   body.textContent = message.text;
@@ -589,6 +630,7 @@ async function refreshConversation(forceScroll = false) {
     const conversation = await window.sovereignbot.conversations.get({ conversationId: id });
     if (state.selectedConversationId !== id) return;
     state.selectedConversation = conversation;
+    markConversationRead(conversation);
     renderConversationHeader(conversation);
     renderMessages(conversation, forceScroll);
     await refreshConversations();
@@ -706,6 +748,7 @@ function renderDetails(conversation) {
   clearNode(roster);
   if (team) {
     const flow = team.flow ?? {};
+    const attention = new Set(flow.attentionCoworkerIds ?? []);
     for (const member of team.coworkers ?? members.map((entry) => ({ id: entry.id, name: entry.name }))) {
       const row = document.createElement("div");
       row.className = "member-row";
@@ -713,14 +756,14 @@ function renderDetails(conversation) {
       name.textContent = member.name;
       const status = document.createElement("small");
       status.className = "member-status";
-      status.textContent = member.id === flow.currentOwnerId && flow.status === "active" ? "Active" : member.id === flow.currentOwnerId ? "Waiting" : "Available";
+      status.textContent = attention.has(member.id) ? "Needs attention" : member.id === flow.currentOwnerId && flow.status === "active" ? "Active" : member.id === flow.currentOwnerId ? "Waiting" : "Available";
       row.append(name, status);
       roster.append(row);
     }
   }
   const pending = pendingUserRecipients(conversation);
   $("details-current-work").textContent = team?.flow?.currentOwner
-    ? `${team.flow.status === "active" ? "Active" : "Waiting"} · ${team.flow.currentOwner}`
+    ? `${team.flow.status === "needs-attention" ? "Needs attention" : team.flow.status === "active" ? "Active" : "Waiting"} · ${team.flow.currentOwner}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
 }
 

@@ -12,6 +12,7 @@ const SKILL_CHANNELS = Object.freeze({
     "skill:update": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 20_000 }),
     "skill:archive": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:restore": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "skill:assign": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
 });
 const TEACH_CHANNELS = Object.freeze({
     "teach:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
@@ -174,6 +175,11 @@ function validateSkillRequest(channel, payload) {
         case "skill:restore":
             exactKeys(payload, new Set(["skillId"]), channel);
             return { skillId: skillId(payload.skillId) };
+        case "skill:assign":
+            exactKeys(payload, new Set(["skillId", "targetKind", "targetId", "enabled"]), channel);
+            if (!["coworker", "team"].includes(payload.targetKind)) throw new Error("skill assignment targetKind is invalid");
+            if (typeof payload.enabled !== "boolean") throw new Error("skill assignment enabled must be boolean");
+            return { skillId: skillId(payload.skillId), targetKind: payload.targetKind, targetId: generalId(payload.targetId, "targetId"), enabled: payload.enabled };
         case "skill:create":
             exactKeys(payload, new Set(["skill"]), channel);
             return { skill: validateSkillDocument(payload.skill) };

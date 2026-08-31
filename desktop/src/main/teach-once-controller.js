@@ -792,7 +792,7 @@ export function createTeachOnceController({
             if (session.savedSkillId) {
                 return { skill: skillStore.get(session.savedSkillId), session: publicSession(session) };
             }
-            const skill = skillStore.create({ ...session.draft, source: "taught" });
+            const skill = skillStore.create({ ...session.draft, source: "taught", lastTestedAt: session.testedAt });
             session.savedSkillId = skill.id;
             session.state = "saved";
             touch(session);

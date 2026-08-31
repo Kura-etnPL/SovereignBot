@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
+import { selectSpecialist } from "./lib/specialist-router.js";
 
 export const TEAMS_SCHEMA = "sovereignbot.desktop.teams.v1";
 export const TEAM_PACK_EXPORT_SCHEMA = "sovereignbot.desktop.team-pack.v1";
@@ -406,12 +407,25 @@ function sanitizePersisted(value) {
         for (const [teamId, flow] of Object.entries(value.flows)) {
             if (!teamIds.has(teamId) || !flow || typeof flow !== "object") continue;
             const stage = ["chief", "coding-lead", "specialist", "reviewer", "synthesis", "complete"].includes(flow.stage) ? flow.stage : "complete";
+            const routingDecision = flow.routingDecision && typeof flow.routingDecision === "object"
+                && typeof flow.routingDecision.targetCoworkerId === "string"
+                && typeof flow.routingDecision.reason === "string"
+                && flow.routingDecision.handoffType === "delegate"
+                && typeof flow.routingDecision.boundedTask === "string"
+                ? {
+                    targetCoworkerId: flow.routingDecision.targetCoworkerId.slice(0, 160),
+                    reason: flow.routingDecision.reason.slice(0, 240),
+                    handoffType: "delegate",
+                    boundedTask: flow.routingDecision.boundedTask.slice(0, 1_000),
+                }
+                : undefined;
             flows[teamId] = {
                 stage,
                 ...(Number.isInteger(flow.handoffIndex) && flow.handoffIndex >= 0 && flow.handoffIndex <= 16 ? { handoffIndex: flow.handoffIndex } : {}),
                 ...(typeof flow.userMessageId === "string" ? { userMessageId: flow.userMessageId } : {}),
                 ...(typeof flow.lastHandoffSourceId === "string" ? { lastHandoffSourceId: flow.lastHandoffSourceId } : {}),
                 ...(typeof flow.lastHandoffTargetId === "string" ? { lastHandoffTargetId: flow.lastHandoffTargetId } : {}),
+                ...(routingDecision ? { routingDecision } : {}),
                 ...(typeof flow.updatedAt === "string" ? { updatedAt: flow.updatedAt } : {}),
             };
         }
@@ -441,6 +455,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         throw new Error("team service requires dataDir, stores and managed workspace services");
     const loaded = sanitizePersisted(loadJsonState(persistPath, null));
     const state = { schema: TEAMS_SCHEMA, ...loaded };
+    let resolveCoworkerAppAccess;
 
     function save() {
         saveJsonState(persistPath, state);
@@ -501,14 +516,54 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const pending = conversation
             ? Object.entries(conversation.messages.at(-1)?.delivery ?? {}).filter(([, value]) => value?.status === "pending").map(([id]) => id)
             : [];
+        const attention = conversation
+            ? [...new Set(conversation.messages.flatMap((message) => Object.entries(message.delivery ?? {})
+                .filter(([, value]) => value?.status === "failed")
+                .map(([id]) => id)))]
+            : [];
         return {
             stage: flow.stage,
-            status: pending.length ? "active" : flow.stage === "complete" ? "available" : "waiting",
+            status: attention.length ? "needs-attention" : pending.length ? "active" : flow.stage === "complete" ? "available" : "waiting",
             currentOwnerId,
             currentOwner: currentOwnerId ? coworkerName(currentOwnerId) : undefined,
             pendingCoworkerIds: pending,
+            attentionCoworkerIds: attention,
             channelId: channel?.id,
+            ...(flow.routingDecision ? { routingDecision: clone(flow.routingDecision) } : {}),
         };
+    }
+
+    function routingCandidates(conversation, currentCoworkerId) {
+        const pending = new Map();
+        for (const message of conversation?.messages ?? []) {
+            for (const [id, delivery] of Object.entries(message.delivery ?? [])) {
+                if (delivery?.status === "pending") pending.set(id, (pending.get(id) ?? 0) + 1);
+            }
+        }
+        return (conversation?.participants ?? [])
+            .filter((id) => id !== "user" && id !== currentCoworkerId)
+            .map((id) => {
+                try {
+                    const coworker = coworkerStore.get(id);
+                    const access = resolveCoworkerAppAccess?.(id) ?? {};
+                    return {
+                        id: coworker.id,
+                        name: coworker.name,
+                        role: coworker.role,
+                        instructions: coworker.instructions,
+                        modelProfile: coworker.modelBinding?.profile,
+                        appCapabilities: [
+                            ...(access.capabilities ?? []),
+                            ...(access.tools ?? []),
+                            ...(access.appIds ?? []),
+                        ],
+                        state: coworker.state,
+                        pendingCount: pending.get(id) ?? 0,
+                    };
+                }
+                catch { return undefined; }
+            })
+            .filter(Boolean);
     }
 
     function publicTeam(team) {
@@ -850,13 +905,17 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         let target;
         if (currentIndex !== undefined && order[currentIndex] === coworkerId) {
             if (currentIndex < order.length - 1) {
-                const requested = team.packId === "custom-team" && Array.isArray(requestedCoworkerIds)
+                const requested = Array.isArray(requestedCoworkerIds)
                     ? requestedCoworkerIds.find((id) => id !== coworkerId && team.coworkerIds.includes(id))
                     : undefined;
-                target = requested ?? order[currentIndex + 1];
+                const dynamic = !requested && source?.senderId === "user"
+                    ? selectSpecialist({ objective: source.text, currentCoworkerId: coworkerId, candidates: routingCandidates(conversation, coworkerId) })
+                    : undefined;
+                target = requested ?? dynamic?.targetCoworkerId ?? order[currentIndex + 1];
                 flow.handoffIndex = currentIndex + 1;
                 if (target !== order[currentIndex + 1]) flow.handoffIndex = Math.max(0, order.indexOf(target));
                 flow.stage = stageForIndex(flow.handoffIndex, order);
+                if (dynamic && target === dynamic.targetCoworkerId) flow.routingDecision = dynamic;
             }
             else {
                 flow.stage = "complete";
@@ -934,6 +993,15 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         workspaceIdForConversation,
         currentOwnerForConversation,
         isManagedConversation,
+        setCoworkerAppAccessResolver(resolver) {
+            if (resolver !== undefined && typeof resolver !== "function") throw new Error("coworker app access resolver must be a function");
+            resolveCoworkerAppAccess = resolver;
+        },
+        routeSpecialist({ conversationId, coworkerId, objective } = {}) {
+            const conversation = conversationStore.get(conversationId);
+            if (conversation.kind !== "team" || !conversation.participants.includes(coworkerId)) return undefined;
+            return selectSpecialist({ objective, currentCoworkerId: coworkerId, candidates: routingCandidates(conversation, coworkerId) });
+        },
         status(teamId) { return flowStatus(requireTeam(teamId)); },
     };
 }
