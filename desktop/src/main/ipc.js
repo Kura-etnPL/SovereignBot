@@ -13,6 +13,9 @@ const SKILL_CHANNELS = Object.freeze({
     "skill:archive": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:restore": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:assign": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
+    "skill:export": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "skill:import": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 24_000 }),
+    "skill:duplicate": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
 const TEACH_CHANNELS = Object.freeze({
     "teach:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
@@ -173,6 +176,8 @@ function validateSkillRequest(channel, payload) {
         case "skill:get":
         case "skill:archive":
         case "skill:restore":
+        case "skill:export":
+        case "skill:duplicate":
             exactKeys(payload, new Set(["skillId"]), channel);
             return { skillId: skillId(payload.skillId) };
         case "skill:assign":
@@ -186,6 +191,13 @@ function validateSkillRequest(channel, payload) {
         case "skill:update":
             exactKeys(payload, new Set(["skillId", "patch"]), channel);
             return { skillId: skillId(payload.skillId), patch: validateSkillDocument(payload.patch, { patch: true }) };
+        case "skill:import": {
+            exactKeys(payload, new Set(["skill"]), channel);
+            const value = payload.skill;
+            exactKeys(value, new Set(["schema", "name", "description", "instructions", "inputs", "steps", "expectedOutput", "requestedCapabilities", "validators", "source"]), "skill import");
+            if (value.schema !== "sovereignbot.desktop.skill.v1") throw new Error("skill import schema is invalid");
+            return { skill: structuredClone(value) };
+        }
         default:
             throw new Error(`unknown skill IPC channel: ${channel}`);
     }

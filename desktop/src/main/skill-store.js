@@ -318,6 +318,21 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
             save();
             return publicSkill(skill);
         },
+        exportSkill(id) {
+            const skill = requireSkill(id);
+            return { schema: "sovereignbot.desktop.skill.v1", name: skill.name, description: skill.description, instructions: skill.instructions, inputs: clone(skill.inputs), steps: [...skill.steps], expectedOutput: skill.expectedOutput, requestedCapabilities: [...skill.requestedCapabilities], validators: [...skill.validators], source: skill.source };
+        },
+        importSkill(input) {
+            if (!plainObject(input)) throw new Error("skill import must be an object");
+            if (input.schema !== "sovereignbot.desktop.skill.v1") throw new Error("skill schema is invalid");
+            const { schema: _schema, ...document } = input;
+            const created = this.create(document);
+            return { imported: true, skill: created };
+        },
+        duplicateSkill(id) {
+            const skill = requireSkill(id);
+            return this.create({ name: `${skill.name} copy`, description: skill.description, instructions: skill.instructions, inputs: clone(skill.inputs), steps: [...skill.steps], expectedOutput: skill.expectedOutput, requestedCapabilities: [...skill.requestedCapabilities], validators: [...skill.validators], source: "manual" });
+        },
         assignedSkillIdsForCoworkers,
         requireActive(id) {
             const skill = requireSkill(id);

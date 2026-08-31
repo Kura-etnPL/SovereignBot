@@ -998,7 +998,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                 const requested = Array.isArray(requestedCoworkerIds)
                     ? requestedCoworkerIds.find((id) => id !== coworkerId && team.coworkerIds.includes(id))
                     : undefined;
-                const dynamic = !requested && source?.senderId === "user"
+                const sourceIsTeamMember = source?.senderId && team.coworkerIds.includes(source.senderId);
+                const dynamic = !requested && (source?.senderId === "user" || sourceIsTeamMember)
                     ? selectSpecialist({ objective: source.text, currentCoworkerId: coworkerId, candidates: routingCandidates(conversation, coworkerId) })
                     : undefined;
                 target = requested ?? dynamic?.targetCoworkerId ?? order[currentIndex + 1];

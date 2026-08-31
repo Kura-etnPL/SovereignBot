@@ -1636,7 +1636,8 @@ async function refreshActivity() {
     const counts = {};
     for (const task of tasks) counts[task.status] = (counts[task.status] ?? 0) + 1;
     $("overview-block").textContent = `Coworker/runtime agents\n${agents.join("\n") || "…"}\n\nTasks ${JSON.stringify(counts)}`;
-    $("audit-block").textContent = (audit.entries ?? []).slice().reverse().map((entry) => `${entry.at ?? ""}  ${entry.type}  ${entry.subject ?? ""}`).join("\n") || "No audit entries.";
+    const auditEntries = Array.isArray(audit) ? audit : (audit?.entries ?? []);
+    $("audit-block").textContent = auditEntries.map((entry) => `${entry.at ?? ""}  ${entry.type}  ${entry.subject ?? ""}`).join("\n") || "No audit entries.";
   } catch {
     $("overview-block").textContent = "Activity is unavailable in this runtime mode.";
     $("audit-block").textContent = "";

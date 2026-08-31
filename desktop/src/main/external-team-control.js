@@ -596,7 +596,16 @@ export function createExternalTeamControlApi({
             if (!isPlainObject(input)) throw new Error("runRoutineNow payload must be an object");
             rejectAuthority(input, "runRoutineNow");
             exactKeys(input, new Set(["routineId"]), "runRoutineNow");
-            return { protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL, routineId: opaqueId(input.routineId, "routineId"), result: routineController.runNow(input.routineId) };
+            const result = routineController.runNow(input.routineId);
+            return {
+                protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
+                routineId: opaqueId(input.routineId, "routineId"),
+                result: {
+                    routine: result?.routine ? { id: result.routine.id, name: publicText(result.routine.name), enabled: result.routine.enabled === true, lastStatus: result.routine.lastStatus, lastRunAt: result.routine.lastRunAt, nextRunAt: result.routine.nextRunAt } : undefined,
+                    job: result?.job ? { id: result.job.id, title: publicText(result.job.title), status: result.job.status, createdAt: result.job.createdAt, updatedAt: result.job.updatedAt } : undefined,
+                    run: result?.run ? { id: result.run.id, status: result.run.status, scheduledFor: result.run.scheduledFor, startedAt: result.run.startedAt, finishedAt: result.run.finishedAt, source: result.run.source } : undefined,
+                },
+            };
         },
 
         getAttention() {

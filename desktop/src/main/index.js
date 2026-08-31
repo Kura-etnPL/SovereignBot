@@ -30,6 +30,7 @@ import { createWorkerNodeStore } from "./worker-node-store.js";
 import { createTeamService } from "./team-service.js";
 import { createConnectedAppsService } from "./connected-apps.js";
 import { createExternalTeamControlServer } from "./external-team-control.js";
+import { createProductSurfaceService } from "./product-surface-service.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -155,6 +156,7 @@ async function main() {
     let coworkerDispatcher;
     let teachOnce;
     let externalTeamControl;
+    const productSurfaces = createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime: host.runtime });
     const blockedConversations = new Set();
     let quitting = false;
     let shutdownStarted = false;
@@ -388,10 +390,12 @@ async function main() {
                     const updated = coworkerStore.restore(coworkerId);
                     return { coworker: updated, refresh: await refreshCoworkerRuntime() };
                 },
-                "team:list": () => teamService.list(),
+                "team:list": () => { const listed = teamService.list(); const known = new Set(listed.packs.map((pack) => pack.id)); return { ...listed, packs: [...listed.packs, ...productSurfaces.recipeList().filter((pack) => !known.has(pack.id))] }; },
                 "team:get": ({ teamId }) => teamService.get(teamId),
                 "team:installPack": async ({ packId }) => {
-                    const result = teamService.installPack(packId);
+                    const result = productSurfaces.recipeList().some((pack) => pack.id === packId)
+                        ? teamService.importPack(productSurfaces.getPackRecipe(packId))
+                        : teamService.installPack(packId);
                     const refresh = await refreshCoworkerRuntime();
                     return { ...result, refresh };
                 },
@@ -401,8 +405,19 @@ async function main() {
                     const refresh = await refreshCoworkerRuntime();
                     return { ...result, refresh };
                 },
+                "team:duplicatePack": ({ packId }) => productSurfaces.duplicatePack(packId),
+                "team:editPack": ({ packId, patch }) => productSurfaces.editPack(packId, patch),
                 "team:exportPlaybook": ({ teamId, playbookId }) => teamService.exportPlaybook(teamId, playbookId),
                 "team:importPlaybook": ({ teamId, playbook }) => teamService.importPlaybook(teamId, playbook),
+                "playbook:list": ({ includeArchived }) => productSurfaces.listPlaybooks({ includeArchived }),
+                "playbook:create": ({ playbook }) => productSurfaces.createPlaybook(playbook),
+                "playbook:update": ({ playbookId, patch }) => productSurfaces.updatePlaybook(playbookId, patch),
+                "playbook:archive": ({ playbookId }) => productSurfaces.archivePlaybook(playbookId),
+                "playbook:restore": ({ playbookId }) => productSurfaces.restorePlaybook(playbookId),
+                "playbook:duplicate": ({ playbookId }) => productSurfaces.duplicatePlaybook(playbookId),
+                "playbook:export": ({ playbookId }) => productSurfaces.exportPlaybook(playbookId),
+                "playbook:import": ({ playbook }) => productSurfaces.importPlaybook(playbook),
+                "playbook:assign": ({ playbookId, teamId, channelId }) => productSurfaces.assignPlaybook(playbookId, { teamId, channelId }),
                 "team:createChannelFromTemplate": ({ teamId, templateId }) => teamService.createChannelFromTemplate(teamId, templateId),
                 "channel:list": ({ teamId, includeArchived }) => teamService.listChannels({ teamId, includeArchived }),
                 "channel:get": ({ channelId }) => teamService.getChannel(channelId),
@@ -451,6 +466,8 @@ async function main() {
                     shell.showItemInFolder(artifactStore.managedPath(artifactId));
                     return { ok: true };
                 },
+                "artifact:hub": (payload) => productSurfaces.artifactHub(payload),
+                "computer:history": (payload) => productSurfaces.computerHistory(payload),
                 "goal:submit": ({ text, workspaceId }) => goals.submitGoal({ text, workspaceId }),
                 "goal:list": () => goals.listGoals(),
                 "goal:getStatus": ({ goalId }) => goals.getGoal(goalId),
