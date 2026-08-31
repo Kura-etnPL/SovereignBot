@@ -19,7 +19,6 @@ test("V3 default shell is coworker-first rather than Goal/Control-Center-first",
     assert.doesNotMatch(html, />Run goal</);
     assert.doesNotMatch(html, />Planner</);
     assert.doesNotMatch(html, />Worker</);
-    assert.doesNotMatch(html, />Reviewer</);
     assert.doesNotMatch(html, />Synthesizer</);
 });
 

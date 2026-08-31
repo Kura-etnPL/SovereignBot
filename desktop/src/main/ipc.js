@@ -13,6 +13,21 @@ const SKILL_CHANNELS = Object.freeze({
     "skill:archive": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:restore": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
+const TEACH_CHANNELS = Object.freeze({
+    "teach:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "teach:start": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 4096 }),
+    "teach:get": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "teach:snapshot": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "teach:recordAction": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 16_000 }),
+    "teach:finish": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "teach:test": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "teach:save": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "teach:cancel": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+});
+const CONVERSATION_CONTROL_CHANNELS = Object.freeze({
+    "conversation:stop": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "conversation:redirect": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 32_000 }),
+});
 const ROUTINE_CHANNELS = Object.freeze({
     "routine:create": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 16_000 }),
     "routine:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
@@ -42,6 +57,8 @@ const ALL_IPC_CHANNELS = Object.freeze({
     [LIVE_FRAME_CHANNEL]: Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     [ATTACH_CHANNEL]: Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     ...SKILL_CHANNELS,
+    ...TEACH_CHANNELS,
+    ...CONVERSATION_CONTROL_CHANNELS,
     ...ROUTINE_CHANNELS,
     ...EVENT_TRIGGER_CHANNELS,
     ...WORKER_NODE_CHANNELS,
@@ -68,6 +85,12 @@ function conversationId(value) {
 function skillId(value) {
     if (typeof value !== "string" || !/^skill_[a-f0-9]{16}$/i.test(value))
         throw new Error("skillId must be a skill identifier");
+    return value;
+}
+
+function teachSessionId(value) {
+    if (typeof value !== "string" || !/^teach_[a-f0-9]{16}$/i.test(value))
+        throw new Error("sessionId must be a teach session identifier");
     return value;
 }
 
@@ -107,6 +130,24 @@ function boundedString(value, label, max, required = false) {
     return trimmed;
 }
 
+function participantIds(value) {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > 8) throw new Error("mentions must be an array of at most 8 identifiers");
+    const out = [];
+    for (const item of value) {
+        if (item !== "everyone") generalId(item, "mention");
+        if (!out.includes(item)) out.push(item);
+    }
+    return out;
+}
+
+function integerField(min, max) {
+    return (value, label) => {
+        if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${label} must be an integer between ${min} and ${max}`);
+        return value;
+    };
+}
+
 function validateSkillDocument(value, { patch = false } = {}) {
     exactKeys(value, patch ? new Set(["name", "description", "instructions", "state"]) : new Set(["name", "description", "instructions"]), "skill");
     const out = {};
@@ -142,6 +183,81 @@ function validateSkillRequest(channel, payload) {
         default:
             throw new Error(`unknown skill IPC channel: ${channel}`);
     }
+}
+
+function validateTeachAction(value) {
+    exactKeys(value, new Set([
+        "kind", "url", "ref", "snapshotId", "target", "app", "inputName", "text", "sensitive",
+        "key", "direction", "amount", "milliseconds", "validator", "expectedOutput",
+    ]), "teach action");
+    const kind = boundedString(value.kind, "action kind", 32, true);
+    if (!["navigate", "click", "type", "key", "scroll", "wait", "assert"].includes(kind)) throw new Error("action kind is not supported");
+    const out = { kind };
+    if (value.url !== undefined) out.url = boundedString(value.url, "navigate url", 2_000, true);
+    if (value.ref !== undefined) out.ref = boundedString(value.ref, "element ref", 160, true);
+    if (value.snapshotId !== undefined) out.snapshotId = boundedString(value.snapshotId, "snapshotId", 160, true);
+    if (value.target !== undefined) out.target = boundedString(value.target, "action target", 240, true);
+    if (value.app !== undefined) out.app = boundedString(value.app, "action app", 120);
+    if (value.inputName !== undefined) out.inputName = boundedString(value.inputName, "inputName", 80, true);
+    if (value.text !== undefined) out.text = boundedString(value.text, "demo input", 4_000, true);
+    if (value.sensitive !== undefined) {
+        if (typeof value.sensitive !== "boolean") throw new Error("sensitive must be boolean");
+        out.sensitive = value.sensitive;
+    }
+    if (value.key !== undefined) out.key = boundedString(value.key, "key", 32, true);
+    if (value.direction !== undefined) {
+        if (!["up", "down"].includes(value.direction)) throw new Error("scroll direction must be up or down");
+        out.direction = value.direction;
+    }
+    if (value.amount !== undefined) out.amount = integerField(1, 10)(value.amount, "amount");
+    if (value.milliseconds !== undefined) out.milliseconds = integerField(0, 10_000)(value.milliseconds, "milliseconds");
+    if (value.validator !== undefined) {
+        if (!["exists", "contains", "equals", "manual"].includes(value.validator)) throw new Error("validator is invalid");
+        out.validator = value.validator;
+    }
+    if (value.expectedOutput !== undefined) out.expectedOutput = boundedString(value.expectedOutput, "expectedOutput", 500);
+    return out;
+}
+
+function validateTeachRequest(channel, payload) {
+    const bytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
+    if (bytes > TEACH_CHANNELS[channel].maxPayloadBytes) throw new Error(`${channel} payload is too large`);
+    if (channel === "teach:list") {
+        exactKeys(payload, new Set(), channel);
+        return {};
+    }
+    if (["teach:get", "teach:snapshot", "teach:finish", "teach:test", "teach:save", "teach:cancel"].includes(channel)) {
+        exactKeys(payload, new Set(["sessionId"]), channel);
+        return { sessionId: teachSessionId(payload.sessionId) };
+    }
+    if (channel === "teach:start") {
+        exactKeys(payload, new Set(["coworkerId", "name", "description"]), channel);
+        return {
+            coworkerId: generalId(payload.coworkerId, "coworkerId"),
+            name: boundedString(payload.name, "teach name", 100, true),
+            description: boundedString(payload.description ?? "", "teach description", 280) ?? "",
+        };
+    }
+    if (channel === "teach:recordAction") {
+        exactKeys(payload, new Set(["sessionId", "action"]), channel);
+        return { sessionId: teachSessionId(payload.sessionId), action: validateTeachAction(payload.action) };
+    }
+    throw new Error(`unknown teach IPC channel: ${channel}`);
+}
+
+function validateConversationControlRequest(channel, payload) {
+    const bytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
+    if (bytes > CONVERSATION_CONTROL_CHANNELS[channel].maxPayloadBytes) throw new Error(`${channel} payload is too large`);
+    if (channel === "conversation:stop") {
+        exactKeys(payload, new Set(["conversationId"]), channel);
+        return { conversationId: conversationId(payload.conversationId) };
+    }
+    exactKeys(payload, new Set(["conversationId", "text", "mentions", "replyTo", "clientMessageId"]), channel);
+    const out = { conversationId: conversationId(payload.conversationId), text: boundedString(payload.text, "text", 12_000, true) };
+    if (payload.mentions !== undefined) out.mentions = participantIds(payload.mentions);
+    if (payload.replyTo !== undefined) out.replyTo = generalId(payload.replyTo, "replyTo");
+    if (payload.clientMessageId !== undefined) out.clientMessageId = boundedString(payload.clientMessageId, "clientMessageId", 128);
+    return out;
 }
 
 function validateRoutineSchedule(value) {
@@ -282,6 +398,10 @@ function validateRequest(channel, payload) {
     }
     if (SKILL_CHANNELS[channel])
         return validateSkillRequest(channel, payload);
+    if (TEACH_CHANNELS[channel])
+        return validateTeachRequest(channel, payload);
+    if (CONVERSATION_CONTROL_CHANNELS[channel])
+        return validateConversationControlRequest(channel, payload);
     if (ROUTINE_CHANNELS[channel])
         return validateRoutineRequest(channel, payload);
     if (EVENT_TRIGGER_CHANNELS[channel])

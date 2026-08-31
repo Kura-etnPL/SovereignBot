@@ -6,7 +6,7 @@ import test from "node:test";
 import { createConversationStore } from "../src/main/conversation-store.js";
 import { createCoworkerStore } from "../src/main/coworker-store.js";
 import { createDesktopServices } from "../src/main/services.js";
-import { createTeamService } from "../src/main/team-service.js";
+import { TEAM_PACK_EXPORT_SCHEMA, createTeamService } from "../src/main/team-service.js";
 
 function fixture() {
     const root = mkdtempSync(join(tmpdir(), "sovereign-team-"));
@@ -121,6 +121,37 @@ test("ordinary teams create a Project Channel and route the next user turn to th
 
         const followup = conversations.postUserMessage(created.conversation.id, { text: "Review the result." });
         assert.deepEqual(Object.keys(followup.delivery), [reviewer.id]);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("Team Pack export/import carries only reusable product declarations", () => {
+    const { root, conversations, teams } = fixture();
+    try {
+        const installed = teams.installPack("software-team");
+        const exported = teams.exportPack(installed.team.id);
+        assert.equal(exported.schema, TEAM_PACK_EXPORT_SCHEMA);
+        assert.equal(exported.name, "Software Team");
+        assert.deepEqual(exported.channels.map((entry) => entry.name), ["Project Channel"]);
+        const serialized = JSON.stringify(exported);
+        assert.equal(serialized.includes("providerAccountId"), false);
+        assert.equal(serialized.includes("workspaceId"), false);
+        assert.equal(serialized.includes("conversationId"), false);
+        assert.equal(serialized.includes("managed-workspaces"), false);
+        assert.equal(serialized.includes("path"), false);
+
+        const imported = teams.importPack(exported);
+        assert.equal(imported.imported, true);
+        assert.equal(imported.installed, true);
+        assert.equal(imported.team.name, "Software Team");
+        assert.notEqual(imported.team.id, installed.team.id);
+        assert.equal(imported.team.channels[0].name, "Project Channel");
+        assert.equal(teams.importPack(exported).installed, false);
+        assert.equal(conversations.list().conversations.length, 2);
+
+        assert.throws(() => teams.importPack({ ...exported, coworkers: exported.coworkers.map((entry, index) => index ? entry : { ...entry, providerAccountId: "account" }) }), /field is not allowed/);
     }
     finally {
         rmSync(root, { recursive: true, force: true });

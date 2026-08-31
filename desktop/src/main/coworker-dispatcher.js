@@ -357,19 +357,39 @@ export function createCoworkerDispatcher({
         return run;
     }
 
-    async function cancelConversation(conversationId, reason = "conversation cancelled by external operator") {
+    async function stopConversation(conversationId, reason = "conversation stopped by the user", actor = "desktop-operator") {
         const prefix = `${conversationId}:`;
         const taskIds = [...activeTasks.entries()]
             .filter(([key]) => key.startsWith(prefix))
             .map(([, taskId]) => taskId);
         const results = await Promise.allSettled(taskIds.map((taskId) => runtime.orchestrator.cancel(taskId, {
             reason,
-            actor: "external-team-control",
+            actor,
         })));
+        let stoppedDeliveries = 0;
+        try {
+            const conversation = conversationStore.get(conversationId);
+            for (const message of conversation.messages ?? []) {
+                for (const [coworkerId, delivery] of Object.entries(message.delivery ?? {})) {
+                    if (delivery?.status !== "pending") continue;
+                    conversationStore.markDelivery(conversationId, message.id, coworkerId, "failed", reason);
+                    stoppedDeliveries += 1;
+                }
+            }
+        }
+        catch {
+            // Cancellation must remain best-effort even if a delivery disappeared
+            // concurrently; the orchestrator cancellation result is still useful.
+        }
         return {
             requested: taskIds.length,
             cancelled: results.filter((entry) => entry.status === "fulfilled").length,
+            stoppedDeliveries,
         };
+    }
+
+    async function cancelConversation(conversationId, reason = "conversation cancelled by external operator") {
+        return stopConversation(conversationId, reason, "external-team-control");
     }
 
     function dispatchMessage(conversationId, messageId) {
@@ -388,6 +408,7 @@ export function createCoworkerDispatcher({
 
     return {
         dispatchMessage,
+        stopConversation,
         cancelConversation,
         async flush() {
             await Promise.allSettled([...chains.values()]);

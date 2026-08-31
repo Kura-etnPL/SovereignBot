@@ -132,6 +132,13 @@ function fakeRuntime(roster) {
         async listTasks() {
             return structuredClone(tasks);
         },
+        async cancel(taskId, reason) {
+            const task = tasks.find((entry) => entry.id === taskId);
+            if (!task) throw new Error(`task not found: ${taskId}`);
+            task.status = "cancelled";
+            task.error = reason?.reason ?? "cancelled";
+            return structuredClone(task);
+        },
     };
     return {
         orchestrator,
@@ -229,6 +236,58 @@ test("coworker dispatcher honors trusted configured workspace bindings", async (
         await dispatcher.flush();
         assert.equal(runtime._tasks[0].executionContext.workspaceId, "workspace_project");
         assert.equal(runtime._tasks[0].executionContext.cwd, workspace);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("coworker dispatcher stop cancels active work and closes pending deliveries", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sb-coworker-stop-"));
+    try {
+        const { store, coder } = makeCoworkers(root);
+        const roster = buildProviderRoster({
+            discovery: { codex: READY(), claude: READY() },
+            settings: {},
+            coworkers: store.list().coworkers,
+        });
+        const runtime = fakeRuntime(roster);
+        let entered;
+        const enteredPromise = new Promise((resolve) => { entered = resolve; });
+        let release;
+        const gate = new Promise((resolve) => { release = resolve; });
+        runtime.orchestrator.runUntilIdle = async () => {
+            entered();
+            await gate;
+            for (const task of runtime._tasks.filter((entry) => entry.status === "queued")) task.status = "completed";
+        };
+        const conversations = createConversationStore({
+            persistPath: join(root, "conversations.json"),
+            coworkerStore: store,
+        });
+        const direct = conversations.createDirect(coder.id);
+        const dispatcher = createCoworkerDispatcher({
+            dataDir: root,
+            runtime,
+            roster: () => roster,
+            coworkerStore: store,
+            conversationStore: conversations,
+            services: { workspacePath() { return undefined; } },
+        });
+
+        const message = conversations.postUserMessage(direct.id, { text: "Stop this turn" });
+        dispatcher.dispatchMessage(direct.id, message.id);
+        await enteredPromise;
+        const stopped = await dispatcher.stopConversation(direct.id);
+        assert.equal(stopped.requested, 1);
+        assert.equal(stopped.cancelled, 1);
+        assert.equal(stopped.stoppedDeliveries, 1);
+        release();
+        await dispatcher.flush();
+        const view = conversations.get(direct.id);
+        assert.equal(view.messages.length, 1);
+        assert.equal(view.messages[0].delivery[coder.id].status, "failed");
+        assert.match(view.messages[0].delivery[coder.id].detail, /stopped by the user/i);
     }
     finally {
         rmSync(root, { recursive: true, force: true });

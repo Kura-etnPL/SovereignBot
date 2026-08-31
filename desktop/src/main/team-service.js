@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 
 export const TEAMS_SCHEMA = "sovereignbot.desktop.teams.v1";
+export const TEAM_PACK_EXPORT_SCHEMA = "sovereignbot.desktop.team-pack.v1";
 
 const MAX_TEAMS = 32;
 const MAX_CHANNELS = 128;
@@ -196,6 +197,123 @@ function safePlaybooks(value) {
         description: safeString(entry.description ?? "", "playbook description", 500),
         steps: Array.isArray(entry.steps) ? entry.steps.slice(0, 12).map((step) => safeId(step, "playbook step")) : [],
     }));
+}
+
+function safePackModelBinding(value) {
+    if (value === undefined || value === null) return { profile: "automatic" };
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new Error("team pack modelBinding must be an object");
+    const allowed = new Set(["profile", "provider", "model"]);
+    for (const key of Object.keys(value)) {
+        if (!allowed.has(key)) throw new Error(`team pack modelBinding field is not allowed: ${key}`);
+    }
+    const profile = value.profile ?? "automatic";
+    if (!["automatic", "efficient", "deep", "economy", "custom"].includes(profile))
+        throw new Error("team pack modelBinding.profile is invalid");
+    const provider = value.provider === undefined ? undefined : safeId(value.provider, "modelBinding.provider");
+    if (provider && !["codex", "claude", "antigravity", "chatgpt-web"].includes(provider))
+        throw new Error("team pack modelBinding.provider is invalid");
+    const model = value.model === undefined ? undefined : safeId(value.model, "modelBinding.model");
+    if (profile === "custom" && (!provider || !model))
+        throw new Error("team pack custom modelBinding requires provider and model");
+    return {
+        profile,
+        ...(provider ? { provider } : {}),
+        ...(model ? { model } : {}),
+    };
+}
+
+function safePackDefinition(value, { requireSchema = false } = {}) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new Error("team pack must be an object");
+    const allowed = new Set(["schema", "id", "name", "description", "coworkers", "channels", "playbooks"]);
+    for (const key of Object.keys(value)) {
+        if (!allowed.has(key)) throw new Error(`team pack field is not allowed: ${key}`);
+    }
+    if (requireSchema && value.schema !== TEAM_PACK_EXPORT_SCHEMA)
+        throw new Error(`team pack schema must be ${TEAM_PACK_EXPORT_SCHEMA}`);
+    const id = safeId(value.id, "packId");
+    const name = safeString(value.name, "team pack name", 120);
+    const description = safeString(value.description, "team pack description", 500);
+    if (!Array.isArray(value.coworkers) || value.coworkers.length < 2 || value.coworkers.length > 8)
+        throw new Error("team pack must contain 2 to 8 coworkers");
+    const keys = new Set();
+    const coworkers = value.coworkers.map((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("team pack coworker must be an object");
+        const coworkerAllowed = new Set(["key", "name", "role", "instructions", "avatar", "modelBinding"]);
+        for (const key of Object.keys(entry)) {
+            if (!coworkerAllowed.has(key)) throw new Error(`team pack coworker field is not allowed: ${key}`);
+        }
+        const key = safeId(entry.key, "team pack coworker key");
+        if (keys.has(key)) throw new Error(`duplicate team pack coworker key: ${key}`);
+        keys.add(key);
+        return {
+            key,
+            name: safeString(entry.name, "team pack coworker name", 80),
+            role: safeString(entry.role, "team pack coworker role", 120),
+            instructions: safeString(entry.instructions, "team pack coworker instructions", 12_000),
+            ...(entry.avatar === undefined ? {} : { avatar: safeString(entry.avatar, "team pack coworker avatar", 120) }),
+            modelBinding: safePackModelBinding(entry.modelBinding),
+        };
+    });
+    if (!Array.isArray(value.channels) || value.channels.length < 1 || value.channels.length > 8)
+        throw new Error("team pack must contain 1 to 8 channels");
+    const channelKeys = new Set();
+    const channels = value.channels.map((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("team pack channel must be an object");
+        const channelAllowed = new Set(["key", "name", "kind", "instructions", "playbookId"]);
+        for (const key of Object.keys(entry)) {
+            if (!channelAllowed.has(key)) throw new Error(`team pack channel field is not allowed: ${key}`);
+        }
+        const key = safeId(entry.key, "team pack channel key");
+        if (channelKeys.has(key)) throw new Error(`duplicate team pack channel key: ${key}`);
+        channelKeys.add(key);
+        const kind = entry.kind ?? "project";
+        if (!["work", "personal", "project"].includes(kind)) throw new Error("team pack channel kind is invalid");
+        return {
+            key,
+            name: safeString(entry.name, "team pack channel name", 120),
+            kind,
+            instructions: safeString(entry.instructions, "team pack channel instructions", 12_000),
+            playbookId: safeId(entry.playbookId, "team pack channel playbookId"),
+        };
+    });
+    const playbooks = safePlaybooks(value.playbooks);
+    if (!playbooks.length) throw new Error("team pack must contain at least one playbook");
+    return {
+        schema: TEAM_PACK_EXPORT_SCHEMA,
+        id,
+        name,
+        description,
+        coworkers,
+        channels,
+        playbooks,
+    };
+}
+
+function exportablePack(pack) {
+    return {
+        schema: TEAM_PACK_EXPORT_SCHEMA,
+        id: pack.id,
+        name: pack.name,
+        description: pack.description,
+        coworkers: pack.coworkers.map((entry) => ({
+            key: entry.key,
+            name: entry.name,
+            role: entry.role,
+            instructions: entry.instructions,
+            ...(entry.avatar ? { avatar: entry.avatar } : {}),
+            modelBinding: safePackModelBinding(entry.modelBinding),
+        })),
+        channels: pack.channels.map((entry) => ({
+            key: entry.key,
+            name: entry.name,
+            kind: entry.kind,
+            instructions: entry.instructions,
+            playbookId: entry.playbookId,
+        })),
+        playbooks: safePlaybooks(pack.playbooks),
+    };
 }
 
 function sanitizePersisted(value) {
@@ -405,11 +523,9 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return coworkerId;
     }
 
-    function installPack(packId = SOFTWARE_TEAM_PACK.id) {
-        const pack = TEAM_PACK_BY_ID.get(packId);
-        if (!pack)
-            throw new Error(`unknown team pack: ${packId}`);
-        const existing = state.teams.find((entry) => entry.packId === packId);
+    function installPackDefinition(pack, persistedPackId = pack.id) {
+        const normalizedPackId = safeId(persistedPackId, "packId");
+        const existing = state.teams.find((entry) => entry.packId === normalizedPackId);
         if (existing)
             return { installed: false, team: publicTeam(existing) };
         if (state.teams.length >= MAX_TEAMS)
@@ -425,7 +541,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const timestamp = now();
         const team = {
             id: teamId,
-            packId,
+            packId: normalizedPackId,
             name: pack.name,
             coworkerIds,
             sharedWorkspaceId,
@@ -444,6 +560,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                 title: definition.name,
                 coworkerIds,
                 leadCoworkerId: idsByKey.get("chief"),
+                deduplicate: false,
             });
             const channel = {
                 id: channelId,
@@ -463,6 +580,66 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         }
         save();
         return { installed: true, team: publicTeam(team) };
+    }
+
+    function installPack(packId = SOFTWARE_TEAM_PACK.id) {
+        const pack = TEAM_PACK_BY_ID.get(packId);
+        if (!pack)
+            throw new Error(`unknown team pack: ${packId}`);
+        return installPackDefinition(pack, pack.id);
+    }
+
+    function exportPack(teamId) {
+        const team = requireTeam(teamId);
+        const builtIn = TEAM_PACK_BY_ID.get(team.packId);
+        if (builtIn)
+            return exportablePack(builtIn);
+
+        const keyByCoworkerId = new Map(team.coworkerIds.map((id, index, ids) => [
+            id,
+            index === 0 ? "chief" : index === ids.length - 1 ? "reviewer" : `specialist-${index}`,
+        ]));
+        const pack = {
+            id: team.packId === "custom-team" ? "custom-team-pack" : team.packId,
+            name: team.name,
+            description: "A SovereignBot team pack exported from an existing team.",
+            coworkers: team.coworkerIds.map((id) => {
+                const coworker = coworkerStore.getInternal(id);
+                return {
+                    key: keyByCoworkerId.get(id),
+                    name: coworker.name,
+                    role: coworker.role,
+                    instructions: coworker.instructions,
+                    ...(coworker.avatar ? { avatar: coworker.avatar } : {}),
+                    modelBinding: safePackModelBinding(coworker.modelBinding),
+                };
+            }),
+            channels: team.channelIds.map((channelId, index) => {
+                const channel = requireChannel(channelId);
+                return {
+                    key: `channel-${index + 1}`,
+                    name: channel.name,
+                    kind: channel.kind,
+                    instructions: channel.instructions,
+                    playbookId: channel.playbookId,
+                };
+            }),
+            playbooks: team.playbooks.map((playbook) => ({
+                id: playbook.id,
+                name: playbook.name,
+                description: playbook.description,
+                steps: playbook.steps.map((step) => keyByCoworkerId.get(step) ?? step),
+            })),
+        };
+        return exportablePack(safePackDefinition(pack));
+    }
+
+    function importPack(input) {
+        const pack = safePackDefinition(input, { requireSchema: true });
+        return {
+            imported: true,
+            ...installPackDefinition(pack, `imported:${pack.id}`),
+        };
     }
 
     function createTeam({ title, coworkerIds, leadCoworkerId } = {}) {
@@ -631,6 +808,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             };
         },
         get(teamId) { return publicTeam(requireTeam(teamId)); },
+        exportPack,
+        importPack,
         listChannels({ teamId } = {}) {
             const channels = teamId === undefined ? state.channels : state.channels.filter((entry) => entry.teamId === String(teamId));
             if (teamId !== undefined) requireTeam(teamId);

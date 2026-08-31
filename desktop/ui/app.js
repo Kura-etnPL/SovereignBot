@@ -16,6 +16,8 @@ const state = {
   selectedConversation: undefined,
   activeView: "welcome",
   mentionIds: new Set(),
+  replyTo: undefined,
+  redirectMode: false,
   pollTimer: undefined,
   conversationSignature: undefined,
 };
@@ -204,6 +206,12 @@ function renderTeamPackActions() {
     button.addEventListener("click", () => installTeamPack(pack.id, button));
     container.append(button);
   }
+  const importButton = document.createElement("button");
+  importButton.type = "button";
+  importButton.className = "quiet-action";
+  importButton.textContent = "Import Team Pack / 导入团队包";
+  importButton.addEventListener("click", () => openTeamPackDialog());
+  container.append(importButton);
 }
 
 function renderRecent() {
@@ -317,6 +325,8 @@ async function openDirect(coworkerId) {
 async function openConversation(conversationId) {
   state.selectedConversationId = conversationId;
   state.mentionIds.clear();
+  state.replyTo = undefined;
+  state.redirectMode = false;
   state.conversationSignature = undefined;
   switchView("conversation");
   hide($("details-panel"));
@@ -345,6 +355,31 @@ function pendingUserRecipients(conversation) {
     }
   }
   return pending;
+}
+
+function renderReplyComposer(conversation) {
+  const row = $("reply-row");
+  if (!row) return;
+  clearNode(row);
+  const message = state.replyTo ? conversation?.messages?.find((entry) => entry.id === state.replyTo) : undefined;
+  if (!message) {
+    state.replyTo = undefined;
+    hide(row);
+    return;
+  }
+  show(row);
+  const copy = document.createElement("span");
+  const author = message.senderId === "user" ? "You" : coworkerById(message.senderId)?.name || "Coworker";
+  copy.textContent = `Replying to ${author}: ${text(message.text).slice(0, 180)}`;
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.className = "quiet-action reply-clear";
+  clear.textContent = "Cancel / 取消";
+  clear.addEventListener("click", () => {
+    state.replyTo = undefined;
+    renderReplyComposer(conversation);
+  });
+  row.append(copy, clear);
 }
 
 function renderMentionRow(conversation) {
@@ -405,7 +440,21 @@ function renderConversationHeader(conversation) {
     presence.lastChild.textContent = offline ? " Provider unavailable" : " Ready";
   }
 
+  const stopButton = $("conversation-stop");
+  const redirectButton = $("conversation-redirect");
+  if (stopButton) stopButton.classList.toggle("hidden", pending.size === 0);
+  if (redirectButton) {
+    if (!pending.size) state.redirectMode = false;
+    redirectButton.classList.toggle("hidden", pending.size === 0);
+    redirectButton.textContent = state.redirectMode ? "Cancel redirect / 取消" : "Redirect / 重定向";
+  }
+  const hint = $("composer-hint");
+  if (hint) hint.textContent = state.redirectMode
+    ? "Enter to redirect the active work · Shift+Enter for a new line"
+    : pending.size ? "Active work is running · Redirect changes its direction" : "Enter to send · Shift+Enter for a new line";
+
   renderMentionRow(conversation);
+  renderReplyComposer(conversation);
   renderDetails(conversation);
 }
 
@@ -447,6 +496,20 @@ function renderMessage(conversation, message) {
   body.className = "chat-text";
   body.textContent = message.text;
   content.append(meta, body);
+
+  const actions = document.createElement("div");
+  actions.className = "message-actions";
+  const reply = document.createElement("button");
+  reply.type = "button";
+  reply.className = "message-action";
+  reply.textContent = "Reply / 回复";
+  reply.addEventListener("click", () => {
+    state.replyTo = message.id;
+    renderReplyComposer(conversation);
+    try { $("composer-input")?.focus({ preventScroll: true }); } catch { $("composer-input")?.focus(); }
+  });
+  actions.append(reply);
+  content.append(actions);
 
   if (user && Object.keys(message.delivery ?? {}).length) {
     const delivery = document.createElement("div");
@@ -527,15 +590,23 @@ async function sendMessage(event) {
   hide($("composer-error"));
   $("composer-send").disabled = true;
   try {
-    await window.sovereignbot.conversations.send({
+    const pending = pendingUserRecipients(conversation);
+    const payload = {
       conversationId: conversation.id,
       text: value,
       ...(state.mentionIds.size ? { mentions: [...state.mentionIds] } : {}),
+      ...(state.replyTo ? { replyTo: state.replyTo } : {}),
       clientMessageId: `ui-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    });
+    };
+    const send = state.redirectMode && pending.size
+      ? window.sovereignbot.conversations.redirect
+      : window.sovereignbot.conversations.send;
+    await send(payload);
     area.value = "";
     autoSizeComposer();
     state.mentionIds.clear();
+    state.replyTo = undefined;
+    state.redirectMode = false;
     await refreshConversation(true);
   } catch (error) {
     $("composer-error").textContent = text(error?.message || error).replace(/^.*Error: /, "");
@@ -565,6 +636,9 @@ function renderDetails(conversation) {
   $("details-provider").textContent = profiles.length ? profiles.map(humanModelProfile).join(" + ") : "Automatic / 自动";
   const team = teamForConversation(conversation.id);
   $("details-workspace").textContent = team ? "Shared project workspace" : "Private workspace";
+  const teamTools = $("details-team-tools");
+  teamTools?.classList.toggle("hidden", !team);
+  if (!team) $("team-pack-transfer-result") && ($("team-pack-transfer-result").textContent = "");
   const roster = $("details-roster");
   clearNode(roster);
   if (team) {
@@ -585,6 +659,69 @@ function renderDetails(conversation) {
   $("details-current-work").textContent = team?.flow?.currentOwner
     ? `${team.flow.status === "active" ? "Active" : "Waiting"} · ${team.flow.currentOwner}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
+}
+
+function openTeamPackDialog(pack) {
+  const area = $("team-pack-json");
+  const error = $("team-pack-form-error");
+  if (!area) return;
+  area.value = pack ? JSON.stringify(pack, null, 2) : "";
+  hide(error);
+  $("team-pack-dialog")?.showModal?.();
+  if (!pack) area.focus();
+}
+
+async function exportCurrentTeamPack() {
+  const team = teamForConversation(state.selectedConversationId);
+  if (!team || !window.sovereignbot?.teams?.exportPack) return;
+  const result = $("team-pack-transfer-result");
+  try {
+    const pack = await window.sovereignbot.teams.exportPack({ teamId: team.id });
+    openTeamPackDialog(pack);
+    if (result) result.textContent = "Export ready. Copy the JSON to share it.";
+  } catch (error) {
+    if (result) result.textContent = text(error?.message || error).replace(/^.*Error: /, "");
+  }
+}
+
+async function importTeamPack(event) {
+  event.preventDefault();
+  const area = $("team-pack-json");
+  const error = $("team-pack-form-error");
+  hide(error);
+  let pack;
+  try {
+    pack = JSON.parse(area.value);
+  } catch {
+    error.textContent = "Paste a valid team pack JSON.";
+    show(error);
+    return;
+  }
+  try {
+    const imported = await window.sovereignbot.teams.importPack({ pack });
+    $("team-pack-dialog")?.close();
+    await Promise.all([refreshCoworkers(), refreshConversations(), refreshTeams(), refreshRoster()]);
+    const channel = imported?.team?.channels?.[0] ?? state.channels.find((entry) => entry.teamId === imported?.team?.id);
+    if (channel?.conversationId) await openConversation(channel.conversationId);
+  } catch (caught) {
+    error.textContent = text(caught?.message || caught).replace(/^.*Error: /, "");
+    show(error);
+  }
+}
+
+async function copyTeamPack() {
+  const area = $("team-pack-json");
+  const result = $("team-pack-form-error");
+  hide(result);
+  if (!area?.value.trim()) return;
+  try {
+    await navigator.clipboard.writeText(area.value);
+    result.textContent = "Copied to clipboard.";
+    result.classList.remove("hidden");
+  } catch {
+    result.textContent = "Clipboard is unavailable; select the JSON and copy it manually.";
+    result.classList.remove("hidden");
+  }
 }
 
 function renderConnectedApps() {
@@ -691,6 +828,32 @@ function renderConnectedApps() {
   }
 }
 
+async function stopCurrentConversation() {
+  const conversation = state.selectedConversation;
+  if (!conversation || !window.sovereignbot.conversations.stop) return;
+  const button = $("conversation-stop");
+  if (button) button.disabled = true;
+  hide($("composer-error"));
+  try {
+    await window.sovereignbot.conversations.stop({ conversationId: conversation.id });
+    state.redirectMode = false;
+    await refreshConversation(true);
+  } catch (error) {
+    $("composer-error").textContent = text(error?.message || error).replace(/^.*Error: /, "");
+    show($("composer-error"));
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function toggleRedirectMode() {
+  const conversation = state.selectedConversation;
+  if (!conversation || !pendingUserRecipients(conversation).size) return;
+  state.redirectMode = !state.redirectMode;
+  renderConversationHeader(conversation);
+  try { $("composer-input")?.focus({ preventScroll: true }); } catch { $("composer-input")?.focus(); }
+}
+
 function populateTeamPicker() {
   const picker = $("team-member-picker");
   clearNode(picker);
@@ -715,16 +878,79 @@ function openDialog(id) {
   if (dialog?.showModal) dialog.showModal();
 }
 
+function populateCoworkerAdvanced() {
+  const select = $("coworker-workspace");
+  if (!select) return;
+  select.textContent = "";
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "Coworker default / 同事默认";
+  select.append(defaultOption);
+  for (const workspace of state.workspaces?.workspaces ?? []) {
+    const option = document.createElement("option");
+    option.value = workspace.id;
+    option.textContent = workspace.kind === "shared-project" ? "Shared project workspace / 共享项目工作区" : workspace.label || "Private workspace / 私有工作区";
+    select.append(option);
+  }
+}
+
+function applyCoworkerRolePreset(roleKey) {
+  const presets = {
+    chief: {
+      name: "Chief",
+      role: "Own outcomes and coordinate the team.",
+      instructions: "Scope the outcome, choose the next best coworker, keep one owner active, and synthesize the final result.",
+      profile: "automatic",
+    },
+    "coding-lead": {
+      name: "Coding Lead",
+      role: "Implement and improve software in trusted workspaces.",
+      instructions: "Inspect the workspace, make focused changes, run relevant checks, and hand important changes to a reviewer.",
+      profile: "efficient",
+    },
+    reviewer: {
+      name: "Reviewer",
+      role: "Review work for correctness, security, and product quality.",
+      instructions: "Review the proposed result, identify concrete risks, and return bounded actionable feedback.",
+      profile: "deep",
+    },
+    researcher: {
+      name: "Researcher",
+      role: "Investigate questions and produce decision-ready findings.",
+      instructions: "Separate evidence from inference, preserve provenance, and deliver concise findings another coworker can act on.",
+      profile: "automatic",
+    },
+  };
+  const preset = presets[roleKey];
+  if (!preset) return;
+  $("coworker-name").value = preset.name;
+  $("coworker-role").value = preset.role;
+  $("coworker-instructions").value = preset.instructions;
+  $("coworker-provider").value = preset.profile;
+}
+
 async function createCoworker(event) {
   event.preventDefault();
   hide($("coworker-form-error"));
   try {
+    const profile = $("coworker-provider").value;
+    const provider = $("coworker-advanced-provider").value;
+    const providerAccountId = $("coworker-advanced-account").value.trim();
+    const model = $("coworker-advanced-model").value.trim();
+    if (!provider && (providerAccountId || model)) throw new Error("Choose a provider before pinning an account or model.");
     const result = await window.sovereignbot.coworkers.create({
         coworker: {
           name: $("coworker-name").value.trim(),
           role: $("coworker-role").value.trim(),
           instructions: $("coworker-instructions").value.trim(),
-          modelBinding: { profile: $("coworker-provider").value },
+          modelBinding: {
+            profile,
+            ...(provider ? { provider } : {}),
+            ...(providerAccountId ? { providerAccountId } : {}),
+            ...(model ? { model } : {}),
+          },
+          ...($("coworker-workspace").value ? { workspaceIds: [$("coworker-workspace").value] } : {}),
+          ...($("coworker-computer-profile").value.trim() ? { computerProfileId: $("coworker-computer-profile").value.trim() } : {}),
         },
     });
     $("coworker-dialog").close();
@@ -973,17 +1199,22 @@ function showToastError(error) {
 }
 
 function bindEvents() {
-  $("new-coworker").addEventListener("click", () => openDialog("coworker-dialog"));
+  $("new-coworker").addEventListener("click", () => { populateCoworkerAdvanced(); openDialog("coworker-dialog"); });
   $("refresh-coworkers").addEventListener("click", () => Promise.all([refreshCoworkers(), refreshConversations(), refreshRoster()]));
   $("new-team").addEventListener("click", () => { populateTeamPicker(); openDialog("team-dialog"); });
   $("welcome-create-team").addEventListener("click", () => { populateTeamPicker(); openDialog("team-dialog"); });
   $("welcome-install-software-team")?.addEventListener("click", installSoftwareTeam);
+  $("team-export-pack")?.addEventListener("click", exportCurrentTeamPack);
+  $("team-import-pack")?.addEventListener("click", () => openTeamPackDialog());
+  $("team-pack-copy")?.addEventListener("click", copyTeamPack);
+  $("team-pack-form")?.addEventListener("submit", importTeamPack);
   $("welcome-open-chief").addEventListener("click", () => {
     const chief = state.coworkers.find((entry) => /chief of staff/i.test(entry.name)) ?? state.coworkers[0];
     if (chief) openDirect(chief.id);
   });
   $("coworker-form").addEventListener("submit", createCoworker);
   $("team-form").addEventListener("submit", createTeam);
+  for (const button of document.querySelectorAll(".quick-role")) button.addEventListener("click", () => applyCoworkerRolePreset(button.dataset.role));
   for (const button of document.querySelectorAll("[data-close-dialog]")) {
     button.addEventListener("click", () => $(button.dataset.closeDialog)?.close());
   }
@@ -998,6 +1229,8 @@ function bindEvents() {
   });
   // composer-add is wired by skills-ui.js to open the real attachment dialog.
 
+  $("conversation-stop")?.addEventListener("click", stopCurrentConversation);
+  $("conversation-redirect")?.addEventListener("click", toggleRedirectMode);
   $("open-details").addEventListener("click", () => $("details-panel").classList.toggle("hidden"));
   $("close-details").addEventListener("click", () => hide($("details-panel")));
   $("nav-settings").addEventListener("click", async () => { switchView("settings"); await refreshSettingsData(); });

@@ -22,3 +22,18 @@
 .skill-create-form input:focus, .skill-create-form textarea:focus { border-color: color-mix(in srgb, var(--text) 35%, var(--line-strong)); }
 .skill-form-actions { display: flex; justify-content: flex-end; gap: 7px; }
 .future-section { display: none; }
+
+.teach-section-copy { margin: -2px 0 10px; color: var(--text-3); font-size: 10.5px; line-height: 1.45; }
+.teach-modal { width: min(720px, calc(100vw - 34px)); }
+.teach-copy { color: var(--text-3); font-size: 10.5px; line-height: 1.5; }
+.teach-panel { display: grid; gap: 12px; }
+.teach-session-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.teach-session-head > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.teach-session-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.teach-action-form { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.teach-elements { display: flex; flex-wrap: wrap; gap: 6px; min-height: 4px; }
+.teach-element { padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--panel-3); color: var(--text-2); cursor: pointer; font-size: 9.5px; }
+.teach-element:hover { color: var(--text); border-color: color-mix(in srgb, var(--text) 30%, var(--line-strong)); }
+.teach-actions { display: grid; gap: 5px; max-height: 190px; overflow-y: auto; margin: 0; padding-left: 25px; }
+.teach-action-row { padding: 7px 8px; border-radius: 8px; background: var(--panel-2); color: var(--text-2); font-size: 10px; line-height: 1.4; }
+.teach-draft-meta { padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--text-3); font-size: 10px; line-height: 1.45; }
