@@ -244,17 +244,23 @@
     hide($("composer-error"));
     $("composer-send").disabled = true;
     try {
-      await window.sovereignbot.conversations.send({
+      const pending = pendingUserRecipients(conversation);
+      const redirecting = state.redirectMode && pending.size && selectedSkills.size === 0 && attachments.length === 0;
+      const payload = {
         conversationId: conversation.id,
         text: value,
         ...(state.mentionIds.size ? { mentions: [...state.mentionIds] } : {}),
+        ...(state.replyTo ? { replyTo: state.replyTo } : {}),
         ...(selectedSkills.size ? { skillIds: [...selectedSkills] } : {}),
         ...(attachments.length ? { artifactIds: attachments.map((entry) => entry.id) } : {}),
         clientMessageId: `ui-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      });
+      };
+      await (redirecting ? window.sovereignbot.conversations.redirect : window.sovereignbot.conversations.send)(payload);
       area.value = "";
       autoSizeComposer();
       state.mentionIds.clear();
+      state.replyTo = undefined;
+      state.redirectMode = false;
       selectedSkills.clear();
       attachments = [];
       renderDraftExtensions();

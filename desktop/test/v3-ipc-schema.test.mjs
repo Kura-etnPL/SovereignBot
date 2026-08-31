@@ -8,7 +8,7 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     const expected = [
         "coworker:list", "coworker:get", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
         "conversation:list", "conversation:get", "conversation:createDirect", "conversation:createTeam", "conversation:send",
-        "team:list", "team:get", "team:installPack", "channel:list", "channel:get",
+        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:exportPlaybook", "team:importPlaybook", "team:createChannelFromTemplate", "channel:list", "channel:get",
         "connectedApps:list", "connectedApps:assign",
     ];
     for (const channel of expected)
@@ -92,6 +92,65 @@ test("team creation requires a bounded explicit participant set", () => {
     assert.throws(
         () => validateV3IpcRequest("conversation:createTeam", { title: "Nope", coworkerIds: ["coworker_1111111111111111"] }),
         /at least two/,
+    );
+});
+
+test("team pack transfer is declarative and rejects provider/account or workspace state", () => {
+    const pack = {
+        schema: "sovereignbot.desktop.team-pack.v1",
+        id: "demo-pack",
+        name: "Demo Team",
+        description: "A bounded demo team.",
+        coworkers: [
+            { key: "chief", name: "Chief", role: "Coordinate", instructions: "Coordinate the work.", modelBinding: { profile: "automatic" } },
+            { key: "reviewer", name: "Reviewer", role: "Review", instructions: "Review the result.", modelBinding: { profile: "efficient", provider: "codex", model: "luna" } },
+        ],
+        channels: [{ key: "project", name: "Project Channel", kind: "project", instructions: "A bounded project room.", playbookId: "delivery" }],
+        playbooks: [{ id: "delivery", name: "Delivery", description: "Coordinate and review.", steps: ["chief", "reviewer"] }],
+    };
+    assert.deepEqual(validateV3IpcRequest("team:importPack", { pack }), { pack });
+    assert.deepEqual(validateV3IpcRequest("team:exportPack", { teamId: "team_1111111111111111" }), { teamId: "team_1111111111111111" });
+    assert.throws(
+        () => validateV3IpcRequest("team:importPack", { pack: { ...pack, coworkers: pack.coworkers.map((entry, index) => index ? entry : { ...entry, modelBinding: { ...entry.modelBinding, providerAccountId: "account" } }) } }),
+        /unexpected request field: providerAccountId/,
+    );
+    assert.throws(
+        () => validateV3IpcRequest("team:importPack", { pack: { ...pack, workspacePath: "E:/private" } }),
+        /unexpected request field: workspacePath/,
+    );
+});
+
+test("playbook transfer is declarative and rejects runtime state", () => {
+    const playbook = {
+        schema: "sovereignbot.desktop.playbook.v1",
+        id: "delivery",
+        name: "Delivery",
+        description: "A bounded delivery method.",
+        steps: ["chief", "coding-lead", "reviewer", "chief"],
+    };
+    assert.deepEqual(
+        validateV3IpcRequest("team:importPlaybook", { teamId: "team_1111111111111111", playbook }),
+        { teamId: "team_1111111111111111", playbook },
+    );
+    assert.deepEqual(
+        validateV3IpcRequest("team:exportPlaybook", { teamId: "team_1111111111111111", playbookId: "delivery" }),
+        { teamId: "team_1111111111111111", playbookId: "delivery" },
+    );
+    assert.throws(
+        () => validateV3IpcRequest("team:importPlaybook", { teamId: "team_1111111111111111", playbook: { ...playbook, workspacePath: "E:/private" } }),
+        /unexpected request field: workspacePath/,
+    );
+});
+
+test("channel template creation accepts only a bounded team/template selection", () => {
+    const payload = {
+        teamId: "team_1111111111111111",
+        templateId: "work",
+    };
+    assert.deepEqual(validateV3IpcRequest("team:createChannelFromTemplate", payload), payload);
+    assert.throws(
+        () => validateV3IpcRequest("team:createChannelFromTemplate", { ...payload, workspacePath: "E:/private" }),
+        /unexpected request field: workspacePath/,
     );
 });
 

@@ -231,6 +231,134 @@ export class Orchestrator {
         return stamped;
     }
 
+    // Trusted Desktop-only execution hook for bounded actions that must run while a
+    // TaskBoundComputerGateway sees a genuinely running task.  It deliberately does not
+    // invoke a provider harness: the caller supplies a narrow, main-process callback (for
+    // example a Skill replay), while task ownership, Governor authorization, cancellation,
+    // audit, and terminal state remain Orchestrator-owned.
+    async runBoundTask(taskId, { agentId, execute } = {}) {
+        if (typeof execute !== "function")
+            throw new Error("bound task execution requires a callback");
+        const queued = await this.requireTask(taskId);
+        if (queued.kind === "plan")
+            throw new Error("a plan cannot run a bound action callback");
+        if (queued.status !== "queued")
+            throw new Error(`bound task ${queued.id} is not queued (current status: ${queued.status})`);
+        if (!queued.executionContext)
+            throw new Error(`bound task ${queued.id} has no trusted execution context`);
+
+        const selectedAgentId = agentId ?? queued.preferredAgentId ?? queued.assignedAgentId;
+        const agent = this.requireAgent(selectedAgentId);
+        if (agent.role === "supervisor" && queued.allowSupervisorExecution !== true)
+            throw new Error(`bound task ${queued.id} cannot run on supervisor ${agent.id}`);
+        if (queued.preferredAgentId && queued.preferredAgentId !== agent.id)
+            throw new Error(`bound task ${queued.id} is pinned to ${queued.preferredAgentId}`);
+        if (!(queued.requiredCapabilities ?? []).every((capability) => agent.capabilities.includes(capability)))
+            throw new Error(`bound task ${queued.id} agent lacks required capabilities`);
+
+        const decision = await this.governor.authorize({
+            category: "harness",
+            operation: "run",
+            target: "computer-callback",
+            agentId: agent.id,
+            taskId: queued.id,
+            metadata: { role: agent.role, executionKind: "computer-callback" },
+        });
+        if (!decision.allowed)
+            return this.blockTask(queued, agent.id, decision.reason, decision.ruleId);
+
+        const acceptance = await this.transition(queued.id, ["queued"], {
+            status: "accepted",
+            assignedAgentId: agent.id,
+            ownerAgentId: agent.id,
+        });
+        if (!acceptance.changed)
+            return acceptance.task;
+        await this.taskEvents.append({
+            taskId: queued.id,
+            type: "task.accepted",
+            actor: agent.id,
+            data: { supervisorAgentId: acceptance.task.supervisorAgentId, executionKind: "computer-callback" },
+        });
+
+        this.#busy.set(agent.id, (this.#busy.get(agent.id) ?? 0) + 1);
+        const controller = new AbortController();
+        this.#controllers.set(queued.id, controller);
+        const running = await this.transition(queued.id, ["accepted"], { status: "running" });
+        if (!running.changed) {
+            this.#busy.set(agent.id, Math.max(0, (this.#busy.get(agent.id) ?? 1) - 1));
+            this.#controllers.delete(queued.id);
+            return running.task;
+        }
+        await this.taskEvents.append({
+            taskId: queued.id,
+            type: "task.started",
+            actor: agent.id,
+            data: { attempt: running.task.attempt ?? 0, executionKind: "computer-callback" },
+        });
+        await this.audit.append({
+            type: "task.started",
+            actor: agent.id,
+            subject: queued.id,
+            data: { title: running.task.title, executionKind: "computer-callback" },
+        });
+
+        try {
+            const current = await this.requireTask(queued.id);
+            const result = await execute({ task: current, agent, signal: controller.signal });
+            const afterRun = await this.requireTask(queued.id);
+            if (afterRun.status === "cancelled")
+                return afterRun;
+            const completion = await this.transition(queued.id, ["running"], {
+                status: "completed",
+                result,
+                error: undefined,
+            });
+            if (!completion.changed)
+                return completion.task;
+            await this.persistFinalResult(completion.task, agent.id);
+            await this.taskEvents.append({
+                taskId: queued.id,
+                type: "task.completed",
+                actor: agent.id,
+                data: { hasOutput: result !== undefined, executionKind: "computer-callback" },
+            });
+            await this.audit.append({
+                type: "task.completed",
+                actor: agent.id,
+                subject: queued.id,
+                data: { hasOutput: result !== undefined, executionKind: "computer-callback" },
+            });
+            return completion.task;
+        }
+        catch (error) {
+            const desiredStatus = controller.signal.aborted ? "cancelled" : "failed";
+            const transition = await this.transition(queued.id, ["running", "accepted"], {
+                status: desiredStatus,
+                error: String(error?.message ?? error).slice(0, 500),
+            });
+            if (!transition.changed)
+                return transition.task;
+            await this.taskEvents.append({
+                taskId: queued.id,
+                type: desiredStatus === "cancelled" ? "task.cancelled" : "task.failed",
+                actor: agent.id,
+                data: { error: transition.task.error, executionKind: "computer-callback" },
+            });
+            await this.audit.append({
+                type: desiredStatus === "cancelled" ? "task.cancelled" : "task.failed",
+                actor: agent.id,
+                subject: queued.id,
+                data: { error: transition.task.error, executionKind: "computer-callback" },
+            });
+            return transition.task;
+        }
+        finally {
+            this.#busy.set(agent.id, Math.max(0, (this.#busy.get(agent.id) ?? 1) - 1));
+            this.#controllers.delete(queued.id);
+        }
+    }
+
     async listTasks() {
         return this.tasks.list();
     }

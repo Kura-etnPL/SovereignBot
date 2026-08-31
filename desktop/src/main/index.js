@@ -19,6 +19,8 @@ import { createArtifactStore } from "./artifact-store.js";
 import { createAttachmentAwareConversationStore, pickConversationAttachments } from "./attachment-integration.js";
 import { createSkillStore } from "./skill-store.js";
 import { createSkillAwareConversationStore, createSkillHandlers } from "./skill-integration.js";
+import { createTeachOnceController } from "./teach-once-controller.js";
+import { createTeachOnceRuntime } from "./teach-once-runtime.js";
 import { createCoworkerDispatcher } from "./coworker-dispatcher.js";
 import { openProviderLogin } from "./provider-login.js";
 import { validateRoleAssignment } from "./provider-roster.js";
@@ -145,6 +147,7 @@ async function main() {
     let eventTriggers;
     let chiefLoop;
     let coworkerDispatcher;
+    let teachOnce;
     let externalTeamControl;
     const blockedConversations = new Set();
     let quitting = false;
@@ -257,6 +260,26 @@ async function main() {
 
     const firstRun = createFirstRunService({ host, services });
     rebuildRuntimeBoundServices();
+    const teachOnceRuntime = createTeachOnceRuntime({
+        dataDir,
+        getRuntime: () => host.runtime,
+        roster: () => host.rosterSummary(),
+        coworkerStore,
+        services,
+    });
+    const dynamicRawComputer = Object.fromEntries(["snapshot", "navigate", "click", "type", "key", "scroll"].map((method) => [
+        method,
+        (...args) => host.runtime.rawComputer[method](...args),
+    ]));
+    teachOnce = createTeachOnceController({
+        dataDir,
+        coworkerStore,
+        skillStore,
+        rawComputer: dynamicRawComputer,
+        getAgentId: (coworkerId) => host.rosterSummary()?.coworkerBindings?.[coworkerId]?.agentId,
+        generateDraft: teachOnceRuntime.generateDraft,
+        testExecutor: teachOnceRuntime.testExecutor,
+    });
 
     const configuredExternalPort = process.env.SOVEREIGNBOT_EXTERNAL_TEAM_CONTROL_PORT;
     const externalPort = configuredExternalPort === undefined ? 0 : Number(configuredExternalPort);
@@ -363,6 +386,15 @@ async function main() {
                     const refresh = await refreshCoworkerRuntime();
                     return { ...result, refresh };
                 },
+                "team:exportPack": ({ teamId }) => teamService.exportPack(teamId),
+                "team:importPack": async ({ pack }) => {
+                    const result = teamService.importPack(pack);
+                    const refresh = await refreshCoworkerRuntime();
+                    return { ...result, refresh };
+                },
+                "team:exportPlaybook": ({ teamId, playbookId }) => teamService.exportPlaybook(teamId, playbookId),
+                "team:importPlaybook": ({ teamId, playbook }) => teamService.importPlaybook(teamId, playbook),
+                "team:createChannelFromTemplate": ({ teamId, templateId }) => teamService.createChannelFromTemplate(teamId, templateId),
                 "channel:list": ({ teamId }) => teamService.listChannels({ teamId }),
                 "channel:get": ({ channelId }) => teamService.getChannel(channelId),
                 "connectedApps:list": () => connectedApps.list(),
@@ -376,10 +408,26 @@ async function main() {
                     conversationStore,
                     dispatchMessage: (conversationId, messageId) => coworkerDispatcher.dispatchMessage(conversationId, messageId),
                 }),
+                "teach:list": () => teachOnce.list(),
+                "teach:start": (payload) => teachOnce.start(payload),
+                "teach:get": ({ sessionId }) => teachOnce.get(sessionId),
+                "teach:snapshot": ({ sessionId }) => teachOnce.snapshot(sessionId),
+                "teach:recordAction": ({ sessionId, action }) => teachOnce.recordAction(sessionId, action),
+                "teach:finish": ({ sessionId }) => teachOnce.finish(sessionId),
+                "teach:test": ({ sessionId }) => teachOnce.test(sessionId),
+                "teach:save": ({ sessionId }) => teachOnce.save(sessionId),
+                "teach:cancel": ({ sessionId }) => teachOnce.cancel(sessionId),
                 "conversation:list": () => conversationStore.list(),
                 "conversation:get": ({ conversationId }) => conversationStore.get(conversationId),
                 "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
                 "conversation:createTeam": ({ title, coworkerIds, leadCoworkerId }) => teamService.createTeam({ title, coworkerIds, leadCoworkerId }).conversation,
+                "conversation:stop": async ({ conversationId }) => coworkerDispatcher.stopConversation(conversationId),
+                "conversation:redirect": async ({ conversationId, text, mentions, replyTo, clientMessageId }) => {
+                    const stopped = await coworkerDispatcher.stopConversation(conversationId, "conversation redirected by the user");
+                    const message = conversationStore.postUserMessage(conversationId, { text, mentions, replyTo, clientMessageId });
+                    const deliveries = coworkerDispatcher.dispatchMessage(conversationId, message.id);
+                    return { stopped, message, scheduledRecipients: deliveries.length };
+                },
                 "artifact:list": ({ conversationId, coworkerId, limit }) => artifactStore.list({ conversationId, coworkerId, limit }),
                 "artifact:get": ({ artifactId }) => artifactStore.get(artifactId),
                 "artifact:preview": ({ artifactId }) => artifactStore.previewText(artifactId),

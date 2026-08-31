@@ -217,8 +217,8 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
             const existing = conversations.find((entry) => entry.kind === "direct" && entry.participants.length === 2 && entry.participants.includes(coworkerId));
             return existing ? summarize(existing) : createConversation({ kind: "direct", coworkerIds: [coworkerId] });
         },
-        createTeam({ title, coworkerIds, leadCoworkerId }) {
-            if (leadCoworkerId) {
+        createTeam({ title, coworkerIds, leadCoworkerId, deduplicate = true }) {
+            if (deduplicate && leadCoworkerId) {
                 const requestedTitle = title === undefined ? undefined : boundedText(title, "title", MAX_TITLE);
                 const existing = conversations.find((entry) => entry.kind === "team" && entry.leadCoworkerId === leadCoworkerId && (!requestedTitle || entry.title === requestedTitle));
                 if (existing) return summarize(existing);

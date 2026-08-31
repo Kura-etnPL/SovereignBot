@@ -6,7 +6,7 @@ import test from "node:test";
 import { createConversationStore } from "../src/main/conversation-store.js";
 import { createCoworkerStore } from "../src/main/coworker-store.js";
 import { createDesktopServices } from "../src/main/services.js";
-import { createTeamService } from "../src/main/team-service.js";
+import { CHANNEL_TEMPLATES, TEAM_PACK_EXPORT_SCHEMA, TEAM_PLAYBOOK_EXPORT_SCHEMA, createTeamService } from "../src/main/team-service.js";
 
 function fixture() {
     const root = mkdtempSync(join(tmpdir(), "sovereign-team-"));
@@ -121,6 +121,101 @@ test("ordinary teams create a Project Channel and route the next user turn to th
 
         const followup = conversations.postUserMessage(created.conversation.id, { text: "Review the result." });
         assert.deepEqual(Object.keys(followup.delivery), [reviewer.id]);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("Team Pack export/import carries only reusable product declarations", () => {
+    const { root, conversations, teams } = fixture();
+    try {
+        const installed = teams.installPack("software-team");
+        const exported = teams.exportPack(installed.team.id);
+        assert.equal(exported.schema, TEAM_PACK_EXPORT_SCHEMA);
+        assert.equal(exported.name, "Software Team");
+        assert.deepEqual(exported.channels.map((entry) => entry.name), ["Project Channel"]);
+        const serialized = JSON.stringify(exported);
+        assert.equal(serialized.includes("providerAccountId"), false);
+        assert.equal(serialized.includes("workspaceId"), false);
+        assert.equal(serialized.includes("conversationId"), false);
+        assert.equal(serialized.includes("managed-workspaces"), false);
+        assert.equal(serialized.includes("path"), false);
+
+        const imported = teams.importPack(exported);
+        assert.equal(imported.imported, true);
+        assert.equal(imported.installed, true);
+        assert.equal(imported.team.name, "Software Team");
+        assert.notEqual(imported.team.id, installed.team.id);
+        assert.equal(imported.team.channels[0].name, "Project Channel");
+        assert.equal(teams.importPack(exported).installed, false);
+        assert.equal(conversations.list().conversations.length, 2);
+
+        assert.throws(() => teams.importPack({ ...exported, coworkers: exported.coworkers.map((entry, index) => index ? entry : { ...entry, providerAccountId: "account" }) }), /field is not allowed/);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Playbook export/import is bounded and idempotent", () => {
+    const { root, teams } = fixture();
+    try {
+        const installed = teams.installPack("software-team");
+        const exported = teams.exportPlaybook(installed.team.id, "software-delivery");
+        assert.equal(exported.schema, TEAM_PLAYBOOK_EXPORT_SCHEMA);
+        assert.deepEqual(exported.steps, ["chief", "coding-lead", "reviewer", "chief"]);
+        const serialized = JSON.stringify(exported);
+        assert.equal(serialized.includes("workspace"), false);
+        assert.equal(serialized.includes("session"), false);
+        assert.equal(serialized.includes("capability"), false);
+
+        const imported = teams.importPlaybook(installed.team.id, {
+            ...exported,
+            id: "review-method",
+            name: "Review Method",
+            steps: ["chief", "reviewer"],
+        });
+        assert.equal(imported.imported, true);
+        assert.equal(imported.team.playbooks.some((playbook) => playbook.id === "review-method"), true);
+        assert.equal(teams.importPlaybook(installed.team.id, {
+            ...exported,
+            id: "review-method",
+            name: "Review Method",
+            steps: ["chief", "reviewer"],
+        }).imported, false);
+        assert.throws(
+            () => teams.importPlaybook(installed.team.id, { ...exported, id: "bad", workspacePath: "E:/private" }),
+            /field is not allowed/,
+        );
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("channel templates create governed team channels idempotently", () => {
+    const { root, conversations, teams } = fixture();
+    try {
+        const installed = teams.installPack("software-team");
+        assert.deepEqual(CHANNEL_TEMPLATES.map((template) => template.id), ["work", "personal", "project"]);
+        const created = teams.createChannelFromTemplate(installed.team.id, "work");
+        assert.equal(created.created, true);
+        assert.equal(created.channel.kind, "work");
+        assert.equal(created.channel.templateId, "work");
+        assert.equal(created.channel.workspaceId, installed.team.sharedWorkspaceId);
+        assert.equal(created.team.channels.length, 2);
+        assert.equal(conversations.list().conversations.length, 2);
+        assert.equal(JSON.stringify(created.team).includes("path"), false);
+
+        const existingProject = teams.createChannelFromTemplate(installed.team.id, "project");
+        assert.equal(existingProject.created, false);
+        assert.equal(existingProject.channel.name, "Project Channel");
+
+        const repeated = teams.createChannelFromTemplate(installed.team.id, "work");
+        assert.equal(repeated.created, false);
+        assert.equal(repeated.channel.id, created.channel.id);
+        assert.equal(teams.get(installed.team.id).channels.length, 2);
     }
     finally {
         rmSync(root, { recursive: true, force: true });

@@ -8,6 +8,14 @@ const MAX_DESCRIPTION = 280;
 const MAX_INSTRUCTIONS = 16_000;
 const MAX_MESSAGE_SKILLS = 8;
 const MAX_INVOCATIONS = 10_000;
+const MAX_INPUTS = 16;
+const MAX_STEPS = 64;
+const MAX_VALIDATORS = 24;
+const SKILL_CAPABILITIES = new Set(["computer", "workspace"]);
+
+function plainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
 function makeId() {
     return `skill_${randomBytes(8).toString("hex")}`;
@@ -37,22 +45,80 @@ function clone(value) {
     return structuredClone(value);
 }
 
+function boundedText(value, label, max, { required = false } = {}) {
+    if (value === undefined || value === null) {
+        if (required) throw new Error(`${label} is required`);
+        return undefined;
+    }
+    if (typeof value !== "string") throw new Error(`${label} must be a string`);
+    const trimmed = value.trim();
+    if (required && !trimmed) throw new Error(`${label} is required`);
+    if (trimmed.length > max) throw new Error(`${label} exceeds ${max} characters`);
+    return trimmed || undefined;
+}
+
+function normalizeInputs(value) {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > MAX_INPUTS) throw new Error(`skill inputs must be an array of at most ${MAX_INPUTS} entries`);
+    return value.map((entry, index) => {
+        if (!plainObject(entry)) throw new Error(`skill input ${index} must be an object`);
+        const allowed = new Set(["name", "type", "description", "required"]);
+        for (const key of Object.keys(entry)) if (!allowed.has(key)) throw new Error(`unknown skill input field: ${key}`);
+        const name = boundedText(entry.name, `skill input ${index} name`, 80, { required: true });
+        if (!/^[A-Za-z][A-Za-z0-9 _-]{0,79}$/.test(name)) throw new Error(`skill input ${index} name is invalid`);
+        const type = boundedText(entry.type ?? "string", `skill input ${index} type`, 40, { required: true });
+        const description = boundedText(entry.description ?? "", `skill input ${index} description`, 240) ?? "";
+        if (typeof entry.required !== "boolean" && entry.required !== undefined) throw new Error(`skill input ${index} required must be boolean`);
+        return { name, type, description, required: entry.required !== false };
+    });
+}
+
+function normalizeStringArray(value, label, max, itemMax) {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > max) throw new Error(`${label} must be an array of at most ${max} entries`);
+    return value.map((entry, index) => boundedText(entry, `${label}[${index}]`, itemMax, { required: true }));
+}
+
+function normalizeCapabilities(value) {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > SKILL_CAPABILITIES.size) throw new Error("skill requestedCapabilities is invalid");
+    const out = [];
+    for (const capability of value) {
+        if (typeof capability !== "string" || !SKILL_CAPABILITIES.has(capability)) throw new Error("skill requestedCapabilities contains an unsupported capability");
+        if (!out.includes(capability)) out.push(capability);
+    }
+    return out;
+}
+
+function normalizeMetadata(input) {
+    return {
+        inputs: normalizeInputs(input.inputs),
+        steps: normalizeStringArray(input.steps, "skill steps", MAX_STEPS, 800),
+        expectedOutput: boundedText(input.expectedOutput ?? "", "skill expectedOutput", 1_000) ?? "",
+        requestedCapabilities: normalizeCapabilities(input.requestedCapabilities),
+        validators: normalizeStringArray(input.validators, "skill validators", MAX_VALIDATORS, 500),
+        source: ["manual", "taught"].includes(input.source) ? input.source : "manual",
+    };
+}
+
 function normalizeCreate(input) {
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("skill must be an object");
-    const allowed = new Set(["name", "description", "instructions"]);
+    const allowed = new Set(["name", "description", "instructions", "inputs", "steps", "expectedOutput", "requestedCapabilities", "validators", "source"]);
     for (const key of Object.keys(input)) {
         if (!allowed.has(key)) throw new Error(`unknown skill field: ${key}`);
     }
+    const metadata = normalizeMetadata(input);
     return {
         name: text(input.name, "skill name", MAX_NAME, { required: true }),
         description: text(input.description, "skill description", MAX_DESCRIPTION) ?? "",
         instructions: text(input.instructions, "skill instructions", MAX_INSTRUCTIONS, { required: true }),
+        ...metadata,
     };
 }
 
 function normalizePatch(input) {
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("skill patch must be an object");
-    const allowed = new Set(["name", "description", "instructions", "state"]);
+    const allowed = new Set(["name", "description", "instructions", "inputs", "steps", "expectedOutput", "requestedCapabilities", "validators", "source", "state"]);
     const patch = {};
     for (const key of Object.keys(input)) {
         if (!allowed.has(key)) throw new Error(`unknown skill field: ${key}`);
@@ -60,6 +126,15 @@ function normalizePatch(input) {
     if (Object.hasOwn(input, "name")) patch.name = text(input.name, "skill name", MAX_NAME, { required: true });
     if (Object.hasOwn(input, "description")) patch.description = text(input.description, "skill description", MAX_DESCRIPTION) ?? "";
     if (Object.hasOwn(input, "instructions")) patch.instructions = text(input.instructions, "skill instructions", MAX_INSTRUCTIONS, { required: true });
+    if (Object.hasOwn(input, "inputs")) patch.inputs = normalizeInputs(input.inputs);
+    if (Object.hasOwn(input, "steps")) patch.steps = normalizeStringArray(input.steps, "skill steps", MAX_STEPS, 800);
+    if (Object.hasOwn(input, "expectedOutput")) patch.expectedOutput = boundedText(input.expectedOutput, "skill expectedOutput", 1_000) ?? "";
+    if (Object.hasOwn(input, "requestedCapabilities")) patch.requestedCapabilities = normalizeCapabilities(input.requestedCapabilities);
+    if (Object.hasOwn(input, "validators")) patch.validators = normalizeStringArray(input.validators, "skill validators", MAX_VALIDATORS, 500);
+    if (Object.hasOwn(input, "source")) {
+        if (!["manual", "taught"].includes(input.source)) throw new Error("skill source must be manual or taught");
+        patch.source = input.source;
+    }
     if (Object.hasOwn(input, "state")) {
         if (!new Set(["active", "archived"]).has(input.state)) throw new Error("skill state must be active or archived");
         patch.state = input.state;
@@ -70,7 +145,17 @@ function normalizePatch(input) {
 function sanitize(entry) {
     try {
         if (!entry || typeof entry !== "object" || !validId(entry.id)) return undefined;
-        const normalized = normalizeCreate({ name: entry.name, description: entry.description, instructions: entry.instructions });
+        const normalized = normalizeCreate({
+            name: entry.name,
+            description: entry.description,
+            instructions: entry.instructions,
+            inputs: entry.inputs,
+            steps: entry.steps,
+            expectedOutput: entry.expectedOutput,
+            requestedCapabilities: entry.requestedCapabilities,
+            validators: entry.validators,
+            source: entry.source,
+        });
         if (!["active", "archived"].includes(entry.state)) return undefined;
         if (typeof entry.createdAt !== "string" || typeof entry.updatedAt !== "string") return undefined;
         return { id: entry.id, ...normalized, state: entry.state, createdAt: entry.createdAt, updatedAt: entry.updatedAt };

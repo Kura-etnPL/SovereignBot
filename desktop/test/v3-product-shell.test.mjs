@@ -14,12 +14,12 @@ test("V3 default shell is coworker-first rather than Goal/Control-Center-first",
     assert.match(html, /id="team-list"/);
     assert.match(html, /id="conversation-messages"/);
     assert.match(html, /id="composer-form"/);
+    assert.match(html, /id="voice-input"/);
     assert.match(html, /id="details-panel"/);
     assert.doesNotMatch(html, /id="goal-form"/);
     assert.doesNotMatch(html, />Run goal</);
     assert.doesNotMatch(html, />Planner</);
     assert.doesNotMatch(html, />Worker</);
-    assert.doesNotMatch(html, />Reviewer</);
     assert.doesNotMatch(html, />Synthesizer</);
 });
 
@@ -47,6 +47,8 @@ test("V3 conversation UX supports durable polling, team mentions, details and pr
     assert.match(html, /id="conversation-presence"/);
     assert.match(html, /id="mention-row"/);
     assert.match(html, /id="provider-cards"/);
+    assert.match(app, /SpeechRecognition/);
+    assert.match(app, /speechSynthesis/);
 });
 
 test("V3 shell carries a coherent responsive design system rather than legacy admin panels", () => {

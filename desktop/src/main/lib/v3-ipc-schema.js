@@ -44,6 +44,104 @@ function modelBindingShape(value) {
     return structuredClone(value);
 }
 
+function teamPackModelBindingShape(value) {
+    if (value === undefined || value === null) return { profile: "automatic" };
+    if (!isPlainObject(value)) throw new Error("team pack modelBinding must be an object");
+    exact(value, new Set(["profile", "provider", "model"]));
+    const profile = value.profile ?? "automatic";
+    if (!["automatic", "efficient", "deep", "economy", "custom"].includes(profile))
+        throw new Error("team pack modelBinding.profile is invalid");
+    if (value.provider !== undefined && !["codex", "claude", "antigravity", "chatgpt-web"].includes(value.provider))
+        throw new Error("team pack modelBinding.provider is invalid");
+    for (const [key, child] of [["provider", value.provider], ["model", value.model]]) {
+        if (child !== undefined && (typeof child !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(child)))
+            throw new Error(`team pack modelBinding.${key} must be a safe opaque identifier`);
+    }
+    if (profile === "custom" && (!value.provider || !value.model))
+        throw new Error("team pack custom modelBinding requires provider and model");
+    return {
+        profile,
+        ...(value.provider ? { provider: value.provider } : {}),
+        ...(value.model ? { model: value.model } : {}),
+    };
+}
+
+function teamPackShape(value) {
+    if (!isPlainObject(value)) throw new Error("team pack must be an object");
+    assertNoAuthority(value, "pack");
+    exact(value, new Set(["schema", "id", "name", "description", "coworkers", "channels", "playbooks"]));
+    if (value.schema !== "sovereignbot.desktop.team-pack.v1") throw new Error("team pack schema is invalid");
+    const id = identifier(value.id, "packId");
+    const name = string(value.name, "team pack name", 120, true);
+    const description = string(value.description, "team pack description", 500, true);
+    if (!Array.isArray(value.coworkers) || value.coworkers.length < 2 || value.coworkers.length > 8)
+        throw new Error("team pack must contain 2 to 8 coworkers");
+    const coworkerKeys = new Set();
+    const coworkers = value.coworkers.map((entry) => {
+        if (!isPlainObject(entry)) throw new Error("team pack coworker must be an object");
+        exact(entry, new Set(["key", "name", "role", "instructions", "avatar", "modelBinding"]));
+        const key = identifier(entry.key, "team pack coworker key");
+        if (coworkerKeys.has(key)) throw new Error(`duplicate team pack coworker key: ${key}`);
+        coworkerKeys.add(key);
+        const out = {
+            key,
+            name: string(entry.name, "team pack coworker name", 80, true),
+            role: string(entry.role, "team pack coworker role", 120, true),
+            instructions: string(entry.instructions, "team pack coworker instructions", 12_000, true),
+            modelBinding: teamPackModelBindingShape(entry.modelBinding),
+        };
+        if (entry.avatar !== undefined) out.avatar = string(entry.avatar, "team pack coworker avatar", 120, true);
+        return out;
+    });
+    if (!Array.isArray(value.channels) || value.channels.length < 1 || value.channels.length > 8)
+        throw new Error("team pack must contain 1 to 8 channels");
+    const channelKeys = new Set();
+    const channels = value.channels.map((entry) => {
+        if (!isPlainObject(entry)) throw new Error("team pack channel must be an object");
+        exact(entry, new Set(["key", "name", "kind", "instructions", "playbookId"]));
+        const key = identifier(entry.key, "team pack channel key");
+        if (channelKeys.has(key)) throw new Error(`duplicate team pack channel key: ${key}`);
+        channelKeys.add(key);
+        if (!["work", "personal", "project"].includes(entry.kind)) throw new Error("team pack channel kind is invalid");
+        return {
+            key,
+            name: string(entry.name, "team pack channel name", 120, true),
+            kind: entry.kind,
+            instructions: string(entry.instructions, "team pack channel instructions", 12_000, true),
+            playbookId: identifier(entry.playbookId, "team pack channel playbookId"),
+        };
+    });
+    if (!Array.isArray(value.playbooks) || value.playbooks.length < 1 || value.playbooks.length > 8)
+        throw new Error("team pack must contain 1 to 8 playbooks");
+    const playbooks = value.playbooks.map((entry) => {
+        if (!isPlainObject(entry)) throw new Error("team pack playbook must be an object");
+        exact(entry, new Set(["id", "name", "description", "steps"]));
+        if (!Array.isArray(entry.steps) || entry.steps.length > 12) throw new Error("team pack playbook steps are invalid");
+        return {
+            id: identifier(entry.id, "playbookId"),
+            name: string(entry.name, "playbook name", 120, true),
+            description: string(entry.description, "playbook description", 500, true),
+            steps: entry.steps.map((step) => identifier(step, "playbook step")),
+        };
+    });
+    return { schema: value.schema, id, name, description, coworkers, channels, playbooks };
+}
+
+function teamPlaybookShape(value) {
+    if (!isPlainObject(value)) throw new Error("playbook must be an object");
+    assertNoAuthority(value, "playbook");
+    exact(value, new Set(["schema", "id", "name", "description", "steps"]));
+    if (value.schema !== "sovereignbot.desktop.playbook.v1") throw new Error("playbook schema is invalid");
+    if (!Array.isArray(value.steps) || value.steps.length > 12) throw new Error("playbook steps are invalid");
+    return {
+        schema: value.schema,
+        id: identifier(value.id, "playbookId"),
+        name: string(value.name, "playbook name", 120, true),
+        description: string(value.description, "playbook description", 500, true),
+        steps: value.steps.map((step) => identifier(step, "playbook step")),
+    };
+}
+
 function coworkerShape(value, { patch = false } = {}) {
     if (!isPlainObject(value)) throw new Error(patch ? "patch must be an object" : "coworker must be an object");
     assertNoAuthority(value, patch ? "patch" : "coworker");
@@ -89,6 +187,11 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "team:list": spec(1024, empty),
     "team:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId"])); return { teamId: identifier(value.teamId, "teamId") }; }),
     "team:installPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["packId"])); return { packId: identifier(value.packId, "packId") }; }),
+    "team:exportPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId"])); return { teamId: identifier(value.teamId, "teamId") }; }),
+    "team:importPack": spec(64 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["pack"])); return { pack: teamPackShape(value.pack) }; }),
+    "team:exportPlaybook": spec(2048, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId", "playbookId"])); return { teamId: identifier(value.teamId, "teamId"), playbookId: identifier(value.playbookId, "playbookId") }; }),
+    "team:importPlaybook": spec(8 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId", "playbook"])); return { teamId: identifier(value.teamId, "teamId"), playbook: teamPlaybookShape(value.playbook) }; }),
+    "team:createChannelFromTemplate": spec(2048, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId", "templateId"])); return { teamId: identifier(value.teamId, "teamId"), templateId: identifier(value.templateId, "templateId") }; }),
     "channel:list": spec(1024, (payload) => { if (payload === undefined || payload === null) return {}; const value = objectPayload(payload); exact(value, new Set(["teamId"])); return value.teamId === undefined ? {} : { teamId: identifier(value.teamId, "teamId") }; }),
     "channel:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["channelId"])); return { channelId: identifier(value.channelId, "channelId") }; }),
     "connectedApps:list": spec(1024, empty),
