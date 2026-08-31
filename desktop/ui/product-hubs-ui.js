@@ -48,6 +48,65 @@
     for (const item of items) { const card = document.createElement("article"); card.className = "settings-card"; const h = document.createElement("h3"); h.textContent = item.activity; card.append(h, line("Activity", item.summary), line("App", item.app), line("Site", item.site), line("Time", item.timestamp), line("Status", item.status)); root.append(card); }
     if (!items.length) { const p = document.createElement("p"); p.textContent = "No safe Computer activity recorded yet."; root.append(p); }
   }
+  function renderChannels(items, teams, conversations) {
+    const root = $("product-channels");
+    const filter = $("product-channel-filter");
+    const switcher = $("product-channel-switch");
+    if (!root) return;
+    clear(root);
+    if (switcher) {
+      switcher.textContent = "";
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "Quick switch / 快速切换";
+      switcher.append(placeholder);
+      for (const channel of items.filter((entry) => !entry.archived)) {
+        const option = document.createElement("option");
+        option.value = channel.conversationId;
+        option.textContent = channel.name;
+        switcher.append(option);
+      }
+    }
+    const mode = filter?.value ?? "active";
+    const visible = items.filter((channel) => mode === "all" || (mode === "archived" ? channel.archived : !channel.archived));
+    const teamById = new Map(teams.map((team) => [team.id, team]));
+    for (const channel of visible) {
+      const conversation = conversations.find((entry) => entry.id === channel.conversationId);
+      const team = teamById.get(channel.teamId);
+      const card = document.createElement("article");
+      card.className = "settings-card";
+      const heading = document.createElement("div");
+      heading.className = "card-heading";
+      const title = document.createElement("h3");
+      title.textContent = channel.name;
+      const meta = document.createElement("p");
+      meta.textContent = `${team?.name ?? "Team"} · ${channel.kind} · ${channel.archived ? "Read-only / 只读" : "Available / 可用"}`;
+      heading.append(title, meta);
+      if (conversationUnread(conversation)) {
+        const unread = document.createElement("span");
+        unread.className = "soft-pill";
+        unread.textContent = "Unread / 未读";
+        heading.append(unread);
+      }
+      card.append(heading);
+      card.append(line("Description", channel.instructions || "No channel instructions"));
+      card.append(line("Last activity", conversation?.updatedAt || channel.updatedAt));
+      if (conversation?.lastMessage?.textPreview) card.append(line("Latest", conversation.lastMessage.textPreview));
+      const actions = document.createElement("div");
+      actions.className = "detail-actions";
+      actions.append(button(channel.archived ? "View / 查看" : "Open / 打开", () => {
+        if (channel.conversationId && typeof openConversation === "function") void openConversation(channel.conversationId);
+      }));
+      actions.append(button(channel.archived ? "Restore / 恢复" : "Archive / 归档", async () => {
+        await (channel.archived ? api.channels.restore : api.channels.archive)({ channelId: channel.id });
+        if (typeof refreshConversations === "function" && typeof refreshTeams === "function") await Promise.all([refreshConversations(), refreshTeams()]);
+        await refresh();
+      }));
+      card.append(actions);
+      root.append(card);
+    }
+    if (!visible.length) { const p = document.createElement("p"); p.textContent = mode === "archived" ? "No archived channels." : "No active channels yet."; root.append(p); }
+  }
   function renderSkills(items) {
     const root = $("product-skills"); clear(root);
     for (const item of items) { const card = document.createElement("article"); card.className = "settings-card"; const h = document.createElement("h3"); h.textContent = item.name; card.append(h, line("Status", item.state), line("Assigned", item.assignedTeamIds.length ? "Team" : "Not assigned")); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(button("Export", async () => copy(await api.skills.export({ skillId: item.id })))); actions.append(button("Duplicate", async () => { await api.skills.duplicate({ skillId: item.id }); await refresh(); })); card.append(actions); root.append(card); }
@@ -62,10 +121,10 @@
     const filter = $("artifact-hub-filter");
     if (filter && filter.options.length === 1) for (const team of teams.teams ?? []) { const option = document.createElement("option"); option.value = `team:${team.id}`; option.textContent = `By Team / 团队: ${team.name}`; filter.append(option); for (const channel of team.channels ?? []) { const channelOption = document.createElement("option"); channelOption.value = `channel:${channel.id}`; channelOption.textContent = `By Channel / 频道: ${channel.name}`; filter.append(channelOption); } }
     const scope = filter?.value ?? "recent"; const artifactPayload = { limit: 100 }; if (scope.startsWith("team:")) artifactPayload.teamId = scope.slice(5); if (scope.startsWith("channel:")) artifactPayload.channelId = scope.slice(8); if (scope.startsWith("coworker:")) artifactPayload.coworkerId = scope.slice(9);
-    const [playbooks, artifacts, history, skills] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true })]);
-    renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? []); renderSkills(skills.skills ?? []); renderPacks(teams.packs ?? []);
+    const [playbooks, artifacts, history, skills, channels, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations.list({})]);
+    renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? []); renderSkills(skills.skills ?? []); renderPacks(teams.packs ?? []);
   }
   async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description") ?? ""; const rawSteps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; await api.playbooks.create({ playbook: { name, description, steps: rawSteps.split(",").map((x) => x.trim()).filter(Boolean) } }); await refresh(); }
-  function setup() { const artifactRoot = $("product-artifacts"); const heading = artifactRoot?.parentElement?.querySelector(".card-heading"); if (heading && !$("artifact-hub-filter")) { const filter = document.createElement("select"); filter.id = "artifact-hub-filter"; filter.setAttribute("aria-label", "Artifact filter"); const option = document.createElement("option"); option.value = "recent"; option.textContent = "Recent / 最近"; filter.append(option); heading.append(filter); } $("nav-product-hubs")?.addEventListener("click", async () => { switchView("product-hubs"); try { await refresh(); } catch (e) { error($("product-playbooks"), e); } }); $("product-hubs-refresh")?.addEventListener("click", () => void refresh()); $("artifact-hub-filter")?.addEventListener("change", () => void refresh()); $("playbook-create")?.addEventListener("click", () => void createPlaybook()); }
+  function setup() { const artifactRoot = $("product-artifacts"); const heading = artifactRoot?.parentElement?.querySelector(".card-heading"); if (heading && !$("artifact-hub-filter")) { const filter = document.createElement("select"); filter.id = "artifact-hub-filter"; filter.setAttribute("aria-label", "Artifact filter"); const option = document.createElement("option"); option.value = "recent"; option.textContent = "Recent / 最近"; filter.append(option); heading.append(filter); } $("nav-product-hubs")?.addEventListener("click", async () => { switchView("product-hubs"); try { await refresh(); } catch (e) { error($("product-playbooks"), e); } }); $("product-hubs-refresh")?.addEventListener("click", () => void refresh()); $("artifact-hub-filter")?.addEventListener("change", () => void refresh()); $("product-channel-filter")?.addEventListener("change", () => void refresh()); $("product-channel-switch")?.addEventListener("change", (event) => { if (event.target.value && typeof openConversation === "function") void openConversation(event.target.value); }); $("playbook-create")?.addEventListener("click", () => void createPlaybook()); }
   window.addEventListener("DOMContentLoaded", setup);
 })();
