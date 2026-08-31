@@ -715,6 +715,7 @@ function renderDetails(conversation) {
   clearNode(roster);
   if (team) {
     const flow = team.flow ?? {};
+    const attention = new Set(flow.attentionCoworkerIds ?? []);
     for (const member of team.coworkers ?? members.map((entry) => ({ id: entry.id, name: entry.name }))) {
       const row = document.createElement("div");
       row.className = "member-row";
@@ -722,14 +723,14 @@ function renderDetails(conversation) {
       name.textContent = member.name;
       const status = document.createElement("small");
       status.className = "member-status";
-      status.textContent = member.id === flow.currentOwnerId && flow.status === "active" ? "Active" : member.id === flow.currentOwnerId ? "Waiting" : "Available";
+      status.textContent = attention.has(member.id) ? "Needs attention" : member.id === flow.currentOwnerId && flow.status === "active" ? "Active" : member.id === flow.currentOwnerId ? "Waiting" : "Available";
       row.append(name, status);
       roster.append(row);
     }
   }
   const pending = pendingUserRecipients(conversation);
   $("details-current-work").textContent = team?.flow?.currentOwner
-    ? `${team.flow.status === "active" ? "Active" : "Waiting"} · ${team.flow.currentOwner}`
+    ? `${team.flow.status === "needs-attention" ? "Needs attention" : team.flow.status === "active" ? "Active" : "Waiting"} · ${team.flow.currentOwner}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
 }
 

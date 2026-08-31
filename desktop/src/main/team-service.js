@@ -516,12 +516,18 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const pending = conversation
             ? Object.entries(conversation.messages.at(-1)?.delivery ?? {}).filter(([, value]) => value?.status === "pending").map(([id]) => id)
             : [];
+        const attention = conversation
+            ? [...new Set(conversation.messages.flatMap((message) => Object.entries(message.delivery ?? {})
+                .filter(([, value]) => value?.status === "failed")
+                .map(([id]) => id)))]
+            : [];
         return {
             stage: flow.stage,
-            status: pending.length ? "active" : flow.stage === "complete" ? "available" : "waiting",
+            status: attention.length ? "needs-attention" : pending.length ? "active" : flow.stage === "complete" ? "available" : "waiting",
             currentOwnerId,
             currentOwner: currentOwnerId ? coworkerName(currentOwnerId) : undefined,
             pendingCoworkerIds: pending,
+            attentionCoworkerIds: attention,
             channelId: channel?.id,
             ...(flow.routingDecision ? { routingDecision: clone(flow.routingDecision) } : {}),
         };
