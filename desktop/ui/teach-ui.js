@@ -296,6 +296,10 @@
   async function finishTeaching() {
     const error = $("teach-action-error");
     error?.classList.add("hidden");
+    const button = $("teach-finish");
+    button.disabled = true;
+    $("teach-session-state").textContent = "Generating Skill draft… / 正在生成 Skill 草稿…";
+    $("teach-result").textContent = "The assigned Coworker is synthesizing a bounded SkillDraft. / 已由当前同事生成受边界约束的 SkillDraft。";
     try {
       const result = await window.sovereignbot.teachOnce.finish({ sessionId: session.id });
       session = result.session;
@@ -303,6 +307,9 @@
       setPanel("draft");
     } catch (reason) {
       if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }
+    }
+    finally {
+      button.disabled = false;
     }
   }
 
@@ -322,13 +329,23 @@
   async function testDraft() {
     const error = $("teach-draft-error");
     error?.classList.add("hidden");
+    const button = $("teach-test");
+    button.disabled = true;
+    $("teach-result").textContent = "Running the bounded Computer/Governor test… / 正在运行受边界约束的 Computer/Governor 测试…";
     try {
       const result = await window.sovereignbot.teachOnce.test({ sessionId: session.id });
       session = result.session;
       renderDraft(session);
-      $("teach-result").textContent = "Semantic replay preview passed. Review the draft, then save it as a Skill. / 语义回放预览通过，请确认草稿后保存。";
+      $("teach-result").textContent = result.status === "awaiting-confirmation"
+        ? "The test reached a manual validator and is waiting for your confirmation; it was not marked passed. / 测试到达手动验证步骤，等待你的确认，尚未标记为通过。"
+        : result.ok
+          ? "Governed Computer test passed. Review the draft, then save it as a Skill. / 受治理的 Computer 测试通过，请确认草稿后保存。"
+          : "Governed Computer test did not pass. / 受治理的 Computer 测试未通过。";
     } catch (reason) {
       if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }
+    }
+    finally {
+      button.disabled = false;
     }
   }
 
@@ -349,7 +366,7 @@
   }
 
   async function cancelTeaching() {
-    if (session && session.state === "recording") {
+    if (session && !["saved", "cancelled"].includes(session.state)) {
       try { session = await window.sovereignbot.teachOnce.cancel({ sessionId: session.id }); } catch {}
     }
     $("teach-dialog")?.close();

@@ -20,6 +20,7 @@ import { createAttachmentAwareConversationStore, pickConversationAttachments } f
 import { createSkillStore } from "./skill-store.js";
 import { createSkillAwareConversationStore, createSkillHandlers } from "./skill-integration.js";
 import { createTeachOnceController } from "./teach-once-controller.js";
+import { createTeachOnceRuntime } from "./teach-once-runtime.js";
 import { createCoworkerDispatcher } from "./coworker-dispatcher.js";
 import { openProviderLogin } from "./provider-login.js";
 import { validateRoleAssignment } from "./provider-roster.js";
@@ -258,14 +259,27 @@ async function main() {
     }
 
     const firstRun = createFirstRunService({ host, services });
+    rebuildRuntimeBoundServices();
+    const teachOnceRuntime = createTeachOnceRuntime({
+        dataDir,
+        getRuntime: () => host.runtime,
+        roster: () => host.rosterSummary(),
+        coworkerStore,
+        services,
+    });
+    const dynamicRawComputer = Object.fromEntries(["snapshot", "navigate", "click", "type", "key", "scroll"].map((method) => [
+        method,
+        (...args) => host.runtime.rawComputer[method](...args),
+    ]));
     teachOnce = createTeachOnceController({
         dataDir,
         coworkerStore,
         skillStore,
-        rawComputer: host.runtime.rawComputer,
+        rawComputer: dynamicRawComputer,
         getAgentId: (coworkerId) => host.rosterSummary()?.coworkerBindings?.[coworkerId]?.agentId,
+        generateDraft: teachOnceRuntime.generateDraft,
+        testExecutor: teachOnceRuntime.testExecutor,
     });
-    rebuildRuntimeBoundServices();
 
     const configuredExternalPort = process.env.SOVEREIGNBOT_EXTERNAL_TEAM_CONTROL_PORT;
     const externalPort = configuredExternalPort === undefined ? 0 : Number(configuredExternalPort);
