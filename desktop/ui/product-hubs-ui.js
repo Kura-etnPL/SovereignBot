@@ -209,6 +209,27 @@
     }
     if (!entries.length) { const p = document.createElement("p"); p.textContent = "No recent coworker activity yet. / 暂无最近同事动态。"; root.append(p); }
   }
+  function renderRecentProjects(teams, workspaces) {
+    const root = $("product-recent-projects");
+    if (!root) return;
+    clear(root);
+    const workspaceNames = new Map((workspaces?.workspaces ?? []).map((workspace) => [workspace.id, workspace.kind === "shared-project" ? "Shared project workspace / 共享项目工作区" : (workspace.label || "Private workspace / 私有工作区")]));
+    const projects = [...(teams ?? [])].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 8);
+    for (const team of projects) {
+      const card = document.createElement("article");
+      card.className = "settings-card";
+      const heading = document.createElement("div");
+      heading.className = "card-heading";
+      const title = document.createElement("h3");
+      title.textContent = team.name;
+      heading.append(title);
+      card.append(heading, line("Workspace", workspaceNames.get(team.sharedWorkspaceId) ?? team.sharedWorkspaceLabel ?? "Shared project workspace"), line("Channel", team.channels?.[0]?.name ?? "Project Channel"), line("Coworkers", team.coworkerIds?.length ?? 0), line("Status", team.flow?.status ?? "available"), line("Updated", team.updatedAt));
+      const conversationId = team.channels?.[0]?.conversationId;
+      if (conversationId && typeof openConversation === "function") card.append(button("Open project / 打开项目", () => openConversation(conversationId)));
+      root.append(card);
+    }
+    if (!projects.length) { const p = document.createElement("p"); p.textContent = "No projects yet. / 暂无项目。"; root.append(p); }
+  }
   async function refresh() {
     const [teams, coworkers, workspaces] = await Promise.all([
       api.teams.list({}),
@@ -216,6 +237,7 @@
       api.workspaces?.list ? api.workspaces.list({}) : Promise.resolve({ workspaces: [] }),
     ]);
     renderWorkspaceSwitcher(workspaces);
+    renderRecentProjects(teams.teams ?? [], workspaces);
     const filter = $("artifact-hub-filter");
     if (filter && filter.options.length === 1) {
       for (const team of teams.teams ?? []) {
