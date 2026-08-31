@@ -406,6 +406,7 @@ async function main() {
                     return { ...result, refresh };
                 },
                 "team:duplicatePack": ({ packId }) => productSurfaces.duplicatePack(packId),
+                "team:exportPackRecipe": ({ packId }) => productSurfaces.exportPack(packId),
                 "team:editPack": ({ packId, patch }) => productSurfaces.editPack(packId, patch),
                 "team:exportPlaybook": ({ teamId, playbookId }) => teamService.exportPlaybook(teamId, playbookId),
                 "team:importPlaybook": ({ teamId, playbook }) => teamService.importPlaybook(teamId, playbook),
