@@ -25,6 +25,9 @@ const state = {
   editingChannelId: undefined,
   pollTimer: undefined,
   conversationSignature: undefined,
+  inlineAttentionFor: undefined,
+  inlineAttentionAt: 0,
+  inlineAttentionRequest: 0,
 };
 
 const READ_MARKERS_KEY = "sovereignbot.conversation-read-v1";
@@ -513,6 +516,48 @@ function renderConversationHeader(conversation) {
   renderDetails(conversation);
 }
 
+async function refreshInlineAttention(conversationId, force = false) {
+  const root = $("conversation-attention-strip") ?? (() => {
+    const element = document.createElement("div");
+    element.id = "conversation-attention-strip";
+    element.className = "demo-banner conversation-attention hidden";
+    $("demo-banner")?.after(element);
+    return element;
+  })();
+  if (!root) return;
+  if (!force && state.inlineAttentionFor === conversationId && Date.now() - state.inlineAttentionAt < 5000) return;
+  const request = ++state.inlineAttentionRequest;
+  state.inlineAttentionFor = conversationId;
+  state.inlineAttentionAt = Date.now();
+  try {
+    const result = await window.sovereignbot.jobs.attention({});
+    if (request !== state.inlineAttentionRequest || state.selectedConversationId !== conversationId) return;
+    const jobs = (result?.jobs ?? []).filter((job) => job.conversationId === conversationId);
+    root.textContent = "";
+    root.classList.toggle("hidden", jobs.length === 0);
+    for (const job of jobs.slice(0, 3)) {
+      const card = document.createElement("div");
+      card.className = "attention-inline-card";
+      const copy = document.createElement("span");
+      copy.textContent = `${job.title}: ${job.attentionState?.reason || job.error || "Needs your decision"}`.slice(0, 360);
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "hero-action";
+      retry.textContent = "Retry / 重试";
+      retry.addEventListener("click", async () => { retry.disabled = true; try { await window.sovereignbot.jobs.approve({ jobId: job.id }); await refreshInlineAttention(conversationId, true); } finally { retry.disabled = false; } });
+      const dismiss = document.createElement("button");
+      dismiss.type = "button";
+      dismiss.className = "quiet-action";
+      dismiss.textContent = "Dismiss / 忽略";
+      dismiss.addEventListener("click", async () => { dismiss.disabled = true; try { await window.sovereignbot.jobs.dismiss({ jobId: job.id }); await refreshInlineAttention(conversationId, true); } finally { dismiss.disabled = false; } });
+      card.append(copy, retry, dismiss);
+      root.append(card);
+    }
+  } catch {
+    if (request === state.inlineAttentionRequest) root.classList.add("hidden");
+  }
+}
+
 function replyPreview(conversation, replyTo) {
   if (!replyTo) return undefined;
   return conversation.messages.find((entry) => entry.id === replyTo)?.text;
@@ -651,6 +696,7 @@ async function refreshConversation(forceScroll = false) {
     markConversationRead(conversation);
     renderConversationHeader(conversation);
     renderMessages(conversation, forceScroll);
+    void refreshInlineAttention(id);
     await refreshConversations();
     if (state.teams.length) await refreshTeams();
   } catch (error) {
