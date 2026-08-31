@@ -71,6 +71,16 @@ test("no usable provider means an empty roster unless Demo Mode is explicitly on
     assert.equal(off.agents.length, 0);
     assert.equal(off.mode, "provider");
 
+    const workerNodeOnly = buildProviderRoster({
+        discovery: discovery({ found: false }, { found: false }),
+        settings: {},
+        includeWorkerNodeDispatcher: true,
+    });
+    assert.equal(workerNodeOnly.ready, false);
+    assert.deepEqual(workerNodeOnly.roles, { planner: "worker-node-supervisor" });
+    assert.deepEqual(workerNodeOnly.agents.map((agent) => agent.id), ["worker-node-supervisor", "worker-node-dispatcher"]);
+    assert.ok(workerNodeOnly.agents.every((agent) => agent.harness.kind === "worker-node"));
+
     const signedOut = buildProviderRoster({
         discovery: discovery(READY({ auth: { state: "signed-out" } }), { found: false }),
         settings: {},

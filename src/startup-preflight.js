@@ -16,6 +16,13 @@ const KNOWN_TOP_LEVEL = new Set([
     "memory.jsonl",
     "audit.jsonl",
     "repeat-state.json",
+    // Worker Node bootstrap owns this private identity file. The Worker Node
+    // server validates it before constructing the Core runtime; preflight must
+    // recognize it as part of the documented Worker Node data directory.
+    "worker-node-identity.json",
+    // Worker Node idempotency is also durable Core-adjacent state owned by the
+    // Worker Node server and validated by WorkerNodeDispatchStore on startup.
+    "worker-node-dispatch-ledger.json",
     "policy-versions",
     "computers",
     "operator-sessions",

@@ -62,7 +62,7 @@ export async function loadCoreResolvers() {
 // settings, and the persistent Coworker Registry. Coworkers are converted into dedicated
 // provider-backed runtime agents only here; renderer messages and model output never mint
 // runtime identities or capabilities.
-export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = () => [] }) {
+export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = () => [], workerNodeClientResolver }) {
     if (typeof getSettings !== "function")
         throw new Error("runtime host requires a settings reader");
     if (typeof getCoworkers !== "function")
@@ -203,6 +203,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             fakeLaunchers,
             computerAvailable: Boolean(computer.path),
             coworkers: coworkerSnapshot(),
+            includeWorkerNodeDispatcher: Boolean(workerNodeClientResolver),
         });
         const nextRuntime = await createRuntime({
             dataDir,
@@ -214,7 +215,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                 repeatWindowMs: 180000,
                 rules: buildPolicyRules(nextRoster.agents),
             },
-        });
+        }, workerNodeClientResolver ? { workerNodeClientResolver } : {});
         discovery = nextDiscovery;
         roster = nextRoster;
         summary = summarizeRoster(roster, discovery);
@@ -237,6 +238,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             fakeLaunchers,
             computerAvailable: Boolean(computer.path),
             coworkers: coworkerSnapshot(),
+            includeWorkerNodeDispatcher: Boolean(workerNodeClientResolver),
         });
         const sameShape =
             nextRoster.mode === roster.mode

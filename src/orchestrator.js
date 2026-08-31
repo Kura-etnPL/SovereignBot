@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { createHarness, harnessTarget } from "./harness.js";
 import { createId } from "./id.js";
+import { validateNodeId, validateWorkspaceId } from "./worker-node-protocol.js";
 
 const TERMINAL = new Set(["completed", "failed", "blocked", "cancelled"]);
 const ACTIVE_WORK = new Set(["queued", "accepted", "running", "awaiting_review", "changes_requested"]);
@@ -15,8 +16,14 @@ function validateTrustedExecutionContext(value) {
     if (!value || typeof value !== "object" || Array.isArray(value))
         throw new Error("trusted execution context must be an object");
     const keys = Object.keys(value).sort();
-    if (keys.length !== 2 || keys[0] !== "cwd" || keys[1] !== "workspaceId")
-        throw new Error("trusted execution context accepts exactly workspaceId and cwd");
+    if (value.kind === "worker-node") {
+        if (keys.length !== 3 || keys[0] !== "kind" || keys[1] !== "nodeId" || keys[2] !== "workspaceId")
+            throw new Error("worker-node execution context accepts exactly kind, nodeId, and workspaceId");
+        return { kind: "worker-node", nodeId: validateNodeId(value.nodeId), workspaceId: validateWorkspaceId(value.workspaceId) };
+    }
+    const localKeys = value.kind === "local" ? ["cwd", "kind", "workspaceId"] : ["cwd", "workspaceId"];
+    if (keys.length !== localKeys.length || keys.some((key, index) => key !== localKeys[index]))
+        throw new Error("trusted execution context accepts local workspaceId/cwd or worker-node nodeId/workspaceId");
     const workspaceId = value.workspaceId;
     if (typeof workspaceId !== "string" || !/^[A-Za-z0-9][\w:-]{0,63}$/.test(workspaceId))
         throw new Error("trusted execution context workspaceId must be an identifier");
@@ -34,8 +41,10 @@ function validateTrustedExecutionContext(value) {
     }
     if (!stats.isDirectory())
         throw new Error(`trusted execution context cwd must be a directory: ${cwd}`);
-    return { workspaceId, cwd };
+    return value.kind === "local" ? { kind: "local", workspaceId, cwd } : { workspaceId, cwd };
 }
+
+export { validateTrustedExecutionContext };
 
 function normalizeReview(review) {
     if (!review?.required)
@@ -204,8 +213,8 @@ export class Orchestrator {
     // context is strictly validated and stamped after delegation so provider harnesses
     // can bind the real child-process cwd to a registry-vetted workspace.
     async delegateTrusted(parentTaskId, spec, trustedContext, actorAgentId) {
-        const task = await this.delegate(parentTaskId, spec, actorAgentId);
         const context = validateTrustedExecutionContext(trustedContext);
+        const task = await this.delegate(parentTaskId, spec, actorAgentId);
         const stamped = await this.patch(task, { executionContext: { ...context } });
         await this.taskEvents.append({
             taskId: task.id,

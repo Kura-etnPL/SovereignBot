@@ -24,6 +24,7 @@ import { openProviderLogin } from "./provider-login.js";
 import { validateRoleAssignment } from "./provider-roster.js";
 import { attachWindowLifecycle } from "./lifecycle.js";
 import { createTrayController } from "./tray.js";
+import { createWorkerNodeStore } from "./worker-node-store.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -45,6 +46,11 @@ function logStartupError(scope, error) {
     catch {}
     return message;
 }
+
+// Set the product name before Electron resolves userData/single-instance paths.
+// Packaged builds otherwise inherit the generic "Electron" profile, which can
+// collide with the host application's lock and corrupt smoke/installer isolation.
+app.setName("SovereignBot");
 
 if (!app.requestSingleInstanceLock()) {
     app.quit();
@@ -99,6 +105,7 @@ async function main() {
     const artifactStore = createArtifactStore({ dataDir });
     const attachmentAwareConversationStore = createAttachmentAwareConversationStore(conversationStore, artifactStore);
     const skillStore = createSkillStore({ persistPath: join(dataDir, "desktop-state", "skills.json") });
+    const workerNodeStore = createWorkerNodeStore({ dataDir });
 
     let host;
     try {
@@ -106,6 +113,7 @@ async function main() {
             dataDir,
             getSettings: () => services.getSettings(),
             getCoworkers: () => coworkerStore.list().coworkers,
+            workerNodeClientResolver: (nodeId) => workerNodeStore.client(nodeId),
         });
     }
     catch (error) {
@@ -211,6 +219,7 @@ async function main() {
             skillStore,
             supervisorAgentId: host.plannerAgentId,
             readiness: goalReadiness,
+            workerNodeStore,
         });
         routines = createRoutineController({ dataDir, jobController: jobs, coworkerStore, skillStore, services });
         eventTriggers = createEventTriggerController({ dataDir, routineController: routines, services });
@@ -356,6 +365,12 @@ async function main() {
                 "eventTrigger:get": ({ triggerId }) => eventTriggers.get(triggerId),
                 "eventTrigger:setEnabled": ({ triggerId, enabled }) => eventTriggers.setEnabled(triggerId, enabled),
                 "eventTrigger:remove": ({ triggerId }) => eventTriggers.remove(triggerId),
+                "workerNode:pairViaDialog": () => workerNodeStore.pairViaDialog(win, dialog),
+                "workerNode:list": () => workerNodeStore.list(),
+                "workerNode:get": ({ nodeId }) => workerNodeStore.get(nodeId),
+                "workerNode:refresh": ({ nodeId }) => workerNodeStore.refresh(nodeId),
+                "workerNode:setEnabled": ({ nodeId, enabled }) => workerNodeStore.setEnabled(nodeId, enabled),
+                "workerNode:remove": ({ nodeId }) => workerNodeStore.remove(nodeId),
             },
         });
     }

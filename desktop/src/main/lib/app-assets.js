@@ -24,11 +24,13 @@ export const APP_ASSETS = Object.freeze({
     "/chief-ui.js": Object.freeze({ file: "chief-ui.js", type: JS }),
     "/jobs-ui.js": Object.freeze({ file: "jobs-ui.js", type: JS }),
     "/triggers-ui.js": Object.freeze({ file: "triggers-ui.js", type: JS }),
+    "/worker-nodes-ui.js": Object.freeze({ file: "worker-nodes-ui.js", type: JS }),
     "/i18n.js": Object.freeze({ file: "i18n.js", type: JS }),
     "/artifacts.css": Object.freeze({ file: "artifacts.css", type: CSS }),
     "/computer.css": Object.freeze({ file: "computer.css", type: CSS }),
     "/live-screen.css": Object.freeze({ file: "live-screen.css", type: CSS }),
     "/skills.css": Object.freeze({ file: "skills.css", type: CSS }),
+    "/worker-nodes.css": Object.freeze({ file: "worker-nodes.css", type: CSS }),
 });
 
 export function resolveAppAsset(rawUrl) {

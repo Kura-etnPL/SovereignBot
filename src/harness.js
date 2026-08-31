@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { ClaudeCodeHarness } from "./claude-code-harness.js";
 import { CodexHarness } from "./codex-harness.js";
+import { WorkerNodeHarness } from "./worker-node-harness.js";
 
 const TOOL_BRIDGE_MANAGERS = new WeakMap();
 const HARNESS_ACTIVITY = new WeakMap();
@@ -246,6 +247,8 @@ export function harnessTarget(harness) {
         return harness.command ?? process.env.SOVEREIGNBOT_CODEX_BIN ?? "codex";
     if (harness.kind === "claude-code")
         return harness.command ?? process.env.SOVEREIGNBOT_CLAUDE_BIN ?? "claude";
+    if (harness.kind === "worker-node")
+        return "worker-node";
     return "echo";
 }
 
@@ -259,6 +262,8 @@ function createBaseHarness(agent) {
             return new CodexHarness(agent.harness);
         case "claude-code":
             return new ClaudeCodeHarness(agent.harness);
+        case "worker-node":
+            return new WorkerNodeHarness(agent);
         default:
             throw new Error(`unsupported harness kind: ${agent.harness.kind}`);
     }

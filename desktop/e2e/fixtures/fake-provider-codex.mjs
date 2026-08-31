@@ -33,6 +33,13 @@ const sessionId = resumed ? args[resumeIndex + 1] : `fake-codex-session-${Date.n
 const cwd = process.cwd();
 const kind = phase();
 
+// The V4.5 real Worker Node gate can hold one explicitly marked task long enough
+// to exercise confirmed remote cancellation. Normal fake-provider contracts remain
+// immediate and deterministic.
+const cancelHoldMs = Number(process.env.FAKE_PROVIDER_DELAY_MS ?? 0);
+if (cancelHoldMs > 0 && /V45_CANCEL_HOLD/.test(prompt))
+    await new Promise((resolve) => setTimeout(resolve, Math.min(cancelHoldMs, 60_000)));
+
 if (args.includes("--help")) {
     process.stdout.write([
         "Usage: codex <command>",

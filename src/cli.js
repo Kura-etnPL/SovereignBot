@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { loadConfig, writeDefaultConfig, DEFAULT_CONFIG_PATH } from "./config.js";
+import { defaultWorkerNodeConfig, loadConfig, writeDefaultConfig, DEFAULT_CONFIG_PATH } from "./config.js";
 import { applyCrashRecovery, inspectCrashRecovery } from "./crash-recovery.js";
 import { doctorExitCode, formatDoctorReport, runDoctor } from "./doctor.js";
 import { createRuntime } from "./runtime.js";
@@ -7,6 +7,10 @@ import { startServer } from "./server.js";
 import { createStateBackup, exportState, inspectStateBackup, restoreStateBackup } from "./state-transfer.js";
 import { providerContinuityRefs, publicProgressView, publicRuntimeRecords, publicTaskGraphView, publicTaskListView, publicTaskView } from "./task-view.js";
 import { VERSION } from "./version.js";
+import { readFile } from "node:fs/promises";
+import { writeJsonAtomic } from "./fs-util.js";
+import { exportWorkerNodePairingBundle, loadOrCreateWorkerIdentity, publicWorkerNodeIdentity } from "./worker-node-identity.js";
+import { loadWorkerNodeConfig, startWorkerNodeServer } from "./worker-node-server.js";
 
 function valueAfter(args, flag) {
     const index = args.indexOf(flag);
@@ -74,6 +78,10 @@ Usage:
   sovereignbot computer token <agent-id>
   sovereignbot computer operator-token
   sovereignbot computer list
+  sovereignbot worker-node init --provider <codex|claude-code> [--config path]
+  sovereignbot worker-node identity [--config path]
+  sovereignbot worker-node serve [--config path]
+  sovereignbot worker-node pairing-bundle --endpoint http://127.0.0.1:7342 [--config path]
 
 Every command accepts [--config path]. Repeated flags such as --cap and --depends may be supplied more than once.
 Doctor is passive with respect to model work/browser startup: it never runs a model prompt or starts WebDriver/browser merely to inspect readiness.
@@ -99,6 +107,44 @@ async function main() {
         const written = await writeDefaultConfig(configPath);
         console.log(`created ${written}`);
         return;
+    }
+    if (command === "worker-node") {
+        const subcommand = args[1];
+        if (subcommand === "init") {
+            const path = configPath;
+            try {
+                await readFile(path, "utf8");
+                throw new Error(`config already exists: ${path}`);
+            }
+            catch (error) {
+                if (error.code !== "ENOENT") throw error;
+            }
+            const config = defaultWorkerNodeConfig(undefined, undefined, valueAfter(args, "--provider"));
+            await writeJsonAtomic(path, config);
+            await loadOrCreateWorkerIdentity(config.dataDir, { name: config.name });
+            console.log(`created ${path}`);
+            return;
+        }
+        const workerConfig = await loadWorkerNodeConfig(configPath);
+        if (subcommand === "identity") {
+            const identity = await loadOrCreateWorkerIdentity(workerConfig.dataDir, { name: workerConfig.name });
+            console.log(JSON.stringify(publicWorkerNodeIdentity(identity), null, 2));
+            return;
+        }
+        if (subcommand === "pairing-bundle") {
+            const endpoint = valueAfter(args, "--endpoint") ?? `http://${workerConfig.bindHost === "::1" ? `[${workerConfig.bindHost}]` : workerConfig.bindHost}:${workerConfig.port}`;
+            console.log(JSON.stringify(await exportWorkerNodePairingBundle(workerConfig.dataDir, endpoint), null, 2));
+            return;
+        }
+        if (subcommand === "serve") {
+            const server = await startWorkerNodeServer({ config: workerConfig });
+            console.log(`Worker Node listening on ${server.url}`);
+            const stop = async () => { await server.close(); process.exit(0); };
+            process.on("SIGINT", stop);
+            process.on("SIGTERM", stop);
+            return;
+        }
+        throw new Error("worker-node requires init, identity, serve, or pairing-bundle");
     }
     if (command === "doctor") {
         const report = await runDoctor(configPath);

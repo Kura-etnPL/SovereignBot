@@ -63,6 +63,19 @@ jobs:
         working-directory: desktop
         run: npm run fetch-node
 
+      # V4.5's deterministic real-Electron gate exercises a separate pinned-Node
+      # Worker Node over loopback, including idempotency, reconnect/restart,
+      # confirmed cancellation, no local fallback, credential removal, and UI.
+      - name: V4.5 Worker Node vertical gate
+        working-directory: desktop
+        env:
+          FAKE_PROVIDER_DIR: ${{ github.workspace }}\desktop\e2e\fixtures
+          FAKE_PROVIDER_TRANSCRIPT: ${{ runner.temp }}\fake-provider-transcript-v45-worker-node.jsonl
+        shell: pwsh
+        run: |
+          $env:FAKE_PROVIDER_NODE = (node -p "process.execPath")
+          node scripts/verify-v45-worker-node.mjs
+
       # V4.1's deterministic Electron gate covers the product-level Jobs/Chief/Attention
       # state machine and renderer behavior that unit tests alone cannot prove: repeated
       # root-scroll invariants, waiting -> needs_attention escalation, approve/dismiss,

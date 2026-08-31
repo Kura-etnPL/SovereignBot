@@ -7,6 +7,8 @@
 
 export const PROVIDER_ROLES = Object.freeze(["planner", "worker", "reviewer", "synthesizer"]);
 const PROVIDERS = Object.freeze(["codex", "claude"]);
+export const WORKER_NODE_SUPERVISOR = "worker-node-supervisor";
+export const WORKER_NODE_DISPATCHER = "worker-node-dispatcher";
 
 import { join } from "node:path";
 
@@ -164,7 +166,7 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
     return { agents, bindings };
 }
 
-export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false, coworkers = [] } = {}) {
+export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false, coworkers = [], includeWorkerNodeDispatcher = false } = {}) {
     if (!discovery || typeof discovery !== "object")
         throw new Error("provider roster requires discovery results");
 
@@ -178,12 +180,34 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
         claude: providerUsable(discovery.claude, settings, "claude"),
     };
     if (!usableProviders.codex && !usableProviders.claude) {
+        const workerNodeAgents = includeWorkerNodeDispatcher
+            ? [
+                {
+                    id: WORKER_NODE_SUPERVISOR,
+                    name: "Worker Node Supervisor",
+                    role: "supervisor",
+                    capabilities: ["planning"],
+                    // This identity owns local plan records only. It is never eligible
+                    // for task execution; the dispatcher below is the sole Worker Node
+                    // execution identity.
+                    harness: { kind: "worker-node" },
+                },
+                {
+                    id: WORKER_NODE_DISPATCHER,
+                    name: "Worker Node Dispatcher",
+                    role: "worker",
+                    capabilities: ["worker-node"],
+                    harness: { kind: "worker-node" },
+                    maxConcurrency: 4,
+                },
+            ]
+            : [];
         return {
             mode: "provider",
             ready: false,
             providers: usableProviders,
-            roles: {},
-            agents: [],
+            roles: includeWorkerNodeDispatcher ? { planner: WORKER_NODE_SUPERVISOR } : {},
+            agents: workerNodeAgents,
             coworkerBindings: Object.fromEntries((Array.isArray(coworkers) ? coworkers : [])
                 .filter((entry) => entry?.state === "active")
                 .map((entry) => [entry.id, { ready: false, reason: "no usable provider" }])),
@@ -239,7 +263,20 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
     }
 
     const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers });
-    const agents = [...orchestrationAgents, ...coworkerRuntime.agents];
+    // This identity is a narrow protocol adapter. It is never a planner/reviewer role,
+    // never receives browser/computer capabilities, and is only compatible with tasks
+    // explicitly stamped with the worker-node trusted context.
+    const workerNodeDispatcher = {
+        id: WORKER_NODE_DISPATCHER,
+        name: "Worker Node Dispatcher",
+        role: "worker",
+        capabilities: ["worker-node"],
+        harness: { kind: "worker-node" },
+        maxConcurrency: 4,
+    };
+    const agents = includeWorkerNodeDispatcher
+        ? [...orchestrationAgents, ...coworkerRuntime.agents, workerNodeDispatcher]
+        : [...orchestrationAgents, ...coworkerRuntime.agents];
 
     return {
         mode: "provider",

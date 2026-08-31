@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 const TRANSIENT_RENAME_ERRORS = new Set(["EPERM", "EBUSY", "EACCES"]);
@@ -40,12 +40,15 @@ export async function replaceFileWithRetry(source, destination, {
     throw lastError;
 }
 
-export async function writeJsonAtomic(path, value) {
+export async function writeJsonAtomic(path, value, { mode } = {}) {
     await ensureParent(path);
     const temp = `${path}.tmp-${process.pid}-${randomUUID()}`;
-    await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    const options = mode === undefined ? "utf8" : { encoding: "utf8", mode };
+    await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, options);
     try {
         await replaceFileWithRetry(temp, path);
+        if (mode !== undefined)
+            await chmod(path, mode);
     }
     catch (error) {
         await unlink(temp).catch(() => undefined);
