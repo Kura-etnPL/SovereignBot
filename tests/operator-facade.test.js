@@ -51,6 +51,9 @@ test("overview projects public task view and passive computer status without raw
         assert.equal(Array.isArray(overview.agents), true);
         assert.equal(Array.isArray(overview.computers), true);
         assert.equal(overview.audit.ok, true);
+        assert.equal(Object.hasOwn(overview.computers[0], "profileDir"), false);
+        assert.equal(Object.hasOwn(overview.computers[0], "workspaceDir"), false);
+        assert.equal(Object.hasOwn(overview.computers[0], "token"), false);
         const view = overview.tasks.find((task) => task.id === submitted.id);
         assert.equal(view.status, "completed");
         assert.equal(Object.hasOwn(view, "harnessState"), false);

@@ -57,6 +57,7 @@ export function createCoworkerDispatcher({
     artifactStore,
     services,
     teamFlow,
+    isConversationBlocked = () => false,
     persistPath = join(dataDir, "desktop-state", "coworker-dispatch.json"),
     now = () => new Date().toISOString(),
 } = {}) {
@@ -206,6 +207,8 @@ export function createCoworkerDispatcher({
     }
 
     async function executeDelivery(conversationId, messageId, coworkerId) {
+        if (isConversationBlocked(conversationId))
+            return { ok: false, stopped: true, reason: "conversation is blocked for takeover or cancellation" };
         const coworker = coworkerStore.get(coworkerId);
         if (coworker.state !== "active")
             throw new Error(`${coworker.name} is not active`);
@@ -257,6 +260,11 @@ export function createCoworkerDispatcher({
             state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
             save();
             return { ok: false, taskId: task.id, error: detail };
+        }
+
+        if (isConversationBlocked(conversationId)) {
+            conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "automation stopped for takeover or cancellation");
+            return { ok: false, taskId: task.id, stopped: true, reason: "conversation is blocked for takeover or cancellation" };
         }
 
         const rawText = typeof finished.result?.text === "string"
@@ -335,6 +343,8 @@ export function createCoworkerDispatcher({
         const message = conversation.messages.find((entry) => entry.id === messageId);
         if (!message)
             throw new Error(`unknown message id: ${messageId}`);
+        if (isConversationBlocked(conversationId))
+            return [];
         teamFlow?.onMessageQueued?.({ conversation, message });
         const recipients = Object.entries(message.delivery ?? {})
             .filter(([, delivery]) => delivery?.status === "pending")

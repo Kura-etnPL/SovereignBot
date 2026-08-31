@@ -11,6 +11,7 @@ const state = {
   settings: undefined,
   workspaces: { workspaces: [], defaultWorkspaceId: undefined },
   firstRun: undefined,
+  connectedApps: { apps: [] },
   selectedConversationId: undefined,
   selectedConversation: undefined,
   activeView: "welcome",
@@ -259,6 +260,7 @@ async function refreshCoworkers() {
     const target = $("provider-action-result");
     if (target && error) target.textContent = String(error?.message ?? error).slice(0, 200);
   }
+  renderConnectedApps();
   renderSidebar();
 }
 
@@ -286,6 +288,7 @@ async function refreshTeams() {
     const target = $("provider-action-result");
     if (target && error) target.textContent = String(error?.message ?? error).slice(0, 200);
   }
+  renderConnectedApps();
   renderTeamPackActions();
   renderSidebar();
 }
@@ -354,10 +357,11 @@ function renderMentionRow(conversation) {
   show(row);
   const everyone = document.createElement("button");
   everyone.type = "button";
-  everyone.className = `mention-chip${state.mentionIds.size === 0 ? " active" : ""}`;
+  everyone.className = `mention-chip${state.mentionIds.has("everyone") ? " active" : ""}`;
   everyone.textContent = "@everyone";
   everyone.addEventListener("click", () => {
-    state.mentionIds.clear();
+    if (state.mentionIds.has("everyone")) state.mentionIds.clear();
+    else state.mentionIds = new Set(["everyone"]);
     renderMentionRow(conversation);
   });
   row.append(everyone);
@@ -367,6 +371,7 @@ function renderMentionRow(conversation) {
     chip.className = `mention-chip${state.mentionIds.has(coworker.id) ? " active" : ""}`;
     chip.textContent = `@${coworker.name}`;
     chip.addEventListener("click", () => {
+      state.mentionIds.delete("everyone");
       if (state.mentionIds.has(coworker.id)) state.mentionIds.delete(coworker.id);
       else state.mentionIds.add(coworker.id);
       renderMentionRow(conversation);
@@ -580,6 +585,110 @@ function renderDetails(conversation) {
   $("details-current-work").textContent = team?.flow?.currentOwner
     ? `${team.flow.status === "active" ? "Active" : "Waiting"} · ${team.flow.currentOwner}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
+}
+
+function renderConnectedApps() {
+  let root = $("connected-apps-list");
+  if (!root) {
+    const grid = document.querySelector("#view-settings .settings-grid");
+    if (!grid) return;
+    const section = document.createElement("section");
+    section.className = "settings-card span-2";
+    const head = document.createElement("div");
+    head.className = "card-heading";
+    const copy = document.createElement("div");
+    const title = document.createElement("h2");
+    title.textContent = "Connected Apps / 已连接应用";
+    const description = document.createElement("p");
+    description.textContent = "Assign governed product connections to a team or coworker. Runtime authority remains with the Governor.";
+    copy.append(title, description);
+    head.append(copy);
+    root = document.createElement("div");
+    root.id = "connected-apps-list";
+    root.className = "connected-apps-list";
+    section.append(head, root);
+    grid.insertBefore(section, grid.firstChild);
+  }
+  if (!root) return;
+  clearNode(root);
+  const apps = state.connectedApps?.apps ?? [];
+  if (!apps.length) {
+    const empty = document.createElement("p");
+    empty.className = "setting-feedback";
+    empty.textContent = "No governed connections are available yet.";
+    root.append(empty);
+    return;
+  }
+  for (const app of apps) {
+    const card = document.createElement("article");
+    card.className = "connected-app-card";
+    const head = document.createElement("div");
+    head.className = "connected-app-head";
+    const title = document.createElement("strong");
+    title.textContent = app.name;
+    const status = document.createElement("span");
+    status.className = "connected-app-state" + (app.state === "available" ? " ready" : "");
+    status.textContent = app.state === "available" ? "Available" : "Unavailable";
+    head.append(title, status);
+    const service = document.createElement("p");
+    service.textContent = String(app.service || "") + " · " + String(app.authority || "");
+    const description = document.createElement("p");
+    description.className = "connected-app-description";
+    description.textContent = app.description;
+    const capabilities = document.createElement("small");
+    capabilities.textContent = "Capabilities: " + (app.capabilities ?? []).join(" · ");
+    card.append(head, service, description, capabilities);
+
+    const assignment = document.createElement("div");
+    assignment.className = "connected-app-assignment";
+    const assignmentTitle = document.createElement("span");
+    assignmentTitle.className = "detail-label";
+    assignmentTitle.textContent = "Available to / 可分配给";
+    assignment.append(assignmentTitle);
+    const targets = [
+      ...(state.teams ?? []).map((team) => ({ kind: "team", id: team.id, label: team.name + " / Team" })),
+      ...(state.coworkers ?? []).filter((coworker) => coworker.state !== "archived").map((coworker) => ({ kind: "coworker", id: coworker.id, label: coworker.name + " / Coworker" })),
+    ];
+    if (!targets.length) {
+      const none = document.createElement("small");
+      none.textContent = "Install a team or create a coworker first.";
+      assignment.append(none);
+    }
+    for (const target of targets) {
+      const label = document.createElement("label");
+      label.className = "connected-app-target";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = target.kind === "team"
+        ? (app.assignedTeamIds ?? []).includes(target.id)
+        : (app.assignedCoworkerIds ?? []).includes(target.id);
+      checkbox.addEventListener("change", async () => {
+        checkbox.disabled = true;
+        try {
+          const updated = await window.sovereignbot.connectedApps.assign({
+            appId: app.id,
+            ...(target.kind === "team" ? { teamId: target.id } : { coworkerId: target.id }),
+            enabled: checkbox.checked,
+          });
+          state.connectedApps = {
+            apps: (state.connectedApps?.apps ?? []).map((entry) => entry.id === updated.id ? updated : entry),
+          };
+          renderConnectedApps();
+        } catch (error) {
+          checkbox.checked = !checkbox.checked;
+          showToastError(error);
+        } finally {
+          checkbox.disabled = false;
+        }
+      });
+      const textEl = document.createElement("span");
+      textEl.textContent = target.label;
+      label.append(checkbox, textEl);
+      assignment.append(label);
+    }
+    card.append(assignment);
+    root.append(card);
+  }
 }
 
 function populateTeamPicker() {
@@ -799,20 +908,23 @@ function renderAdvancedRoster() {
 
 async function refreshSettingsData() {
   try {
-    const [settings, workspaces, firstRun, roster] = await Promise.all([
+    const [settings, workspaces, firstRun, roster, connectedApps] = await Promise.all([
       window.sovereignbot.settings.get({}),
       window.sovereignbot.workspaces.list({}),
       window.sovereignbot.firstRun.getStatus({}),
       window.sovereignbot.providers.getRoster({}),
+      window.sovereignbot.connectedApps.list({}),
     ]);
     state.settings = settings;
     state.workspaces = workspaces;
     state.firstRun = firstRun;
     state.roster = roster;
+    state.connectedApps = connectedApps;
     renderSettings();
     renderProviderCards();
     renderWorkspaces();
     renderAdvancedRoster();
+    renderConnectedApps();
     renderReadiness();
     renderSidebar();
     const browsers = firstRun?.browsers ?? [];

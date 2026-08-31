@@ -303,3 +303,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .job-status{padding:2px 7px;border-radius:999px;background:var(--panel-3);color:var(--text-3);font-size:10px;text-transform:uppercase;letter-spacing:.05em;}
 .job-status.needs_attention{background:color-mix(in srgb, var(--bad) 18%, var(--panel-2));color:var(--bad);}
 .job-status.working{background:color-mix(in srgb, var(--good) 18%, var(--panel-2));color:var(--good);}
+
+.connected-apps-list { display: grid; gap: 9px; }
+.connected-app-card { padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.connected-app-head { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
+.connected-app-head strong { font-size: 12px; }
+.connected-app-state { color: var(--text-3); font-size: 9.5px; }
+.connected-app-state.ready { color: var(--good); }
+.connected-app-description { margin-top: 4px !important; }
+.connected-app-card > small { display: block; margin-top: 7px; color: var(--text-3); font-size: 9.5px; }
+.connected-app-assignment { display: grid; grid-template-columns: auto repeat(auto-fit, minmax(150px, 1fr)); gap: 7px 12px; align-items: center; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); }
+.connected-app-target { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 10px; }
+.connected-app-target input { accent-color: var(--text); }

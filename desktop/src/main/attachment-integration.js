@@ -23,6 +23,9 @@ export function createAttachmentAwareConversationStore(conversationStore, artifa
         markDelivery(...args) {
             return conversationStore.markDelivery(...args);
         },
+        postUserMessage(...args) {
+            return conversationStore.postUserMessage(...args);
+        },
         postCoworkerMessage(...args) {
             return conversationStore.postCoworkerMessage(...args);
         },

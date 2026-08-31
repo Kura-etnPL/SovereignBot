@@ -18,7 +18,30 @@ async function computerDetails(runtime) {
         catch (error) {
             lifecycle = { managed: false, running: false, error: error.message };
         }
-        return { ...computer, lifecycle, pendingSecret: pending ? { id: pending.id, taskId: pending.taskId, label: pending.label, createdAt: pending.createdAt, ref: pending.ref } : undefined };
+        // Computer records contain credentials and private filesystem roots for the
+        // sidecar.  The operator/renderer projection is deliberately a small public
+        // status object; controls remain bound to the fixed desktop operator actor.
+        return {
+            id: computer.id,
+            agentId: computer.agentId,
+            control: computer.control && {
+                mode: computer.control.mode,
+                ...(computer.control.updatedAt ? { updatedAt: computer.control.updatedAt } : {}),
+            },
+            hasPendingSecret: Boolean(computer.hasPendingSecret),
+            lifecycle: {
+                agentId: lifecycle.agentId,
+                managed: lifecycle.managed === true,
+                ...(lifecycle.running !== undefined ? { running: lifecycle.running === true } : {}),
+                ...(lifecycle.instantiated !== undefined ? { instantiated: lifecycle.instantiated === true } : {}),
+            },
+            pendingSecret: pending ? {
+                id: pending.id,
+                ...(pending.taskId ? { taskId: pending.taskId } : {}),
+                ...(pending.label ? { label: String(pending.label).slice(0, 160) } : {}),
+                ...(pending.createdAt ? { createdAt: pending.createdAt } : {}),
+            } : undefined,
+        };
     }));
 }
 

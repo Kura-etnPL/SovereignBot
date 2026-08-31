@@ -47,7 +47,7 @@ function modelBindingShape(value) {
 function coworkerShape(value, { patch = false } = {}) {
     if (!isPlainObject(value)) throw new Error(patch ? "patch must be an object" : "coworker must be an object");
     assertNoAuthority(value, patch ? "patch" : "coworker");
-    const allowed = new Set(["name", "role", "instructions", "avatar", "providerPreference", "modelBinding", "skillIds", "workspaceIds", "approvalProfileId", "computerProfileId", "state"]);
+    const allowed = new Set(["name", "role", "instructions", "avatar", "providerPreference", "modelBinding", "skillIds", "workspaceIds", "approvalProfileId", "computerProfileId", "computerMode", "state"]);
     exact(value, allowed);
     if (!patch) { string(value.name, "name", 80, true); string(value.role, "role", 120, true); }
     else if (Object.keys(value).length === 0) throw new Error("coworker patch must not be empty");
@@ -61,6 +61,7 @@ function coworkerShape(value, { patch = false } = {}) {
     idArray(value.workspaceIds, "workspaceIds", 64);
     if (value.approvalProfileId !== undefined) string(value.approvalProfileId, "approvalProfileId", 128);
     if (value.computerProfileId !== undefined) string(value.computerProfileId, "computerProfileId", 128);
+    if (value.computerMode !== undefined && !["shared-login", "private-profile"].includes(value.computerMode)) throw new Error("computerMode must be shared-login or private-profile");
     if (value.state !== undefined && !["active", "paused", "archived"].includes(value.state)) throw new Error("state must be active, paused, or archived");
     return structuredClone(value);
 }
@@ -90,6 +91,20 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "team:installPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["packId"])); return { packId: identifier(value.packId, "packId") }; }),
     "channel:list": spec(1024, (payload) => { if (payload === undefined || payload === null) return {}; const value = objectPayload(payload); exact(value, new Set(["teamId"])); return value.teamId === undefined ? {} : { teamId: identifier(value.teamId, "teamId") }; }),
     "channel:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["channelId"])); return { channelId: identifier(value.channelId, "channelId") }; }),
+    "connectedApps:list": spec(1024, empty),
+    "connectedApps:assign": spec(2048, (payload) => {
+        const value = objectPayload(payload);
+        exact(value, new Set(["appId", "teamId", "coworkerId", "enabled"]));
+        if ((value.teamId === undefined) === (value.coworkerId === undefined))
+            throw new Error("connected app assignment requires exactly one teamId or coworkerId");
+        if (typeof value.enabled !== "boolean") throw new Error("enabled must be boolean");
+        return {
+            appId: identifier(value.appId, "appId"),
+            ...(value.teamId !== undefined ? { teamId: identifier(value.teamId, "teamId") } : {}),
+            ...(value.coworkerId !== undefined ? { coworkerId: identifier(value.coworkerId, "coworkerId") } : {}),
+            enabled: value.enabled,
+        };
+    }),
     "conversation:send": spec(32 * 1024, (payload) => {
         const value = objectPayload(payload);
         const allowed = new Set(["conversationId", "text", "mentions", "replyTo", "artifactIds", "clientMessageId"]);

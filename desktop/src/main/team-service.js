@@ -244,9 +244,10 @@ function sanitizePersisted(value) {
     if (value.flows && typeof value.flows === "object" && !Array.isArray(value.flows)) {
         for (const [teamId, flow] of Object.entries(value.flows)) {
             if (!teamIds.has(teamId) || !flow || typeof flow !== "object") continue;
-            const stage = ["chief", "coding-lead", "reviewer", "synthesis", "complete"].includes(flow.stage) ? flow.stage : "complete";
+            const stage = ["chief", "coding-lead", "specialist", "reviewer", "synthesis", "complete"].includes(flow.stage) ? flow.stage : "complete";
             flows[teamId] = {
                 stage,
+                ...(Number.isInteger(flow.handoffIndex) && flow.handoffIndex >= 0 && flow.handoffIndex <= 16 ? { handoffIndex: flow.handoffIndex } : {}),
                 ...(typeof flow.userMessageId === "string" ? { userMessageId: flow.userMessageId } : {}),
                 ...(typeof flow.lastHandoffSourceId === "string" ? { lastHandoffSourceId: flow.lastHandoffSourceId } : {}),
                 ...(typeof flow.lastHandoffTargetId === "string" ? { lastHandoffTargetId: flow.lastHandoffTargetId } : {}),
@@ -300,13 +301,40 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         catch { return id; }
     }
 
+    function handoffOrder(team) {
+        const ids = [...team.coworkerIds];
+        if (ids.length < 2) return ids;
+        // The first teammate owns intake, the last is the reviewer, and any middle
+        // teammates are bounded specialists.  This keeps Team Packs declarative and
+        // lets ordinary user-created teams use the same one-owner handoff contract.
+        return ids.length === 2
+            ? [ids[0], ids[1], ids[0]]
+            : [ids[0], ...ids.slice(1, -1), ids.at(-1), ids[0]];
+    }
+
+    function indexForFlow(flow, order) {
+        if (Number.isInteger(flow.handoffIndex) && flow.handoffIndex >= 0 && flow.handoffIndex < order.length)
+            return flow.handoffIndex;
+        if (flow.stage === "chief") return 0;
+        if (flow.stage === "synthesis") return Math.max(0, order.length - 1);
+        if (flow.stage === "reviewer") return Math.max(0, order.length - 2);
+        if (flow.stage === "coding-lead") return Math.min(1, Math.max(0, order.length - 1));
+        return undefined;
+    }
+
+    function stageForIndex(index, order) {
+        if (index === 0) return "chief";
+        if (index === order.length - 1) return "synthesis";
+        if (index === order.length - 2) return "reviewer";
+        return index === 1 ? "coding-lead" : "specialist";
+    }
+
     function flowStatus(team) {
         const flow = state.flows[team.id] ?? { stage: "complete" };
         const channel = state.channels.find((entry) => entry.teamId === team.id);
-        let currentOwnerId;
-        if (flow.stage === "chief" || flow.stage === "synthesis") currentOwnerId = team.coworkerIds[0];
-        if (flow.stage === "coding-lead") currentOwnerId = team.coworkerIds[1];
-        if (flow.stage === "reviewer") currentOwnerId = team.coworkerIds[2];
+        const order = handoffOrder(team);
+        const ownerIndex = indexForFlow(flow, order);
+        const currentOwnerId = flow.stage === "complete" || ownerIndex === undefined ? undefined : order[ownerIndex];
         const conversation = channel ? conversationStore.get(channel.conversationId) : undefined;
         const pending = conversation
             ? Object.entries(conversation.messages.at(-1)?.delivery ?? {}).filter(([, value]) => value?.status === "pending").map(([id]) => id)
@@ -446,7 +474,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const team = requireTeam(channel.teamId);
         const current = state.flows[team.id];
         if (current?.userMessageId === message.id) return;
-        state.flows[team.id] = { stage: "chief", userMessageId: message.id, updatedAt: now() };
+        state.flows[team.id] = { stage: "chief", handoffIndex: 0, userMessageId: message.id, updatedAt: now() };
         team.updatedAt = now();
         save();
     }
@@ -458,22 +486,19 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const flow = state.flows[team.id] ?? { stage: "complete" };
         if (source?.id && flow.lastHandoffSourceId === source.id)
             return flow.lastHandoffTargetId;
-        const [chiefId, codingLeadId, reviewerId] = team.coworkerIds;
+        const order = handoffOrder(team);
+        const currentIndex = indexForFlow(flow, order);
         let target;
-        if (flow.stage === "chief" && coworkerId === chiefId) {
-            target = codingLeadId;
-            flow.stage = "coding-lead";
-        }
-        else if (flow.stage === "coding-lead" && coworkerId === codingLeadId) {
-            target = reviewerId;
-            flow.stage = "reviewer";
-        }
-        else if (flow.stage === "reviewer" && coworkerId === reviewerId) {
-            target = chiefId;
-            flow.stage = "synthesis";
-        }
-        else if (flow.stage === "synthesis" && coworkerId === chiefId) {
-            flow.stage = "complete";
+        if (currentIndex !== undefined && order[currentIndex] === coworkerId) {
+            if (currentIndex < order.length - 1) {
+                target = order[currentIndex + 1];
+                flow.handoffIndex = currentIndex + 1;
+                flow.stage = stageForIndex(flow.handoffIndex, order);
+            }
+            else {
+                flow.stage = "complete";
+                delete flow.handoffIndex;
+            }
         }
         if (target) {
             const targetCoworker = coworkerStore.get(target);

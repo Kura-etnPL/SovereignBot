@@ -30,9 +30,13 @@ test("user-picked text attachment is copied durably, hides source path, and reac
     const conversationStore = {
       get() { return structuredClone(original); },
       markDelivery() {},
+      postUserMessage(...args) { return { args }; },
       postCoworkerMessage() {},
     };
     const modelStore = createAttachmentAwareConversationStore(conversationStore, store);
+    assert.deepEqual(modelStore.postUserMessage("conv_0000000000000001", { text: "send" }), {
+      args: ["conv_0000000000000001", { text: "send" }],
+    });
     const decorated = modelStore.get(original.id);
     assert.equal(original.messages[0].text, "Read this.");
     assert.match(decorated.messages[0].text, /attachment canary content/);

@@ -109,9 +109,21 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
 
     function recipientIds(conversation, senderId, mentions) {
         const coworkers = conversation.participants.filter((id) => id !== USER_PARTICIPANT && id !== senderId);
+        if (mentions.includes("everyone")) {
+            if (mentions.length !== 1)
+                throw new Error("@everyone cannot be combined with another mention");
+            return coworkers;
+        }
         if (!mentions.length) {
-            if (senderId === USER_PARTICIPANT && conversation.leadCoworkerId && coworkers.includes(conversation.leadCoworkerId))
-                return [conversation.leadCoworkerId];
+            if (conversation.kind === "team") {
+                // A team room has one current ingress owner.  Explicit mentions (or
+                // @everyone) are the only way to fan work out; an ordinary message
+                // must not wake every Bot in the roster.
+                const lead = conversation.leadCoworkerId ?? coworkers[0];
+                if (lead && coworkers.includes(lead))
+                    return [lead];
+                return coworkers.slice(0, 1);
+            }
             return coworkers;
         }
         for (const mention of mentions) {
@@ -148,7 +160,11 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         if (!validConversationId(id) || conversations.some((entry) => entry.id === id)) throw new Error("conversation id factory returned an invalid or duplicate id");
         const timestamp = now();
         const fallbackTitle = kind === "direct" ? requireCoworker(ids[0]).name : "Team";
-        const conversation = { id, kind, title: boundedText(title, "title", MAX_TITLE) ?? fallbackTitle, participants: [USER_PARTICIPANT, ...ids], ...(leadCoworkerId ? { leadCoworkerId } : {}), messages: [], createdAt: timestamp, updatedAt: timestamp };
+        // Product-created team rooms are Chief-led by default.  Callers can still
+        // choose another explicit lead, while direct user messages remain bounded to
+        // one owner until the owner sends a governed handoff.
+        const effectiveLead = kind === "team" ? (leadCoworkerId ?? ids[0]) : undefined;
+        const conversation = { id, kind, title: boundedText(title, "title", MAX_TITLE) ?? fallbackTitle, participants: [USER_PARTICIPANT, ...ids], ...(effectiveLead ? { leadCoworkerId: effectiveLead } : {}), messages: [], createdAt: timestamp, updatedAt: timestamp };
         conversations.push(conversation);
         save();
         return summarize(conversation);
