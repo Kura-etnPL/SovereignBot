@@ -3,6 +3,12 @@
   const I18n = () => globalThis.SovereignI18n;
   const $ = (id) => document.getElementById(id);
   function t(key, fallback) { try { return I18n()?.t(key) ?? fallback ?? key; } catch { return fallback ?? key; } }
+  const ROUTINE_TEMPLATES = Object.freeze({
+    research: Object.freeze({ name: "Daily research brief", description: "Collect a concise evidence-backed research brief for the team's current priorities.", type: "daily" }),
+    review: Object.freeze({ name: "Weekly review", description: "Review completed work, open attention items, and the next bounded priorities.", type: "weekly" }),
+    operations: Object.freeze({ name: "Daily operations check", description: "Check the team's bounded operational status and report concrete follow-up items.", type: "daily" }),
+    content: Object.freeze({ name: "Content publishing prep", description: "Prepare the next content publishing package, flag missing inputs, and return the draft checklist.", type: "weekly" }),
+  });
 
   let jobs = [];
   let attentionJobs = [];
@@ -293,6 +299,48 @@
       document.querySelector(".workspace-shell")?.append(section);
     }
     applyRoutineLocale();
+    renderRoutineTemplateGallery();
+  }
+
+  function renderRoutineTemplateGallery() {
+    if ($("routine-template-gallery") || !$("routine-list")) return;
+    const section = document.createElement("section");
+    section.id = "routine-template-gallery";
+    section.className = "settings-card span-2";
+    const heading = document.createElement("div");
+    heading.className = "card-heading";
+    const copy = document.createElement("div");
+    const title = document.createElement("h2");
+    title.textContent = "Routine Template Gallery / 例行模板库";
+    const description = document.createElement("p");
+    description.textContent = "Start from a bounded routine template, then review the owner, workspace, and schedule before saving.";
+    copy.append(title, description);
+    heading.append(copy);
+    const cards = document.createElement("div");
+    cards.className = "workspace-cards";
+    for (const [id, template] of Object.entries(ROUTINE_TEMPLATES)) {
+      const card = document.createElement("article");
+      card.className = "settings-card";
+      const name = document.createElement("h3");
+      name.textContent = template.name;
+      const details = document.createElement("p");
+      details.textContent = `${template.description} · ${template.type}`;
+      const use = document.createElement("button");
+      use.type = "button";
+      use.className = "quiet-action";
+      use.textContent = "Use template / 使用模板";
+      use.addEventListener("click", async () => {
+        await populateRoutineForm();
+        const selector = $("routine-template");
+        if (selector) selector.value = id;
+        applyRoutineTemplate();
+        $("routine-dialog")?.showModal?.();
+      });
+      card.append(name, details, use);
+      cards.append(card);
+    }
+    section.append(heading, cards);
+    $("routine-list").before(section);
   }
 
   function ensureAttentionSurface() {
@@ -436,17 +484,11 @@
   }
 
   function applyRoutineTemplate() {
-    const templates = {
-      research: ["Daily research brief", "Collect a concise evidence-backed research brief for the team's current priorities.", "daily"],
-      review: ["Weekly review", "Review completed work, open attention items, and the next bounded priorities.", "weekly"],
-      operations: ["Daily operations check", "Check the team's bounded operational status and report concrete follow-up items.", "daily"],
-      content: ["Content publishing prep", "Prepare the next content publishing package, flag missing inputs, and return the draft checklist.", "weekly"],
-    };
-    const value = templates[$("routine-template")?.value];
+    const value = ROUTINE_TEMPLATES[$("routine-template")?.value];
     if (!value) return;
-    $("routine-name").value = value[0];
-    $("routine-instruction").value = value[1];
-    $("routine-type").value = value[2];
+    $("routine-name").value = value.name;
+    $("routine-instruction").value = value.description;
+    $("routine-type").value = value.type;
     showScheduleFields();
   }
 
