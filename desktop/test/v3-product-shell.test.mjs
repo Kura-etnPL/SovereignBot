@@ -51,6 +51,14 @@ test("V3 conversation UX supports durable polling, team mentions, details and pr
     assert.match(app, /speechSynthesis/);
 });
 
+test("Coworker details expose safe editing and availability controls", () => {
+    assert.match(html, /id="coworker-dialog"/);
+    assert.match(html, /id="coworker-state"/);
+    assert.match(app, /openCoworkerDialog/);
+    assert.match(app, /sovereignbot\.coworkers\.update/);
+    assert.match(app, /Existing provider\/account\/model binding is preserved/);
+});
+
 test("V3 shell carries a coherent responsive design system rather than legacy admin panels", () => {
     for (const token of ["--sidebar", "--details", "--panel", "--text", "--good", "--warn"]) assert.ok(css.includes(token), token);
     assert.match(css, /\.app-shell/);
