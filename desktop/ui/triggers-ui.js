@@ -61,7 +61,7 @@
       const routine = routineById.get(trigger.routineId);
       const workspace = workspaceById.get(trigger.workspaceId);
       const meta = document.createElement("div"); meta.className = "setting-feedback"; meta.style.margin = "0";
-      meta.textContent = `${t("triggers.routine", "Routine")}: ${routine?.name ?? trigger.routineId} · ${t("triggers.workspace", "Workspace")}: ${workspace?.path ?? trigger.workspaceId} · ${t("triggers.pathPrefix", "Path prefix")}: ${trigger.pathPrefix || t("triggers.wholeWorkspace", "whole workspace")}`;
+      meta.textContent = `${t("triggers.routine", "Routine")}: ${routine?.name ?? trigger.routineId} · ${t("triggers.workspace", "Workspace")}: ${workspace?.kind === "shared-project" ? t("workspace.shared", "Shared project workspace") : workspace?.label ?? t("workspace.private", "Private workspace")} · ${t("triggers.pathPrefix", "Path prefix")}: ${trigger.pathPrefix || t("triggers.wholeWorkspace", "whole workspace")}`;
       const event = document.createElement("div"); event.className = "setting-feedback"; event.style.margin = "8px 0 0";
       const eventTime = trigger.lastEventAt ? new Date(trigger.lastEventAt).toLocaleString() : "—";
       event.textContent = `${t("triggers.lastEvent", "Last event")}: ${eventTime} · ${t("triggers.lastPath", "Path")}: ${trigger.lastRelativePath || "—"} · ${t("triggers.lastStatus", "Status")}: ${statusLabel(trigger.lastStatus, trigger.enabled)} · ${t("triggers.failureCount", "Failures")}: ${trigger.failureCount ?? 0}`;

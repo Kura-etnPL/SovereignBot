@@ -24,6 +24,16 @@ function fixture() {
         coworkerStore: coworkers,
         conversationStore: conversations,
         dispatchMessage: () => [],
+        skillStore: {
+            list: () => ({ skills: [{ id: "skill_0000000000000001", name: "Release review", description: "Review bounded releases.", state: "active", assignedCoworkerIds: [], assignedTeamIds: [installed.id] }] }),
+        },
+        routineController: {
+            list: () => ({ routines: [{ id: "routine_0000000000000001", name: "Daily review", enabled: true, coworkerId: installed.coworkerIds[0], skillId: "skill_0000000000000001", schedule: { type: "daily", time: "09:00" }, lastStatus: "completed" }] }),
+            runNow: (routineId) => ({ routineId, job: { id: "job_0000000000000001", status: "queued" } }),
+        },
+        jobs: {
+            attentionJobs: () => ({ jobs: [{ id: "job_0000000000000001", title: "Review needed", status: "needs_attention", priority: "normal", ownerCoworkerId: installed.coworkerIds[0], conversationId: installed.channels[0].conversationId, createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z" }] }),
+        },
         blockConversation: (conversationId) => blocked.add(conversationId),
         isConversationBlocked: (conversationId) => blocked.has(conversationId),
         cancelConversation: (conversationId, reason) => { cancellations.push({ conversationId, reason }); },
@@ -123,7 +133,7 @@ test("external team control server is loopback-only and requires an operator ses
         const tools = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
         assert.equal(tools.status, 200);
         assert.deepEqual((await tools.json()).result.tools.map((entry) => entry.name), [
-            "listTeams", "listCoworkers", "listChannels", "submitOutcome",
+            "listTeams", "listCoworkers", "listChannels", "sendMessage", "getConversation", "listSkills", "listRoutines", "runRoutineNow", "getAttention", "submitOutcome",
             "getOutcomeStatus", "getArtifacts", "cancelOutcome", "requestTakeover",
         ]);
         const listedTeams = await rpc({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "listTeams", arguments: {} } });
@@ -137,6 +147,29 @@ test("external team control server is loopback-only and requires an operator ses
     }
     finally {
         await server.close();
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("external product projections remain bounded and reuse governed channel delivery", () => {
+    const { root, api, installed } = fixture();
+    try {
+        const channel = installed.channels[0];
+        const sent = api.sendMessage({
+            teamId: installed.id,
+            channelId: channel.id,
+            text: "Inspect the bounded release.",
+            clientRequestId: "external-message-1",
+        });
+        assert.equal(sent.teamId, installed.id);
+        assert.equal(api.getConversation({ teamId: installed.id, channelId: channel.id }).messages.at(-1).text, "Inspect the bounded release.");
+        assert.equal(api.listSkills().skills[0].name, "Release review");
+        assert.equal(api.listRoutines().routines[0].name, "Daily review");
+        assert.equal(api.runRoutineNow({ routineId: "routine_0000000000000001" }).result.job.status, "queued");
+        assert.equal(api.getAttention().jobs[0].status, "needs_attention");
+        assert.throws(() => api.getConversation({ teamId: installed.id, channelId: channel.id, path: "E:/private" }), /not allowed/);
+    }
+    finally {
         rmSync(root, { recursive: true, force: true });
     }
 });

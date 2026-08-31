@@ -10,6 +10,8 @@ const MAX_BODY_BYTES = 64 * 1024;
 const MAX_OUTCOMES = 256;
 const MAX_TEXT = 12_000;
 const MAX_ARTIFACTS = 24;
+const MAX_LIST_ITEMS = 128;
+const MAX_CONVERSATION_MESSAGES = 100;
 const OUTCOME_ID = /^outcome_[a-f0-9]{16}$/i;
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const EXTERNAL_MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -231,7 +233,37 @@ const EXTERNAL_MCP_TOOLS = Object.freeze([
     Object.freeze({
         name: "listChannels",
         description: "List Project Channels, optionally narrowed to one opaque team ID.",
-        inputSchema: { type: "object", properties: { teamId: { type: "string" } }, additionalProperties: false },
+        inputSchema: { type: "object", properties: { teamId: { type: "string" }, includeArchived: { type: "boolean" } }, additionalProperties: false },
+    }),
+    Object.freeze({
+        name: "sendMessage",
+        description: "Send a bounded message to a governed Team Channel; execution stays with the current owner and Governor.",
+        inputSchema: { type: "object", properties: { teamId: { type: "string" }, channelId: { type: "string" }, coworkerId: { type: "string" }, text: { type: "string", maxLength: MAX_TEXT }, artifactIds: { type: "array", maxItems: MAX_ARTIFACTS, items: { type: "string" } }, clientRequestId: { type: "string", maxLength: 128 } }, required: ["teamId", "channelId", "text"], additionalProperties: false },
+    }),
+    Object.freeze({
+        name: "getConversation",
+        description: "Read the bounded safe message projection for one governed Team Channel.",
+        inputSchema: { type: "object", properties: { teamId: { type: "string" }, channelId: { type: "string" } }, required: ["teamId", "channelId"], additionalProperties: false },
+    }),
+    Object.freeze({
+        name: "listSkills",
+        description: "List safe Skill metadata and assignments without credentials or execution authority.",
+        inputSchema: { type: "object", properties: { includeArchived: { type: "boolean" } }, additionalProperties: false },
+    }),
+    Object.freeze({
+        name: "listRoutines",
+        description: "List safe Routine metadata without scheduler or workspace authority.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    }),
+    Object.freeze({
+        name: "runRoutineNow",
+        description: "Run one enabled Routine through the existing governed Job path.",
+        inputSchema: { type: "object", properties: { routineId: { type: "string" } }, required: ["routineId"], additionalProperties: false },
+    }),
+    Object.freeze({
+        name: "getAttention",
+        description: "Read bounded Jobs that need human attention.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
     }),
     Object.freeze({
         name: "submitOutcome",
@@ -294,6 +326,9 @@ export function createExternalTeamControlApi({
     coworkerStore,
     conversationStore,
     artifactStore,
+    skillStore,
+    routineController,
+    jobs,
     dispatchMessage,
     blockConversation = () => {},
     isConversationBlocked = () => false,
@@ -465,6 +500,15 @@ export function createExternalTeamControlApi({
         return { team, channel, coworkerId, text, artifactIds: refs, clientRequestId, options };
     }
 
+    function validateChannelRead(input, label) {
+        if (!isPlainObject(input)) throw new Error(label + " payload must be an object");
+        rejectAuthority(input, label);
+        exactKeys(input, new Set(["teamId", "channelId"]), label);
+        const team = requireTeam(opaqueId(input.teamId, "teamId"));
+        const channel = requireChannel(team.id, opaqueId(input.channelId, "channelId"));
+        return { team, channel };
+    }
+
     const api = {
         protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
 
@@ -487,11 +531,90 @@ export function createExternalTeamControlApi({
 
         listChannels(input = {}) {
             rejectAuthority(input);
-            exactKeys(input, new Set(["teamId"]), "listChannels");
+            exactKeys(input, new Set(["teamId", "includeArchived"]), "listChannels");
             const teamId = input.teamId === undefined ? undefined : opaqueId(input.teamId, "teamId");
             if (teamId) requireTeam(teamId);
-            const channels = teamService.listChannels(teamId ? { teamId } : {}).channels;
+            const channels = teamService.listChannels(teamId ? { teamId, includeArchived: input.includeArchived === true } : { includeArchived: input.includeArchived === true }).channels;
             return { protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL, channels: channels.map(publicChannel) };
+        },
+
+        sendMessage(input) {
+            return this.submitOutcome(input);
+        },
+
+        getConversation(input) {
+            const { channel } = validateChannelRead(input, "getConversation");
+            const conversation = conversationStore.get(channel.conversationId);
+            return {
+                protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
+                teamId: channel.teamId,
+                channelId: channel.id,
+                conversationId: channel.conversationId,
+                messages: conversation.messages.slice(-MAX_CONVERSATION_MESSAGES).map(publicMessage).filter(Boolean),
+            };
+        },
+
+        listSkills(input = {}) {
+            if (!skillStore?.list) throw new Error("skills are unavailable");
+            rejectAuthority(input, "listSkills");
+            exactKeys(input, new Set(["includeArchived"]), "listSkills");
+            const skills = skillStore.list({ includeArchived: input.includeArchived === true }).skills ?? [];
+            return {
+                protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
+                skills: skills.slice(0, MAX_LIST_ITEMS).map((skill) => ({
+                    id: skill.id,
+                    name: publicText(skill.name),
+                    description: publicText(skill.description),
+                    state: skill.state,
+                    assignedCoworkerIds: [...(skill.assignedCoworkerIds ?? [])],
+                    assignedTeamIds: [...(skill.assignedTeamIds ?? [])],
+                })),
+            };
+        },
+
+        listRoutines() {
+            if (!routineController?.list) throw new Error("routines are unavailable");
+            const routines = routineController.list().routines ?? [];
+            return {
+                protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
+                routines: routines.slice(0, MAX_LIST_ITEMS).map((routine) => ({
+                    id: routine.id,
+                    name: publicText(routine.name),
+                    enabled: routine.enabled === true,
+                    coworkerId: routine.coworkerId,
+                    skillId: routine.skillId,
+                    schedule: routine.schedule,
+                    lastStatus: routine.lastStatus,
+                    lastRunAt: routine.lastRunAt,
+                    nextRunAt: routine.nextRunAt,
+                })),
+            };
+        },
+
+        runRoutineNow(input) {
+            if (!routineController?.runNow) throw new Error("routine execution is unavailable");
+            if (!isPlainObject(input)) throw new Error("runRoutineNow payload must be an object");
+            rejectAuthority(input, "runRoutineNow");
+            exactKeys(input, new Set(["routineId"]), "runRoutineNow");
+            return { protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL, routineId: opaqueId(input.routineId, "routineId"), result: routineController.runNow(input.routineId) };
+        },
+
+        getAttention() {
+            if (!jobs?.attentionJobs) throw new Error("attention center is unavailable");
+            const attention = jobs.attentionJobs().jobs ?? [];
+            return {
+                protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
+                jobs: attention.slice(0, MAX_LIST_ITEMS).map((job) => ({
+                    id: job.id,
+                    title: publicText(job.title),
+                    status: job.status,
+                    priority: job.priority,
+                    ownerCoworkerId: job.ownerCoworkerId,
+                    conversationId: job.conversationId,
+                    createdAt: job.createdAt,
+                    updatedAt: job.updatedAt,
+                })),
+            };
         },
 
         submitOutcome(input) {
@@ -603,7 +726,7 @@ export function createExternalTeamControlApi({
                 transport: "loopback-http",
                 endpoint: "/mcp/v1",
                 mcpProtocolVersion: EXTERNAL_MCP_PROTOCOL_VERSION,
-                methods: ["listTeams", "listCoworkers", "listChannels", "submitOutcome", "getOutcomeStatus", "getArtifacts", "cancelOutcome", "requestTakeover"],
+                methods: ["listTeams", "listCoworkers", "listChannels", "sendMessage", "getConversation", "listSkills", "listRoutines", "runRoutineNow", "getAttention", "submitOutcome", "getOutcomeStatus", "getArtifacts", "cancelOutcome", "requestTakeover"],
                 mcpMethods: [...EXTERNAL_MCP_METHODS],
             };
         },
@@ -685,6 +808,20 @@ export function createExternalTeamControlServer({
                 return api.listCoworkers();
             case "listChannels":
                 return api.listChannels(input);
+            case "sendMessage":
+                return api.sendMessage(input);
+            case "getConversation":
+                return api.getConversation(input);
+            case "listSkills":
+                return api.listSkills(input);
+            case "listRoutines":
+                exactKeys(input, new Set(), "listRoutines");
+                return api.listRoutines();
+            case "runRoutineNow":
+                return api.runRoutineNow(input);
+            case "getAttention":
+                exactKeys(input, new Set(), "getAttention");
+                return api.getAttention();
             case "submitOutcome":
                 return api.submitOutcome(input);
             case "getOutcomeStatus":

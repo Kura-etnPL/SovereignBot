@@ -1059,12 +1059,28 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             return {
                 schema: TEAMS_SCHEMA,
                 teams: state.teams.map(publicTeam),
-                packs: TEAM_PACKS.map((pack) => ({
-                    id: pack.id,
-                    name: pack.name,
-                    description: pack.description,
-                    installed: state.teams.some((entry) => entry.packId === pack.id),
-                })),
+                packs: [
+                    ...TEAM_PACKS.map((pack) => ({
+                        id: pack.id,
+                        name: pack.name,
+                        description: pack.description,
+                        coworkerNames: pack.coworkers.map((entry) => entry.name),
+                        channelNames: pack.channels.map((entry) => entry.name),
+                        playbookNames: pack.playbooks.map((entry) => entry.name),
+                        installed: state.teams.some((entry) => entry.packId === pack.id),
+                    })),
+                    ...state.teams
+                        .filter((entry) => !TEAM_PACK_BY_ID.has(entry.packId))
+                        .map((entry) => ({
+                            id: entry.packId,
+                            name: entry.name,
+                            description: "A reusable team recipe saved in SovereignBot.",
+                            coworkerNames: entry.coworkerIds.map(coworkerName),
+                            channelNames: entry.channelIds.map((channelId) => state.channels.find((channel) => channel.id === channelId)?.name).filter(Boolean),
+                            playbookNames: entry.playbooks.map((playbook) => playbook.name),
+                            installed: true,
+                        })),
+                ],
                 channelTemplates: CHANNEL_TEMPLATES.map((template) => ({ ...template })),
             };
         },

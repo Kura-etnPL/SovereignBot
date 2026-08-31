@@ -276,6 +276,7 @@
         <header class="page-header"><div><span class="eyebrow" data-i18n="routines.title">Routines</span><h1 data-i18n="routines.title">Routines</h1><p data-i18n="routines.subtitle">Schedule recurring work.</p></div><div style="display:flex;gap:8px;align-items:center"><button id="routine-refresh" class="quiet-action" type="button" data-i18n="action.refresh">Refresh</button><button id="routine-new" class="hero-action" type="button" data-i18n="routines.create">New routine</button></div></header>
         <div id="routine-list" class="workspace-cards"></div>
         <dialog id="routine-dialog" class="modal"><form id="routine-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="routines.create">New routine</span><h2 data-i18n="routines.create">New routine</h2></div><button class="modal-x" data-close-dialog="routine-dialog" type="button">×</button></div>
+          <label><span>Routine template / 例行模板</span><select id="routine-template"><option value="">Start from scratch / 从头开始</option><option value="research">Daily research brief / 每日研究简报</option><option value="review">Weekly review / 每周复盘</option><option value="operations">Daily operations check / 每日运营检查</option><option value="content">Content publishing prep / 内容发布准备</option></select></label>
           <label><span data-i18n="routines.name">Name</span><input id="routine-name" maxlength="120" required></label>
           <label><span data-i18n="routines.instruction">Instruction</span><textarea id="routine-instruction" maxlength="8000" rows="4" required></textarea></label>
           <label><span data-i18n="routines.coworker">Coworker</span><select id="routine-owner"></select></label>
@@ -428,9 +429,24 @@
     for (const item of skills?.skills ?? []) { const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.name; skill.append(opt); }
     const ws = $("routine-workspace"); ws.textContent = "";
     const def = document.createElement("option"); def.value = ""; def.textContent = t("routines.defaultWorkspace", "Coworker default"); ws.append(def);
-    for (const item of workspaces?.workspaces ?? []) { const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.path; ws.append(opt); }
+    for (const item of workspaces?.workspaces ?? []) { const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.kind === "shared-project" ? "Shared project workspace / 共享项目工作区" : item.label || "Private workspace / 私有工作区"; ws.append(opt); }
     const inOneHour = new Date(Date.now() + 3600_000); const local = new Date(inOneHour.getTime() - inOneHour.getTimezoneOffset() * 60000).toISOString().slice(0,16); $("routine-at").value = local;
     $("routine-minute").value = String(new Date().getMinutes());
+    showScheduleFields();
+  }
+
+  function applyRoutineTemplate() {
+    const templates = {
+      research: ["Daily research brief", "Collect a concise evidence-backed research brief for the team's current priorities.", "daily"],
+      review: ["Weekly review", "Review completed work, open attention items, and the next bounded priorities.", "weekly"],
+      operations: ["Daily operations check", "Check the team's bounded operational status and report concrete follow-up items.", "daily"],
+      content: ["Content publishing prep", "Prepare the next content publishing package, flag missing inputs, and return the draft checklist.", "weekly"],
+    };
+    const value = templates[$("routine-template")?.value];
+    if (!value) return;
+    $("routine-name").value = value[0];
+    $("routine-instruction").value = value[1];
+    $("routine-type").value = value[2];
     showScheduleFields();
   }
 
@@ -539,6 +555,7 @@
     $("attention-refresh")?.addEventListener("click", refreshAttention);
     $("routine-new")?.addEventListener("click", async () => { await populateRoutineForm(); $("routine-dialog")?.showModal?.(); });
     $("routine-type")?.addEventListener("change", showScheduleFields);
+    $("routine-template")?.addEventListener("change", applyRoutineTemplate);
     $("routine-form")?.addEventListener("submit", async (e) => {
       e.preventDefault(); const err = $("routine-form-error"); err?.classList.add("hidden");
       try {

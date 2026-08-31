@@ -234,14 +234,31 @@ function renderTeamPackActions() {
   const container = $("team-pack-actions");
   if (!container) return;
   clearNode(container);
-  for (const pack of state.teamPacks.filter((entry) => entry?.id !== "software-team" && !entry.installed)) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "quiet-action";
-    button.textContent = `Install ${pack.name}`;
-    button.title = pack.description ?? "Install this team";
-    button.addEventListener("click", () => installTeamPack(pack.id, button));
-    container.append(button);
+  for (const pack of state.teamPacks) {
+    const card = document.createElement("div");
+    card.className = "team-pack-card";
+    const title = document.createElement("strong");
+    title.textContent = pack.name;
+    const description = document.createElement("span");
+    description.textContent = pack.description ?? "";
+    const contents = document.createElement("small");
+    contents.textContent = `${pack.coworkerNames?.length ?? 0} coworkers · ${pack.channelNames?.length ?? 0} channels · ${pack.playbookNames?.length ?? 0} playbooks`;
+    card.append(title, description, contents);
+    if (pack.installed) {
+      const installed = document.createElement("span");
+      installed.className = "soft-pill";
+      installed.textContent = "Installed / 已安装";
+      card.append(installed);
+    } else {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "quiet-action";
+      button.textContent = `Install ${pack.name}`;
+      button.title = pack.description ?? "Install this team";
+      button.addEventListener("click", () => installTeamPack(pack.id, button));
+      card.append(button);
+    }
+    container.append(card);
   }
   const importButton = document.createElement("button");
   importButton.type = "button";

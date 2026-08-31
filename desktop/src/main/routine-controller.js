@@ -86,7 +86,7 @@ function sanitizeHistory(value) {
   if (!Array.isArray(value)) return [];
   return value.filter((entry) => entry && typeof entry.id === "string" && typeof entry.scheduledFor === "string")
     .map((entry) => {
-      const source = entry.source === "event" ? "event" : "schedule";
+      const source = entry.source === "event" ? "event" : entry.source === "manual" ? "manual" : "schedule";
       const run = {
         id: entry.id,
         scheduledFor: entry.scheduledFor,
@@ -287,6 +287,14 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
     return submitRoutineRun(routine, { scheduledFor: routine.nextRunAt })?.job;
   }
 
+  function runRoutineNow(routineId) {
+    const routine = requireRoutine(routineId);
+    if (!routine.enabled) throw new Error("routine is disabled");
+    const result = submitRoutineRun(routine, { scheduledFor: nowIso(now), source: "manual" });
+    if (!result) throw new Error("Routine Job could not be created");
+    return { routine: publicRoutine(routine, true), job: result.job, run: result.run };
+  }
+
   function triggerEvent(routineId, event = {}) {
     exactKeys(event, new Set(["triggerId", "eventId", "relativePath", "eventType", "workspaceId", "observedAt"]), "routine event");
     const routine = requireRoutine(routineId);
@@ -409,6 +417,7 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
       return publicRoutine(removed, true);
     },
     async tickNow() { await tickNow(); return this.list(); },
+    runNow(routineId) { return runRoutineNow(routineId); },
     start() { if (running) return; running = true; scheduleWake(); },
     stop() { running = false; clearTimer(); },
     async flush() { await tickChain; },
