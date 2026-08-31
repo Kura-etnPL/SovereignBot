@@ -462,6 +462,11 @@ async function main() {
                 "artifact:list": ({ conversationId, coworkerId, limit }) => artifactStore.list({ conversationId, coworkerId, limit }),
                 "artifact:get": ({ artifactId }) => artifactStore.get(artifactId),
                 "artifact:preview": ({ artifactId }) => artifactStore.previewText(artifactId),
+                "artifact:open": async ({ artifactId }) => {
+                    const error = await shell.openPath(artifactStore.managedPath(artifactId));
+                    if (error) throw new Error(String(error).slice(0, 240));
+                    return { ok: true };
+                },
                 "artifact:attachViaDialog": ({ conversationId }) => pickConversationAttachments({ win, dialog, artifactStore, conversationId }),
                 "artifact:reveal": ({ artifactId }) => {
                     shell.showItemInFolder(artifactStore.managedPath(artifactId));

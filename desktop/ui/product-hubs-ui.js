@@ -37,6 +37,7 @@
       card.append(line("Type", item.mimeType), line("Creator", item.creator?.name), line("Team", item.team?.name), line("Channel", item.channel?.name), line("Created", item.createdAt), line("Status", item.status));
       const actions = document.createElement("div"); actions.className = "detail-actions";
       actions.append(button("Open preview / 预览", async () => { const result = await api.artifacts.preview({ artifactId: item.id }); window.alert(result?.preview || "Preview is not available."); }));
+      actions.append(button("Open / 打开", async () => { try { await api.artifacts.open({ artifactId: item.id }); } catch (e) { error(root, e); } }));
       actions.append(button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id })));
       if (item.conversationId && typeof openConversation === "function") actions.append(button("Go to conversation / 回到会话", () => openConversation(item.conversationId)));
       card.append(actions); root.append(card);
