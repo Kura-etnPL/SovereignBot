@@ -8,6 +8,7 @@ const MAX_DESCRIPTION = 280;
 const MAX_INSTRUCTIONS = 16_000;
 const MAX_MESSAGE_SKILLS = 8;
 const MAX_INVOCATIONS = 10_000;
+const MAX_ASSIGNMENTS = 256;
 const MAX_INPUTS = 16;
 const MAX_STEPS = 64;
 const MAX_VALIDATORS = 24;
@@ -40,6 +41,9 @@ function validId(value) {
 function validMessageId(value) {
     return typeof value === "string" && /^msg_[a-f0-9]{16}$/i.test(value);
 }
+
+function validCoworkerId(value) { return typeof value === "string" && /^coworker_[a-f0-9]{16}$/i.test(value); }
+function validTeamId(value) { return typeof value === "string" && /^team_[a-f0-9]{16}$/i.test(value); }
 
 function clone(value) {
     return structuredClone(value);
@@ -179,6 +183,14 @@ function sanitizeInvocation(value) {
     }
 }
 
+function sanitizeAssignment(value) {
+    if (!value || typeof value !== "object" || !validId(value.skillId)) return undefined;
+    const coworkerIds = Array.isArray(value.coworkerIds) ? [...new Set(value.coworkerIds.filter(validCoworkerId))].slice(0, 8) : [];
+    const teamIds = Array.isArray(value.teamIds) ? [...new Set(value.teamIds.filter(validTeamId))].slice(0, 8) : [];
+    if (!coworkerIds.length && !teamIds.length) return undefined;
+    return { skillId: value.skillId, coworkerIds, teamIds };
+}
+
 export function createSkillStore({ persistPath, now = () => new Date().toISOString(), makeSkillId = makeId } = {}) {
     if (!persistPath) throw new Error("skill store requires persistPath");
     const loaded = loadJsonState(persistPath, null);
@@ -188,9 +200,13 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
     const invocations = loaded?.schema === SKILLS_SCHEMA && Array.isArray(loaded.invocations)
         ? loaded.invocations.map(sanitizeInvocation).filter(Boolean).slice(-MAX_INVOCATIONS)
         : [];
+    const assignments = loaded?.schema === SKILLS_SCHEMA && Array.isArray(loaded.assignments)
+        ? loaded.assignments.map(sanitizeAssignment).filter((entry) => entry && skills.some((skill) => skill.id === entry.skillId)).slice(-MAX_ASSIGNMENTS)
+        : [];
+    let targetResolver;
 
     function save() {
-        saveJsonState(persistPath, { schema: SKILLS_SCHEMA, skills, invocations });
+        saveJsonState(persistPath, { schema: SKILLS_SCHEMA, skills, invocations, assignments });
     }
 
     function requireSkill(id) {
@@ -210,13 +226,48 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
         });
     }
 
+    function assignmentFor(skillId) {
+        return assignments.find((entry) => entry.skillId === String(skillId));
+    }
+
+    function publicSkill(skill) {
+        const assignment = assignmentFor(skill.id);
+        return {
+            ...clone(skill),
+            assignedCoworkerIds: [...(assignment?.coworkerIds ?? [])],
+            assignedTeamIds: [...(assignment?.teamIds ?? [])],
+        };
+    }
+
+    function requireAssignmentTarget(kind, id) {
+        const valid = kind === "coworker" ? validCoworkerId(id) : validTeamId(id);
+        if (!valid) throw new Error(`${kind}Id is invalid`);
+        const checker = kind === "coworker" ? targetResolver?.hasCoworker : targetResolver?.hasTeam;
+        if (typeof checker !== "function") throw new Error("skill assignment target resolver is unavailable");
+        if (!checker(id)) throw new Error(`unknown ${kind}: ${id}`);
+    }
+
+    function assignedSkillIdsForCoworkers(coworkerIds = []) {
+        const direct = new Set(coworkerIds.filter(validCoworkerId));
+        const teamIds = new Set(direct ? [...direct].flatMap((id) => targetResolver?.teamIdsForCoworker?.(id) ?? []) : []);
+        return assignments
+            .filter((entry) => entry.coworkerIds.some((id) => direct.has(id)) || entry.teamIds.some((id) => teamIds.has(id)))
+            .map((entry) => entry.skillId)
+            .filter((id) => skills.some((skill) => skill.id === id && skill.state === "active"));
+    }
+
     return {
         schema: SKILLS_SCHEMA,
+        setTargetResolver(resolver) {
+            if (resolver !== undefined && (typeof resolver !== "object" || typeof resolver.hasCoworker !== "function" || typeof resolver.hasTeam !== "function"))
+                throw new Error("skill assignment target resolver is invalid");
+            targetResolver = resolver;
+        },
         list({ includeArchived = false } = {}) {
-            return { schema: SKILLS_SCHEMA, skills: skills.filter((entry) => includeArchived || entry.state !== "archived").map(clone) };
+            return { schema: SKILLS_SCHEMA, skills: skills.filter((entry) => includeArchived || entry.state !== "archived").map(publicSkill) };
         },
         get(id) {
-            return clone(requireSkill(id));
+            return publicSkill(requireSkill(id));
         },
         create(input) {
             if (skills.length >= MAX_SKILLS) throw new Error(`skill limit reached (${MAX_SKILLS})`);
@@ -227,13 +278,13 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
             const skill = { id, ...normalized, state: "active", createdAt: timestamp, updatedAt: timestamp };
             skills.push(skill);
             save();
-            return clone(skill);
+            return publicSkill(skill);
         },
         update(id, input) {
             const skill = requireSkill(id);
             Object.assign(skill, normalizePatch(input), { updatedAt: now() });
             save();
-            return clone(skill);
+            return publicSkill(skill);
         },
         archive(id) {
             return this.update(id, { state: "archived" });
@@ -241,6 +292,24 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
         restore(id) {
             return this.update(id, { state: "active" });
         },
+        assign(id, { targetKind, targetId, enabled } = {}) {
+            const skill = requireSkill(id);
+            if (!(targetKind === "coworker" || targetKind === "team")) throw new Error("skill assignment targetKind is invalid");
+            if (typeof enabled !== "boolean") throw new Error("skill assignment enabled must be boolean");
+            requireAssignmentTarget(targetKind, targetId);
+            let assignment = assignmentFor(skill.id);
+            if (!assignment) {
+                assignment = { skillId: skill.id, coworkerIds: [], teamIds: [] };
+                assignments.push(assignment);
+            }
+            const key = targetKind === "coworker" ? "coworkerIds" : "teamIds";
+            if (enabled && !assignment[key].includes(targetId)) assignment[key].push(targetId);
+            if (!enabled) assignment[key] = assignment[key].filter((entry) => entry !== targetId);
+            if (!assignment.coworkerIds.length && !assignment.teamIds.length) assignments.splice(assignments.indexOf(assignment), 1);
+            save();
+            return publicSkill(skill);
+        },
+        assignedSkillIdsForCoworkers,
         requireActive(id) {
             const skill = requireSkill(id);
             if (skill.state !== "active") throw new Error(`skill is archived: ${id}`);
