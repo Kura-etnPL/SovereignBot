@@ -133,3 +133,37 @@ test("governed MCP bridge binds tools to one running worker task and revokes cle
         await runtime.close();
     }
 });
+
+test("workspace-only bridge does not advertise or invoke computer tools", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "sovereign-mcp-workspace-"));
+    const runtimeConfig = config(dataDir);
+    runtimeConfig.agents[0] = { ...runtimeConfig.agents[0], governedTools: ["workspace"] };
+    const runtime = await createRuntime(runtimeConfig);
+    const task = await runtime.orchestrator.submit({
+        title: "HANG workspace tools",
+        requiredCapabilities: ["browser"],
+        preferredAgentId: "worker-a",
+    });
+    const running = runtime.orchestrator.runNext();
+    const active = await waitFor(runtime, task.id, "running");
+    const controller = new AbortController();
+    const bridge = await runtime.governedToolBridge.prepare({ task: active, agent: runtime.config.agents[0], signal: controller.signal });
+    const mcp = await startMcpClient(bridge.command, bridge.args);
+
+    try {
+        const names = (await mcp.tools()).map((tool) => tool.name);
+        assert.deepEqual(names, ["list_files", "read_file", "write_file"]);
+        const listed = await mcp.call("list_files", { path: "." });
+        assert.equal(listed.isError, undefined);
+        const denied = await mcp.call("snapshot");
+        assert.equal(denied.isError, true);
+        assert.match(denied.content[0].text, /unknown governed tool|refused/i);
+    }
+    finally {
+        await mcp.close();
+        controller.abort();
+        await runtime.orchestrator.cancel(task.id);
+        await running;
+        await runtime.close();
+    }
+});

@@ -72,6 +72,17 @@
     return "ready";
   }
 
+  function stageLabel(stage) {
+    return ({
+      chief: "Chief scopes",
+      "coding-lead": "Coding Lead works",
+      specialist: "Specialist works",
+      reviewer: "Reviewer checks",
+      synthesis: "Chief summarizes",
+      complete: "Ready",
+    })[stage] || "Team work";
+  }
+
   function makeButton(label, className = "computer-action") {
     const button = document.createElement("button");
     button.type = "button";
@@ -135,7 +146,7 @@
     card.append(box);
   }
 
-  function renderComputerCard({ coworker, binding, computer, refresh }) {
+  function renderComputerCard({ coworker, binding, computer, team, refresh }) {
     const card = document.createElement("article");
     card.className = "computer-card";
 
@@ -215,9 +226,17 @@
     const control = document.createElement("span");
     control.textContent = `Control: ${computer.control?.mode || "agent"}`;
     const activity = document.createElement("span");
-    activity.textContent = computer.lifecycle?.instantiated === true
-      ? "Activity: governed browser lane active"
-      : "Activity: waiting for a governed browser lane";
+    const flow = team?.flow;
+    const ownsCurrentWork = flow?.currentOwnerId === coworker?.id;
+    activity.textContent = ownsCurrentWork && flow?.status === "active"
+      ? `Activity: ${flow.currentOwner || coworker.name} is working`
+      : computer.lifecycle?.instantiated === true
+        ? "Activity: governed browser lane active"
+        : "Activity: waiting for a governed browser lane";
+    const context = document.createElement("span");
+    context.textContent = team
+      ? `Context: Project Channel · ${stageLabel(flow?.stage)}`
+      : "Context: Private workspace";
     const runtime = document.createElement("span");
     runtime.textContent = !computer.lifecycle?.managed
       ? "Managed browser not configured"
@@ -226,7 +245,7 @@
         : computer.lifecycle?.instantiated === true
           ? "Browser runtime active"
           : "Browser runtime ready";
-    details.append(control, activity, runtime);
+    details.append(control, activity, context, runtime);
     card.append(details);
 
     const actions = document.createElement("div");
@@ -277,11 +296,12 @@
       root.textContent = "";
       const coworkers = participantCoworkers(conversation);
       const computers = overview?.computers ?? [];
+      const team = typeof teamForConversation === "function" ? teamForConversation(conversation.id) : undefined;
       const refresh = () => renderComputers(conversation);
       for (const coworker of coworkers) {
         const binding = bindingFor(coworker.id);
         const computer = computers.find((entry) => entry.agentId === binding?.agentId);
-        root.append(renderComputerCard({ coworker, binding, computer, refresh }));
+        root.append(renderComputerCard({ coworker, binding, computer, team, refresh }));
       }
       if (!coworkers.length) {
         const empty = document.createElement("span");

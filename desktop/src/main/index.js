@@ -115,6 +115,7 @@ async function main() {
         conversationStore,
         services,
     });
+    conversationStore.setTeamRouteResolver((conversation) => teamService.currentOwnerForConversation(conversation.id));
     const connectedApps = createConnectedAppsService({ dataDir, teamService, coworkerStore });
 
     let host;
@@ -123,6 +124,7 @@ async function main() {
             dataDir,
             getSettings: () => services.getSettings(),
             getCoworkers: () => (coworkerStore.listInternal?.() ?? coworkerStore.list()).coworkers,
+            getCoworkerAppAccess: (coworkerId) => connectedApps.assignedToolsForCoworker(coworkerId),
             workerNodeClientResolver: (nodeId) => workerNodeStore.client(nodeId),
         });
     }
@@ -272,6 +274,7 @@ async function main() {
         dispatchMessage: (conversationId, messageId) => coworkerDispatcher.dispatchMessage(conversationId, messageId),
         blockConversation: (conversationId) => blockedConversations.add(conversationId),
         isConversationBlocked: (conversationId) => blockedConversations.has(conversationId),
+        cancelConversation: (conversationId, reason) => coworkerDispatcher.cancelConversation(conversationId, reason),
     });
     try {
         await externalTeamControl.start();
@@ -363,7 +366,11 @@ async function main() {
                 "channel:list": ({ teamId }) => teamService.listChannels({ teamId }),
                 "channel:get": ({ channelId }) => teamService.getChannel(channelId),
                 "connectedApps:list": () => connectedApps.list(),
-                "connectedApps:assign": (payload) => connectedApps.setAssignment(payload),
+                "connectedApps:assign": async (payload) => {
+                    const app = connectedApps.setAssignment(payload);
+                    const refresh = await refreshCoworkerRuntime();
+                    return { ...app, refresh };
+                },
                 ...createSkillHandlers({
                     skillStore,
                     conversationStore,
@@ -372,7 +379,7 @@ async function main() {
                 "conversation:list": () => conversationStore.list(),
                 "conversation:get": ({ conversationId }) => conversationStore.get(conversationId),
                 "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
-                "conversation:createTeam": ({ title, coworkerIds, leadCoworkerId }) => conversationStore.createTeam({ title, coworkerIds, leadCoworkerId }),
+                "conversation:createTeam": ({ title, coworkerIds, leadCoworkerId }) => teamService.createTeam({ title, coworkerIds, leadCoworkerId }).conversation,
                 "artifact:list": ({ conversationId, coworkerId, limit }) => artifactStore.list({ conversationId, coworkerId, limit }),
                 "artifact:get": ({ artifactId }) => artifactStore.get(artifactId),
                 "artifact:preview": ({ artifactId }) => artifactStore.previewText(artifactId),

@@ -23,6 +23,11 @@ export const GOVERNED_MCP_TOOLS = [
     "request_secret",
 ];
 
+export const GOVERNED_TOOL_GROUPS = Object.freeze({
+    computer: Object.freeze(["snapshot", "navigate", "click", "type", "key", "scroll", "request_help", "request_secret"]),
+    workspace: Object.freeze(["list_files", "read_file", "write_file"]),
+});
+
 function token() {
     return randomBytes(32).toString("base64url");
 }
@@ -61,12 +66,19 @@ function safeError(error) {
         .slice(0, 1400);
 }
 
-function hasComputerTools(agent) {
-    return Array.isArray(agent.governedTools) && agent.governedTools.includes("computer");
+function allowedToolsFor(agent) {
+    if (!Array.isArray(agent.governedTools) || !agent.governedTools.length) return [];
+    const tools = new Set();
+    for (const group of agent.governedTools) {
+        const members = GOVERNED_TOOL_GROUPS[group];
+        if (!members) throw new Error(`unsupported governed tool group: ${group}`);
+        for (const tool of members) tools.add(tool);
+    }
+    return GOVERNED_MCP_TOOLS.filter((tool) => tools.has(tool));
 }
 
-function claudeToolNames() {
-    return GOVERNED_MCP_TOOLS.map((name) => `mcp__${GOVERNED_MCP_SERVER_NAME}__${name}`);
+function claudeToolNames(toolNames) {
+    return toolNames.map((name) => `mcp__${GOVERNED_MCP_SERVER_NAME}__${name}`);
 }
 
 function toml(value) {
@@ -89,7 +101,8 @@ export class GovernedToolBridgeManager {
     }
 
     async prepare({ task, agent, signal }) {
-        if (!hasComputerTools(agent))
+        const allowedTools = allowedToolsFor(agent);
+        if (!allowedTools.length)
             return undefined;
         if (!["codex", "claude-code"].includes(agent.harness?.kind)) {
             throw new Error(`governed computer tools require a Codex or Claude Code harness, got ${agent.harness?.kind ?? "unknown"}`);
@@ -115,6 +128,7 @@ export class GovernedToolBridgeManager {
             taskId: task.id,
             agentId: agent.id,
             active: true,
+            allowedTools: [...allowedTools],
             bootstrapPath,
             claudeConfigPath,
         };
@@ -125,6 +139,7 @@ export class GovernedToolBridgeManager {
                 protocol: "sovereignbot.governed-bridge.v1",
                 brokerUrl: this.#url,
                 capability,
+                allowedTools,
             })}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
 
             await writeFile(claudeConfigPath, `${JSON.stringify({
@@ -139,7 +154,7 @@ export class GovernedToolBridgeManager {
                 type: "tool_bridge.opened",
                 actor: agent.id,
                 subject: task.id,
-                data: { bridgeId: id, server: GOVERNED_MCP_SERVER_NAME, tools: ["computer"] },
+                data: { bridgeId: id, server: GOVERNED_MCP_SERVER_NAME, groups: [...agent.governedTools], tools: allowedTools },
             });
         }
         catch (error) {
@@ -183,8 +198,8 @@ export class GovernedToolBridgeManager {
             command,
             args,
             claudeConfigPath,
-            toolNames: [...GOVERNED_MCP_TOOLS],
-            claudeToolNames: claudeToolNames(),
+            toolNames: [...allowedTools],
+            claudeToolNames: claudeToolNames(allowedTools),
             codexConfigOverrides: [
                 `mcp_servers.${GOVERNED_MCP_SERVER_NAME}.command=${toml(command)}`,
                 `mcp_servers.${GOVERNED_MCP_SERVER_NAME}.args=${toml(args)}`,
@@ -232,7 +247,7 @@ export class GovernedToolBridgeManager {
                     return;
                 }
                 const body = await readJson(request);
-                if (!GOVERNED_MCP_TOOLS.includes(body.name)) {
+                if (!lease.allowedTools.includes(body.name)) {
                     send(response, 404, { error: "unknown governed tool" });
                     return;
                 }

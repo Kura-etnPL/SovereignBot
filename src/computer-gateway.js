@@ -354,6 +354,8 @@ export class ComputerGateway {
         if (!actorId)
             throw new Error("human actor id is required to take control");
         const previous = await this.#registry.control(agentId);
+        if (previous.mode === "human" && previous.actorId && previous.actorId !== actorId)
+            throw new Error("computer is already controlled by another operator");
         const control = {
             mode: "human",
             actorId,
@@ -375,6 +377,8 @@ export class ComputerGateway {
         if (!actorId)
             throw new Error("human actor id is required to release control");
         const previous = await this.#registry.control(agentId);
+        if (previous.mode === "human" && previous.actorId && previous.actorId !== actorId)
+            throw new Error("only the operator holding computer control can release it");
         const control = {
             mode: "agent",
             releasedBy: actorId,

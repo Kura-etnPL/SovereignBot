@@ -99,9 +99,38 @@ export function createConnectedAppsService({ dataDir, persistPath = join(dataDir
             description: app.description,
             capabilities: [...app.capabilities],
             state: active ? "available" : "unavailable",
+            connectionState: active ? "available" : "unavailable",
             authority: "Governor-controlled",
+            approval: {
+                mode: "governed",
+                summary: "Every action is task-bound and subject to Governor policy.",
+            },
             assignedTeamIds: [...assignment.teams],
             assignedCoworkerIds: [...assignment.coworkers],
+        };
+    }
+
+    function assignedToolsForCoworker(coworkerId) {
+        const id = validTarget(coworkerId, COWORKER_ID, "coworkerId");
+        const coworker = coworkerStore.get(id);
+        if (coworker.state !== "active") return { tools: [], appIds: [], approvalProfiles: [] };
+        const teamIds = new Set(teamService.list().teams
+            .filter((team) => team.coworkerIds.includes(id))
+            .map((team) => team.id));
+        const tools = new Set();
+        const appIds = [];
+        for (const app of APP_CATALOG) {
+            const assignment = state.assignments[app.id] ?? { teams: [], coworkers: [] };
+            const assigned = assignment.coworkers.includes(id) || assignment.teams.some((teamId) => teamIds.has(teamId));
+            if (!assigned) continue;
+            appIds.push(app.id);
+            for (const tool of app.id === "sovereignbot-computer" ? ["computer"] : ["workspace"])
+                tools.add(tool);
+        }
+        return {
+            tools: [...tools],
+            appIds,
+            approvalProfiles: [],
         };
     }
 
@@ -146,5 +175,7 @@ export function createConnectedAppsService({ dataDir, persistPath = join(dataDir
                 || (coworkerId && assignment.coworkers.includes(coworkerId)),
             );
         },
+
+        assignedToolsForCoworker,
     };
 }

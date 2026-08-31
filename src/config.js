@@ -6,7 +6,7 @@ const SUPPORTED_HARNESSES = new Set(["echo", "command", "codex", "claude-code"])
 const WORKER_NODE_PROVIDERS = new Set(["codex", "claude-code"]);
 const SUPPORTED_COMPUTER_DRIVERS = new Set(["webdriver-sidecar"]);
 const SUPPORTED_BROWSERS = new Set(["chrome", "edge", "firefox"]);
-const SUPPORTED_GOVERNED_TOOLS = new Set(["computer"]);
+const SUPPORTED_GOVERNED_TOOLS = new Set(["computer", "workspace"]);
 
 export function defaultConfig(dataDir = ".sovereignbot/data") {
     return {

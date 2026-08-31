@@ -297,6 +297,8 @@ export function createExternalTeamControlApi({
     dispatchMessage,
     blockConversation = () => {},
     isConversationBlocked = () => false,
+    cancelConversation = () => undefined,
+    requestAttention = () => undefined,
     now = () => new Date().toISOString(),
     makeOutcomeId: makeOutcomeIdFn = makeOutcomeId,
 } = {}) {
@@ -309,9 +311,25 @@ export function createExternalTeamControlApi({
             ? loaded.outcomes.map(sanitizePersistedOutcome).filter(Boolean).slice(-MAX_OUTCOMES).map((entry) => [entry.id, entry])
             : [],
     );
+    const restoredBlockedConversations = new Set([...outcomes.values()]
+        .filter((entry) => ["cancelled", "needs_attention"].includes(entry.status))
+        .map((entry) => entry.conversationId));
+    for (const conversationId of restoredBlockedConversations) {
+        try { blockConversation(conversationId, "restored-external-outcome"); }
+        catch {}
+    }
 
     function save() {
         saveJsonState(persistPath, { schema: EXTERNAL_TEAM_CONTROL_SCHEMA, outcomes: [...outcomes.values()].slice(-MAX_OUTCOMES) });
+    }
+
+    function conversationBlocked(conversationId) {
+        return restoredBlockedConversations.has(conversationId) || isConversationBlocked(conversationId);
+    }
+
+    function block(conversationId, reason) {
+        restoredBlockedConversations.add(conversationId);
+        blockConversation(conversationId, reason);
     }
 
     function requireTeam(teamId) {
@@ -360,7 +378,7 @@ export function createExternalTeamControlApi({
     function sync(outcome) {
         if (outcome.status === "cancelled" || outcome.status === "needs_attention")
             return outcome;
-        if (isConversationBlocked(outcome.conversationId)) {
+        if (conversationBlocked(outcome.conversationId)) {
             outcome.status = "needs_attention";
             outcome.updatedAt = now();
             save();
@@ -482,7 +500,7 @@ export function createExternalTeamControlApi({
                 const existing = [...outcomes.values()].find((entry) => entry.clientRequestId === request.clientRequestId && entry.teamId === request.team.id && entry.channelId === request.channel.id);
                 if (existing) return publicOutcome(existing);
             }
-            if (isConversationBlocked(request.channel.conversationId))
+            if (conversationBlocked(request.channel.conversationId))
                 throw new Error("channel is blocked for takeover or cancellation");
             const id = makeOutcomeIdFn();
             if (!OUTCOME_ID.test(id) || outcomes.has(id)) throw new Error("outcome id factory returned an invalid or duplicate id");
@@ -552,7 +570,8 @@ export function createExternalTeamControlApi({
             const outcome = requireOutcome(outcomeId);
             if (!(["queued", "working"].includes(sync(outcome).status)))
                 return publicOutcome(outcome);
-            blockConversation(outcome.conversationId, "external-cancel");
+            block(outcome.conversationId, "external-cancel");
+            void Promise.resolve(cancelConversation(outcome.conversationId, "external outcome cancelled")).catch(() => undefined);
             outcome.status = "cancelled";
             outcome.updatedAt = now();
             save();
@@ -567,7 +586,9 @@ export function createExternalTeamControlApi({
             const reason = boundedText(input.reason, "reason", 500) ?? "External operator requested takeover.";
             if (["completed", "failed", "cancelled"].includes(sync(outcome).status))
                 return publicOutcome(outcome);
-            blockConversation(outcome.conversationId, "external-takeover");
+            block(outcome.conversationId, "external-takeover");
+            try { requestAttention({ outcomeId: outcome.id, conversationId: outcome.conversationId, reason }); }
+            catch {}
             outcome.status = "needs_attention";
             outcome.takeoverReason = reason;
             outcome.updatedAt = now();

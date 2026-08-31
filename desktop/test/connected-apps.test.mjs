@@ -47,6 +47,18 @@ test("connected apps expose governed capabilities and persist opaque assignments
         });
         assert.deepEqual(assignedToCoworker.assignedCoworkerIds, [codingLead.id]);
         assert.equal(connectedApps.isAssigned({ appId: "sovereignbot-workspace", coworkerId: codingLead.id }), true);
+        assert.deepEqual(connectedApps.assignedToolsForCoworker(codingLead.id), {
+            tools: ["computer", "workspace"],
+            appIds: ["sovereignbot-computer", "sovereignbot-workspace"],
+            approvalProfiles: [],
+        });
+
+        connectedApps.setAssignment({ appId: "sovereignbot-computer", teamId: installed.id, enabled: false });
+        assert.deepEqual(connectedApps.assignedToolsForCoworker(codingLead.id), {
+            tools: ["workspace"],
+            appIds: ["sovereignbot-workspace"],
+            approvalProfiles: [],
+        });
 
         assert.throws(
             () => connectedApps.setAssignment({ appId: "sovereignbot-computer", teamId: installed.id, coworkerId: codingLead.id, enabled: true }),

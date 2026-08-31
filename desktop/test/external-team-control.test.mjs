@@ -17,6 +17,7 @@ function fixture() {
     const teams = createTeamService({ dataDir: root, coworkerStore: coworkers, conversationStore: conversations, services });
     const installed = teams.installPack("software-team").team;
     const blocked = new Set();
+    const cancellations = [];
     const api = createExternalTeamControlApi({
         dataDir: root,
         teamService: teams,
@@ -25,13 +26,14 @@ function fixture() {
         dispatchMessage: () => [],
         blockConversation: (conversationId) => blocked.add(conversationId),
         isConversationBlocked: (conversationId) => blocked.has(conversationId),
+        cancelConversation: (conversationId, reason) => { cancellations.push({ conversationId, reason }); },
         makeOutcomeId: () => "outcome_0000000000000001",
     });
-    return { root, teams, conversations, installed, api, blocked };
+    return { root, teams, conversations, installed, api, blocked, cancellations };
 }
 
 test("external team control exposes bounded opaque team operations and idempotent outcomes", () => {
-    const { root, teams, conversations, installed, api, blocked } = fixture();
+    const { root, teams, conversations, installed, api, blocked, cancellations } = fixture();
     try {
         const channel = installed.channels[0];
         const listed = api.listTeams();
@@ -64,6 +66,7 @@ test("external team control exposes bounded opaque team operations and idempoten
         const cancelled = api.cancelOutcome(first.id);
         assert.equal(cancelled.status, "cancelled");
         assert.equal(blocked.has(channel.conversationId), true);
+        assert.deepEqual(cancellations, [{ conversationId: channel.conversationId, reason: "external outcome cancelled" }]);
         assert.equal(api.getOutcome(first.id).status, "cancelled");
         assert.throws(() => api.submitOutcome({
             teamId: installed.id,

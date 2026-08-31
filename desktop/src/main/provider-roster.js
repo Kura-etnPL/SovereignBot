@@ -175,7 +175,7 @@ export function chooseCoworkerProvider(coworker, usableProviders = {}) {
     return undefined;
 }
 
-function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
+function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCoworkerAppAccess }) {
     const agents = [];
     const bindings = {};
     for (const coworker of Array.isArray(coworkers) ? coworkers : []) {
@@ -201,6 +201,8 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
             continue;
         }
         const id = coworkerAgentId(coworker.id);
+        const appAccess = typeof getCoworkerAppAccess === "function" ? getCoworkerAppAccess(coworker.id) : undefined;
+        const governedTools = Array.isArray(appAccess?.tools) ? [...new Set(appAccess.tools)] : [];
         const agent = {
             id,
             name: `${coworker.name} · ${provider === "codex" ? "Codex" : "Claude Code"}`,
@@ -208,6 +210,7 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
             capabilities: ["general", coworkerCapability(coworker.id)],
             harness: harnessConfig(provider, "coworker", fakeLaunchers, modelBinding.model),
             maxConcurrency: 1,
+            ...(governedTools.length ? { governedTools } : {}),
         };
         agents.push(agent);
         bindings[coworker.id] = {
@@ -217,12 +220,13 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers }) {
             profile: modelBinding.profile,
             ...(accountNamespace ? { accountNamespace } : {}),
             harnessKind: agent.harness.kind,
+            ...(governedTools.length ? { governedTools: [...governedTools], connectedAppIds: [...(appAccess?.appIds ?? [])] } : {}),
         };
     }
     return { agents, bindings };
 }
 
-export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false, coworkers = [], includeWorkerNodeDispatcher = false } = {}) {
+export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false, coworkers = [], includeWorkerNodeDispatcher = false, getCoworkerAppAccess } = {}) {
     if (!discovery || typeof discovery !== "object")
         throw new Error("provider roster requires discovery results");
 
@@ -318,7 +322,7 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
             workerAgent.governedTools = ["computer"];
     }
 
-    const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers });
+    const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCoworkerAppAccess });
     // This identity is a narrow protocol adapter. It is never a planner/reviewer role,
     // never receives browser/computer capabilities, and is only compatible with tasks
     // explicitly stamped with the worker-node trusted context.

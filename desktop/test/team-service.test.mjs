@@ -90,3 +90,39 @@ test("declarative secondary Team Packs reuse the governed team path", () => {
         rmSync(root, { recursive: true, force: true });
     }
 });
+
+test("ordinary teams create a Project Channel and route the next user turn to the current owner", () => {
+    const { root, coworkers, conversations, teams } = fixture();
+    try {
+        const chief = coworkers.create({ name: "Chief", role: "Coordinate work" });
+        const coder = coworkers.create({ name: "Coder", role: "Build software" });
+        const reviewer = coworkers.create({ name: "Reviewer", role: "Review software" });
+        conversations.setTeamRouteResolver((conversation) => teams.currentOwnerForConversation(conversation.id));
+
+        const created = teams.createTeam({ title: "Product Team", coworkerIds: [chief.id, coder.id, reviewer.id] });
+        assert.equal(created.created, true);
+        assert.equal(created.team.packId, "custom-team");
+        assert.equal(created.team.channels[0].name, "Project Channel");
+        assert.equal(created.team.sharedWorkspaceLabel, "Product Team project");
+
+        const first = conversations.postUserMessage(created.conversation.id, { text: "Ship the bounded change." });
+        assert.deepEqual(Object.keys(first.delivery), [chief.id]);
+        teams.onMessageQueued({ conversation: conversations.get(created.conversation.id), message: first });
+        assert.equal(teams.currentOwnerForConversation(created.conversation.id), chief.id);
+
+        const handoff = teams.nextHandoff({
+            conversation: conversations.get(created.conversation.id),
+            coworkerId: chief.id,
+            source: first,
+            requestedCoworkerIds: [reviewer.id],
+        });
+        assert.equal(handoff, reviewer.id);
+        assert.equal(teams.currentOwnerForConversation(created.conversation.id), reviewer.id);
+
+        const followup = conversations.postUserMessage(created.conversation.id, { text: "Review the result." });
+        assert.deepEqual(Object.keys(followup.delivery), [reviewer.id]);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});

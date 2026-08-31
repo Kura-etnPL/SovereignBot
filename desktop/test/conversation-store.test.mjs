@@ -76,6 +76,11 @@ test("team messages default to one owner, explicit mentions narrow routing, and 
         const first = conversations.postUserMessage(team.id, { text: "Ship V3." });
         assert.deepEqual(Object.keys(first.delivery), [chief.id]);
 
+        conversations.setTeamRouteResolver(() => coder.id);
+        const routed = conversations.postUserMessage(team.id, { text: "Continue the implementation." });
+        assert.deepEqual(Object.keys(routed.delivery), [coder.id]);
+        conversations.setTeamRouteResolver(undefined);
+
         const broadcast = conversations.postUserMessage(team.id, { text: "Notify the whole team.", mentions: ["everyone"] });
         assert.deepEqual(Object.keys(broadcast.delivery).sort(), [chief.id, coder.id, researcher.id].sort());
 

@@ -21,6 +21,7 @@ const ELECTRON = process.platform === "win32"
 const INTERNAL_NODE = join(DESKTOP_ROOT, "resources", "node", "node.exe");
 const FAKE_DIR = join(DESKTOP_ROOT, "e2e", "fixtures");
 const TIMEOUT_MS = 180_000;
+const ELECTRON_ARGS = process.env.SOVEREIGNBOT_ELECTRON_DISABLE_GPU === "1" ? ["--disable-gpu"] : [];
 
 await mkdir(RUN_DIR, { recursive: true });
 await rm(DATA_DIR, { recursive: true, force: true });
@@ -47,7 +48,7 @@ for (const key of Object.keys(env)) {
 delete env.ELECTRON_FORCE_RENDERER_ACCESSIBILITY;
 
 console.error(`[software-team] spawning production Electron canary (${TIMEOUT_MS / 1000}s)`);
-const child = spawn(ELECTRON, [`--user-data-dir=${ELECTRON_USER_DATA_DIR}`, "src/main/index.js", "--verify-software-team"], {
+const child = spawn(ELECTRON, [...ELECTRON_ARGS, `--user-data-dir=${ELECTRON_USER_DATA_DIR}`, "src/main/index.js", "--verify-software-team"], {
     cwd: DESKTOP_ROOT,
     env,
     stdio: ["ignore", "pipe", "pipe"],
