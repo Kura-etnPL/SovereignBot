@@ -182,7 +182,7 @@ export const IPC_CHANNELS = Object.freeze({
         validateRequest: (payload) => {
             if (!isPlainObject(payload)) throw new Error("request payload must be an object");
             assertNoForbiddenKeys(payload);
-            assertOnlyKnownKeys(payload, ["title", "objective", "ownerCoworkerId", "parentJobId", "priority", "nextActionAt", "executionTarget"]);
+            assertOnlyKnownKeys(payload, ["title", "objective", "ownerCoworkerId", "parentJobId", "priority", "nextActionAt", "executionTarget", "computerTarget", "computerActions"]);
             if (typeof payload.title !== "string" || !payload.title.trim()) throw new Error("missing request field: title");
             if (payload.title.length > 120) throw new Error("title exceeds 120 characters");
             if (typeof payload.objective !== "string" || !payload.objective.trim()) throw new Error("missing request field: objective");
@@ -193,6 +193,8 @@ export const IPC_CHANNELS = Object.freeze({
             if (payload.priority !== undefined) out.priority = enumField(["low", "normal", "high"])(payload.priority, "priority");
             if (payload.nextActionAt !== undefined) out.nextActionAt = stringField(64)(payload.nextActionAt, "nextActionAt");
             if (payload.executionTarget !== undefined) out.executionTarget = workerExecutionTarget(payload.executionTarget);
+            if (payload.computerTarget !== undefined) out.computerTarget = workerComputerTarget(payload.computerTarget);
+            if (payload.computerActions !== undefined) out.computerActions = computerActions(payload.computerActions);
             return out;
         },
     }),
@@ -425,6 +427,38 @@ function workerExecutionTarget(value) {
         };
     }
     throw new Error("executionTarget.kind must be local or worker-node");
+}
+
+function workerComputerTarget(value) {
+    if (!isPlainObject(value)) throw new Error("computerTarget must be an object");
+    assertOnlyKnownKeys(value, ["kind", "nodeId", "workspaceId", "computerId"]);
+    if (value.kind !== "worker-computer") throw new Error("computerTarget.kind must be worker-computer");
+    return {
+        kind: "worker-computer",
+        nodeId: workerNodeIdField()(value.nodeId, "computerTarget.nodeId"),
+        workspaceId: idField()(value.workspaceId, "computerTarget.workspaceId"),
+        computerId: idField()(value.computerId, "computerTarget.computerId"),
+    };
+}
+
+function computerActions(value) {
+    if (!Array.isArray(value) || value.length < 1 || value.length > 8) throw new Error("computerActions must contain 1-8 actions");
+    const allowed = {
+        snapshot: [], navigate: ["url"], click: ["snapshotId", "ref"], type: ["snapshotId", "ref", "text"],
+        key: ["snapshotId", "ref", "key"], scroll: ["deltaX", "deltaY"], list_files: ["path"],
+        read_file: ["path", "encoding"], write_file: ["path", "content", "encoding"], request_help: ["reason"],
+    };
+    return value.map((action) => {
+        if (!isPlainObject(action) || !Object.hasOwn(action, "operation") || !Object.hasOwn(allowed, action.operation)) throw new Error("computer action operation is invalid");
+        if (!isPlainObject(action.input)) throw new Error("computer action input must be an object");
+        assertOnlyKnownKeys(action, ["operation", "input"]);
+        assertOnlyKnownKeys(action.input, allowed[action.operation]);
+        for (const [key, entry] of Object.entries(action.input)) {
+            if (typeof entry === "string" && (entry.length > 4000 || /(?:[A-Za-z]:[\\/]|file:\/\/|bearer|token|cookie|password|secret|credential|session|continuity|provider|cwd|command|coordinates?|click\s+at)/i.test(entry))) throw new Error(`computer action ${key} contains private or authority data`);
+        }
+        if (action.operation === "scroll" && (!Number.isInteger(action.input.deltaX) || !Number.isInteger(action.input.deltaY) || Math.abs(action.input.deltaX) > 2000 || Math.abs(action.input.deltaY) > 2000)) throw new Error("computer scroll delta is invalid");
+        return { operation: action.operation, input: structuredClone(action.input) };
+    });
 }
 
 function integerField(min, max) {

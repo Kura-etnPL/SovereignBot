@@ -37,3 +37,5 @@ export * from "./worker-node-harness.js";
 export * from "./worker-node-identity.js";
 export * from "./worker-node-protocol.js";
 export * from "./worker-node-server.js";
+export * from "./worker-computer-action-store.js";
+export * from "./worker-computer-protocol.js";

@@ -26,11 +26,12 @@
       for (const value of [
         `${label("Protocol", "协议")}: ${node.protocol}`,
         `${label("OS", "系统")}: ${node.platform}/${node.arch}`,
-        `${label("Endpoint", "端点")}: ${node.endpoint}`,
+        `${label("Registry", "注册表")}: ${label("Advanced worker registry", "高级工作节点注册表")}`,
         `${label("Last seen", "最后在线")}: ${node.lastSeenAt ? new Date(node.lastSeenAt).toLocaleString() : "—"}`,
         `${label("Enabled", "已启用")}: ${node.enabled ? label("yes", "是") : label("no", "否")}`,
       ]) { const span = document.createElement("span"); span.textContent = value; meta.append(span); }
-      const caps = document.createElement("div"); caps.className = "worker-node-meta"; caps.textContent = `${label("Capabilities", "能力")}: ${(node.capabilities ?? []).join(", ") || "—"}`;
+     const caps = document.createElement("div"); caps.className = "worker-node-meta"; caps.textContent = `${label("Capabilities", "能力")}: ${(node.capabilities ?? []).join(", ") || "—"}`;
+      const computer = document.createElement("div"); computer.className = "worker-node-meta"; const target = node.computer ?? {}; computer.textContent = `${label("Computer", "工作电脑")}: ${target.name ?? "—"} · ${target.state ?? "offline"} · ${target.currentLoad ?? 0}/${target.capacity ?? 0} · ${(target.capabilities ?? []).join(", ") || "—"}`;
       const list = document.createElement("ul"); list.className = "worker-node-workspaces";
       for (const workspace of node.workspaces ?? []) { const item = document.createElement("li"); item.textContent = `${workspace.name} (${workspace.id})`; list.append(item); }
       const actions = document.createElement("div"); actions.className = "worker-node-actions";
@@ -38,7 +39,7 @@
       const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "quiet-action"; toggle.textContent = node.enabled ? label("Disable", "停用") : label("Enable", "启用"); toggle.addEventListener("click", async () => { toggle.disabled = true; try { await window.sovereignbot.workerNodes.setEnabled({ nodeId: node.nodeId, enabled: !node.enabled }); await load(); } finally { toggle.disabled = false; } });
       const remove = document.createElement("button"); remove.type = "button"; remove.className = "quiet-action"; remove.textContent = label("Remove", "移除"); remove.addEventListener("click", async () => { remove.disabled = true; try { await window.sovereignbot.workerNodes.remove({ nodeId: node.nodeId }); await load(); } finally { remove.disabled = false; } });
       actions.append(refresh, toggle, remove);
-      card.append(head, meta, caps, list, actions);
+      card.append(head, meta, caps, computer, list, actions);
       if (node.lastError) { const error = document.createElement("p"); error.className = "inline-error"; error.textContent = node.lastError; card.append(error); }
       root.append(card);
     }

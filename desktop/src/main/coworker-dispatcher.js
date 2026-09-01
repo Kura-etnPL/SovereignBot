@@ -58,6 +58,7 @@ export function createCoworkerDispatcher({
     artifactStore,
     services,
     teamFlow,
+    jobController,
     isConversationBlocked = () => false,
     persistPath = join(dataDir, "desktop-state", "coworker-dispatch.json"),
     now = () => new Date().toISOString(),
@@ -892,8 +893,25 @@ export function createCoworkerDispatcher({
         return recipients.map((recipientId) => scheduleDelivery(conversationId, messageId, recipientId));
     }
 
+    // Team task execution uses the same governed Job/Computer target path as
+    // manual Jobs and Routines. It deliberately does not create a second
+    // remote executor inside the conversation dispatcher.
+    function dispatchComputerTask({ title, objective, ownerCoworkerId, teamId, projectId, workspaceId, computerTarget, computerActions } = {}) {
+        if (!jobController?.submitJob) throw new Error("Team Computer task requires the Job controller");
+        if (!teamId) throw new Error("Team Computer task requires a Team binding");
+        return jobController.submitJob({
+            title,
+            objective,
+            ownerCoworkerId,
+            computerTarget,
+            computerActions,
+            internalContext: { teamId, ...(projectId ? { projectId } : {}), ...(workspaceId ? { workspaceId } : {}) },
+        });
+    }
+
     return {
         dispatchMessage,
+        dispatchComputerTask,
         stopConversation,
         cancelConversation,
         async flush() {

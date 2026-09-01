@@ -27,6 +27,16 @@ function string(value, name, max, required = false) { if (value === undefined ||
 function idArray(value, name, max) { if (value === undefined) return undefined; if (!Array.isArray(value) || value.length > max) throw new Error(`${name} must be an array of at most ${max} identifiers`); return [...new Set(value.map((entry) => identifier(entry, name)))]; }
 function exact(value, allowed) { for (const key of Object.keys(value)) { if (!allowed.has(key)) throw new Error(`unexpected request field: ${key}`); } }
 function positiveInteger(value, name, min, max) { if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer from ${min} to ${max}`); return value; }
+function workerComputerTargetShape(value) {
+    const target = objectPayload(value); exact(target, new Set(["kind", "nodeId", "workspaceId", "computerId"]));
+    if (target.kind !== "worker-computer" || typeof target.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(target.nodeId)) throw new Error("computerTarget is invalid");
+    return { kind: target.kind, nodeId: identifier(target.nodeId, "nodeId"), workspaceId: identifier(target.workspaceId, "workspaceId"), computerId: identifier(target.computerId, "computerId") };
+}
+function workerComputerActionsShape(value) {
+    if (!Array.isArray(value) || value.length < 1 || value.length > 8) throw new Error("computerActions must contain 1-8 actions");
+    const allowed = new Set(["snapshot", "navigate", "click", "type", "key", "scroll", "list_files", "read_file", "write_file", "request_help"]);
+    return value.map((entry) => { const action = objectPayload(entry); exact(action, new Set(["operation", "input"])); if (!allowed.has(action.operation)) throw new Error("computer action is invalid"); const input = objectPayload(action.input); for (const textValue of Object.values(input)) if (typeof textValue === "string" && /(?:[A-Za-z]:[\\/]|file:\/\/|bearer|token|cookie|password|secret|credential|session|continuity|provider|cwd|command|coordinates?|click\s+at)/i.test(textValue)) throw new Error("computer action contains private or authority data"); return { operation: action.operation, input: structuredClone(input) }; });
+}
 function memoryTarget(value, { withMemoryId = false, withPatch = false, withPinned = false } = {}) {
     const allowed = new Set(["scope", "ownerId", ...(withMemoryId ? ["memoryId"] : []), ...(withPatch ? ["patch"] : []), ...(withPinned ? ["pinned"] : []), ...(withMemoryId ? [] : ["query", "limit", "includeForgotten"]) ]);
     const input = objectPayload(value);
@@ -298,6 +308,7 @@ export const V3_IPC_CHANNELS = Object.freeze({
         return { title: string(value.title, "title", 120), coworkerIds, ...(leadCoworkerId ? { leadCoworkerId } : {}) };
     }),
     "team:list": spec(1024, empty),
+    "team:computerTask": spec(32 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["title", "objective", "ownerCoworkerId", "teamId", "projectId", "workspaceId", "computerTarget", "computerActions"])); return { title: string(value.title, "title", 120, true), objective: string(value.objective, "objective", 8000, true), ownerCoworkerId: identifier(value.ownerCoworkerId, "ownerCoworkerId"), teamId: identifier(value.teamId, "teamId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }), ...(value.workspaceId === undefined ? {} : { workspaceId: identifier(value.workspaceId, "workspaceId") }), computerTarget: workerComputerTargetShape(value.computerTarget), computerActions: value.computerActions === undefined ? [{ operation: "snapshot", input: {} }] : workerComputerActionsShape(value.computerActions) }; }),
     "team:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId"])); return { teamId: identifier(value.teamId, "teamId") }; }),
     "team:installPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["packId"])); return { packId: identifier(value.packId, "packId") }; }),
     "team:exportPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId"])); return { teamId: identifier(value.teamId, "teamId") }; }),

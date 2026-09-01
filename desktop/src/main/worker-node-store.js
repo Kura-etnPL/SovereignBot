@@ -14,12 +14,36 @@ export const WORKER_NODES_SCHEMA = "sovereignbot.desktop.worker-nodes.v1";
 export const WORKER_NODE_CREDENTIALS_SCHEMA = "sovereignbot.desktop.worker-node-credentials.v1";
 
 const PUBLIC_KEYS = new Set([
-    "nodeId", "name", "protocol", "endpoint", "platform", "arch", "enabled", "status",
-    "capabilities", "workspaces", "lastSeenAt", "lastError",
+    "nodeId", "name", "protocol", "platform", "arch", "enabled", "status",
+    "capabilities", "workspaces", "computer", "lastSeenAt", "lastError",
 ]);
 
 function safeText(value, max = 500) {
     return String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, max);
+}
+
+function safeError(value) {
+    return safeText(value, 500)
+        .replace(/\b[A-Za-z]:[\\/][^\s]+/g, "<redacted-path>")
+        .replace(/((?:bearer|token|password|secret|cookie|credential|session|continuation|endpoint|transport))\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]");
+}
+
+function publicComputer(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {
+        id: "",
+        state: "offline",
+        capacity: 0,
+        currentLoad: 0,
+        capabilities: [],
+    };
+    return {
+        id: safeText(value.id, 160),
+        name: safeText(value.name ?? "Worker Computer", 120),
+        state: ["online", "capacity-limited", "offline", "attention"].includes(value.state) ? value.state : "offline",
+        capacity: Number.isInteger(value.capacity) && value.capacity >= 0 ? value.capacity : 0,
+        currentLoad: Number.isInteger(value.currentLoad) && value.currentLoad >= 0 ? value.currentLoad : 0,
+        capabilities: Array.isArray(value.capabilities) ? [...new Set(value.capabilities.map((entry) => safeText(entry, 64)))].slice(0, 24) : [],
+    };
 }
 
 function publicWorkspace(value) {
@@ -35,22 +59,22 @@ function publicWorkspace(value) {
 
 function publicRecord(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-    if (Object.keys(value).some((key) => !PUBLIC_KEYS.has(key))) return undefined;
+    if (Object.keys(value).some((key) => !PUBLIC_KEYS.has(key) && key !== "endpoint")) return undefined;
     try {
         const workspaces = Array.isArray(value.workspaces) ? value.workspaces.map(publicWorkspace).filter(Boolean) : [];
         return {
             nodeId: validateNodeId(value.nodeId),
             name: String(value.name ?? "").trim().slice(0, 80),
             protocol: value.protocol === WORKER_NODE_PROTOCOL ? WORKER_NODE_PROTOCOL : "",
-            endpoint: validateLoopbackEndpoint(value.endpoint),
             platform: safeText(value.platform, 40),
             arch: safeText(value.arch, 40),
             enabled: value.enabled !== false,
             status: ["online", "offline", "blocked"].includes(value.status) ? value.status : "offline",
             capabilities: Array.isArray(value.capabilities) ? [...new Set(value.capabilities.map((entry) => safeText(entry, 64)))].slice(0, 16) : [],
             workspaces,
+            computer: publicComputer(value.computer),
             lastSeenAt: value.lastSeenAt ? safeText(value.lastSeenAt, 64) : undefined,
-            lastError: value.lastError ? safeText(value.lastError, 500) : undefined,
+            lastError: value.lastError ? safeError(value.lastError) : undefined,
         };
     }
     catch { return undefined; }
@@ -77,6 +101,7 @@ function validateHealth(bundle, health) {
         status: health.ready === true ? "online" : "offline",
         capabilities: Array.isArray(health.capabilities) ? [...new Set(health.capabilities.map((entry) => safeText(entry, 64)))].slice(0, 16) : [],
         workspaces,
+        computer: publicComputer(health.computer),
         lastSeenAt: new Date().toISOString(),
         lastError: undefined,
     };
@@ -104,11 +129,11 @@ export function createWorkerNodeStore({ dataDir, persistPath, credentialsPath, c
     const nodes = new Map();
     for (const entry of loaded?.schema === WORKER_NODES_SCHEMA && Array.isArray(loaded.nodes) ? loaded.nodes : []) {
         const clean = publicRecord(entry);
-        if (clean?.protocol === WORKER_NODE_PROTOCOL) nodes.set(clean.nodeId, clean);
+        if (clean?.protocol === WORKER_NODE_PROTOCOL) nodes.set(clean.nodeId, { ...clean, endpoint: entry.endpoint });
     }
     const credentials = credentialsState(loadJsonState(privatePath, null));
 
-    function savePublic() { saveJsonState(statePath, { schema: WORKER_NODES_SCHEMA, nodes: [...nodes.values()] }); }
+    function savePublic() { saveJsonState(statePath, { schema: WORKER_NODES_SCHEMA, nodes: [...nodes.values()].map(publicRecord) }); }
     function savePrivate() { saveJsonState(privatePath, { schema: WORKER_NODE_CREDENTIALS_SCHEMA, credentials: [...credentials.values()] }, { mode: 0o600 }); }
     function getNode(nodeId) {
         const id = validateNodeId(nodeId);
@@ -127,7 +152,7 @@ export function createWorkerNodeStore({ dataDir, persistPath, credentialsPath, c
         const bundle = validatePairingBundle(bundleValue);
         const existing = nodes.get(bundle.nodeId);
         const existingCredential = credentials.get(bundle.nodeId);
-        if (existing && existing.endpoint !== bundle.endpoint)
+        if (existing?.endpoint && existing.endpoint !== bundle.endpoint)
             throw new Error("Worker Node identity is already paired at a different endpoint");
         if (existingCredential && existingCredential.endpoint !== bundle.endpoint)
             throw new Error("Worker Node identity is already paired at a different endpoint");
@@ -137,7 +162,7 @@ export function createWorkerNodeStore({ dataDir, persistPath, credentialsPath, c
         // the same durable node identity. Invalid bundles fail at health() before either
         // the credential or public online record is replaced.
         credentials.set(bundle.nodeId, bundle);
-        nodes.set(bundle.nodeId, { ...health, enabled: existing?.enabled !== false, status: "online" });
+        nodes.set(bundle.nodeId, { ...health, endpoint: bundle.endpoint, enabled: existing?.enabled !== false, status: "online" });
         savePrivate();
         savePublic();
         return publicRecord(nodes.get(bundle.nodeId));
@@ -165,10 +190,10 @@ export function createWorkerNodeStore({ dataDir, persistPath, credentialsPath, c
                 const credential = credentials.get(node.nodeId);
                 if (!credential) throw new Error("Worker Node credential is unavailable");
                 const health = validateHealth(credential, await privateClient(node.nodeId).health());
-                nodes.set(node.nodeId, { ...health, enabled: node.enabled });
+                nodes.set(node.nodeId, { ...health, endpoint: credential.endpoint, enabled: node.enabled });
             }
             catch (error) {
-                nodes.set(node.nodeId, { ...node, status: node.enabled ? "offline" : "blocked", lastError: safeText(error?.message ?? "Worker Node refresh failed") });
+                nodes.set(node.nodeId, { ...node, status: node.enabled ? "offline" : "blocked", lastError: safeError(error?.message ?? "Worker Node refresh failed") });
             }
             result.push(publicRecord(nodes.get(node.nodeId)));
         }
@@ -186,11 +211,21 @@ export function createWorkerNodeStore({ dataDir, persistPath, credentialsPath, c
         return { node: publicRecord(node), workspace: structuredClone(workspace), client: privateClient(node.nodeId) };
     }
 
+    async function resolveComputerTarget(nodeId, workspaceId, computerId) {
+        const target = resolveDispatchTarget(nodeId, workspaceId);
+        const health = typeof target.client.computerHealth === "function" ? await target.client.computerHealth() : { computer: target.node.computer };
+        const computer = publicComputer(health?.computer);
+        if (!computerId || computer.id !== String(computerId)) throw new Error("selected Worker Computer is not advertised by the Worker Node");
+        if (!["online", "capacity-limited"].includes(computer.state)) throw new Error("selected Worker Computer is unavailable");
+        return { node: target.node, workspace: target.workspace, computer, client: target.client };
+    }
+
     return {
         list() { return { schema: WORKER_NODES_SCHEMA, nodes: [...nodes.values()].map(publicRecord) }; },
         get(nodeId) { return publicRecord(getNode(nodeId)); },
         client(nodeId) { return privateClient(nodeId); },
         resolveDispatchTarget,
+        resolveComputerTarget,
         async cancel(nodeId, remoteTaskId) {
             return privateClient(nodeId).cancel(remoteTaskId);
         },

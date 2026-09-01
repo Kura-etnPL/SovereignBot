@@ -37,6 +37,7 @@ import { createProjectService } from "./project-service.js";
 import { createSearchService } from "./search-service.js";
 import { createCommandPaletteService } from "./command-palette-service.js";
 import { createThisPcService } from "./this-pc-service.js";
+import { createComputerTargetController } from "./computer-target-controller.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -300,6 +301,7 @@ async function main() {
         try { routines?.stop(); } catch {}
         try { chiefLoop?.stop(); } catch {}
         bridge = createOperatorBridge(host.runtime);
+        const computerTargetController = createComputerTargetController({ workerNodeStore, audit: host.runtime.audit });
         goals = createGoalController({
             runtime: host.runtime,
             services,
@@ -327,10 +329,11 @@ async function main() {
             supervisorAgentId: host.plannerAgentId,
             readiness: goalReadiness,
             workerNodeStore,
+            computerTargetController,
             projectService,
             teamService,
         });
-        routines = createRoutineController({ dataDir, jobController: jobs, coworkerStore, skillStore, services, projectService, teamService });
+        routines = createRoutineController({ dataDir, jobController: jobs, coworkerStore, skillStore, services, projectService, teamService, computerTargetController });
         skillStore.setRetestRunner((skill) => {
             const directOwner = (skill.assignedCoworkerIds ?? []).find((id) => coworkerStore.get(id).state === "active");
             const teamOwner = directOwner ? undefined : (skill.assignedTeamIds ?? []).map((id) => teamService.get(id)).flatMap((team) => team.coworkerIds ?? []).find((id) => coworkerStore.get(id).state === "active");
@@ -358,6 +361,7 @@ async function main() {
             conversationStore: createSkillAwareConversationStore(attachmentAwareConversationStore, skillStore),
             artifactStore,
             services,
+            jobController: jobs,
             teamFlow: teamService,
             isConversationBlocked: (conversationId) => blockedConversations.has(conversationId),
         });
@@ -535,6 +539,7 @@ async function main() {
                     return { ...listed, packs: [...packs, ...recipes.filter((pack) => !known.has(pack.id))] };
                 },
                 "team:get": ({ teamId }) => teamService.get(teamId),
+                "team:computerTask": (payload) => coworkerDispatcher.dispatchComputerTask(payload),
                 "team:activity": (payload) => teamService.activity(payload),
                 "team:installPack": async ({ packId }) => {
                     const result = productSurfaces.recipeList().some((pack) => pack.id === packId)

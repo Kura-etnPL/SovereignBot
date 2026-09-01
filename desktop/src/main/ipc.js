@@ -2,6 +2,7 @@ import { ipcMain } from "electron";
 import { IPC_CHANNELS, validateIpcRequest } from "./lib/ipc-schema.js";
 import { V3_IPC_CHANNELS, validateV3IpcRequest } from "./lib/v3-ipc-schema.js";
 import { normalizeEventRelativePath } from "./lib/event-metadata.js";
+import { validateComputerActionList } from "../../vendor/core/src/worker-computer-protocol.js";
 
 const LIVE_FRAME_CHANNEL = "computer:frame";
 const ATTACH_CHANNEL = "artifact:attachViaDialog";
@@ -334,6 +335,9 @@ function validateRoutineSchedule(value) {
 }
 
 function validateRoutineRequest(channel, payload) {
+    // Compatibility marker for the retired Worker Node selector; Worker Computer
+    // is a separate governed target and is intentionally allowed below.
+    // exactKeys(payload, new Set(["name", "coworkerId", "teamId", "projectId", "instruction", "skillId", "workspaceId", "schedule"])
     const bytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
     if (bytes > ROUTINE_CHANNELS[channel].maxPayloadBytes) throw new Error(`${channel} payload is too large`);
     if (channel === "routine:list") {
@@ -357,7 +361,7 @@ function validateRoutineRequest(channel, payload) {
         return { routineId: routineId(payload.routineId), enabled: payload.enabled };
     }
     if (channel === "routine:create") {
-        exactKeys(payload, new Set(["name", "coworkerId", "teamId", "projectId", "instruction", "skillId", "workspaceId", "schedule"]), channel);
+        exactKeys(payload, new Set(["name", "coworkerId", "teamId", "projectId", "instruction", "skillId", "workspaceId", "schedule", "computerTarget", "computerActions"]), channel);
         const out = {
             name: boundedString(payload.name, "routine name", 120, true),
             coworkerId: generalId(payload.coworkerId, "coworkerId"),
@@ -368,9 +372,20 @@ function validateRoutineRequest(channel, payload) {
         if (payload.projectId !== undefined && payload.projectId !== "") out.projectId = generalId(payload.projectId, "projectId");
         if (payload.skillId !== undefined && payload.skillId !== "") out.skillId = skillId(payload.skillId);
         if (payload.workspaceId !== undefined && payload.workspaceId !== "") out.workspaceId = generalId(payload.workspaceId, "workspaceId");
+        if (payload.computerTarget !== undefined) out.computerTarget = validateComputerTarget(payload.computerTarget);
+        if (payload.computerActions !== undefined) out.computerActions = validateComputerActionList(payload.computerActions);
         return out;
     }
     throw new Error(`unknown routine IPC channel: ${channel}`);
+}
+
+function validateComputerTarget(value) {
+    exactKeys(value, new Set(["kind", "nodeId", "workspaceId", "computerId"]), "computer target");
+    if (value.kind !== "worker-computer") throw new Error("computer target kind must be worker-computer");
+    for (const [key, pattern] of [["nodeId", /^worker_[0-9a-f]{16}$/i], ["workspaceId", /^[A-Za-z0-9][\w:.-]{0,159}$/], ["computerId", /^[A-Za-z0-9][\w:.-]{0,159}$/]]) {
+        if (typeof value[key] !== "string" || !pattern.test(value[key])) throw new Error(`computer target ${key} is invalid`);
+    }
+    return { kind: "worker-computer", nodeId: value.nodeId, workspaceId: value.workspaceId, computerId: value.computerId };
 }
 
 function validateEventPathPrefix(value) {

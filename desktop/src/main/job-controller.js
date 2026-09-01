@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 import { normalizeEventMetadata } from "./lib/event-metadata.js";
 import { coworkerAgentId, coworkerCapability, WORKER_NODE_SUPERVISOR } from "./provider-roster.js";
+import { normalizeComputerTarget } from "./computer-target-controller.js";
 
 export const JOBS_SCHEMA = "sovereignbot.desktop.jobs.v1";
 export const MAX_OBJECTIVE = 8000;
@@ -35,6 +36,7 @@ function normalizeExecutionTarget(value) {
 }
 
 function isWorkerNodeTarget(job) { return job.executionTarget?.kind === "worker-node"; }
+function isComputerTarget(job) { return job.computerTarget?.kind === "worker-computer"; }
 function isEconomyFailure(message) { return /\[ECONOMY:(?:METERED_DISABLED|BUDGET_EXHAUSTED|TOTAL_CAP_EXCEEDED|SPEND_CAP_INVALID|LEDGER_CORRUPT|UNAVAILABLE)\]/i.test(String(message ?? "")); }
 function isTransportFailure(error) { return /worker-node transport unavailable|reconnect required/i.test(String(error?.message ?? error)); }
 function makeWorkerRequestId() { return `worker_request_${randomBytes(8).toString("hex")}`; }
@@ -44,7 +46,7 @@ export function makeJobId() { return `job_${randomBytes(8).toString("hex")}`; }
 function slice(v, n) { const s = String(v ?? "").replace(/\s+/g, " ").trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; }
 function depthOf(jobs, id) { let d = 0, cur = jobs.find(j => j.id === id); while (cur?.parentJobId && d < 100) { d += 1; cur = jobs.find(j => j.id === cur.parentJobId); } return d; }
 
-export function createJobController({ dataDir, runtime, roster, coworkerStore, services, skillStore, workerNodeStore, projectService, teamService, persistPath, supervisorAgentId, readiness, now = () => new Date().toISOString(), makeId = makeJobId, makeRequestId = makeWorkerRequestId } = {}) {
+export function createJobController({ dataDir, runtime, roster, coworkerStore, services, skillStore, workerNodeStore, computerTargetController, projectService, teamService, persistPath, supervisorAgentId, readiness, now = () => new Date().toISOString(), makeId = makeJobId, makeRequestId = makeWorkerRequestId } = {}) {
   if (!dataDir || !runtime?.orchestrator) throw new Error("job controller requires dataDir and runtime");
   if (typeof roster !== "function") throw new Error("job controller requires roster reader");
   if (!coworkerStore?.get) throw new Error("job controller requires coworkerStore");
@@ -57,6 +59,14 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
   for (const j of jobs) {
     try { j.executionTarget = normalizeExecutionTarget(j.executionTarget); }
     catch { j.executionTarget = { kind: "local" }; j.status = "needs_attention"; j.error = "invalid persisted execution target"; j.attentionState = { reason: j.error, at: now() }; }
+    if (j.computerTarget !== undefined) {
+      try { j.computerTarget = normalizeComputerTarget(j.computerTarget); }
+      catch { delete j.computerTarget; j.status = "needs_attention"; j.error = "invalid persisted Computer target"; j.attentionState = { reason: j.error, at: now() }; }
+    }
+    if (j.computerTarget !== undefined) {
+      try { j.computerActions = computerTargetController?.normalizeActions?.(j.computerActions); }
+      catch { delete j.computerTarget; delete j.computerActions; j.status = "needs_attention"; j.error = "invalid persisted Computer actions"; j.attentionState = { reason: j.error, at: now() }; }
+    }
     if (INTERRUPTED_ON_RESTART.has(j.status)) {
       if (isWorkerNodeTarget(j)) {
         // The local task is disposable. The next pump recovers its persisted remote
@@ -155,7 +165,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     return { workspaceId: `coworker:${coworker.id}`, cwd };
   }
   function getJob(id) { const j = jobs.find(x => x.id === String(id)); if (!j) throw new Error(`unknown job id: ${id}`); return j; }
-  function publicJob(j) { return { id: j.id, title: j.title, objective: j.objective, status: j.status, priority: j.priority, ownerCoworkerId: j.ownerCoworkerId, parentJobId: j.parentJobId ?? null, workspaceId: j.workspaceId, executionTarget: structuredClone(j.executionTarget ?? { kind: "local" }), workerNodeName: j.workerNodeName ?? undefined, workerWorkspaceName: j.workerWorkspaceName ?? undefined, routineId: j.routineId ?? undefined, skillId: j.skillId ?? undefined, teamId: j.teamId ?? undefined, projectId: j.projectId ?? undefined, scheduledFor: j.scheduledFor ?? undefined, nextActionAt: j.nextActionAt ?? null, attempt: j.attempt, depth: depthOf(jobs, j.id), childJobIds: [...(j.childJobIds ?? [])], attentionState: j.attentionState ? structuredClone(j.attentionState) : undefined, outcomeSummary: j.outcomeSummary ?? undefined, error: j.error ?? undefined, createdAt: j.createdAt, updatedAt: j.updatedAt, conversationId: j.conversationId ?? undefined, taskIds: [...(j.taskIds ?? [])] }; }
+  function publicJob(j) { return { id: j.id, title: j.title, objective: j.objective, status: j.status, priority: j.priority, ownerCoworkerId: j.ownerCoworkerId, parentJobId: j.parentJobId ?? null, workspaceId: j.workspaceId, executionTarget: structuredClone(j.executionTarget ?? { kind: "local" }), computerTarget: j.computerTarget ? structuredClone(j.computerTarget) : undefined, computerActions: j.computerActions?.map(({ operation }) => ({ operation })), workerNodeName: j.workerNodeName ?? undefined, workerWorkspaceName: j.workerWorkspaceName ?? undefined, routineId: j.routineId ?? undefined, skillId: j.skillId ?? undefined, teamId: j.teamId ?? undefined, projectId: j.projectId ?? undefined, scheduledFor: j.scheduledFor ?? undefined, nextActionAt: j.nextActionAt ?? null, attempt: j.attempt, depth: depthOf(jobs, j.id), childJobIds: [...(j.childJobIds ?? [])], attentionState: j.attentionState ? structuredClone(j.attentionState) : undefined, outcomeSummary: j.outcomeSummary ?? undefined, error: j.error ?? undefined, createdAt: j.createdAt, updatedAt: j.updatedAt, conversationId: j.conversationId ?? undefined, taskIds: [...(j.taskIds ?? [])] }; }
   function appendMessage(job, kind, text, role = "system") {
     job.conversation = job.conversation ?? { messages: [] };
     job.conversation.messages.push({ at: now(), role, kind, text: String(text).slice(0, 4000) });
@@ -231,13 +241,20 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         if (!project.coworkerIds?.includes(job.ownerCoworkerId) && (!job.teamId || !project.teamIds?.includes(job.teamId))) throw new Error("Routine Job owner or Team is not a member of the selected Project");
         if (job.requestedWorkspaceId && project.workspaceId !== job.requestedWorkspaceId) throw new Error("Routine Job workspace does not match Project workspace");
       }
-      const remoteTarget = isWorkerNodeTarget(job) ? workerNodeStore?.resolveDispatchTarget(job.executionTarget.nodeId, job.executionTarget.workspaceId) : undefined;
+      const computerTarget = isComputerTarget(job) ? job.computerTarget : undefined;
+      if (computerTarget && !computerTargetController) throw new Error("Worker Computer target is unavailable");
+      if (computerTarget && job.requestedWorkspaceId && job.requestedWorkspaceId !== computerTarget.workspaceId) throw new Error("Computer target workspace does not match Job workspace");
+      const remoteTarget = !computerTarget && isWorkerNodeTarget(job) ? workerNodeStore?.resolveDispatchTarget(job.executionTarget.nodeId, job.executionTarget.workspaceId) : undefined;
       if (isWorkerNodeTarget(job) && !remoteTarget)
         throw new Error("selected Worker Node is unavailable; local fallback is disabled");
-      const { snap, binding } = remoteTarget
+      const { snap, binding } = computerTarget
+        ? { snap: { roles: {} }, binding: undefined }
+        : remoteTarget
         ? { snap: workerNodeRosterSnapshot(), binding: undefined }
         : requireCoworkerBinding(job.ownerCoworkerId);
-      const ctx = remoteTarget
+      const ctx = computerTarget
+        ? { kind: "worker-computer", nodeId: computerTarget.nodeId, workspaceId: computerTarget.workspaceId, computerId: computerTarget.computerId }
+        : remoteTarget
         ? { kind: "worker-node", nodeId: job.executionTarget.nodeId, workspaceId: job.executionTarget.workspaceId }
         : workspaceContext(job, coworker);
       if (remoteTarget) {
@@ -271,6 +288,16 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         job.attentionState = { reason: "repeated objective fingerprint", fingerprint: fp, at: now() };
         job.outcomeSummary = "Needs attention: repeated objective detected.";
         save(); return;
+      }
+
+      if (computerTarget) {
+        const result = await computerTargetController.execute({ job, actions: job.computerActions });
+        job.computerResult = result;
+        job.outcomeSummary = result.summary;
+        appendMessage(job, "answer", result.summary);
+        setStatus(job, "completed");
+        save();
+        return;
       }
 
       const plan = await runtime.orchestrator.createPlan({ title: `job: ${slice(job.title, 80)}`, ownerAgentId: supervisorId, input: { jobId: job.id, objective: job.objective } });
@@ -366,6 +393,9 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
           setStatus(j, "needs_attention");
           j.attentionState = { reason: msg, attempt: j.attempt ?? 0, at: now() };
         }
+      } else if (isComputerTarget(j)) {
+        setStatus(j, "needs_attention");
+        j.attentionState = { reason: msg, attempt: j.attempt ?? 0, at: now() };
       } else if (rosterProviderForJob(j) === "economy" || isEconomyFailure(msg)) {
         setStatus(j, "needs_attention");
         j.attentionState = { reason: msg, attempt: j.attempt ?? 0, at: now() };
@@ -383,7 +413,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
 
   return {
     CAPS,
-    submitJob({ title, objective, ownerCoworkerId, parentJobId, priority, nextActionAt, internalContext, executionTarget } = {}) {
+    submitJob({ title, objective, ownerCoworkerId, parentJobId, priority, nextActionAt, internalContext, executionTarget, computerTarget, computerActions } = {}) {
       const t = typeof title === "string" ? title.trim() : "";
       const obj = typeof objective === "string" ? objective.trim() : "";
       if (!t) throw new Error("job title is required");
@@ -393,7 +423,11 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       if (!ownerCoworkerId) throw new Error("ownerCoworkerId is required");
       coworkerStore.get(ownerCoworkerId);
       const target = normalizeExecutionTarget(executionTarget);
-      if (target.kind === "local" && readiness) { const s = readiness(); if (!s?.allowed) throw new Error(s?.reason ?? "Connect at least one AI provider to run jobs."); }
+      const normalizedComputerTarget = computerTarget === undefined ? undefined : normalizeComputerTarget(computerTarget);
+      if (normalizedComputerTarget && target.kind !== "local") throw new Error("Computer target cannot be combined with Worker Node executionTarget");
+      const normalizedComputerActions = normalizedComputerTarget ? (computerTargetController?.normalizeActions?.(computerActions) ?? computerActions) : undefined;
+      if (normalizedComputerTarget && !computerTargetController) throw new Error("Worker Computer target is unavailable");
+      if (target.kind === "local" && !normalizedComputerTarget && readiness) { const s = readiness(); if (!s?.allowed) throw new Error(s?.reason ?? "Connect at least one AI provider to run jobs."); }
       if (parentJobId) {
         const parent = getJob(parentJobId);
         if (depthOf(jobs, parent.id) + 1 > CAPS.maxDepth) throw new Error(`job depth exceeds ${CAPS.maxDepth}`);
@@ -402,8 +436,13 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       let resolvedNextActionAt;
       if (nextActionAt !== undefined) { const d = new Date(nextActionAt); if (Number.isNaN(d.getTime())) throw new Error("nextActionAt must be a valid date"); resolvedNextActionAt = d.toISOString(); }
       const internal = normalizeInternalContext(internalContext);
+      if (normalizedComputerTarget && internal.workspaceId && internal.workspaceId !== normalizedComputerTarget.workspaceId) throw new Error("Computer target workspace does not match Job workspace");
+      if (normalizedComputerTarget && internal.projectId && projectService?.resolveScope) {
+        const project = projectService.resolveScope(internal.projectId);
+        if (project.workspaceId && project.workspaceId !== normalizedComputerTarget.workspaceId) throw new Error("Computer target workspace does not match Project workspace");
+      }
       const createdAt = now();
-      const job = { id: makeId(), title: t, objective: obj, ownerCoworkerId: String(ownerCoworkerId), executionTarget: target, status: "queued", priority: priority ?? "normal", workspaceId: undefined, requestedWorkspaceId: internal.workspaceId, routineId: internal.routineId, skillId: internal.skillId, teamId: internal.teamId, projectId: internal.projectId, scheduledFor: internal.scheduledFor, eventMetadata: internal.eventMetadata, conversationId: undefined, planId: undefined, taskIds: [], parentJobId: parentJobId ? String(parentJobId) : undefined, childJobIds: [], attempt: 0, workerNodeReconnectAttempts: 0, requestId: undefined, requestCreatedAt: undefined, remoteTaskId: undefined, lastRemoteStatus: undefined, nextActionAt: resolvedNextActionAt, attentionState: undefined, outcomeSummary: undefined, error: undefined, createdAt, updatedAt: createdAt, conversation: { messages: [] } };
+      const job = { id: makeId(), title: t, objective: obj, ownerCoworkerId: String(ownerCoworkerId), executionTarget: target, computerTarget: normalizedComputerTarget, computerActions: normalizedComputerActions, status: "queued", priority: priority ?? "normal", workspaceId: undefined, requestedWorkspaceId: internal.workspaceId, routineId: internal.routineId, skillId: internal.skillId, teamId: internal.teamId, projectId: internal.projectId, scheduledFor: internal.scheduledFor, eventMetadata: internal.eventMetadata, conversationId: undefined, planId: undefined, taskIds: [], parentJobId: parentJobId ? String(parentJobId) : undefined, childJobIds: [], attempt: 0, workerNodeReconnectAttempts: 0, requestId: undefined, requestCreatedAt: undefined, remoteTaskId: undefined, lastRemoteStatus: undefined, nextActionAt: resolvedNextActionAt, attentionState: undefined, outcomeSummary: undefined, error: undefined, createdAt, updatedAt: createdAt, conversation: { messages: [] } };
       appendMessage(job, "goal", obj, "user");
       jobs.push(job);
       if (parentJobId) { const p = getJob(parentJobId); p.childJobIds = [...(p.childJobIds ?? []), job.id]; p.updatedAt = now(); }
@@ -444,6 +483,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     async cancel(jobId) {
       const j = getJob(jobId);
       if (TERMINAL.has(j.status)) return publicJob(j);
+      if (isComputerTarget(j)) computerTargetController?.cancel(j.id);
       if (isWorkerNodeTarget(j)) {
         const latestRemote = j.remoteTaskId ?? (await runtime.orchestrator.listTasks()).filter((task) => (j.taskIds ?? []).includes(task.id)).map((task) => task.harnessState?.remoteTaskId).find(Boolean);
         if (!latestRemote) {

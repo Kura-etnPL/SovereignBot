@@ -52,6 +52,7 @@ test("Worker Node store keeps credentials private and only resolves healthy adve
         assert.ok(!Object.hasOwn(paired, "token"));
         assert.ok(!Object.hasOwn(paired, "credentials"));
         assert.ok(!Object.hasOwn(paired, "privatePath"));
+        assert.ok(!Object.hasOwn(paired, "endpoint"));
         assert.deepEqual(paired.workspaces, [{ id: WORKSPACE_ID, name: "Node Workspace" }]);
 
         const publicState = JSON.parse(await readFile(publicPath, "utf8"));
@@ -60,6 +61,7 @@ test("Worker Node store keeps credentials private and only resolves healthy adve
         assert.equal(privateState.schema, WORKER_NODE_CREDENTIALS_SCHEMA);
         assert.ok(!JSON.stringify(publicState).includes(token), "public state must not contain the pairing token");
         assert.ok(!JSON.stringify(publicState).includes(privatePath), "public state must not contain credential paths");
+        assert.ok(!JSON.stringify(publicState).includes(ENDPOINT), "public state must not contain the trusted transport endpoint");
         assert.equal(privateState.credentials[0].token, token);
 
         const reloaded = createWorkerNodeStore({ dataDir, clientFactory: fakeClientFactory(calls) });

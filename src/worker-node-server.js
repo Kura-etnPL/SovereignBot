@@ -5,6 +5,8 @@ import { loadConfig } from "./config.js";
 import { createRuntime } from "./runtime.js";
 import { VERSION } from "./version.js";
 import { WorkerNodeDispatchStore } from "./worker-node-dispatch-store.js";
+import { WorkerComputerActionStore } from "./worker-computer-action-store.js";
+import { WORKER_COMPUTER_PROTOCOL, computerEnvelopeHash, validateComputerEnvelope } from "./worker-computer-protocol.js";
 import { loadOrCreateWorkerIdentity } from "./worker-node-identity.js";
 import {
     WORKER_NODE_BODY_LIMIT,
@@ -129,7 +131,47 @@ function remoteStatus(status) {
     return "failed";
 }
 
-export function createWorkerNodeService({ config, runtime, identity, ledger, now = () => Date.now() } = {}) {
+function publicComputerText(value, max = 8000) {
+    return String(value ?? "")
+        .replace(/[\u0000-\u001f\u007f]/g, " ")
+        .replace(/\b[A-Za-z]:[\\/][^\r\n]*/g, "<node-local-path>")
+        .replace(/\\\\[^\r\n]+/g, "<node-local-path>")
+        .replace(/(^|[\s"'=:(\[])(\/(?:home|opt|tmp|var|srv|mnt|media|root|usr|etc|workspace|workspaces|app|run)\/[^\s"'`<>]*)/g, "$1<node-local-path>")
+        .replace(/((?:bearer|api[_-]?key|access[_-]?token|refresh[_-]?token|cookie|password|secret|credential))\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+        .slice(0, max);
+}
+
+function publicComputerResult(value, depth = 0) {
+    if (depth > 4 || value === null || typeof value === "number" || typeof value === "boolean") return value;
+    if (typeof value === "string") return publicComputerText(value);
+    if (Array.isArray(value)) return value.slice(0, 32).map((entry) => publicComputerResult(entry, depth + 1));
+    if (typeof value !== "object") return undefined;
+    const out = {};
+    for (const [key, entry] of Object.entries(value).slice(0, 32)) {
+        if (/token|secret|cookie|credential|endpoint|transport|path|cwd|session|continuation|provider|backend|raw/i.test(key)) continue;
+        out[publicComputerText(key, 80)] = publicComputerResult(entry, depth + 1);
+    }
+    return out;
+}
+
+function publicComputerHealth(adapter, identity) {
+    const raw = typeof adapter?.health === "function" ? adapter.health() : undefined;
+    const value = raw && typeof raw === "object" ? raw : {};
+    const computer = value.computer && typeof value.computer === "object" ? value.computer : value;
+    return {
+        protocol: WORKER_COMPUTER_PROTOCOL,
+        computer: {
+            id: publicComputerText(computer.id ?? `computer:${identity.nodeId}`, 160),
+            name: publicComputerText(computer.name ?? "Worker Computer", 120),
+            state: ["online", "capacity-limited", "offline", "attention"].includes(computer.state) ? computer.state : "offline",
+            capacity: Number.isInteger(computer.capacity) && computer.capacity >= 0 ? computer.capacity : 0,
+            currentLoad: Number.isInteger(computer.currentLoad) && computer.currentLoad >= 0 ? computer.currentLoad : 0,
+            capabilities: Array.isArray(computer.capabilities) ? [...new Set(computer.capabilities.map((entry) => publicComputerText(entry, 64)))].slice(0, 24) : [],
+        },
+    };
+}
+
+export function createWorkerNodeService({ config, runtime, identity, ledger, computerAdapter, computerLedger, now = () => Date.now() } = {}) {
     const validated = validateWorkerNodeConfig(config);
     if (!runtime?.orchestrator)
         throw new Error("Worker Node service requires a Core runtime");
@@ -138,6 +180,7 @@ export function createWorkerNodeService({ config, runtime, identity, ledger, now
     const workspaceById = new Map(validated.workspaces.map((entry) => [entry.id, entry]));
     const worker = validated.agents.find((entry) => entry.id === validated.workerAgentId);
     const dispatchStore = ledger ?? new WorkerNodeDispatchStore(validated.dataDir, { now });
+    const computerActionStore = computerLedger ?? new WorkerComputerActionStore(validated.dataDir, { now });
     const locks = new Map();
 
     function sanitizedError(error) {
@@ -325,7 +368,39 @@ export function createWorkerNodeService({ config, runtime, identity, ledger, now
             capabilities: [...new Set(worker.capabilities)].sort(),
             workspaces: validated.workspaces.map(({ id, name }) => ({ id, name })),
             activeTaskCount: tasks.filter((task) => ACTIVE_TASK_STATUSES.has(task.status)).length,
+            computer: publicComputerHealth(computerAdapter, identity).computer,
         };
+    }
+
+    async function computerHealth() {
+        return publicComputerHealth(computerAdapter, identity);
+    }
+
+    async function computerAction(input) {
+        const envelope = validateComputerEnvelope(input);
+        const hash = computerEnvelopeHash(envelope);
+        const existing = await computerActionStore.get(envelope.requestId);
+        if (existing) {
+            if (existing.bodyHash !== hash) throw new WorkerNodeProtocolError("requestId is already bound to a different Computer action", 409, "conflict");
+            return { protocol: WORKER_COMPUTER_PROTOCOL, requestId: envelope.requestId, status: existing.status, summary: existing.summary, ...(existing.result === undefined ? {} : { result: existing.result }), duplicate: true };
+        }
+        const computer = (await computerHealth()).computer;
+        if (computer.id !== envelope.computerId) throw new WorkerNodeProtocolError("Computer target is not advertised by this Worker Node", 422, "computer_mismatch");
+        if (!validated.workspaces.some((entry) => entry.id === envelope.workspaceId)) throw new WorkerNodeProtocolError("workspace is not advertised by this Worker Node", 422, "workspace_mismatch");
+        if (!computerAdapter || typeof computerAdapter.execute !== "function" || !["online", "capacity-limited"].includes(computer.state))
+            throw new WorkerNodeProtocolError("Worker Computer is unavailable", 503, "computer_unavailable");
+        if (!computer.capabilities.includes(envelope.operation) && !["snapshot", "health"].includes(envelope.operation))
+            throw new WorkerNodeProtocolError("Worker Computer cannot satisfy the requested capability", 422, "capability_mismatch");
+        const started = new Date(now()).toISOString();
+        try {
+            const result = publicComputerResult(await computerAdapter.execute({ operation: envelope.operation, input: envelope.input, jobId: envelope.jobId, ownerCoworkerId: envelope.ownerCoworkerId, projectId: envelope.projectId, workspaceId: envelope.workspaceId, computerId: envelope.computerId, attempt: envelope.attempt }));
+            const record = await computerActionStore.put({ requestId: envelope.requestId, bodyHash: hash, status: "completed", result, summary: "Worker Computer action completed", createdAt: started, updatedAt: new Date(now()).toISOString() });
+            return { protocol: WORKER_COMPUTER_PROTOCOL, requestId: envelope.requestId, status: record.status, summary: record.summary, result: record.result, duplicate: false };
+        }
+        catch (error) {
+            await computerActionStore.put({ requestId: envelope.requestId, bodyHash: hash, status: "failed", summary: publicComputerText(error?.message ?? "Worker Computer action failed", 500), createdAt: started, updatedAt: new Date(now()).toISOString() }).catch(() => undefined);
+            throw new WorkerNodeProtocolError("Worker Computer action failed", 503, "computer_failure");
+        }
     }
 
     return {
@@ -335,7 +410,9 @@ export function createWorkerNodeService({ config, runtime, identity, ledger, now
         taskStatus,
         cancel,
         health,
-        async init() { await dispatchStore.init(); },
+        computerHealth,
+        computerAction,
+        async init() { await dispatchStore.init(); await computerActionStore.init(); },
         async close() { await runtime.close?.(); },
     };
 }
@@ -382,12 +459,12 @@ function taskIdFromPath(pathname, cancel = false) {
     return undefined;
 }
 
-export async function startWorkerNodeServer({ config, runtime, identity, ledger, serverFactory = createServer } = {}) {
+export async function startWorkerNodeServer({ config, runtime, identity, ledger, computerAdapter, computerLedger, serverFactory = createServer } = {}) {
     const validated = validateWorkerNodeConfig(config);
     const privateIdentity = identity ?? await loadOrCreateWorkerIdentity(validated.dataDir, { name: validated.name });
     const ownedRuntime = runtime ? false : true;
     const coreRuntime = runtime ?? await createRuntime(validated);
-    const service = createWorkerNodeService({ config: validated, runtime: coreRuntime, identity: privateIdentity, ledger });
+    const service = createWorkerNodeService({ config: validated, runtime: coreRuntime, identity: privateIdentity, ledger, computerAdapter, computerLedger });
     await service.init();
     const server = serverFactory(async (request, response) => {
         try {
@@ -411,6 +488,15 @@ export async function startWorkerNodeServer({ config, runtime, identity, ledger,
             }
             if (request.method === "GET" && url.pathname === "/v1/health") {
                 sendJson(response, 200, await service.health());
+                return;
+            }
+            if (request.method === "GET" && url.pathname === "/v1/computer/health") {
+                sendJson(response, 200, await service.computerHealth());
+                return;
+            }
+            if (request.method === "POST" && url.pathname === "/v1/computer/action") {
+                const result = await service.computerAction(await readJsonBody(request));
+                sendJson(response, result.duplicate ? 200 : 202, result);
                 return;
             }
             if (request.method === "POST" && url.pathname === "/v1/dispatch") {

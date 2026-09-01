@@ -28,11 +28,12 @@
     if ($("job-execution") || !$("job-form-error")) return;
     const makeLabel = (caption, control) => { const label = document.createElement("label"); label.textContent = caption; label.append(control); return label; };
     const execution = document.createElement("select"); execution.id = "job-execution";
-    for (const [value, caption] of [["local", "This PC / 此电脑"], ["worker-node", "Paired Worker Node / 已配对工作节点"]]) { const option = document.createElement("option"); option.value = value; option.textContent = caption; execution.append(option); }
+    for (const [value, caption] of [["local", "This PC / 此电脑"], ["worker-node", "Paired Worker Node / 已配对工作节点"], ["worker-computer", "Worker Computer / 工作电脑"]]) { const option = document.createElement("option"); option.value = value; option.textContent = caption; execution.append(option); }
     const node = document.createElement("select"); node.id = "job-node";
     const workspace = document.createElement("select"); workspace.id = "job-node-workspace";
+    const computer = document.createElement("select"); computer.id = "job-computer";
     const nodeFields = document.createElement("div"); nodeFields.id = "job-node-fields"; nodeFields.className = "hidden";
-    nodeFields.append(makeLabel("Worker Node", node), makeLabel("Node workspace", workspace));
+    nodeFields.append(makeLabel("Worker Node", node), makeLabel("Node workspace", workspace), makeLabel("Computer target", computer));
     $("job-form-error").before(makeLabel("Execution", execution), nodeFields);
   }
 
@@ -302,7 +303,29 @@
       document.querySelector(".workspace-shell")?.append(section);
     }
     applyRoutineLocale();
+    ensureRoutineComputerSurface();
     renderRoutineTemplateGallery();
+  }
+
+  function ensureRoutineComputerSurface() {
+    if ($("routine-execution") || !$("routine-form-error")) return;
+    const makeLabel = (caption, control) => { const node = document.createElement("label"); node.textContent = caption; node.append(control); return node; };
+    const mode = document.createElement("select"); mode.id = "routine-execution";
+    for (const pair of [["local", "This PC / 此电脑"], ["worker-computer", "Worker Computer / 工作电脑"]]) { const option = document.createElement("option"); option.value = pair[0]; option.textContent = pair[1]; mode.append(option); }
+    const node = document.createElement("select"); node.id = "routine-computer-node";
+    const workspace = document.createElement("select"); workspace.id = "routine-computer-workspace";
+    const computer = document.createElement("select"); computer.id = "routine-computer";
+    const fields = document.createElement("div"); fields.id = "routine-computer-fields"; fields.className = "hidden";
+    fields.append(makeLabel("Worker Node", node), makeLabel("Node workspace", workspace), makeLabel("Computer target", computer));
+    $("routine-form-error").before(makeLabel("Execution", mode), fields);
+    mode.addEventListener("change", () => { const remote = mode.value === "worker-computer"; fields.classList.toggle("hidden", !remote); workspace.toggleAttribute("required", remote); node.toggleAttribute("required", remote); computer.toggleAttribute("required", remote); });
+    node.addEventListener("change", () => {
+      const selected = workerNodes.find((entry) => entry.nodeId === node.value);
+      workspace.textContent = "";
+      for (const item of selected?.workspaces ?? []) { const option = document.createElement("option"); option.value = item.id; option.textContent = item.name + " (" + item.id + ")"; workspace.append(option); }
+      const target = selected?.computer; computer.textContent = "";
+      if (target?.id) { const option = document.createElement("option"); option.value = target.id; option.textContent = (target.name ?? "Worker Computer") + " (" + target.state + ")"; computer.append(option); }
+    });
   }
 
   function renderRoutineTemplateGallery() {
@@ -477,13 +500,17 @@
   }
 
   async function populateRoutineForm() {
-    const [cw, skills, workspaces, teams, projects] = await Promise.all([
+    const [cw, skills, workspaces, teams, projects, workerResult] = await Promise.all([
       window.sovereignbot.coworkers.list({}).catch(() => ({ coworkers: [] })),
       window.sovereignbot.skills.list({}).catch(() => ({ skills: [] })),
       window.sovereignbot.workspaces.list({}).catch(() => ({ workspaces: [] })),
       window.sovereignbot.teams.list({}).catch(() => ({ teams: [] })),
       window.sovereignbot.projects.list({}).catch(() => ({ projects: [] })),
+      window.sovereignbot.workerNodes.list({}).catch(() => ({ nodes: [] })),
     ]);
+    workerNodes = workerResult?.nodes ?? [];
+    const routineNode = $("routine-computer-node");
+    if (routineNode) { routineNode.textContent = ""; for (const item of workerNodes.filter((entry) => entry.enabled && entry.status === "online" && ["online", "capacity-limited"].includes(entry.computer?.state))) { const option = document.createElement("option"); option.value = item.nodeId; option.textContent = item.name + " (" + item.nodeId + ")"; routineNode.append(option); } routineNode.dispatchEvent(new Event("change")); }
     populateOwnerSelect(cw?.coworkers ?? [], "routine-owner");
     const skill = $("routine-skill"); skill.textContent = "";
     const none = document.createElement("option"); none.value = ""; none.textContent = t("routines.noSkill", "No skill"); skill.append(none);
@@ -589,10 +616,13 @@
     $("work-refresh")?.addEventListener("click", refresh);
     $("work-new")?.addEventListener("click", async () => { try { const cw = await window.sovereignbot.coworkers.list({}); populateOwnerSelect(cw?.coworkers ?? []); } catch {} await populateExecutionTargetForm(); $("job-dialog")?.showModal?.(); });
     $("job-execution")?.addEventListener("change", () => {
-      const remote = $("job-execution").value === "worker-node";
+      const mode = $("job-execution").value;
+      const remote = ["worker-node", "worker-computer"].includes(mode);
+      const computer = mode === "worker-computer";
       $("job-node-fields")?.classList.toggle("hidden", !remote);
       $("job-node-workspace")?.toggleAttribute("required", remote);
       $("job-node")?.toggleAttribute("required", remote);
+      $("job-computer")?.toggleAttribute("required", computer);
     });
     $("job-node")?.addEventListener("change", () => {
       const workspace = $("job-node-workspace");
@@ -602,14 +632,22 @@
       for (const entry of selected?.workspaces ?? []) {
         const option = document.createElement("option"); option.value = entry.id; option.textContent = `${entry.name} (${entry.id})`; workspace.append(option);
       }
+      const computer = $("job-computer");
+      if (computer) {
+        computer.textContent = "";
+        const target = selected?.computer;
+        if (target?.id) { const option = document.createElement("option"); option.value = target.id; option.textContent = `${target.name ?? "Worker Computer"} (${target.state}, ${target.currentLoad ?? 0}/${target.capacity ?? 0})`; computer.append(option); }
+      }
     });
     $("job-form")?.addEventListener("submit", async (e) => {
       e.preventDefault(); const errEl = $("job-form-error"); errEl?.classList.add("hidden");
       try {
-        const target = $("job-execution")?.value === "worker-node"
+        const mode = $("job-execution")?.value;
+        const target = mode === "worker-node"
           ? { kind: "worker-node", nodeId: $("job-node").value, workspaceId: $("job-node-workspace").value }
           : { kind: "local" };
-        await window.sovereignbot.jobs.submit({ title: $("job-title").value.trim(), objective: $("job-objective").value.trim(), ownerCoworkerId: $("job-owner").value, executionTarget: target });
+        const computerTarget = mode === "worker-computer" ? { kind: "worker-computer", nodeId: $("job-node").value, workspaceId: $("job-node-workspace").value, computerId: $("job-computer").value } : undefined;
+        await window.sovereignbot.jobs.submit({ title: $("job-title").value.trim(), objective: $("job-objective").value.trim(), ownerCoworkerId: $("job-owner").value, executionTarget: target, ...(computerTarget ? { computerTarget, computerActions: [{ operation: "snapshot", input: {} }] } : {}) });
         $("job-dialog")?.close(); $("job-form")?.reset(); await refresh();
       }
       catch (err) { if (errEl) { errEl.textContent = String(err?.message ?? err).replace(/^.*Error: /, "").slice(0, 400); errEl.classList.remove("hidden"); } }
@@ -626,7 +664,9 @@
     $("routine-form")?.addEventListener("submit", async (e) => {
       e.preventDefault(); const err = $("routine-form-error"); err?.classList.add("hidden");
       try {
-        await window.sovereignbot.routines.create({ name: $("routine-name").value.trim(), instruction: $("routine-instruction").value.trim(), coworkerId: $("routine-owner").value, teamId: $("routine-team").value || undefined, projectId: $("routine-project").value || undefined, skillId: $("routine-skill").value || undefined, workspaceId: $("routine-workspace").value || undefined, schedule: scheduleFromForm() });
+        const remoteRoutine = $("routine-execution")?.value === "worker-computer";
+        const routineTarget = remoteRoutine ? { kind: "worker-computer", nodeId: $("routine-computer-node").value, workspaceId: $("routine-computer-workspace").value, computerId: $("routine-computer").value } : undefined;
+        await window.sovereignbot.routines.create({ name: $("routine-name").value.trim(), instruction: $("routine-instruction").value.trim(), coworkerId: $("routine-owner").value, teamId: $("routine-team").value || undefined, projectId: $("routine-project").value || undefined, skillId: $("routine-skill").value || undefined, workspaceId: $("routine-workspace").value || undefined, schedule: scheduleFromForm(), ...(routineTarget ? { computerTarget: routineTarget, computerActions: [{ operation: "snapshot", input: {} }] } : {}) });
         $("routine-dialog")?.close(); $("routine-form")?.reset(); await refreshRoutines();
       } catch (error) { if (err) { err.textContent = String(error?.message ?? error).replace(/^.*Error: /, "").slice(0,400); err.classList.remove("hidden"); } }
     });

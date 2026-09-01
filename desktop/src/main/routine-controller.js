@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 import { normalizeEventMetadata, normalizeEventRelativePath } from "./lib/event-metadata.js";
+import { normalizeComputerTarget } from "./computer-target-controller.js";
 
 export const ROUTINES_SCHEMA = "sovereignbot.desktop.routines.v1";
 export const ROUTINE_HISTORY_LIMIT = 100;
@@ -124,6 +125,7 @@ function sanitizeRoutine(entry) {
     const name = String(entry.name ?? "").trim();
     const instruction = String(entry.instruction ?? "").trim();
     if (!name || name.length > MAX_NAME || !instruction || instruction.length > MAX_INSTRUCTION) return undefined;
+    const computerTarget = entry.computerTarget === undefined ? undefined : normalizeComputerTarget(entry.computerTarget);
     return {
       id: entry.id,
       name,
@@ -135,6 +137,8 @@ function sanitizeRoutine(entry) {
       instruction,
       skillId: entry.skillId ? String(entry.skillId) : undefined,
       workspaceId: entry.workspaceId ? String(entry.workspaceId) : undefined,
+      computerTarget,
+      computerActions: Array.isArray(entry.computerActions) ? entry.computerActions.map((action) => ({ operation: String(action.operation), input: structuredClone(action.input ?? {}) })) : undefined,
       schedule: normalizeRoutineSchedule(entry.schedule),
       createdAt: String(entry.createdAt ?? ""),
       updatedAt: String(entry.updatedAt ?? ""),
@@ -147,7 +151,7 @@ function sanitizeRoutine(entry) {
   } catch { return undefined; }
 }
 
-export function createRoutineController({ dataDir, jobController, coworkerStore, skillStore, services, projectService, teamService, persistPath, now = () => Date.now(), makeId = makeRoutineId, makeHistoryId = makeRunId, makeEventId = makeEventRunId } = {}) {
+export function createRoutineController({ dataDir, jobController, coworkerStore, skillStore, services, projectService, teamService, computerTargetController, persistPath, now = () => Date.now(), makeId = makeRoutineId, makeHistoryId = makeRunId, makeEventId = makeEventRunId } = {}) {
   if (!dataDir) throw new Error("routine controller requires dataDir");
   if (!jobController?.submitJob || !jobController?.getJob) throw new Error("routine controller requires jobController");
   if (!coworkerStore?.get) throw new Error("routine controller requires coworkerStore");
@@ -194,6 +198,8 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
       teamId: routine.teamId,
       projectId: routine.projectId,
       workspaceId: routine.workspaceId,
+      computerTarget: routine.computerTarget ? clone(routine.computerTarget) : undefined,
+      computerActions: routine.computerActions?.map(({ operation }) => ({ operation })),
       state: routine.state,
       schedule: clone(routine.schedule),
       createdAt: routine.createdAt,
@@ -281,6 +287,7 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
         title: routine.name,
         objective: routine.instruction,
         ownerCoworkerId: routine.coworkerId,
+        ...(routine.computerTarget ? { computerTarget: routine.computerTarget, computerActions: routine.computerActions } : {}),
         internalContext: {
           routineId: routine.id,
           scheduledFor,
@@ -386,7 +393,7 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
   }
 
   return {
-    create({ name, coworkerId, teamId, projectId, instruction, skillId, workspaceId, schedule } = {}) {
+    create({ name, coworkerId, teamId, projectId, instruction, skillId, workspaceId, schedule, computerTarget, computerActions } = {}) {
       const cleanName = typeof name === "string" ? name.trim() : "";
       const cleanInstruction = typeof instruction === "string" ? instruction.trim() : "";
       if (!cleanName) throw new Error("routine name is required");
@@ -396,6 +403,10 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
       if (!coworkerId) throw new Error("routine coworkerId is required");
       const normalizedSchedule = normalizeRoutineSchedule(schedule);
       const refs = { coworkerId: String(coworkerId), teamId: teamId ? String(teamId) : undefined, projectId: projectId ? String(projectId) : undefined, skillId: skillId ? String(skillId) : undefined, workspaceId: workspaceId ? String(workspaceId) : undefined };
+      const normalizedComputerTarget = computerTarget === undefined ? undefined : normalizeComputerTarget(computerTarget);
+      if (normalizedComputerTarget && refs.workspaceId && refs.workspaceId !== normalizedComputerTarget.workspaceId) throw new Error("Routine Computer target workspace does not match Routine workspace");
+      if (normalizedComputerTarget && !computerTargetController) throw new Error("Worker Computer target is unavailable");
+      const normalizedComputerActions = normalizedComputerTarget ? computerTargetController.normalizeActions(computerActions) : undefined;
       validateRefs(refs);
       const stamp = nowIso(now);
       const routine = {
@@ -409,6 +420,8 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
         instruction: cleanInstruction,
         skillId: refs.skillId,
         workspaceId: refs.workspaceId,
+        computerTarget: normalizedComputerTarget,
+        computerActions: normalizedComputerActions,
         schedule: normalizedSchedule,
         createdAt: stamp,
         updatedAt: stamp,
