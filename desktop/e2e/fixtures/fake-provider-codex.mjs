@@ -28,11 +28,26 @@ function phase() {
     return "work";
 }
 
+function fanoutPhase() {
+    if (process.env.FAKE_PROVIDER_FANOUT_CANARY !== "1" || !/FANOUT_CANARY/.test(prompt)) return undefined;
+    if (/independent fan-out child/i.test(prompt)) return "fanout-child";
+    if (/required independent review of parallel specialist results/i.test(prompt)) return "fanout-review";
+    if (/original owner's join step/i.test(prompt)) return "fanout-join";
+    if (/For independent parallel work/i.test(prompt)) return "fanout-owner";
+    return undefined;
+}
+
+function fanoutRoster() {
+    const ids = prompt.match(/coworker_[a-f0-9]{16}/gi) ?? [];
+    return [...new Set(ids)];
+}
+
 const resumeIndex = args.indexOf("resume");
 const resumed = resumeIndex >= 0;
 const sessionId = resumed ? args[resumeIndex + 1] : `fake-codex-session-${Date.now().toString(36)}`;
 const cwd = process.cwd();
-const kind = phase();
+const kind = fanoutPhase() ?? phase();
+const negativeFanout = /negative-stop/.test(prompt);
 
 // The V4.5 real Worker Node gate can hold one explicitly marked task long enough
 // to exercise confirmed remote cancellation. Normal fake-provider contracts remain
@@ -40,6 +55,9 @@ const kind = phase();
 const cancelHoldMs = Number(process.env.FAKE_PROVIDER_DELAY_MS ?? 0);
 if (cancelHoldMs > 0 && /V45_CANCEL_HOLD/.test(prompt))
     await new Promise((resolve) => setTimeout(resolve, Math.min(cancelHoldMs, 60_000)));
+
+if (kind === "fanout-child")
+    await new Promise((resolve) => setTimeout(resolve, negativeFanout ? 1_200 : 260));
 
 if (args.includes("--help")) {
     process.stdout.write([
@@ -72,7 +90,33 @@ const PROPOSAL = {
 };
 
 let text;
-if (kind === "planning") {
+if (kind === "fanout-owner") {
+    const [firstChild, secondChild, reviewer] = fanoutRoster();
+    const stopMarker = negativeFanout ? " negative-stop" : "";
+    text = `parallel bounded work requested\nSOVEREIGN_FANOUT: ${JSON.stringify({
+        reviewerCoworkerId: reviewer,
+        children: [
+            { key: "research", coworkerId: firstChild, task: `Research the bounded acceptance criteria.${stopMarker}` },
+            { key: "implement", coworkerId: secondChild, task: `Implement the bounded change and report the result.${stopMarker}` },
+        ],
+    })}`;
+}
+else if (kind === "fanout-child") {
+    const childKey = /independent fan-out child ([a-z0-9_-]+)/i.exec(prompt)?.[1] ?? "specialist";
+    const artifactLine = childKey === "implement"
+        ? `\nSOVEREIGN_ARTIFACTS: [{"path":"fanout-implementation.md","title":"Fanout implementation"}]`
+        : "";
+    if (childKey === "implement")
+        writeFileSync(join(cwd, "fanout-implementation.md"), "# Fanout implementation\n\nDeterministic bounded child result.\n", "utf8");
+    text = `FANOUT CHILD RESULT(fake): ${childKey} submitted${artifactLine}`;
+}
+else if (kind === "fanout-review") {
+    text = `FANOUT REVIEW RESULT(fake): independent results approved\nSOVEREIGN_REVIEW: "approved"`;
+}
+else if (kind === "fanout-join") {
+    text = "FANOUT JOIN RESULT(fake): Chief completed synthesis.";
+}
+else if (kind === "planning") {
     text = `${"```json"}\n${JSON.stringify(PROPOSAL)}\n${"```"}`;
 }
 else if (kind === "review") {

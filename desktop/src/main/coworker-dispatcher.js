@@ -836,7 +836,6 @@ export function createCoworkerDispatcher({
     }
 
     async function stopConversation(conversationId, reason = "conversation stopped by the user", actor = "desktop-operator", expectedContext) {
-        const controlContext = expectedContext ?? teamFlow?.collaborationContextForConversation?.(conversationId);
         const prefix = `${conversationId}:`;
         const taskIds = [...activeTasks.entries()]
             .filter(([key]) => key.startsWith(prefix))
@@ -860,7 +859,11 @@ export function createCoworkerDispatcher({
             // Cancellation must remain best-effort even if a delivery disappeared
             // concurrently; the orchestrator cancellation result is still useful.
         }
-        teamFlow?.stopRun?.(conversationId, reason, controlContext);
+        // Cancellation can settle child tasks and advance the collaboration
+        // ledger before the stop event is committed. Read the current context
+        // after cancellation instead of reusing a stale pre-cancel revision.
+        const currentContext = teamFlow?.collaborationContextForConversation?.(conversationId) ?? expectedContext;
+        teamFlow?.stopRun?.(conversationId, reason, currentContext);
         return {
             requested: taskIds.length,
             cancelled: results.filter((entry) => entry.status === "fulfilled").length,

@@ -1482,8 +1482,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                 .map(([id]) => id)),
             ])]
             : [];
-        const status = flow.attentionReason || flow.runStatus === "attention" ? "needs-attention"
-            : flow.runStatus === "stopped" ? "stopped"
+        const status = flow.runStatus === "stopped" ? "stopped"
+            : flow.attentionReason || flow.runStatus === "attention" ? "needs-attention"
                 : pending.length ? "active"
                     : flow.stage === "complete" || flow.runStatus === "completed" ? "available" : "waiting";
         const effectiveOwnerId = flow.stage === "complete" ? undefined : flow.ownerId ?? currentOwnerId;

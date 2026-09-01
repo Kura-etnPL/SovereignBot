@@ -704,6 +704,10 @@ async function refreshConversation(forceScroll = false) {
     void refreshInlineAttention(id);
     await refreshConversations();
     if (state.teams.length) await refreshTeams();
+    // Team flow state is refreshed after the conversation header. Re-render the
+    // details panel so active fanout status is visible without waiting for the
+    // next polling cycle.
+    if (state.selectedConversation) renderDetails(state.selectedConversation);
   } catch (error) {
     $("composer-error").textContent = text(error?.message || error);
     show($("composer-error"));
@@ -843,7 +847,10 @@ function renderDetails(conversation) {
   const parallel = team?.flow?.activeFanout;
   if (parallel?.children?.length) {
     const done = parallel.children.filter((entry) => entry.status === "completed").length;
-    $("details-current-work").textContent = `${done}/${parallel.children.length} specialists complete · ${parallel.state === "reviewing" ? "Reviewing" : parallel.state === "join_requested" || parallel.state === "joining" ? "Joining results" : "Parallel work"}`;
+    const parallelStatus = parallel.state === "stopped" || parallel.state === "blocked"
+      ? "Attention"
+      : parallel.state === "reviewing" ? "Reviewing" : parallel.state === "join_requested" || parallel.state === "joining" ? "Joining results" : "Parallel work";
+    $("details-current-work").textContent = `${done}/${parallel.children.length} specialists complete · ${parallelStatus}`;
   } else $("details-current-work").textContent = team?.flow?.currentOwner
     ? `${team.flow.status === "needs-attention" ? "Attention" : team.flow.status === "active" ? "Active" : team.flow.status === "stopped" ? "Attention" : "Waiting"} · ${team.flow.currentOwner}${activitySuffix}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";

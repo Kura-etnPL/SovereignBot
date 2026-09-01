@@ -37,6 +37,7 @@ const env = {
     FAKE_PROVIDER_DIR: FAKE_DIR,
     FAKE_PROVIDER_TRANSCRIPT: TRANSCRIPT,
     FAKE_PROVIDER_TEAM_CANARY: "1",
+    FAKE_PROVIDER_FANOUT_CANARY: "1",
     FAKE_PROVIDER_INCLUDE_CWD: "0",
 };
 for (const key of Object.keys(env)) {

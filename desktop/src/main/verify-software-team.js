@@ -253,6 +253,189 @@ export async function runVerifySoftwareTeam({
             [...messages].reverse().find((entry) => entry.senderId === chiefId) ? "Chief of Staff" : undefined,
         ];
         check("OWNER_STATUS_AND_FINAL_SYNTHESIS", stageOwners[0]?.includes("Coding Lead") && stageOwners.slice(1).every(Boolean) && finished.flow.stage === "complete", stageOwners);
+
+        // Exercise the same public product path for a four-coworker team. The pack is
+        // imported through the renderer so Electron IPC, TeamService's governed
+        // workspace provisioning, runtime refresh, and the normal UI projection all
+        // participate in this canary.
+        const recipe = await renderer("window.sovereignbot.teams.exportPackRecipe({ packId: 'software-team' })");
+        const fanoutPack = {
+            ...recipe,
+            id: "fanout-canary-pack",
+            name: "Fanout Canary Team",
+            description: "Four-coworker parallel delivery canary.",
+            coworkers: [
+                recipe.coworkers[0],
+                recipe.coworkers[1],
+                {
+                    key: "researcher",
+                    name: "Researcher",
+                    role: "Research the bounded acceptance criteria independently.",
+                    instructions: "Work only on the bounded research task and return a concise evidence note.",
+                    avatar: "⌕",
+                    // Reuse the Researcher that is already bound in the fresh
+                    // runtime roster; importing a new binding during active work
+                    // is intentionally rejected by RuntimeHost.
+                    modelBinding: { profile: "automatic" },
+                },
+                recipe.coworkers.at(-1),
+            ],
+            channels: [{
+                ...recipe.channels[0],
+                name: "Fanout Room",
+                instructions: "Chief coordinates two independent specialists, Reviewer checks both, and Chief joins the result.",
+                playbookId: "fanout-delivery",
+            }],
+            playbooks: [{
+                ...recipe.playbooks[0],
+                id: "fanout-delivery",
+                name: "Parallel Delivery",
+                description: "Chief coordinates → two specialists work independently → Reviewer checks → Chief joins.",
+                steps: ["chief", "coding-lead", "researcher", "reviewer", "chief"],
+            }],
+        };
+        await renderer(`(()=>{
+            const area = document.getElementById('team-pack-json');
+            area.value = ${JSON.stringify(JSON.stringify(fanoutPack))};
+            document.getElementById('team-pack-form').requestSubmit();
+            return true;
+        })()`);
+        const importedFanout = await waitFor("four-coworker fanout team import", async () => {
+            const listed = await renderer("window.sovereignbot.teams.list({})");
+            const candidate = listed?.teams?.find((entry) => entry.name === "Fanout Canary Team");
+            return candidate?.coworkers?.length === 4 && candidate.channels?.[0] ? candidate : false;
+        }, 30_000);
+        const fanoutChannel = importedFanout.channels[0];
+        const fanoutNames = importedFanout.coworkers.map((entry) => entry.name);
+        check("FANOUT_ELECTRON_TEAM_READY", fanoutNames.join("|") === "Chief of Staff|Coding Lead|Researcher|Reviewer", { coworkerCount: fanoutNames.length, coworkers: fanoutNames });
+        await waitFor("Fanout Room visible", async () => await renderer(`document.getElementById("conversation-title")?.textContent === ${JSON.stringify(fanoutChannel.name)}`), 30_000);
+
+        await renderer(`window.sovereignbot.conversations.send(${JSON.stringify({
+            conversationId: fanoutChannel.conversationId,
+            text: "FANOUT_CANARY: run two independent bounded subtasks, review both results, and join the completed outcome.",
+            clientMessageId: "canary-fanout-positive",
+        })})`);
+        await waitFor("positive fanout message visible", async () => await renderer("document.getElementById('conversation-messages')?.innerText.includes('FANOUT_CANARY')"), 30_000);
+        await renderer("document.getElementById('open-details')?.click(); true");
+        await waitFor("fanout details panel open", async () => await renderer("!document.getElementById('details-panel')?.classList.contains('hidden')"), 10_000);
+        const fanoutRunning = await waitFor("parallel fanout work", async () => {
+            const team = await renderer(`window.sovereignbot.teams.get({ teamId: ${JSON.stringify(importedFanout.id)} })`);
+            const conversation = await renderer(`window.sovereignbot.conversations.get({ conversationId: ${JSON.stringify(fanoutChannel.conversationId)} })`);
+            const activity = await renderer(`window.sovereignbot.teams.activity({ conversationId: ${JSON.stringify(fanoutChannel.conversationId)}, limit: 40 })`);
+            const fanout = team?.flow?.activeFanout;
+            return fanout && fanout.children?.length === 2 && ["running", "review_requested", "reviewing", "join_requested", "joining"].includes(fanout.state)
+                ? { team, conversation, activity, body: await renderer("document.body.innerText"), details: await renderer("({ hidden: document.getElementById('details-panel')?.classList.contains('hidden'), rect: (()=>{ const r = document.getElementById('details-panel')?.getBoundingClientRect(); return r ? { width: r.width, height: r.height } : undefined; })(), text: document.getElementById('details-panel')?.innerText || '' })") }
+                : false;
+        }, 45_000);
+        const activeFanout = fanoutRunning.team.flow.activeFanout;
+        check("FANOUT_PARALLEL_WORKING", activeFanout?.state && activeFanout.children?.length === 2
+            && activeFanout.owner === "Chief of Staff" && activeFanout.reviewer === "Reviewer"
+            && activeFanout.children.every((entry) => ["running", "completed"].includes(entry.status))
+            && activeFanout.children.some((entry) => entry.coworker === "Coding Lead")
+            && activeFanout.children.some((entry) => entry.coworker === "Researcher"), {
+            state: activeFanout?.state,
+            childCount: activeFanout?.children?.length ?? 0,
+            owner: activeFanout?.owner,
+            reviewer: activeFanout?.reviewer,
+        });
+        const fanoutUiBody = `${String(fanoutRunning.body ?? "")}\n${String(fanoutRunning.details?.text ?? "")}`;
+        check("FANOUT_UI_PROJECTION", fanoutRunning.details?.hidden === false && (fanoutRunning.details?.rect?.width ?? 0) > 0
+            && fanoutUiBody.includes("Fanout Canary Team") && fanoutUiBody.includes("Chief of Staff")
+            && fanoutUiBody.includes("Coding Lead") && fanoutUiBody.includes("Researcher") && fanoutUiBody.includes("Reviewer")
+            && (fanoutUiBody.includes("Parallel work") || fanoutUiBody.includes("specialists complete") || fanoutUiBody.includes("Reviewing")), {
+            rosterCount: fanoutNames.length,
+            panelHidden: fanoutRunning.details?.hidden,
+            panelWidth: fanoutRunning.details?.rect?.width,
+            hasParallelStatus: fanoutUiBody.includes("Parallel work") || fanoutUiBody.includes("specialists complete") || fanoutUiBody.includes("Reviewing"),
+        });
+        result.screenshots.push(await capture("fanout-parallel.png"));
+
+        const fanoutFinished = await waitFor("fanout review and join", async () => {
+            const team = await renderer(`window.sovereignbot.teams.get({ teamId: ${JSON.stringify(importedFanout.id)} })`);
+            const conversation = await renderer(`window.sovereignbot.conversations.get({ conversationId: ${JSON.stringify(fanoutChannel.conversationId)} })`);
+            const activity = await renderer(`window.sovereignbot.teams.activity({ conversationId: ${JSON.stringify(fanoutChannel.conversationId)}, limit: 40 })`);
+            const artifacts = await renderer(`window.sovereignbot.artifacts.list(${JSON.stringify({ conversationId: fanoutChannel.conversationId, limit: 20 })})`);
+            return team?.flow?.stage === "complete" && conversation.messages.some((entry) => entry.text.includes("FANOUT JOIN RESULT(fake)"))
+                ? { team, conversation, activity, artifacts, body: await renderer("document.body.innerText") }
+                : false;
+        }, 90_000);
+        const fanoutLabels = new Set((fanoutFinished.activity?.events ?? []).map((entry) => entry.label));
+        const requiredFanoutLabels = ["Parallel work", "Specialist working", "Specialist submitted", "Review requested", "Reviewing", "Approved", "Joining results", "Completed"];
+        check("FANOUT_ACTIVITY_PROJECTION", requiredFanoutLabels.every((label) => fanoutLabels.has(label))
+            && fanoutFinished.activity?.events?.some((entry) => entry.owner === "Chief of Staff")
+            && fanoutFinished.activity?.events?.some((entry) => entry.targetCoworker === "Coding Lead")
+            && fanoutFinished.activity?.events?.some((entry) => entry.targetCoworker === "Researcher"), {
+            labels: [...fanoutLabels].filter((label) => requiredFanoutLabels.includes(label)),
+            eventCount: fanoutFinished.activity?.events?.length ?? 0,
+        });
+        check("FANOUT_JOIN_COMPLETED", fanoutFinished.team.flow.stage === "complete"
+            && fanoutFinished.team.flow.status === "available"
+            && fanoutFinished.conversation.messages.some((entry) => entry.senderId === importedFanout.coworkerIds[0] && entry.text.includes("FANOUT JOIN RESULT(fake)"))
+            && fanoutFinished.artifacts?.artifacts?.length > 0, {
+            stage: fanoutFinished.team.flow.stage,
+            artifactCount: fanoutFinished.artifacts?.artifacts?.length ?? 0,
+        });
+        const fanoutPublicSurface = { flow: fanoutFinished.team.flow, activity: fanoutFinished.activity, conversation: fanoutFinished.conversation, body: fanoutFinished.body };
+        const forbiddenFanoutInternals = [dataDir, "fanoutId", "sourceMessageId", "ownerMessageId", "reviewMessageId", "taskId", "runId", "requestId", "operationId", "operationToken", "providerSession", "worktree", "batchId", "childId"];
+        check("FANOUT_PUBLIC_PROJECTION_REDACTED", !containsAny(fanoutPublicSurface, forbiddenFanoutInternals), { forbidden: containsAny(fanoutPublicSurface, forbiddenFanoutInternals) ?? null });
+        result.screenshots.push(await capture("fanout-completed.png"));
+        const positiveArtifactCount = fanoutFinished.artifacts?.artifacts?.length ?? 0;
+        const positiveJoinCount = fanoutFinished.conversation.messages.filter((entry) => entry.text.includes("FANOUT JOIN RESULT(fake)")).length;
+
+        // Negative path: use the real public stop IPC while both private child
+        // processes are still running. The stopped run must surface Attention and
+        // leave no published ArtifactStore result or join message behind.
+        await renderer(`window.sovereignbot.conversations.send(${JSON.stringify({
+            conversationId: fanoutChannel.conversationId,
+            text: "FANOUT_CANARY negative-stop: stop this parallel run before any child submits.",
+            clientMessageId: "canary-fanout-negative",
+        })})`);
+        await waitFor("negative fanout message visible", async () => await renderer("document.getElementById('conversation-messages')?.innerText.includes('negative-stop')"), 30_000);
+        await waitFor("negative stop button available", async () => await renderer("(()=>{ const button = document.getElementById('conversation-stop'); return Boolean(button && !button.classList.contains('hidden') && !button.disabled); })()"), 30_000);
+        const negativeRunning = await waitFor("negative fanout child work", async () => {
+            const team = await renderer(`window.sovereignbot.teams.get({ teamId: ${JSON.stringify(importedFanout.id)} })`);
+            return team?.flow?.activeFanout?.state === "running" && team.flow.activeFanout.children?.some((entry) => entry.status === "running") ? team : false;
+        }, 45_000);
+        const stopResult = await renderer(`(async()=>{
+            const result = await window.sovereignbot.conversations.stop(${JSON.stringify({ conversationId: fanoutChannel.conversationId })});
+            await openConversation(${JSON.stringify(fanoutChannel.conversationId)});
+            return result;
+        })()`);
+        await renderer("document.getElementById('open-details')?.click(); true");
+        await waitFor("stopped fanout details panel open", async () => await renderer("!document.getElementById('details-panel')?.classList.contains('hidden')"), 10_000);
+        const negativeStopped = await waitFor("stopped fanout attention state", async () => {
+            const team = await renderer(`window.sovereignbot.teams.get({ teamId: ${JSON.stringify(importedFanout.id)} })`);
+            const conversation = await renderer(`window.sovereignbot.conversations.get({ conversationId: ${JSON.stringify(fanoutChannel.conversationId)} })`);
+            const artifacts = await renderer(`window.sovereignbot.artifacts.list(${JSON.stringify({ conversationId: fanoutChannel.conversationId, limit: 20 })})`);
+            const activity = await renderer(`window.sovereignbot.teams.activity({ conversationId: ${JSON.stringify(fanoutChannel.conversationId)}, limit: 12 })`);
+            const details = await renderer("document.getElementById('details-panel')?.innerText || ''");
+            return team?.flow?.status === "stopped" && team.flow.activeFanout?.state === "stopped" && String(details).includes("Attention")
+                ? { team, conversation, artifacts, activity, body: await renderer("document.body.innerText"), details }
+                : false;
+        }, 30_000);
+        check("FANOUT_NEGATIVE_STOP_FAILS_CLOSED", negativeRunning.flow.activeFanout.children.some((entry) => entry.status === "running")
+            && stopResult && negativeStopped.team.flow.status === "stopped" && negativeStopped.team.flow.activeFanout?.state === "stopped"
+            && negativeStopped.activity?.events?.some((entry) => entry.label === "Attention"), {
+            status: negativeStopped.team.flow.status,
+            fanoutState: negativeStopped.team.flow.activeFanout?.state,
+            attention: negativeStopped.activity?.events?.some((entry) => entry.label === "Attention") === true,
+        });
+        const negativeJoinCount = negativeStopped.conversation.messages.filter((entry) => entry.text.includes("FANOUT JOIN RESULT(fake)")).length;
+        check("FANOUT_NEGATIVE_NO_ARTIFACT_OR_JOIN", (negativeStopped.artifacts?.artifacts?.length ?? 0) === positiveArtifactCount
+            && negativeJoinCount === positiveJoinCount, {
+            artifactCount: negativeStopped.artifacts?.artifacts?.length ?? 0,
+            baselineArtifactCount: positiveArtifactCount,
+            joinCount: negativeJoinCount,
+            baselineJoinCount: positiveJoinCount,
+        });
+        const negativeAttentionVisible = `${String(negativeStopped.body ?? "")}\n${String(negativeStopped.details ?? "")}`.includes("Attention")
+            || negativeStopped.activity?.events?.some((entry) => entry.label === "Attention");
+        check("FANOUT_NEGATIVE_UI_ATTENTION", negativeAttentionVisible
+            && !containsAny({ team: negativeStopped.team.flow, activity: negativeStopped.activity, conversation: negativeStopped.conversation }, forbiddenFanoutInternals), {
+            status: negativeStopped.team.flow.status,
+            attentionVisible: negativeAttentionVisible,
+            forbidden: containsAny({ team: negativeStopped.team.flow, activity: negativeStopped.activity, conversation: negativeStopped.conversation }, forbiddenFanoutInternals) ?? null,
+        });
     }
     catch (error) {
         result.error = String(error?.stack ?? error).slice(0, 4_000);
