@@ -327,8 +327,24 @@ async function main() {
             supervisorAgentId: host.plannerAgentId,
             readiness: goalReadiness,
             workerNodeStore,
+            projectService,
+            teamService,
         });
-        routines = createRoutineController({ dataDir, jobController: jobs, coworkerStore, skillStore, services });
+        routines = createRoutineController({ dataDir, jobController: jobs, coworkerStore, skillStore, services, projectService, teamService });
+        skillStore.setRetestRunner((skill) => {
+            const directOwner = (skill.assignedCoworkerIds ?? []).find((id) => coworkerStore.get(id).state === "active");
+            const teamOwner = directOwner ? undefined : (skill.assignedTeamIds ?? []).map((id) => teamService.get(id)).flatMap((team) => team.coworkerIds ?? []).find((id) => coworkerStore.get(id).state === "active");
+            const ownerCoworkerId = directOwner ?? teamOwner;
+            if (!ownerCoworkerId) throw new Error("assign the Skill to an active Coworker or Team before retesting");
+            const owner = coworkerStore.get(ownerCoworkerId);
+            const workspaceId = (owner.workspaceIds ?? []).find((id) => services.workspacePath(id));
+            return jobs.submitJob({
+                title: `Retest Skill · ${skill.name}`,
+                objective: `Run the bounded Skill “${skill.name}” and report its expected output.`,
+                ownerCoworkerId,
+                internalContext: { skillId: skill.id, ...(workspaceId ? { workspaceId } : {}) },
+            });
+        });
         eventTriggers = createEventTriggerController({ dataDir, routineController: routines, services });
         chiefLoop = createChiefLoop({ jobController: jobs, goalController: goals, roster: () => host.rosterSummary() });
         routines.start();
@@ -591,6 +607,7 @@ async function main() {
                 "teach:recordAction": ({ sessionId, action }) => teachOnce.recordAction(sessionId, action),
                 "teach:finish": ({ sessionId }) => teachOnce.finish(sessionId),
                 "teach:test": ({ sessionId }) => teachOnce.test(sessionId),
+                "teach:confirm": ({ sessionId }) => teachOnce.confirm(sessionId),
                 "teach:save": ({ sessionId }) => teachOnce.save(sessionId),
                 "teach:cancel": ({ sessionId }) => teachOnce.cancel(sessionId),
                 "conversation:list": () => conversationStore.list(),
@@ -665,10 +682,21 @@ async function main() {
                 "job:dismiss": async ({ jobId }) => await jobs.dismiss(jobId),
                 "job:attention": () => jobs.attentionJobs(),
                 "routine:create": (payload) => routines.create(payload),
-                "routine:list": () => routines.list(),
+                "routine:list": (payload) => routines.list(payload),
                 "routine:get": ({ routineId }) => routines.get(routineId),
                 "routine:history": ({ routineId }) => routines.history(routineId),
                 "routine:runNow": ({ routineId }) => routines.runNow(routineId),
+                "routine:archive": ({ routineId }) => {
+                    const result = routines.archive(routineId);
+                    eventTriggers?.reconcile();
+                    return result;
+                },
+                "routine:restore": ({ routineId }) => {
+                    const result = routines.restore(routineId);
+                    eventTriggers?.reconcile();
+                    return result;
+                },
+                "routine:retry": ({ routineId, runId }) => routines.retry(routineId, runId),
                 "routine:setEnabled": ({ routineId, enabled }) => {
                     const result = routines.setEnabled(routineId, enabled);
                     eventTriggers?.reconcile();

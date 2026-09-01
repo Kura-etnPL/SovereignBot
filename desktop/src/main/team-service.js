@@ -542,6 +542,15 @@ function safePackDefinition(value, { requireSchema = false } = {}) {
     });
     const playbooks = safePlaybooks(value.playbooks);
     if (!playbooks.length) throw new Error("team pack must contain at least one playbook");
+    const playbookIds = new Set(playbooks.map((playbook) => playbook.id));
+    for (const channel of channels) {
+        if (!playbookIds.has(channel.playbookId)) throw new Error(`team pack channel references unknown playbook: ${channel.playbookId}`);
+    }
+    for (const playbook of playbooks) {
+        for (const step of playbook.steps) {
+            if (!keys.has(step)) throw new Error(`team pack playbook references unknown coworker: ${step}`);
+        }
+    }
     return {
         schema: TEAM_PACK_EXPORT_SCHEMA,
         id,
@@ -616,6 +625,9 @@ function sanitizePersisted(value) {
                 sharedWorkspaceId: safeId(entry.sharedWorkspaceId, "sharedWorkspaceId"),
                 channelIds: validChannels,
                 playbooks: safePlaybooks(entry.playbooks),
+                coworkerKeyById: entry.coworkerKeyById && typeof entry.coworkerKeyById === "object" && !Array.isArray(entry.coworkerKeyById)
+                    ? Object.fromEntries(Object.entries(entry.coworkerKeyById).filter(([id, key]) => ids.includes(id) && typeof key === "string").slice(0, 8))
+                    : undefined,
                 createdAt: safeString(entry.createdAt, "team createdAt", 80),
                 updatedAt: safeString(entry.updatedAt, "team updatedAt", 80),
             };
@@ -1438,6 +1450,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
 
     function handoffOrder(team) {
         const ids = [...team.coworkerIds];
+        const declared = team.playbooks?.[0]?.steps?.map((key) => team.coworkerKeyById?.[key] ?? key);
+        if (Array.isArray(declared) && declared.length >= 2 && declared.length <= 12 && declared.every((id) => ids.includes(id))) return [...declared];
         if (ids.length < 2) return ids;
         // The first teammate owns intake, the last is the reviewer, and any middle
         // teammates are bounded specialists.  This keeps Team Packs declarative and
@@ -1616,6 +1630,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             sharedWorkspaceId,
             channelIds: [],
             playbooks: clone(pack.playbooks),
+            coworkerKeyById: Object.fromEntries([...idsByKey.entries()].map(([key, id]) => [id, key])),
             createdAt: timestamp,
             updatedAt: timestamp,
         };
@@ -1666,7 +1681,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
 
         const keyByCoworkerId = new Map(team.coworkerIds.map((id, index, ids) => [
             id,
-            index === 0 ? "chief" : index === ids.length - 1 ? "reviewer" : `specialist-${index}`,
+            team.coworkerKeyById?.[id] ?? (index === 0 ? "chief" : index === ids.length - 1 ? "reviewer" : `specialist-${index}`),
         ]));
         const pack = {
             id: team.packId === "custom-team" ? "custom-team-pack" : team.packId,

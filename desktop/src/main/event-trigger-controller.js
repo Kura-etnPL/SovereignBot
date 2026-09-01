@@ -413,7 +413,7 @@ export function createEventTriggerController({
     try { routine = routineController.get(trigger.routineId); }
     catch (error) { return { ok: false, status: "blocked", error: `Routine unavailable: ${boundedError(error)}` }; }
     if (!routine?.enabled) return { ok: false, status: "blocked", error: "linked Routine is disabled" };
-    if (!["hourly", "daily", "weekly"].includes(routine.schedule?.type)) return { ok: false, status: "blocked", error: "event triggers require a recurring Routine" };
+    if (!["hourly", "daily", "weekly", "custom"].includes(routine.schedule?.type)) return { ok: false, status: "blocked", error: "event triggers require a recurring Routine" };
     if (routine.workspaceId !== trigger.workspaceId) return { ok: false, status: "blocked", error: "Routine workspace does not match trigger workspace" };
     return { ok: true, root, routine };
   }
@@ -730,7 +730,7 @@ export function createEventTriggerController({
       const pathPrefix = normalizeEventPathPrefix(payload.pathPrefix);
       const routine = routineController.get(routineId);
       if (!routine?.enabled) throw new Error("event triggers require an enabled Routine");
-      if (!["hourly", "daily", "weekly"].includes(routine.schedule?.type)) throw new Error("event triggers require a recurring Routine");
+      if (!["hourly", "daily", "weekly", "custom"].includes(routine.schedule?.type)) throw new Error("event triggers require a recurring Routine");
       if (routine.workspaceId !== workspaceId) throw new Error("trigger workspace must match the Routine workspace");
       if (!workspaceRoot(workspaceId)) throw new Error(`unknown trusted workspace: ${workspaceId}`);
       const id = makeId();

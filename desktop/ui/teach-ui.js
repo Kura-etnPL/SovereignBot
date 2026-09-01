@@ -5,6 +5,7 @@
 
   let session;
   let snapshot;
+  let manualPending = false;
 
   const $ = (id) => document.getElementById(id);
   const participantList = () => typeof participantCoworkers === "function"
@@ -84,7 +85,7 @@
           <ol id="teach-draft-steps" class="teach-actions"></ol>
           <div id="teach-draft-meta" class="teach-draft-meta"></div>
           <p id="teach-draft-error" class="inline-error hidden"></p>
-          <div class="modal-actions"><button id="teach-test" class="quiet-action" type="button">Test / 测试</button><button id="teach-save" class="hero-action" type="button" disabled>Save Skill / 保存 Skill</button><button id="teach-draft-close" class="quiet-action" type="button">Close / 关闭</button></div>
+          <div class="modal-actions"><button id="teach-test" class="quiet-action" type="button">Test / 测试</button><button id="teach-confirm" class="quiet-action hidden" type="button">Confirm manual check / 确认手动检查</button><button id="teach-save" class="hero-action" type="button" disabled>Save Skill / 保存 Skill</button><button id="teach-draft-close" class="quiet-action" type="button">Close / 关闭</button></div>
         </div>
         <p id="teach-result" class="setting-feedback"></p>
       </div>`;
@@ -101,6 +102,7 @@
     $("teach-finish").addEventListener("click", finishTeaching);
     $("teach-cancel").addEventListener("click", cancelTeaching);
     $("teach-test").addEventListener("click", testDraft);
+    $("teach-confirm").addEventListener("click", confirmManualCheck);
     $("teach-save").addEventListener("click", saveSkill);
     $("teach-draft-close").addEventListener("click", () => dialog.close());
     renderActionFields();
@@ -129,11 +131,24 @@
     for (const id of ["teach-start-panel", "teach-record-panel", "teach-draft-panel"]) $(id)?.classList.toggle("hidden", id !== `teach-${name}-panel`);
   }
 
-  function openDialog() {
+  async function restoreSession() {
+    try {
+      const participantIds = new Set(participantList().map((entry) => entry.id));
+      const listed = await window.sovereignbot.teachOnce.list();
+      const candidate = (listed.sessions ?? []).filter((entry) => !["saved", "cancelled"].includes(entry.state) && participantIds.has(entry.coworkerId)).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
+      if (!candidate) return;
+      session = await window.sovereignbot.teachOnce.get({ sessionId: candidate.id });
+      manualPending = false;
+    } catch {}
+  }
+
+  async function openDialog() {
     const dialog = ensureDialog();
+    await restoreSession();
     if (!session || session.state === "saved" || session.state === "cancelled") {
       session = undefined;
       snapshot = undefined;
+      manualPending = false;
       fillCoworkers();
       $("teach-start-error")?.classList.add("hidden");
       setPanel("start");
@@ -157,6 +172,7 @@
         description: $("teach-description").value.trim(),
       });
       snapshot = undefined;
+      manualPending = false;
       renderSession(session);
       setPanel("record");
     } catch (reason) {
@@ -303,6 +319,7 @@
     try {
       const result = await window.sovereignbot.teachOnce.finish({ sessionId: session.id });
       session = result.session;
+      manualPending = false;
       renderDraft(session);
       setPanel("draft");
     } catch (reason) {
@@ -324,6 +341,7 @@
     for (const step of draft.steps) steps.append(make("li", "teach-action-row", step));
     $("teach-draft-meta").textContent = `${draft.inputs.length} reusable input(s) · capability request: ${draft.requestedCapabilities.join(", ") || "none"} · ${draft.validators.length} validator(s)`;
     $("teach-save").disabled = value.state !== "tested";
+    $("teach-confirm")?.classList.toggle("hidden", !manualPending);
   }
 
   async function testDraft() {
@@ -336,6 +354,8 @@
       const result = await window.sovereignbot.teachOnce.test({ sessionId: session.id });
       session = result.session;
       renderDraft(session);
+      manualPending = result.status === "awaiting-confirmation";
+      $("teach-confirm")?.classList.toggle("hidden", !manualPending);
       $("teach-result").textContent = result.status === "awaiting-confirmation"
         ? "The test reached a manual validator and is waiting for your confirmation; it was not marked passed. / 测试到达手动验证步骤，等待你的确认，尚未标记为通过。"
         : result.ok
@@ -347,6 +367,21 @@
     finally {
       button.disabled = false;
     }
+  }
+
+  async function confirmManualCheck() {
+    if (!session || !manualPending) return;
+    const button = $("teach-confirm");
+    button.disabled = true;
+    try {
+      session = await window.sovereignbot.teachOnce.confirm({ sessionId: session.id });
+      manualPending = false;
+      button.classList.add("hidden");
+      await testDraft();
+    } catch (reason) {
+      const error = $("teach-draft-error");
+      if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }
+    } finally { button.disabled = false; }
   }
 
   async function saveSkill() {

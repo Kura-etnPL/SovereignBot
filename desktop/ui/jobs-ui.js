@@ -286,11 +286,14 @@
           <label><span data-i18n="routines.name">Name</span><input id="routine-name" maxlength="120" required></label>
           <label><span data-i18n="routines.instruction">Instruction</span><textarea id="routine-instruction" maxlength="8000" rows="4" required></textarea></label>
           <label><span data-i18n="routines.coworker">Coworker</span><select id="routine-owner"></select></label>
+          <label><span>Team / 团队（可选）</span><select id="routine-team"><option value="">No team binding / 不绑定团队</option></select></label>
+          <label><span>Project / 项目（可选）</span><select id="routine-project"><option value="">No project binding / 不绑定项目</option></select></label>
           <label><span data-i18n="routines.skill">Skill</span><select id="routine-skill"></select></label>
           <label><span data-i18n="routines.workspace">Workspace</span><select id="routine-workspace"></select></label>
-          <label><span data-i18n="routines.schedule">Schedule</span><select id="routine-type"><option value="one-time" data-i18n="routines.type.one-time">One-time</option><option value="hourly" data-i18n="routines.type.hourly">Hourly</option><option value="daily" data-i18n="routines.type.daily">Daily</option><option value="weekly" data-i18n="routines.type.weekly">Weekly</option></select></label>
+          <label><span data-i18n="routines.schedule">Schedule</span><select id="routine-type"><option value="one-time" data-i18n="routines.type.one-time">One-time</option><option value="hourly" data-i18n="routines.type.hourly">Hourly</option><option value="daily" data-i18n="routines.type.daily">Daily</option><option value="weekly" data-i18n="routines.type.weekly">Weekly</option><option value="custom">Custom interval / 自定义间隔</option></select></label>
           <label id="routine-field-at"><span data-i18n="routines.at">Run at</span><input id="routine-at" type="datetime-local"></label>
           <label id="routine-field-minute" class="hidden"><span data-i18n="routines.minute">Minute past the hour</span><input id="routine-minute" type="number" min="0" max="59" value="0"></label>
+          <label id="routine-field-interval" class="hidden"><span>Interval minutes / 间隔分钟</span><input id="routine-interval" type="number" min="1" max="10080" value="60"></label>
           <label id="routine-field-time" class="hidden"><span data-i18n="routines.time">Time</span><input id="routine-time" type="time" value="09:00"></label>
           <label id="routine-field-weekday" class="hidden"><span data-i18n="routines.weekday">Weekday</span><select id="routine-weekday"></select></label>
           <p id="routine-form-error" class="inline-error hidden"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-dialog" type="button" data-i18n="action.cancel">Cancel</button><button class="hero-action" type="submit" data-i18n="routines.create">New routine</button></div>
@@ -387,6 +390,7 @@
     if (!schedule) return "—";
     if (schedule.type === "one-time") return `${t("routines.type.one-time", "One-time")} · ${new Date(schedule.at).toLocaleString()}`;
     if (schedule.type === "hourly") return `${t("routines.type.hourly", "Hourly")} · :${String(schedule.minute).padStart(2,"0")}`;
+    if (schedule.type === "custom") return `Custom interval / 自定义间隔 · ${schedule.intervalMinutes} min`;
     if (schedule.type === "daily") return `${t("routines.type.daily", "Daily")} · ${schedule.time}`;
     return `${t("routines.type.weekly", "Weekly")} · ${t(`weekday.${schedule.weekday}`, schedule.weekday)} ${schedule.time}`;
   }
@@ -402,7 +406,7 @@
       const card = document.createElement("div"); card.className = "job-card";
       const head = document.createElement("div"); head.className = "job-card-head";
       const title = document.createElement("strong"); title.textContent = routine.name;
-      const badge = document.createElement("span"); badge.className = `job-status ${routine.enabled ? "completed" : "waiting"}`; badge.textContent = routine.enabled ? t("routines.enabled", "Enabled") : t("routines.disabled", "Disabled");
+      const badge = document.createElement("span"); badge.className = `job-status ${routine.state === "archived" ? "failed" : routine.enabled ? "completed" : "waiting"}`; badge.textContent = routine.state === "archived" ? "Archived / 已归档" : routine.enabled ? t("routines.enabled", "Enabled") : t("routines.disabled", "Disabled");
       head.append(title, badge);
       const meta = document.createElement("div"); meta.className = "setting-feedback"; meta.style.margin = "0";
       const next = routine.nextRunAt ? new Date(routine.nextRunAt).toLocaleString() : "—";
@@ -410,19 +414,23 @@
       const actions = document.createElement("div"); actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
       const open = document.createElement("button"); open.className = "quiet-action"; open.type = "button"; open.textContent = t("routines.history", "History"); open.addEventListener("click", () => openRoutineDetail(routine.id));
       const remove = document.createElement("button"); remove.className = "quiet-action"; remove.type = "button"; remove.textContent = t("routines.remove", "Remove"); remove.addEventListener("click", async () => { await window.sovereignbot.routines.remove({ routineId: routine.id }); await refreshRoutines(); });
+      const runNow = document.createElement("button"); runNow.className = "hero-action"; runNow.type = "button"; runNow.textContent = "Run now / 立即运行"; runNow.disabled = routine.state === "archived" || !routine.enabled; runNow.addEventListener("click", async () => { try { await window.sovereignbot.routines.runNow({ routineId: routine.id }); await refreshRoutines(); } catch (error) { window.alert(String(error?.message ?? error).slice(0, 300)); } });
       const consumedOneTime = routine.schedule?.type === "one-time" && Boolean(routine.lastRunAt);
-      actions.append(open);
-      if (!consumedOneTime) {
+      actions.append(open, runNow);
+      if (routine.state === "archived") {
+        const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = "Restore / 恢复"; restore.addEventListener("click", async () => { try { await window.sovereignbot.routines.restore({ routineId: routine.id }); await refreshRoutines(); } catch (error) { window.alert(String(error?.message ?? error).slice(0, 300)); } }); actions.append(restore);
+      } else if (!consumedOneTime) {
         const toggle = document.createElement("button"); toggle.className = "quiet-action"; toggle.type = "button"; toggle.textContent = routine.enabled ? t("routines.disable", "Disable") : t("routines.enable", "Enable"); toggle.addEventListener("click", async () => { await window.sovereignbot.routines.setEnabled({ routineId: routine.id, enabled: !routine.enabled }); await refreshRoutines(); });
         actions.append(toggle);
       }
+      if (routine.state !== "archived") { const archive = document.createElement("button"); archive.className = "quiet-action"; archive.type = "button"; archive.textContent = "Archive / 归档"; archive.addEventListener("click", async () => { await window.sovereignbot.routines.archive({ routineId: routine.id }); await refreshRoutines(); }); actions.append(archive); }
       actions.append(remove);
       card.append(head, meta, actions); root.append(card);
     }
   }
 
   async function refreshRoutines() {
-    try { const result = await window.sovereignbot.routines.list({}); routines = result?.routines ?? []; renderRoutineList(); } catch {}
+    try { const result = await window.sovereignbot.routines.list({ includeArchived: true }); routines = result?.routines ?? []; renderRoutineList(); } catch {}
   }
 
   async function openRoutineDetail(routineId) {
@@ -439,6 +447,7 @@
         const line = document.createElement("div"); line.textContent = `${new Date(run.scheduledFor).toLocaleString()} · ${run.status}${run.error ? ` · ${run.error}` : ""}`;
         card.append(line);
         if (run.jobId) { const btn = document.createElement("button"); btn.className = "quiet-action"; btn.type = "button"; btn.textContent = `${t("action.open", "Open")} ${t("routines.job", "Job")}`; btn.addEventListener("click", async () => { $("routine-detail-dialog")?.close(); await openDetail(run.jobId); }); card.append(btn); }
+        if (run.jobId && ["waiting", "needs_attention"].includes(run.status) && routine.state !== "archived") { const retry = document.createElement("button"); retry.className = "hero-action"; retry.type = "button"; retry.textContent = "Retry / 重试"; retry.addEventListener("click", async () => { await window.sovereignbot.routines.retry({ routineId, runId: run.id }); await openRoutineDetail(routineId); }); card.append(retry); }
         root.append(card);
       }
       $("routine-detail-dialog")?.showModal?.();
@@ -449,6 +458,7 @@
     const type = $("routine-type")?.value ?? "one-time";
     $("routine-field-at")?.classList.toggle("hidden", type !== "one-time");
     $("routine-field-minute")?.classList.toggle("hidden", type !== "hourly");
+    $("routine-field-interval")?.classList.toggle("hidden", type !== "custom");
     $("routine-field-time")?.classList.toggle("hidden", !["daily","weekly"].includes(type));
     $("routine-field-weekday")?.classList.toggle("hidden", type !== "weekly");
   }
@@ -461,15 +471,18 @@
       return { type, at: new Date(value).toISOString() };
     }
     if (type === "hourly") return { type, minute: Number($("routine-minute").value) };
+    if (type === "custom") return { type, intervalMinutes: Number($("routine-interval").value) };
     if (type === "daily") return { type, time: $("routine-time").value };
     return { type, weekday: Number($("routine-weekday").value), time: $("routine-time").value };
   }
 
   async function populateRoutineForm() {
-    const [cw, skills, workspaces] = await Promise.all([
+    const [cw, skills, workspaces, teams, projects] = await Promise.all([
       window.sovereignbot.coworkers.list({}).catch(() => ({ coworkers: [] })),
       window.sovereignbot.skills.list({}).catch(() => ({ skills: [] })),
       window.sovereignbot.workspaces.list({}).catch(() => ({ workspaces: [] })),
+      window.sovereignbot.teams.list({}).catch(() => ({ teams: [] })),
+      window.sovereignbot.projects.list({}).catch(() => ({ projects: [] })),
     ]);
     populateOwnerSelect(cw?.coworkers ?? [], "routine-owner");
     const skill = $("routine-skill"); skill.textContent = "";
@@ -478,6 +491,8 @@
     const ws = $("routine-workspace"); ws.textContent = "";
     const def = document.createElement("option"); def.value = ""; def.textContent = t("routines.defaultWorkspace", "Coworker default"); ws.append(def);
     for (const item of workspaces?.workspaces ?? []) { const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.kind === "shared-project" ? "Shared project workspace / 共享项目工作区" : item.label || "Private workspace / 私有工作区"; ws.append(opt); }
+    const team = $("routine-team"); team.textContent = ""; const noTeam = document.createElement("option"); noTeam.value = ""; noTeam.textContent = "No team binding / 不绑定团队"; team.append(noTeam); for (const item of teams?.teams ?? []) { if (item.state === "archived") continue; const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.name; team.append(opt); }
+    const project = $("routine-project"); project.textContent = ""; const noProject = document.createElement("option"); noProject.value = ""; noProject.textContent = "No project binding / 不绑定项目"; project.append(noProject); for (const item of projects?.projects ?? []) { if (item.state === "archived") continue; const opt = document.createElement("option"); opt.value = item.projectId; opt.textContent = item.name; project.append(opt); }
     const inOneHour = new Date(Date.now() + 3600_000); const local = new Date(inOneHour.getTime() - inOneHour.getTimezoneOffset() * 60000).toISOString().slice(0,16); $("routine-at").value = local;
     $("routine-minute").value = String(new Date().getMinutes());
     showScheduleFields();
@@ -513,6 +528,16 @@
         error.classList.remove("hidden");
       }
     }
+  }
+
+  async function createRoutineFromSource(detail = {}) {
+    await populateRoutineForm();
+    if (detail.name) $("routine-name").value = String(detail.name).slice(0, 120);
+    if (detail.instruction) $("routine-instruction").value = String(detail.instruction).slice(0, 8000);
+    if (detail.teamId && [...$("routine-team").options].some((option) => option.value === detail.teamId)) $("routine-team").value = detail.teamId;
+    if (detail.projectId && [...$("routine-project").options].some((option) => option.value === detail.projectId)) $("routine-project").value = detail.projectId;
+    showRoutinesView();
+    $("routine-dialog")?.showModal?.();
   }
 
   function showRoutinesView() {
@@ -601,13 +626,14 @@
     $("routine-form")?.addEventListener("submit", async (e) => {
       e.preventDefault(); const err = $("routine-form-error"); err?.classList.add("hidden");
       try {
-        await window.sovereignbot.routines.create({ name: $("routine-name").value.trim(), instruction: $("routine-instruction").value.trim(), coworkerId: $("routine-owner").value, skillId: $("routine-skill").value || undefined, workspaceId: $("routine-workspace").value || undefined, schedule: scheduleFromForm() });
+        await window.sovereignbot.routines.create({ name: $("routine-name").value.trim(), instruction: $("routine-instruction").value.trim(), coworkerId: $("routine-owner").value, teamId: $("routine-team").value || undefined, projectId: $("routine-project").value || undefined, skillId: $("routine-skill").value || undefined, workspaceId: $("routine-workspace").value || undefined, schedule: scheduleFromForm() });
         $("routine-dialog")?.close(); $("routine-form")?.reset(); await refreshRoutines();
       } catch (error) { if (err) { err.textContent = String(error?.message ?? error).replace(/^.*Error: /, "").slice(0,400); err.classList.remove("hidden"); } }
     });
     document.addEventListener("sovereignbot:create-routine-from-skill", (event) => {
       void createRoutineFromSkill(event.detail?.skillId);
     });
+    document.addEventListener("sovereignbot:create-routine-from-source", (event) => { void createRoutineFromSource(event.detail); });
     for (const b of document.querySelectorAll("[data-close-dialog]")) b.addEventListener("click", () => $(b.dataset.closeDialog)?.close());
   }
 

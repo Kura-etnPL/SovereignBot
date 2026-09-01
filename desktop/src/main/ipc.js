@@ -26,6 +26,7 @@ const TEACH_CHANNELS = Object.freeze({
     "teach:recordAction": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 16_000 }),
     "teach:finish": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "teach:test": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "teach:confirm": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "teach:save": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "teach:cancel": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
@@ -42,6 +43,9 @@ const ROUTINE_CHANNELS = Object.freeze({
     "routine:get": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:history": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:runNow": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "routine:archive": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "routine:restore": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "routine:retry": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:setEnabled": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:remove": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
@@ -265,7 +269,7 @@ function validateTeachRequest(channel, payload) {
         exactKeys(payload, new Set(), channel);
         return {};
     }
-    if (["teach:get", "teach:snapshot", "teach:finish", "teach:test", "teach:save", "teach:cancel"].includes(channel)) {
+    if (["teach:get", "teach:snapshot", "teach:finish", "teach:test", "teach:confirm", "teach:save", "teach:cancel"].includes(channel)) {
         exactKeys(payload, new Set(["sessionId"]), channel);
         return { sessionId: teachSessionId(payload.sessionId) };
     }
@@ -300,8 +304,8 @@ function validateConversationControlRequest(channel, payload) {
 }
 
 function validateRoutineSchedule(value) {
-    exactKeys(value, new Set(["type", "at", "minute", "time", "weekday"]), "routine schedule");
-    if (!["one-time", "hourly", "daily", "weekly"].includes(value.type)) throw new Error("invalid routine schedule type");
+    exactKeys(value, new Set(["type", "at", "minute", "time", "weekday", "intervalMinutes"]), "routine schedule");
+    if (!["one-time", "hourly", "daily", "weekly", "custom"].includes(value.type)) throw new Error("invalid routine schedule type");
     if (value.type === "one-time") {
         if (Object.keys(value).some((key) => !["type", "at"].includes(key))) throw new Error("one-time schedule accepts only type and at");
         const at = boundedString(value.at, "schedule.at", 64, true);
@@ -312,6 +316,11 @@ function validateRoutineSchedule(value) {
         if (Object.keys(value).some((key) => !["type", "minute"].includes(key))) throw new Error("hourly schedule accepts only type and minute");
         if (!Number.isInteger(value.minute) || value.minute < 0 || value.minute > 59) throw new Error("schedule.minute must be 0-59");
         return { type: "hourly", minute: value.minute };
+    }
+    if (value.type === "custom") {
+        if (Object.keys(value).some((key) => !["type", "intervalMinutes"].includes(key))) throw new Error("custom schedule accepts only type and intervalMinutes");
+        if (!Number.isInteger(value.intervalMinutes) || value.intervalMinutes < 1 || value.intervalMinutes > 10080) throw new Error("schedule.intervalMinutes must be 1-10080");
+        return { type: "custom", intervalMinutes: value.intervalMinutes };
     }
     const time = boundedString(value.time, "schedule.time", 5, true);
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error("schedule.time must be HH:MM");
@@ -328,12 +337,19 @@ function validateRoutineRequest(channel, payload) {
     const bytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
     if (bytes > ROUTINE_CHANNELS[channel].maxPayloadBytes) throw new Error(`${channel} payload is too large`);
     if (channel === "routine:list") {
-        exactKeys(payload, new Set(), channel);
-        return {};
+        exactKeys(payload, new Set(["includeArchived"]), channel);
+        if (payload.includeArchived !== undefined && typeof payload.includeArchived !== "boolean") throw new Error("includeArchived must be boolean");
+        return payload.includeArchived === undefined ? {} : { includeArchived: payload.includeArchived };
     }
-    if (["routine:get", "routine:history", "routine:runNow", "routine:remove"].includes(channel)) {
+    if (["routine:get", "routine:history", "routine:runNow", "routine:archive", "routine:restore", "routine:remove"].includes(channel)) {
         exactKeys(payload, new Set(["routineId"]), channel);
         return { routineId: routineId(payload.routineId) };
+    }
+    if (channel === "routine:retry") {
+        exactKeys(payload, new Set(["routineId", "runId"]), channel);
+        const out = { routineId: routineId(payload.routineId) };
+        if (payload.runId !== undefined) out.runId = boundedString(payload.runId, "runId", 80, true);
+        return out;
     }
     if (channel === "routine:setEnabled") {
         exactKeys(payload, new Set(["routineId", "enabled"]), channel);
@@ -341,13 +357,15 @@ function validateRoutineRequest(channel, payload) {
         return { routineId: routineId(payload.routineId), enabled: payload.enabled };
     }
     if (channel === "routine:create") {
-        exactKeys(payload, new Set(["name", "coworkerId", "instruction", "skillId", "workspaceId", "schedule"]), channel);
+        exactKeys(payload, new Set(["name", "coworkerId", "teamId", "projectId", "instruction", "skillId", "workspaceId", "schedule"]), channel);
         const out = {
             name: boundedString(payload.name, "routine name", 120, true),
             coworkerId: generalId(payload.coworkerId, "coworkerId"),
             instruction: boundedString(payload.instruction, "routine instruction", 8000, true),
             schedule: validateRoutineSchedule(payload.schedule),
         };
+        if (payload.teamId !== undefined && payload.teamId !== "") out.teamId = generalId(payload.teamId, "teamId");
+        if (payload.projectId !== undefined && payload.projectId !== "") out.projectId = generalId(payload.projectId, "projectId");
         if (payload.skillId !== undefined && payload.skillId !== "") out.skillId = skillId(payload.skillId);
         if (payload.workspaceId !== undefined && payload.workspaceId !== "") out.workspaceId = generalId(payload.workspaceId, "workspaceId");
         return out;

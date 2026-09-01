@@ -8,7 +8,7 @@ export const ROUTINE_HISTORY_LIMIT = 100;
 const MAX_NAME = 120;
 const MAX_INSTRUCTION = 8000;
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
-const SCHEDULE_TYPES = new Set(["one-time", "hourly", "daily", "weekly"]);
+const SCHEDULE_TYPES = new Set(["one-time", "hourly", "daily", "weekly", "custom"]);
 const TERMINAL_JOB = new Set(["completed", "failed", "cancelled"]);
 const EVENT_TYPES = new Set(["change", "rename"]);
 
@@ -30,7 +30,7 @@ export { normalizeEventRelativePath } from "./lib/event-metadata.js";
 
 export function normalizeRoutineSchedule(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("schedule must be an object");
-  if (!SCHEDULE_TYPES.has(value.type)) throw new Error("schedule type must be one-time, hourly, daily, or weekly");
+  if (!SCHEDULE_TYPES.has(value.type)) throw new Error("schedule type must be one-time, hourly, daily, weekly, or custom");
   if (value.type === "one-time") {
     exactKeys(value, new Set(["type", "at"]), "schedule");
     return { type: "one-time", at: asIso(value.at, "schedule.at") };
@@ -39,6 +39,11 @@ export function normalizeRoutineSchedule(value) {
     exactKeys(value, new Set(["type", "minute"]), "schedule");
     if (!Number.isInteger(value.minute) || value.minute < 0 || value.minute > 59) throw new Error("schedule.minute must be 0-59");
     return { type: "hourly", minute: value.minute };
+  }
+  if (value.type === "custom") {
+    exactKeys(value, new Set(["type", "intervalMinutes"]), "schedule");
+    if (!Number.isInteger(value.intervalMinutes) || value.intervalMinutes < 1 || value.intervalMinutes > 10080) throw new Error("schedule.intervalMinutes must be 1-10080");
+    return { type: "custom", intervalMinutes: value.intervalMinutes };
   }
   if (value.type === "daily") {
     exactKeys(value, new Set(["type", "time"]), "schedule");
@@ -65,6 +70,7 @@ export function nextRoutineOccurrence(scheduleValue, afterMs) {
     if (next.getTime() <= afterMs) next.setHours(next.getHours() + 1);
     return next.toISOString();
   }
+  if (schedule.type === "custom") return new Date(afterMs + schedule.intervalMinutes * 60_000).toISOString();
   if (schedule.type === "daily") {
     const next = setLocalTime(new Date(afterMs), schedule.time);
     if (next.getTime() <= afterMs) next.setDate(next.getDate() + 1);
@@ -121,8 +127,11 @@ function sanitizeRoutine(entry) {
     return {
       id: entry.id,
       name,
-      enabled: entry.enabled !== false,
+      state: entry.state === "archived" ? "archived" : "active",
+      enabled: entry.state === "archived" ? false : entry.enabled !== false,
       coworkerId: String(entry.coworkerId ?? ""),
+      teamId: entry.teamId ? String(entry.teamId) : undefined,
+      projectId: entry.projectId ? String(entry.projectId) : undefined,
       instruction,
       skillId: entry.skillId ? String(entry.skillId) : undefined,
       workspaceId: entry.workspaceId ? String(entry.workspaceId) : undefined,
@@ -138,7 +147,7 @@ function sanitizeRoutine(entry) {
   } catch { return undefined; }
 }
 
-export function createRoutineController({ dataDir, jobController, coworkerStore, skillStore, services, persistPath, now = () => Date.now(), makeId = makeRoutineId, makeHistoryId = makeRunId, makeEventId = makeEventRunId } = {}) {
+export function createRoutineController({ dataDir, jobController, coworkerStore, skillStore, services, projectService, teamService, persistPath, now = () => Date.now(), makeId = makeRoutineId, makeHistoryId = makeRunId, makeEventId = makeEventRunId } = {}) {
   if (!dataDir) throw new Error("routine controller requires dataDir");
   if (!jobController?.submitJob || !jobController?.getJob) throw new Error("routine controller requires jobController");
   if (!coworkerStore?.get) throw new Error("routine controller requires coworkerStore");
@@ -152,8 +161,22 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
 
   function save() { saveJsonState(persistPath, { schema: ROUTINES_SCHEMA, routines }); }
   function requireRoutine(id) { const routine = routines.find((entry) => entry.id === String(id)); if (!routine) throw new Error(`unknown routine id: ${id}`); return routine; }
-  function validateRefs({ coworkerId, skillId, workspaceId }) {
-    coworkerStore.get(coworkerId);
+  function validateRefs({ coworkerId, skillId, workspaceId, teamId, projectId }) {
+    const coworker = coworkerStore.get(coworkerId);
+    if (coworker.state && coworker.state !== "active") throw new Error("Routine owner Coworker is not active");
+    if (teamId !== undefined) {
+      if (!teamService?.get) throw new Error("Routine Team binding is unavailable");
+      const team = teamService.get(teamId);
+      if (team.state && team.state !== "active") throw new Error("Routine Team is not active");
+      if (!team.coworkerIds.includes(String(coworkerId))) throw new Error("Routine Coworker is not a member of the selected Team");
+    }
+    if (projectId !== undefined) {
+      if (!projectService?.resolveScope) throw new Error("Routine Project binding is unavailable");
+      const project = projectService.resolveScope(projectId);
+      if (project.state !== "active") throw new Error("Routine Project is not active");
+      if (!project.coworkerIds?.includes(String(coworkerId)) && (!teamId || !project.teamIds?.includes(String(teamId)))) throw new Error("Routine Coworker or Team is not a member of the selected Project");
+      if (workspaceId !== undefined && project.workspaceId !== String(workspaceId)) throw new Error("Routine workspace does not match Project workspace");
+    }
     if (skillId !== undefined) {
       if (!skillStore?.requireActive) throw new Error("routine skills require skill store");
       skillStore.requireActive(skillId);
@@ -168,7 +191,10 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
       coworkerId: routine.coworkerId,
       instruction: routine.instruction,
       skillId: routine.skillId,
+      teamId: routine.teamId,
+      projectId: routine.projectId,
       workspaceId: routine.workspaceId,
+      state: routine.state,
       schedule: clone(routine.schedule),
       createdAt: routine.createdAt,
       updatedAt: routine.updatedAt,
@@ -259,6 +285,8 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
           routineId: routine.id,
           scheduledFor,
           skillId: routine.skillId,
+          teamId: routine.teamId,
+          projectId: routine.projectId,
           workspaceId: routine.workspaceId,
           deferSchedule: true,
           ...(eventMetadata ? { eventMetadata } : {}),
@@ -283,13 +311,13 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
   }
 
   function fireRoutine(routine) {
-    if (!routine.enabled || !routine.nextRunAt || Date.parse(routine.nextRunAt) > now()) return undefined;
+    if (routine.state !== "active" || !routine.enabled || !routine.nextRunAt || Date.parse(routine.nextRunAt) > now()) return undefined;
     return submitRoutineRun(routine, { scheduledFor: routine.nextRunAt })?.job;
   }
 
   function runRoutineNow(routineId) {
     const routine = requireRoutine(routineId);
-    if (!routine.enabled) throw new Error("routine is disabled");
+    if (routine.state !== "active" || !routine.enabled) throw new Error("routine is archived or disabled");
     const result = submitRoutineRun(routine, { scheduledFor: nowIso(now), source: "manual" });
     if (!result) throw new Error("Routine Job could not be created");
     return { routine: publicRoutine(routine, true), job: result.job, run: result.run };
@@ -358,7 +386,7 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
   }
 
   return {
-    create({ name, coworkerId, instruction, skillId, workspaceId, schedule } = {}) {
+    create({ name, coworkerId, teamId, projectId, instruction, skillId, workspaceId, schedule } = {}) {
       const cleanName = typeof name === "string" ? name.trim() : "";
       const cleanInstruction = typeof instruction === "string" ? instruction.trim() : "";
       if (!cleanName) throw new Error("routine name is required");
@@ -367,14 +395,17 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
       if (cleanInstruction.length > MAX_INSTRUCTION) throw new Error(`routine instruction exceeds ${MAX_INSTRUCTION} characters`);
       if (!coworkerId) throw new Error("routine coworkerId is required");
       const normalizedSchedule = normalizeRoutineSchedule(schedule);
-      const refs = { coworkerId: String(coworkerId), skillId: skillId ? String(skillId) : undefined, workspaceId: workspaceId ? String(workspaceId) : undefined };
+      const refs = { coworkerId: String(coworkerId), teamId: teamId ? String(teamId) : undefined, projectId: projectId ? String(projectId) : undefined, skillId: skillId ? String(skillId) : undefined, workspaceId: workspaceId ? String(workspaceId) : undefined };
       validateRefs(refs);
       const stamp = nowIso(now);
       const routine = {
         id: makeId(),
         name: cleanName,
+        state: "active",
         enabled: true,
         coworkerId: refs.coworkerId,
+        teamId: refs.teamId,
+        projectId: refs.projectId,
         instruction: cleanInstruction,
         skillId: refs.skillId,
         workspaceId: refs.workspaceId,
@@ -393,13 +424,14 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
       scheduleWake();
       return publicRoutine(routine, true);
     },
-    list() { reconcileHistory(); return { schema: ROUTINES_SCHEMA, routines: routines.map((routine) => publicRoutine(routine, false)) }; },
+    list({ includeArchived = false } = {}) { reconcileHistory(); return { schema: ROUTINES_SCHEMA, routines: routines.filter((routine) => includeArchived || routine.state !== "archived").map((routine) => publicRoutine(routine, false)) }; },
     get(routineId) { reconcileHistory(); return publicRoutine(requireRoutine(routineId), true); },
     history(routineId) { reconcileHistory(); const routine = requireRoutine(routineId); return { routineId: routine.id, history: clone(routine.history).reverse() }; },
     triggerEvent,
     setEnabled(routineId, enabled) {
       if (typeof enabled !== "boolean") throw new Error("enabled must be boolean");
       const routine = requireRoutine(routineId);
+      if (enabled && routine.state === "archived") throw new Error("restore the archived Routine before enabling it");
       if (enabled && routine.schedule.type === "one-time" && routine.lastRunAt) throw new Error("completed one-time routine cannot be re-enabled; create a new routine instead");
       routine.enabled = enabled;
       routine.updatedAt = nowIso(now);
@@ -415,6 +447,37 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
       save();
       scheduleWake();
       return publicRoutine(removed, true);
+    },
+    archive(routineId) {
+      const routine = requireRoutine(routineId);
+      routine.state = "archived";
+      routine.enabled = false;
+      routine.nextRunAt = undefined;
+      routine.updatedAt = nowIso(now);
+      save();
+      scheduleWake();
+      return publicRoutine(routine, true);
+    },
+    restore(routineId) {
+      const routine = requireRoutine(routineId);
+      validateRefs(routine);
+      if (routine.schedule.type === "one-time" && routine.lastRunAt) throw new Error("completed one-time routine cannot be restored; create a new routine instead");
+      routine.state = "active";
+      routine.enabled = true;
+      routine.nextRunAt = initialNextRun(routine.schedule, now());
+      routine.updatedAt = nowIso(now);
+      save();
+      scheduleWake();
+      return publicRoutine(routine, true);
+    },
+    retry(routineId, runId) {
+      const routine = requireRoutine(routineId);
+      if (routine.state !== "active") throw new Error("archived Routine cannot be retried");
+      const run = [...routine.history].reverse().find((entry) => !runId || entry.id === String(runId));
+      if (!run?.jobId) throw new Error("Routine run has no ordinary Job to retry");
+      const job = jobController.getJob(run.jobId);
+      if (!job || !["waiting", "needs_attention"].includes(job.status)) throw new Error("Routine Job is not waiting for retry");
+      return jobController.resume(run.jobId);
     },
     async tickNow() { await tickNow(); return this.list(); },
     runNow(routineId) { return runRoutineNow(routineId); },
