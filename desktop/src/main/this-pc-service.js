@@ -242,13 +242,20 @@ export function createThisPcService({
         };
     }
 
-    async function takeOver(projectId, coworkerId) {
+    function operatorActor(value) {
+        if (value === undefined) return actor;
+        if (typeof value !== "string" || !/^external-controller:device_[0-9a-f]{16}$/i.test(value)) throw new Error("Computer operator identity is invalid");
+        return value;
+    }
+
+    async function takeOver(projectId, coworkerId, options = {}) {
+        const currentActor = operatorActor(options?.actor);
         const selection = await selectionPayload(projectId, coworkerId);
         return withProjectQueue(selection.scope.projectId, async () => {
             const active = await activeTask(selection);
             if (!selection.agentId || !active) throw new Error("Take Over requires a valid active task-bound Computer lease");
             const current = await control(selection.agentId);
-            if (current.mode === "human" && current.actorId !== actor) throw new Error("Computer is already controlled by another operator");
+            if (current.mode === "human" && current.actorId !== currentActor) throw new Error("Computer is already controlled by another operator");
             if (selection.coworker.computerMode === "shared-login") {
                 for (const memberId of selection.scope.coworkerIds) {
                     if (memberId === selection.coworker.id) continue;
@@ -260,26 +267,27 @@ export function createThisPcService({
                         throw new Error("Shared Computer context is already controlled by another operator");
                 }
             }
-            await resolveRuntime().computer.takeControl(selection.agentId, actor);
+            await resolveRuntime().computer.takeControl(selection.agentId, currentActor);
             return publicSelection(selection, { includeDetails: false });
         });
     }
 
-    async function handBack(projectId, coworkerId) {
+    async function handBack(projectId, coworkerId, options = {}) {
+        const currentActor = operatorActor(options?.actor);
         const selection = await selectionPayload(projectId, coworkerId);
         return withProjectQueue(selection.scope.projectId, async () => {
             const active = await activeTask(selection);
             if (!selection.agentId || !active) throw new Error("Hand Back requires a valid active task-bound Computer lease");
             const current = await control(selection.agentId);
-            if (current.mode !== "human" || (current.actorId && current.actorId !== actor)) throw new Error("Only the operator holding Computer control can Hand Back");
-            await resolveRuntime().computer.releaseControl(selection.agentId, actor);
+            if (current.mode !== "human" || (current.actorId && current.actorId !== currentActor)) throw new Error("Only the operator holding Computer control can Hand Back");
+            await resolveRuntime().computer.releaseControl(selection.agentId, currentActor);
             try {
                 // Re-enter through the real TaskBound + Governor path. This is the lease
                 // reacquisition proof; a renderer toggle is never sufficient.
                 await resolveRuntime().computer.snapshot(selection.agentId, active.id);
             }
             catch (error) {
-                await resolveRuntime().computer.takeControl(selection.agentId, actor).catch(() => undefined);
+                await resolveRuntime().computer.takeControl(selection.agentId, currentActor).catch(() => undefined);
                 throw new Error(`Hand Back was rejected: ${String(error?.message ?? error).slice(0, 180)}`);
             }
             return publicSelection(selection, { includeDetails: false });

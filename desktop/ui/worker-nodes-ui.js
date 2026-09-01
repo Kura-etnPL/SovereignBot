@@ -91,10 +91,21 @@
     void load(); pollTimer = setTimeout(poll, 10_000);
   }
 
+  async function beginExternalPairing(transport) {
+    const result = $("external-controller-result");
+    try {
+      const outcome = await window.sovereignbot.externalControllers.pairingBegin({ transport });
+      const offer = outcome?.offer ?? outcome;
+      if (result) result.textContent = label(`One-time ${transport} pairing code: ${offer?.code ?? "—"}. QR-safe payload (expires ${offer?.expiresAt ?? "—"}): ${JSON.stringify(offer)}`, `一次性 ${transport} 配对码：${offer?.code ?? "—"}。二维码安全载荷（过期时间 ${offer?.expiresAt ?? "—"}）：${JSON.stringify(offer)}`);
+    } catch (error) { if (result) result.textContent = text(error?.message ?? error).slice(0, 500); }
+  }
+
   function bind() {
     $("nav-worker-nodes")?.addEventListener("click", show);
     $("worker-node-refresh")?.addEventListener("click", () => { void window.sovereignbot.workerNodes.refresh({}).then(load); });
     $("external-controller-refresh")?.addEventListener("click", () => { void load(); });
+    $("external-controller-pair-direct")?.addEventListener("click", () => { void beginExternalPairing("lan"); });
+    $("external-controller-pair-relay")?.addEventListener("click", () => { void beginExternalPairing("remote-relay"); });
     $("worker-node-pair")?.addEventListener("click", async () => {
       const result = $("worker-node-result"); if (result) result.textContent = label("Choose a pairing bundle…", "请选择配对文件…");
       try { const outcome = await window.sovereignbot.workerNodes.pairViaDialog({}); if (result) result.textContent = outcome?.paired ? label("Worker Node paired.", "工作节点已配对。") : label("Pairing cancelled.", "已取消配对。"); await load(); }

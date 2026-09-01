@@ -11,10 +11,10 @@ import { createProductSurfaceService } from "../src/main/product-surface-service
 import { createDesktopServices } from "../src/main/services.js";
 import { createTeamService } from "../src/main/team-service.js";
 import { createExternalControllerStore } from "../src/main/external-controller-store.js";
-import { createSecureChannelPair, createSecureExternalControlClient, attachSecureExternalControlServer } from "../vendor/core/src/worker-secure-transport.js";
+import { createSecureChannelPair, createSecureExternalControlClient, createSecureRemoteControllerClient, attachSecureExternalControlServer } from "../vendor/core/src/worker-secure-transport.js";
 import { createWorkerTrustStore } from "../vendor/core/src/worker-trust-store.js";
 
-function fixture({ root: providedRoot, controllerRegistry } = {}) {
+function fixture({ root: providedRoot, controllerRegistry, projectService: providedProjectService, computerService, jobs: providedJobs } = {}) {
     const root = providedRoot ?? mkdtempSync(join(tmpdir(), "sovereign-external-team-"));
     const coworkers = createCoworkerStore({ persistPath: join(root, "coworkers.json") });
     const conversations = createConversationStore({ persistPath: join(root, "conversations.json"), coworkerStore: coworkers });
@@ -28,7 +28,7 @@ function fixture({ root: providedRoot, controllerRegistry } = {}) {
         list: () => ({ routines: [{ id: "routine_0000000000000001", name: "Daily review", enabled: true, coworkerId: installed.coworkerIds[0], skillId: "skill_0000000000000001", schedule: { type: "daily", time: "09:00" }, lastStatus: "completed" }] }),
         runNow: (routineId) => ({ routineId, job: { id: "job_0000000000000001", status: "queued" } }),
     };
-    let jobs = {
+  let jobs = providedJobs ?? {
         attentionJobs: () => ({ jobs: [{ id: "job_0000000000000001", title: "Review needed", status: "needs_attention", priority: "normal", ownerCoworkerId: installed.coworkerIds[0], conversationId: installed.channels[0].conversationId, createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z" }] }),
     };
     const blocked = new Set();
@@ -51,6 +51,8 @@ function fixture({ root: providedRoot, controllerRegistry } = {}) {
         cancelConversation: (conversationId, reason) => { cancellations.push({ conversationId, reason }); },
         requestAttention: (request) => { attentionRequests.push(request); },
         controllerRegistry,
+        projectService: providedProjectService,
+        computerService,
         artifactStore,
         audit,
         makeOutcomeId: () => `outcome_${String(++outcomeSequence).padStart(16, "0")}`,
@@ -331,4 +333,68 @@ test("external routine and attention projections follow runtime service replacem
     finally {
         rmSync(root, { recursive: true, force: true });
     }
+});
+
+test("remote controller v2 runs isolated direct and opaque relay canaries with governed Attention and Computer boundaries", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sovereign-remote-controller-v2-"));
+    const hostTrust = createWorkerTrustStore({ dataDir: join(root, "desktop-trust"), name: "Sovereign Desktop", platform: "win32" });
+    const directTrust = createWorkerTrustStore({ dataDir: join(root, "android-trust"), name: "Android Controller", platform: "android" });
+    const relayTrust = createWorkerTrustStore({ dataDir: join(root, "web-trust"), name: "Web Controller", platform: "web" });
+    const registry = createExternalControllerStore({ dataDir: root, trustStore: hostTrust });
+    const projectId = "project_0000000000000001";
+    const computerCalls = [];
+    let targetCoworkerId = "coworker_0000000000000001";
+    const computerService = {
+        async list() { return { computers: [{ coworkerId: targetCoworkerId, coworkerName: "Planner", status: "takeover", statusMessage: "Operator has control", currentApp: "Browser", currentSite: "example.test", canHandBack: true, activity: [{ summary: "safe activity" }] }] }; },
+        async health() { return { ok: true, status: "ready" }; },
+        async snapshot(project, coworker) { computerCalls.push({ operation: "snapshot", project, coworker }); return { available: true, snapshotId: "snapshot_0000000000000001", site: "example.test", elements: [{ ref: "e1", role: "button", name: "Continue", type: "button" }] }; },
+        async handBack(project, coworker, options) { computerCalls.push({ operation: "release", project, coworker, actor: options.actor }); return { status: "working", coworkerId: coworker }; },
+    };
+    const attentionJob = { id: "job_0000000000000001", title: "Approval required", status: "needs_attention", priority: "high", ownerCoworkerId: "coworker_0000000000000001", teamId: "team_0000000000000001", projectId, createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z" };
+    const jobs = {
+        attentionJobs: () => ({ jobs: [attentionJob] }),
+        getJob: (id) => { if (id !== attentionJob.id) throw new Error("unknown job"); return attentionJob; },
+        async approve(id) { if (id !== attentionJob.id) throw new Error("unknown job"); attentionJob.status = "queued"; return structuredClone(attentionJob); },
+        async dismiss(id) { if (id !== attentionJob.id) throw new Error("unknown job"); attentionJob.status = "failed"; return structuredClone(attentionJob); },
+    };
+    const projectService = { resolveScope: () => undefined };
+    const { api, installed, audit } = fixture({ root, controllerRegistry: registry, projectService, computerService, jobs });
+    attentionJob.teamId = installed.id;
+    targetCoworkerId = installed.coworkerIds[0];
+    attentionJob.ownerCoworkerId = targetCoworkerId;
+    projectService.resolveScope = (id) => id === projectId ? { projectId, teamIds: [installed.id], coworkerIds: [targetCoworkerId] } : undefined;
+    const scopes = ["teams:read", "coworkers:read", "channels:read", "messages:write", "conversation:read", "outcomes:write", "outcomes:read", "outcomes:cancel", "artifacts:read", "skills:read", "routines:read", "routines:run", "attention:read", "attention:decide", "takeover:request", "computer:view", "computer:release"];
+    const pairController = (trust, transport) => {
+        const offer = hostTrust.beginPairing({ transport, trustTtlMs: 60_000 });
+        const response = trust.acceptPairing(offer, offer.code, { transport, trustTtlMs: 60_000 });
+        hostTrust.completePairing(offer, response);
+        registry.grant({ deviceId: trust.identity().deviceId, transport, scopes, teamIds: [installed.id], projectIds: [projectId] });
+        const pair = createSecureChannelPair({ leftIdentity: hostTrust.identity(), rightIdentity: trust.identity(), leftTrust: hostTrust.getPeer(trust.identity().deviceId), rightTrust: trust.getPeer(hostTrust.identity().deviceId), transport, relay: transport === "remote-relay" ? undefined : null });
+        attachSecureExternalControlServer(pair.left, { invoke: (operation, input, principal) => api.invoke(operation, input, principal) });
+        return { pair, client: createSecureRemoteControllerClient(pair.right), trust };
+    };
+    try {
+        const direct = pairController(directTrust, "lan");
+        const relay = pairController(relayTrust, "remote-relay");
+        assert.equal((await direct.client.listTeams()).teams.length, 1);
+        assert.equal((await relay.client.getAttention()).jobs[0].id, attentionJob.id);
+        const approved = await direct.client.approveAttention({ jobId: attentionJob.id });
+        assert.equal(approved.decision, "approved");
+        attentionJob.status = "needs_attention";
+        const denied = await relay.client.denyAttention({ jobId: attentionJob.id });
+        assert.equal(denied.decision, "denied");
+        const viewed = await relay.client.computerView({ projectId, coworkerId: targetCoworkerId });
+        assert.equal(viewed.snapshot.elements[0].name, "Continue");
+        const released = await relay.client.releaseTakeover({ projectId, coworkerId: targetCoworkerId });
+        assert.equal(released.released, true);
+        assert.equal(computerCalls.at(-1).actor, `external-controller:${relay.trust.identity().deviceId}`);
+        assert.match(JSON.stringify(relay.pair.relay.inspect()), /ciphertext/);
+        assert.equal(JSON.stringify(relay.pair.relay.inspect()).includes("Continue"), false);
+        await assert.rejects(() => direct.pair.right.request({ kind: "control.call", operation: "computerView", input: { projectId, coworkerId: targetCoworkerId } }), /not supported/);
+        await assert.rejects(() => relay.client.computerView({ projectId: "project_9999999999999999", coworkerId: targetCoworkerId }), /outside|unknown|binding denied/);
+        registry.revoke(relay.trust.identity().deviceId);
+        await assert.rejects(() => relay.client.getAttention(), /revoked/);
+        assert.equal((await audit.readAll()).some((row) => row.type === "external.attention.decided"), true);
+    }
+    finally { rmSync(root, { recursive: true, force: true }); }
 });

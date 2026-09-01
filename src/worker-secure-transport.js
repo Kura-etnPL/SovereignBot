@@ -34,6 +34,14 @@ export const EXTERNAL_CONTROL_OPERATIONS = Object.freeze([
     "getAttention",
     "requestTakeover",
 ]);
+export const EXTERNAL_CONTROL_PROTOCOL_V1 = "sovereignbot.external-control/1";
+export const EXTERNAL_CONTROL_PROTOCOL_V2 = "sovereignbot.external-control/2";
+export const EXTERNAL_CONTROL_V2_OPERATIONS = Object.freeze([
+    "approveAttention",
+    "denyAttention",
+    "computerView",
+    "releaseTakeover",
+]);
 
 const ID = /^[a-z][a-z0-9_-]{2,95}$/;
 const DEVICE_ID = /^device_[0-9a-f]{16}$/i;
@@ -243,21 +251,24 @@ export function publicTrustRecord(value, { now = () => Date.now() } = {}) {
 }
 
 function securePayload(value) {
-    exactKeys(value, new Set(["kind", "envelope", "operation", "input"]), "secure Worker request");
+    exactKeys(value, new Set(["kind", "envelope", "operation", "input", "controlVersion"]), "secure Worker request");
     if (!REQUEST_KINDS.has(value.kind)) throw new Error("secure Worker request kind is not supported");
     if (value.kind === "computer.action") {
-        if (value.operation !== undefined || value.input !== undefined) throw new Error("computer action request cannot contain control fields");
+        if (value.operation !== undefined || value.input !== undefined || value.controlVersion !== undefined) throw new Error("computer action request cannot contain control fields");
         return { kind: value.kind, envelope: validateComputerEnvelope(value.envelope) };
     }
     if (value.kind === "control.call") {
         if (value.envelope !== undefined) throw new Error("external control request cannot contain a computer envelope");
-        if (typeof value.operation !== "string" || !EXTERNAL_CONTROL_OPERATIONS.includes(value.operation)) throw new Error("secure external control operation is not supported");
+        const version = value.controlVersion === undefined ? 1 : value.controlVersion;
+        if (!Number.isInteger(version) || ![1, 2].includes(version)) throw new Error("secure external control version is not supported");
+        const operations = version === 2 ? [...EXTERNAL_CONTROL_OPERATIONS, ...EXTERNAL_CONTROL_V2_OPERATIONS] : EXTERNAL_CONTROL_OPERATIONS;
+        if (typeof value.operation !== "string" || !operations.includes(value.operation)) throw new Error("secure external control operation is not supported");
         object(value.input, "secure external control input");
         if (Buffer.byteLength(canonicalSecureJson(value.input), "utf8") > 48 * 1024) throw new Error("secure external control input is too large");
-        return { kind: value.kind, operation: value.operation, input: structuredClone(value.input) };
+        return { kind: value.kind, ...(value.controlVersion === undefined ? {} : { controlVersion: version }), operation: value.operation, input: structuredClone(value.input) };
     }
     if (value.envelope !== undefined) throw new Error("computer health request cannot contain an envelope");
-    if (value.operation !== undefined || value.input !== undefined) throw new Error("computer health request cannot contain control fields");
+    if (value.operation !== undefined || value.input !== undefined || value.controlVersion !== undefined) throw new Error("computer health request cannot contain control fields");
     return { kind: value.kind };
 }
 
@@ -412,13 +423,40 @@ export function createSecureExternalControlClient(channel) {
     });
 }
 
+export function createSecureRemoteControllerClient(channel) {
+    if (!channel?.request) throw new Error("secure remote controller client requires a channel");
+    const call = (operation, input = {}) => channel.request({ kind: "control.call", controlVersion: 2, operation, input });
+    return Object.freeze({
+        listTeams: () => channel.request({ kind: "control.call", operation: "listTeams", input: {} }),
+        listCoworkers: () => channel.request({ kind: "control.call", operation: "listCoworkers", input: {} }),
+        listChannels: (input = {}) => channel.request({ kind: "control.call", operation: "listChannels", input }),
+        sendMessage: (input) => channel.request({ kind: "control.call", operation: "sendMessage", input }),
+        getConversation: (input) => channel.request({ kind: "control.call", operation: "getConversation", input }),
+        submitOutcome: (input) => channel.request({ kind: "control.call", operation: "submitOutcome", input }),
+        getStatus: (input) => channel.request({ kind: "control.call", operation: "getStatus", input }),
+        cancel: (input) => channel.request({ kind: "control.call", operation: "cancel", input }),
+        getArtifacts: (input) => channel.request({ kind: "control.call", operation: "getArtifacts", input }),
+        listSkills: (input = {}) => channel.request({ kind: "control.call", operation: "listSkills", input }),
+        listRoutines: () => channel.request({ kind: "control.call", operation: "listRoutines", input: {} }),
+        runRoutineNow: (input) => channel.request({ kind: "control.call", operation: "runRoutineNow", input }),
+        getAttention: () => channel.request({ kind: "control.call", operation: "getAttention", input: {} }),
+        requestTakeover: (input) => channel.request({ kind: "control.call", operation: "requestTakeover", input }),
+        approveAttention: (input) => call("approveAttention", input),
+        denyAttention: (input) => call("denyAttention", input),
+        computerView: (input) => call("computerView", input),
+        releaseTakeover: (input) => call("releaseTakeover", input),
+    });
+}
+
 export function attachSecureExternalControlServer(channel, { invoke } = {}) {
     if (!channel?.setRequestHandler || typeof invoke !== "function") throw new Error("secure external control server requires a bounded invoker");
     channel.setRequestHandler(async (payload) => {
-        exactKeys(payload, new Set(["kind", "operation", "input"]), "secure external control payload");
-        if (payload.kind !== "control.call" || !EXTERNAL_CONTROL_OPERATIONS.includes(payload.operation)) throw new Error("secure external control operation is not supported");
+        exactKeys(payload, new Set(["kind", "controlVersion", "operation", "input"]), "secure external control payload");
+        const version = payload.controlVersion === undefined ? 1 : payload.controlVersion;
+        const operations = version === 2 ? [...EXTERNAL_CONTROL_OPERATIONS, ...EXTERNAL_CONTROL_V2_OPERATIONS] : EXTERNAL_CONTROL_OPERATIONS;
+        if (payload.kind !== "control.call" || !operations.includes(payload.operation)) throw new Error("secure external control operation is not supported");
         object(payload.input, "secure external control input");
-        return invoke(payload.operation, structuredClone(payload.input), { deviceId: channel.peerDeviceId, transport: channel.transport });
+        return invoke(payload.operation, structuredClone(payload.input), { deviceId: channel.peerDeviceId, transport: channel.transport, controlVersion: version });
     });
     return channel;
 }

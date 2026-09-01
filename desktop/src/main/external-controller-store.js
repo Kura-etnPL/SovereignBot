@@ -16,7 +16,10 @@ export const EXTERNAL_CONTROLLER_SCOPES = Object.freeze([
     "routines:read",
     "routines:run",
     "attention:read",
+    "attention:decide",
     "takeover:request",
+    "computer:view",
+    "computer:release",
 ]);
 
 const OPERATION_SCOPE = Object.freeze({
@@ -33,8 +36,13 @@ const OPERATION_SCOPE = Object.freeze({
     listRoutines: "routines:read",
     runRoutineNow: "routines:run",
     getAttention: "attention:read",
+    approveAttention: "attention:decide",
+    denyAttention: "attention:decide",
     requestTakeover: "takeover:request",
+    computerView: "computer:view",
+    releaseTakeover: "computer:release",
 });
+const UNBOUND_READ_OPERATIONS = new Set(["listTeams", "listCoworkers", "listChannels", "listSkills", "listRoutines", "getAttention"]);
 
 const DEVICE_ID = /^device_[0-9a-f]{16}$/i;
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -185,7 +193,8 @@ export function createExternalControllerStore({ dataDir, persistPath, trustStore
         const team = context.teamId === undefined ? undefined : id(context.teamId, "teamId");
         const project = context.projectId === undefined ? undefined : id(context.projectId, "projectId");
         if (team && record.teamIds.length && !record.teamIds.includes(team)) throw new Error("external controller Team binding denied");
-        if (record.projectIds.length && (!project || !record.projectIds.includes(project))) throw new Error("external controller Project binding denied");
+        if (record.projectIds.length && project && !record.projectIds.includes(project)) throw new Error("external controller Project binding denied");
+        if (record.projectIds.length && !project && !UNBOUND_READ_OPERATIONS.has(operation)) throw new Error("external controller Project binding denied");
         record.lastSeenAt = new Date(nowMs(now)).toISOString();
         save();
         return clone(record);

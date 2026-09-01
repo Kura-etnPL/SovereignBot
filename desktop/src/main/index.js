@@ -432,6 +432,7 @@ async function main() {
         getJobs: () => jobs,
         controllerRegistry: externalControllerStore,
         projectService,
+        computerService: thisPc,
     });
     try {
         await externalTeamControl.start();

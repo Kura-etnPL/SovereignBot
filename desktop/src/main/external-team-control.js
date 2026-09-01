@@ -5,6 +5,7 @@ import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 
 export const EXTERNAL_TEAM_CONTROL_SCHEMA = "sovereignbot.external-team-control.v1";
 export const EXTERNAL_TEAM_CONTROL_PROTOCOL = "sovereignbot.team-control.v1";
+export const EXTERNAL_CONTROL_PROTOCOL_V2 = "sovereignbot.external-control/2";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_OUTCOMES = 256;
@@ -344,6 +345,7 @@ export function createExternalTeamControlApi({
     getJobs = () => jobs,
     controllerRegistry,
     projectService,
+    computerService,
     now = () => new Date().toISOString(),
     makeOutcomeId: makeOutcomeIdFn = makeOutcomeId,
 } = {}) {
@@ -441,7 +443,21 @@ export function createExternalTeamControlApi({
         if (input.routineId !== undefined) {
             const routine = getRoutineController()?.list?.().routines?.find((entry) => entry.id === input.routineId);
             if (!routine) throw new Error("unknown routine: " + input.routineId);
-            return { ...(routine.teamId ? { teamId: routine.teamId } : {}), ...(routine.projectId ? { projectId: routine.projectId } : {}) };
+            const binding = principal ? controllerBinding(principal) : undefined;
+            const boundProjectId = routine.teamId ? binding?.projectIds.find((projectId) => projectContainsTeam(projectId, routine.teamId)) : undefined;
+            return { ...(routine.teamId ? { teamId: routine.teamId } : {}), ...(routine.projectId ? { projectId: routine.projectId } : {}), ...(boundProjectId ? { projectId: boundProjectId } : {}) };
+        }
+        if (input.jobId !== undefined) {
+            const job = getJobs()?.getJob?.(input.jobId) ?? getJobs()?.attentionJobs?.().jobs?.find((entry) => entry.id === input.jobId);
+            if (!job) throw new Error("unknown attention job: " + input.jobId);
+            return { ...(job.teamId ? { teamId: job.teamId } : {}), ...(job.projectId ? { projectId: job.projectId } : {}) };
+        }
+        if (input.projectId !== undefined || input.coworkerId !== undefined) {
+            if (input.projectId === undefined || input.coworkerId === undefined) throw new Error("Computer target requires projectId and coworkerId");
+            const project = projectService?.resolveScope?.(input.projectId);
+            if (!project || !project.coworkerIds?.includes(input.coworkerId)) throw new Error("Computer target is outside the selected Project");
+            const team = teamService.list().teams.find((entry) => project.teamIds?.includes(entry.id) && entry.coworkerIds?.includes(input.coworkerId));
+            return { projectId: project.projectId ?? input.projectId, ...(team ? { teamId: team.id } : {}) };
         }
         return {};
     }
@@ -828,12 +844,52 @@ export function createExternalTeamControlApi({
             return publicOutcome(outcome);
         },
 
+        async decideAttention(input, principal, decision) {
+            if (!isPlainObject(input)) throw new Error("attention decision payload must be an object");
+            rejectAuthority(input, "attention decision");
+            exactKeys(input, new Set(["jobId"]), "attention decision");
+            const jobId = opaqueId(input.jobId, "jobId");
+            const currentJobs = getJobs();
+            if (!currentJobs?.getJob || typeof currentJobs[decision] !== "function") throw new Error("attention decision service is unavailable");
+            const result = await currentJobs[decision](jobId);
+            const activeAudit = getAudit();
+            if (activeAudit?.append) await activeAudit.append({ type: "external.attention.decided", actor: "external-controller", data: { operation: decision === "approve" ? "approve attention" : "deny attention", jobId, status: result?.status } });
+            return { protocol: EXTERNAL_CONTROL_PROTOCOL_V2, decision: decision === "approve" ? "approved" : "denied", job: result };
+        },
+
+        async computerView(input) {
+            if (!computerService?.list || !computerService?.health || !computerService?.snapshot) throw new Error("Computer view service is unavailable");
+            rejectAuthority(input, "computerView");
+            exactKeys(input, new Set(["projectId", "coworkerId"]), "computerView");
+            const { projectId, coworkerId } = input;
+            const listed = await computerService.list({ projectId, coworkerId });
+            const computer = listed?.computers?.[0];
+            if (computer && computer.coworkerId !== coworkerId) throw new Error("Computer view target mismatch");
+            const health = await computerService.health(projectId, coworkerId);
+            let snapshot = { available: false, reason: "Computer snapshot is unavailable" };
+            if (computer?.status !== "unavailable") {
+                try { snapshot = await computerService.snapshot(projectId, coworkerId); }
+                catch (error) { snapshot = { available: false, reason: publicText(error?.message ?? "Computer snapshot is unavailable").slice(0, 240) }; }
+            }
+            return { protocol: EXTERNAL_CONTROL_PROTOCOL_V2, projectId, coworkerId, health, computer: computer ? { coworkerId: computer.coworkerId, coworkerName: computer.coworkerName, status: computer.status, statusMessage: publicText(computer.statusMessage), currentApp: computer.currentApp, currentSite: computer.currentSite, canHandBack: computer.canHandBack === true, activity: (computer.activity ?? []).slice(0, 20) } : undefined, snapshot };
+        },
+
+        async releaseTakeover(input, principal) {
+            if (!computerService?.handBack) throw new Error("Computer release service is unavailable");
+            rejectAuthority(input, "releaseTakeover");
+            exactKeys(input, new Set(["projectId", "coworkerId"]), "releaseTakeover");
+            const result = await computerService.handBack(input.projectId, input.coworkerId, { actor: `external-controller:${principal.deviceId}` });
+            return { protocol: EXTERNAL_CONTROL_PROTOCOL_V2, released: true, computer: result };
+        },
+
         async invoke(operation, input = {}, principal) {
             if (!isPlainObject(input)) throw new Error("secure external control input must be an object");
             if (!controllerRegistry?.authorize) throw new Error("paired external controller authority is unavailable");
             let context;
             let release;
             try {
+                if (["approveAttention", "denyAttention", "computerView", "releaseTakeover"].includes(operation) && principal?.controlVersion !== 2)
+                    throw new Error("external control protocol v2 is required for this operation");
                 context = principalContext(input, principal);
                 controllerRegistry.authorize(principal?.deviceId, operation, { ...context, ...(principal?.transport ? { transport: principal.transport } : {}) });
                 release = controllerRegistry.beginRequest?.(principal.deviceId);
@@ -862,6 +918,10 @@ export function createExternalTeamControlApi({
                     case "runRoutineNow": return this.runRoutineNow(input);
                     case "getAttention": return this.getAttention({}, principal);
                     case "requestTakeover": return await this.requestTakeover(input.outcomeId, { ...(input.reason === undefined ? {} : { reason: input.reason }) });
+                    case "approveAttention": return await this.decideAttention(input, principal, "approve");
+                    case "denyAttention": return await this.decideAttention(input, principal, "dismiss");
+                    case "computerView": return await this.computerView(input, principal);
+                    case "releaseTakeover": return await this.releaseTakeover(input, principal);
                     default: throw new Error("secure external control operation is not supported");
                 }
             }
@@ -887,7 +947,7 @@ export function createExternalTeamControlApi({
                 mcpProtocolVersion: EXTERNAL_MCP_PROTOCOL_VERSION,
                 methods: ["listTeams", "listCoworkers", "listChannels", "sendMessage", "getConversation", "listSkills", "listRoutines", "runRoutineNow", "getAttention", "submitOutcome", "getOutcomeStatus", "getArtifacts", "cancelOutcome", "requestTakeover"],
                 mcpMethods: [...EXTERNAL_MCP_METHODS],
-                secureControl: { transport: "paired-device-direct-or-opaque-relay", operations: ["listTeams", "listCoworkers", "listChannels", "sendMessage", "getConversation", "submitOutcome", "getStatus", "cancel", "getArtifacts", "listSkills", "listRoutines", "runRoutineNow", "getAttention", "requestTakeover"] },
+                secureControl: { transport: "paired-device-direct-or-opaque-relay", protocolVersions: [1, 2], operations: ["listTeams", "listCoworkers", "listChannels", "sendMessage", "getConversation", "submitOutcome", "getStatus", "cancel", "getArtifacts", "listSkills", "listRoutines", "runRoutineNow", "getAttention", "requestTakeover"], v2Operations: ["approveAttention", "denyAttention", "computerView", "releaseTakeover"] },
             };
         },
     };
