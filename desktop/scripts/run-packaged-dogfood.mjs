@@ -3,7 +3,7 @@
 // boundary by the checked-in local fixture; no network or installer is involved.
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
