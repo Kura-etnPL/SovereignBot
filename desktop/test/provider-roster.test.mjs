@@ -88,6 +88,12 @@ test("no usable provider means an empty roster unless Demo Mode is explicitly on
     });
     assert.equal(signedOut.ready, false);
 
+    const capacityLimited = buildProviderRoster({
+        discovery: discovery(READY({ health: "capacity-limited", auth: { state: "signed-in" } }), { found: false }),
+        settings: {},
+    });
+    assert.equal(capacityLimited.ready, false);
+
     const demo = buildProviderRoster({
         discovery: discovery({ found: false }, { found: false }),
         settings: { demoMode: true },
@@ -233,4 +239,25 @@ test("reserved providers fail closed until an explicit executable adapter is reg
         chooseCoworkerProvider({ modelBinding: { profile: "deep" } }, { "chatgpt-web": true, claude: true }),
         undefined,
     );
+});
+
+test("deep requires an explicit strong Codex target and efficient maps to Luna", () => {
+    const strong = { id: "coworker_cccccccccccccccc", name: "Strong Coworker", state: "active", modelBinding: { profile: "deep", provider: "codex", model: "sol" } };
+    const lighter = { id: "coworker_dddddddddddddddd", name: "Lighter Coworker", state: "active", modelBinding: { profile: "deep", provider: "codex", model: "luna" } };
+    assert.equal(chooseCoworkerProvider(strong, { codex: true }), "codex");
+    assert.equal(chooseCoworkerProvider(lighter, { codex: true }), undefined);
+
+    const roster = buildProviderRoster({
+        discovery: discovery(),
+        settings: {},
+        coworkers: [{
+            id: "coworker_eeeeeeeeeeeeeeee",
+            name: "Efficient Coworker",
+            state: "active",
+            modelBinding: { profile: "efficient", provider: "codex" },
+        }],
+    });
+    const agent = roster.agents.find((entry) => entry.id === "coworker-agent-eeeeeeeeeeeeeeee");
+    assert.equal(agent.harness.model, "luna");
+    assert.equal(roster.coworkerBindings["coworker_eeeeeeeeeeeeeeee"].provider, "codex");
 });

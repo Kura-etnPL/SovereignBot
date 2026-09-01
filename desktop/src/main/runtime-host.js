@@ -138,11 +138,12 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                 source: launch.source,
                 commandPathHidden: true,
                 auth: { state: "unverified" },
+                health: "ready",
                 interactiveLoginAvailable: false,
             };
         }
         catch (error) {
-            return { provider: label, found: false, reason: String(error?.message ?? error) };
+            return { provider: label, found: false, health: "unavailable", reason: String(error?.message ?? error) };
         }
     }
 
@@ -207,6 +208,24 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
     }
 
     function summarizeRoster(roster, discovery) {
+        const settings = getSettings();
+        const publicProvider = (key) => {
+            const result = discovery[key] ?? {};
+            const authState = result.auth?.state;
+            const disabled = settings.providers?.[key]?.enabled === false;
+            const health = disabled ? "unavailable" : result.health
+                ?? (!result.found ? "unavailable"
+                    : authState === "signed-out" ? "signed-out"
+                        : authState === "capacity-limited" ? "capacity-limited" : "ready");
+            return {
+                found: Boolean(result.found),
+                enabled: !disabled,
+                health,
+                ...(disabled ? { reason: "Provider disabled in Settings" } : result.reason ? { reason: String(result.reason).slice(0, 300) } : {}),
+                authState,
+                usable: roster.providers[key] === true,
+            };
+        };
         return {
             mode: roster.mode,
             ready: roster.ready,
@@ -220,18 +239,8 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                 harnessKind: agent.harness.kind,
             })),
             providers: {
-                codex: {
-                    found: Boolean(discovery.codex?.found),
-                    enabled: getSettings().providers.codex.enabled,
-                    authState: discovery.codex?.auth?.state ?? undefined,
-                    usable: roster.providers.codex === true,
-                },
-                claude: {
-                    found: Boolean(discovery.claude?.found),
-                    enabled: getSettings().providers.claude.enabled,
-                    authState: discovery.claude?.auth?.state ?? undefined,
-                    usable: roster.providers.claude === true,
-                },
+                codex: publicProvider("codex"),
+                claude: publicProvider("claude"),
             },
         };
     }
@@ -317,8 +326,8 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             nextRoster.mode === roster.mode
             && JSON.stringify(nextRoster.roles) === JSON.stringify(roster.roles)
             && JSON.stringify(nextRoster.coworkerBindings ?? {}) === JSON.stringify(roster.coworkerBindings ?? {})
-            && JSON.stringify(nextRoster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind, agent.governedTools ?? []]))
-                === JSON.stringify(roster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind, agent.governedTools ?? []]))
+            && JSON.stringify(nextRoster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind, agent.harness.model ?? "", agent.governedTools ?? []]))
+                === JSON.stringify(roster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind, agent.harness.model ?? "", agent.governedTools ?? []]))
             && (computer.path ?? "") === (computerPath ?? "");
         if (sameShape) {
             discovery = nextDiscovery;

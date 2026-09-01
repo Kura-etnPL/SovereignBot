@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { findAuthStatusCandidates, probeOnce, describeProvider } from "../src/main/lib/provider-discovery.js";
+import { classifyAuthText, findAuthStatusCandidates, probeOnce, describeProvider } from "../src/main/lib/provider-discovery.js";
 
 test("findAuthStatusCandidates extracts only auth+status style subcommands from help text", () => {
     const codexStyle = [
@@ -14,7 +15,7 @@ test("findAuthStatusCandidates extracts only auth+status style subcommands from 
         "Options:",
         "  --help             Print help",
     ].join("\n");
-    assert.deepEqual(findAuthStatusCandidates(codexStyle), ["auth status Show current authentication status"]);
+    assert.deepEqual(findAuthStatusCandidates(codexStyle), ["auth status"]);
 
     const claudeStyle = "- status          Show auth status and account info";
     const candidates = findAuthStatusCandidates(claudeStyle);
@@ -61,5 +62,28 @@ test("describeProvider reports found/unverified for a real resolver and found:fa
         "broken",
         ["--version"],
     );
-    assert.deepEqual(broken, { provider: "broken", found: false, reason: "resolver exploded" });
+    assert.deepEqual(broken, { provider: "broken", found: false, health: "unavailable", reason: "resolver exploded" });
+});
+
+test("provider discovery uses read-only nested login help and classifies capacity limits", async () => {
+    const fake = new URL("../e2e/fixtures/fake-provider-codex.mjs", import.meta.url);
+    const healthy = await describeProvider(
+        () => ({ command: process.execPath, prefixArgs: [fileURLToPath(fake)], source: "fake-codex" }),
+        "codex",
+        ["--version"],
+    );
+    assert.equal(healthy.health, "ready");
+    assert.equal(healthy.auth.state, "signed-in");
+    assert.equal(healthy.auth.via, "auth status");
+    assert.equal(healthy.interactiveLoginAvailable, true);
+    assert.deepEqual(classifyAuthText("logged in, quota exceeded; try again later", "login status"), {
+        state: "capacity-limited",
+        via: "login status",
+    });
+
+    assert.deepEqual(findAuthStatusCandidates([
+        "Commands:",
+        "  login         Manage login",
+        "  login status  Show login status",
+    ].join("\n")), ["login status"]);
 });

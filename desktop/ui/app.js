@@ -302,7 +302,8 @@ function renderSidebar() {
 
 function renderReadiness() {
   const readyCoworkers = Object.values(state.roster?.coworkerBindings ?? {}).filter((entry) => entry?.ready).length;
-  const providers = Object.entries(state.roster?.providers ?? {}).filter(([, value]) => value?.usable).map(([key]) => humanProvider(key));
+  const providers = Object.entries(state.roster?.providers ?? {}).filter(([, value]) => value?.health === "ready" && value?.usable).map(([key]) => humanProvider(key));
+  const blocked = Object.values(state.roster?.providers ?? {}).find((value) => ["signed-out", "capacity-limited", "unavailable"].includes(value?.health));
   const summary = $("provider-summary");
   const dot = $("provider-dot");
   if (state.roster?.mode === "demo") {
@@ -312,7 +313,10 @@ function renderReadiness() {
     summary.textContent = providers.length ? `${providers.join(" + ")} ready · ${readyCoworkers} coworker lanes` : `${readyCoworkers} coworker lanes ready`;
     dot.classList.remove("offline");
   } else {
-    summary.textContent = "Connect Codex or Claude Code";
+    summary.textContent = blocked?.health === "signed-out" ? "Sign in to Codex or Claude Code"
+      : blocked?.health === "capacity-limited" ? "Provider capacity is limited"
+        : blocked?.health === "unavailable" ? "Provider unavailable — check Settings"
+          : "Connect Codex or Claude Code";
     dot.classList.add("offline");
   }
 }
@@ -1601,7 +1605,9 @@ function renderProviderCards() {
   const firstRunProviders = state.firstRun?.providers ?? {};
   for (const provider of ["codex", "claude"]) {
     const info = firstRunProviders[provider] ?? {};
-    const usable = state.roster?.providers?.[provider]?.usable;
+    const rosterProvider = state.roster?.providers?.[provider] ?? {};
+    const health = rosterProvider.health ?? (rosterProvider.usable ? "ready" : info.found ? "unavailable" : "unavailable");
+    const usable = health === "ready" && rosterProvider.usable === true;
     const card = document.createElement("article");
     card.className = "provider-card";
     const head = document.createElement("div");
@@ -1609,11 +1615,15 @@ function renderProviderCards() {
     const name = document.createElement("strong");
     name.textContent = humanProvider(provider);
     const status = document.createElement("span");
-    status.className = `provider-state${usable ? " ready" : ""}`;
-    status.textContent = usable ? "Ready" : info.found ? `Auth ${info.auth?.state ?? "unverified"}` : "Not found";
+    status.className = `provider-state${health === "ready" && usable ? " ready" : ""}`;
+    status.textContent = health === "ready" && usable ? "Ready"
+      : health === "ready" && rosterProvider.usable === false ? "Disabled"
+      : health === "signed-out" ? "Signed out"
+        : health === "capacity-limited" ? "Capacity limited"
+          : health === "unavailable" ? "Unavailable" : "Checking";
     head.append(name, status);
     const detail = document.createElement("p");
-    detail.textContent = info.found ? (info.version || "CLI detected") : "Install the local CLI, then refresh.";
+    detail.textContent = rosterProvider.reason || (info.found ? (info.version || "CLI detected") : "Install the local CLI, then refresh.");
     const actions = document.createElement("div");
     actions.className = "provider-actions";
     const signIn = document.createElement("button");

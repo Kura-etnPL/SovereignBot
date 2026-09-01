@@ -37,7 +37,7 @@ function providerEnabled(settings, provider) {
     return settings?.providers?.[provider]?.enabled !== false;
 }
 
-// Usable = detected AND enabled AND not explicitly signed out. Passive auth probing can
+// Usable = detected AND enabled AND not explicitly signed out/capacity limited. Passive auth probing can
 // legitimately fail to verify a working login ("unverified"); blocking on that guesswork
 // would lock out working setups, so unverified providers are allowed in and any real auth
 // failure surfaces later as an honest harness error with repair guidance — never as a
@@ -47,7 +47,8 @@ export function providerUsable(discoveryResult, settings, provider) {
         return false;
     if (!providerEnabled(settings, provider))
         return false;
-    if (discoveryResult.auth?.state === "signed-out")
+    if (["signed-out", "capacity-limited", "unavailable"].includes(discoveryResult.health)
+        || ["signed-out", "capacity-limited"].includes(discoveryResult.auth?.state))
         return false;
     return true;
 }
@@ -135,9 +136,15 @@ function effectiveModelBinding(coworker) {
     // Public coworker projections retain the legacy preference but intentionally omit
     // provider/model details.  Rehydrate only the safe legacy provider for compatibility
     // with older callers; the full main-process list already carries the binding.
-    if (raw && typeof raw === "object" && raw.provider === undefined && legacy !== "auto")
-        return normalizeModelBinding({ ...raw, provider: legacy, ...(legacy === "codex" && raw.model === undefined ? { model: "luna" } : {}) }, { legacyPreference: legacy });
-    return normalizeModelBinding(raw, { legacyPreference: legacy });
+    const normalized = raw && typeof raw === "object" && raw.provider === undefined && legacy !== "auto"
+        ? normalizeModelBinding({ ...raw, provider: legacy, ...(legacy === "codex" && raw.model === undefined ? { model: "luna" } : {}) }, { legacyPreference: legacy })
+        : normalizeModelBinding(raw, { legacyPreference: legacy });
+    // Efficient is the current Codex subscription lane. Keep its concrete target
+    // explicit in the trusted main-process binding so a runtime rebuild can detect
+    // and apply an operator-requested model change.
+    return normalized.profile === "efficient" && normalized.provider === "codex" && !normalized.model
+        ? { ...normalized, model: "luna" }
+        : normalized;
 }
 
 export function chooseCoworkerProvider(coworker, usableProviders = {}) {

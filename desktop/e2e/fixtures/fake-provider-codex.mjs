@@ -66,7 +66,7 @@ if (cancelHoldMs > 0 && /V45_CANCEL_HOLD/.test(prompt))
     await new Promise((resolve) => setTimeout(resolve, Math.min(cancelHoldMs, 60_000)));
 
 if (kind === "fanout-child")
-    await new Promise((resolve) => setTimeout(resolve, negativeFanout ? 60_000 : 260));
+    await new Promise((resolve) => setTimeout(resolve, negativeFanout ? 60_000 : 1_200));
 
 if (args.includes("--help")) {
     process.stdout.write([

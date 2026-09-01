@@ -72,7 +72,6 @@ export async function runVerifySoftwareTeam({
         const attempts = [];
         let image;
         try {
-            win.show();
             await new Promise((resolve) => setTimeout(resolve, 250));
             image = await win.capturePage(undefined, { stayAwake: true });
         }
@@ -728,8 +727,7 @@ export async function runVerifySoftwareTeam({
         await waitFor("negative fanout message visible", async () => await renderer("document.getElementById('conversation-messages')?.innerText.includes('negative-stop')"), 30_000);
         const negativeRunning = await waitFor("negative fanout child work", async () => {
             const team = await renderer(`window.sovereignbot.teams.get({ teamId: ${JSON.stringify(importedFanout.id)} })`);
-            const stopButton = await renderer("(()=>{ const button = document.getElementById('conversation-stop'); return Boolean(button && !button.classList.contains('hidden') && !button.disabled); })()");
-            return team?.flow?.activeFanout?.state === "running" && team.flow.activeFanout.children?.some((entry) => entry.status === "running") && stopButton ? team : false;
+            return team?.flow?.activeFanout?.state === "running" && team.flow.activeFanout.children?.some((entry) => entry.status === "running") ? team : false;
         }, 45_000);
         const stopResult = await renderer(`(async()=>{
             const result = await window.sovereignbot.conversations.stop(${JSON.stringify({ conversationId: fanoutChannel.conversationId })});

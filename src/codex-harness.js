@@ -264,7 +264,13 @@ export class CodexHarness {
             catch {
             }
             await exitPromise.catch(() => undefined);
-            return { ok: false, error: error.message, metadata: { sessionId, eventCount, launcher: launch.source, governedTools: Boolean(context.toolBridge) } };
+            return {
+                ok: false,
+                error: timedOut || cancelled
+                    ? classifyFailure({ spawnError, stderr, timedOut, cancelled })
+                    : error.message,
+                metadata: { sessionId, eventCount, launcher: launch.source, governedTools: Boolean(context.toolBridge) },
+            };
         }
         finally {
             clearTimeout(timeout);
