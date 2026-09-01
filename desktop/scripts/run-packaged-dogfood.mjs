@@ -26,7 +26,7 @@ async function main() {
   const exe = findPackagedExe();
   const dataDir = await mkdtemp(join(tmpdir(), "sovereign-packaged-dogfood-"));
   const transcriptPath = join(dataDir, "fake-provider-transcript.jsonl");
-  const evidenceDir = join(dataDir, "evidence");
+  const evidenceDir = `${dataDir}-evidence`;
   const electronUserDataDir = `${dataDir}-electron-userdata`;
   const child = spawn(exe, ["--disable-gpu", `--user-data-dir=${electronUserDataDir}`, "--verify-software-team"], {
     env: {
@@ -77,6 +77,7 @@ async function main() {
   }
   finally {
     await rm(dataDir, { recursive: true, force: true }).catch(() => {});
+    await rm(evidenceDir, { recursive: true, force: true }).catch(() => {});
     await rm(electronUserDataDir, { recursive: true, force: true }).catch(() => {});
   }
 }
