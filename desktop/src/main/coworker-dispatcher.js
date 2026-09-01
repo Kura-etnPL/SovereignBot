@@ -36,7 +36,8 @@ function redactWorkspacePath(value, workspacePath) {
     if (!workspacePath)
         return text;
     const escaped = String(workspacePath).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return text.replace(new RegExp(escaped, "gi"), "<workspace>");
+    const redacted = text.replace(new RegExp(escaped, "gi"), "<workspace>");
+    return redacted.replace(/(^|\n)[ \t]*cwd[ \t]*=[^\r\n]*/gi, "$1");
 }
 
 function publicConversationContext(conversation, coworkerId) {
