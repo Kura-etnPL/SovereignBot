@@ -1,6 +1,6 @@
 {
     "name": "sovereignbot-desktop",
-    "version": "4.0.0-dev",
+    "version": "4.0.0",
     "description": "SovereignBot Windows desktop application: local-first AI coworker runtime with governed computer access.",
     "productName": "SovereignBot",
     "type": "module",
@@ -21,7 +21,8 @@
         "secret-scan": "node scripts/no-secret-scan.mjs",
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",
         "installer-e2e": "node scripts/installer-e2e.mjs",
-        "release-manifest": "node scripts/write-release-manifest.mjs"
+        "release-manifest": "node scripts/write-release-manifest.mjs",
+        "release-version": "node scripts/check-release-version.mjs"
     },
     "devDependencies": {
         "@electron-forge/cli": "7.11.2",

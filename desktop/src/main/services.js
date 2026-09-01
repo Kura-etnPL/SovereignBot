@@ -28,6 +28,7 @@ export const DESKTOP_SETTINGS_SCHEMA = Object.freeze({
     notifications: "boolean",
     demoMode: "boolean",
     language: Object.freeze(["system", "zh-CN", "en"]),
+    updateChannel: Object.freeze(["stable", "preview", "off"]),
 });
 
 function defaultSettings() {
@@ -40,6 +41,7 @@ function defaultSettings() {
         // production mode always requires a real, enabled provider.
         demoMode: false,
         language: "system",
+        updateChannel: "stable",
         providers: { codex: { enabled: true }, claude: { enabled: true }, "chatgpt-web": { enabled: true }, antigravity: { enabled: true }, economy: { enabled: true } },
         roles: {},
     };
@@ -48,6 +50,7 @@ function defaultSettings() {
 function normalizeSettings(value) {
     const settings = { ...defaultSettings(), ...value };
     if (!["system", "zh-CN", "en"].includes(settings.language)) settings.language = "system";
+    if (!["stable", "preview", "off"].includes(settings.updateChannel)) settings.updateChannel = "stable";
     settings.providers = {
         codex: { enabled: value?.providers?.codex?.enabled !== false },
         claude: { enabled: value?.providers?.claude?.enabled !== false },

@@ -14,6 +14,7 @@ const state = {
   workspaces: { workspaces: [], defaultWorkspaceId: undefined },
   firstRun: undefined,
   connectedApps: { apps: [] },
+  updateStatus: undefined,
   selectedConversationId: undefined,
   selectedConversation: undefined,
   activeView: "welcome",
@@ -1826,26 +1827,55 @@ function ensureDataLifecycleCard() {
   void refresh();
 }
 
+function ensureUpdateCard() {
+  if ($("update-card")) return;
+  const grid = $("view-settings")?.querySelector(".settings-grid");
+  if (!grid || !window.sovereignbot.updates) return;
+  const card = document.createElement("section"); card.id = "update-card"; card.className = "settings-card span-2";
+  const heading = document.createElement("div"); heading.className = "card-heading";
+  const copy = document.createElement("div"); const title = document.createElement("h2"); title.textContent = "Release updates"; const description = document.createElement("p"); description.textContent = "Stable updates are verified locally before staging. Nothing downloads or applies automatically."; copy.append(title, description);
+  const refresh = document.createElement("button"); refresh.id = "update-check"; refresh.type = "button"; refresh.className = "quiet-action"; refresh.textContent = "Check for updates"; heading.append(copy, refresh);
+  const channelLabel = document.createElement("label"); channelLabel.textContent = "Channel / 通道 "; const channel = document.createElement("select"); channel.id = "update-channel";
+  for (const [value, label] of [["stable", "Stable"], ["preview", "Preview"], ["off", "Off"]]) { const option = document.createElement("option"); option.value = value; option.textContent = label; channel.append(option); }
+  channelLabel.append(channel);
+  const status = document.createElement("div"); status.id = "update-status"; status.className = "setting-feedback";
+  const actions = document.createElement("div"); actions.className = "detail-actions";
+  const stage = document.createElement("button"); stage.id = "update-stage"; stage.type = "button"; stage.className = "quiet-action"; stage.textContent = "Stage verified update";
+  const apply = document.createElement("button"); apply.id = "update-apply"; apply.type = "button"; apply.className = "quiet-action"; apply.textContent = "Apply on restart"; actions.append(stage, apply);
+  card.append(heading, channelLabel, status, actions); grid.prepend(card);
+  const showError = (error) => { status.textContent = text(error?.message || error).replace(/^.*Error: /, ""); };
+  const render = (value) => { state.updateStatus = value; channel.value = value.channel ?? "stable"; const a = value.available; const staged = value.staged; status.textContent = `Current ${value.currentVersion} · ${value.channel} · ${a ? `Available ${a.version} · ${a.signature?.status ?? "unknown"} / verified` : "No verified update"}${staged ? ` · Backup ${staged.backupId} · restart required` : ""}`; };
+  channel.addEventListener("change", async () => { try { render(await window.sovereignbot.updates.setChannel({ channel: channel.value })); } catch (error) { showError(error); } });
+  refresh.addEventListener("click", async () => { refresh.disabled = true; try { render(await window.sovereignbot.updates.check({})); } catch (error) { showError(error); } finally { refresh.disabled = false; } });
+  stage.addEventListener("click", async () => { try { render(await window.sovereignbot.updates.stage({})); } catch (error) { showError(error); } });
+  apply.addEventListener("click", async () => { if (!window.confirm("Apply the verified update and restart the app?")) return; try { const result = await window.sovereignbot.updates.apply({}); status.textContent = `Update ${result.version} requested; restart required.`; } catch (error) { showError(error); } });
+  void window.sovereignbot.updates.status({}).then(render).catch(showError);
+}
+
 async function refreshSettingsData() {
   try {
     ensureDataLifecycleCard();
-    const [settings, workspaces, firstRun, roster, connectedApps] = await Promise.all([
+    ensureUpdateCard();
+    const [settings, workspaces, firstRun, roster, connectedApps, updateStatus] = await Promise.all([
       window.sovereignbot.settings.get({}),
       window.sovereignbot.workspaces.list({}),
       window.sovereignbot.firstRun.getStatus({}),
       window.sovereignbot.providers.getRoster({}),
       window.sovereignbot.connectedApps.list({}),
+      window.sovereignbot.updates?.status?.({}) ?? Promise.resolve(undefined),
     ]);
     state.settings = settings;
     state.workspaces = workspaces;
     state.firstRun = firstRun;
     state.roster = roster;
     state.connectedApps = connectedApps;
+    state.updateStatus = updateStatus;
     renderSettings();
     renderProviderCards();
     renderWorkspaces();
     renderAdvancedRoster();
     renderConnectedApps();
+    if ($("update-status") && updateStatus) { $("update-channel").value = updateStatus.channel; $("update-status").textContent = `Current ${updateStatus.currentVersion} · ${updateStatus.channel} · ${updateStatus.available ? `Available ${updateStatus.available.version} · ${updateStatus.available.signature?.status ?? "unknown"} / verified` : "No verified update"}`; }
     renderReadiness();
     renderSidebar();
     const browsers = firstRun?.browsers ?? [];

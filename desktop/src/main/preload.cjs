@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
     search: Object.freeze({ query: invoke("search:query") }),
     palette: Object.freeze({ list: invoke("palette:list"), execute: invoke("palette:execute") }),
     settings: Object.freeze({ get: invoke("settings:get"), update: invoke("settings:update") }),
+    updates: Object.freeze({ status: invoke("update:status"), check: invoke("update:check"), stage: invoke("update:stage"), apply: invoke("update:apply"), setChannel: invoke("update:setChannel") }),
     dataLifecycle: Object.freeze({ status: invoke("data:status"), listBackups: invoke("data:listBackups"), backup: invoke("data:backup"), restore: invoke("data:restore"), export: invoke("data:export"), prepareReset: invoke("data:prepareReset"), reset: invoke("data:reset") }),
     coworkers: Object.freeze({ list: invoke("coworker:list"), get: invoke("coworker:get"), create: invoke("coworker:create"), update: invoke("coworker:update"), archive: invoke("coworker:archive"), restore: invoke("coworker:restore") }),
     memory: Object.freeze({ list: invoke("memory:list"), get: invoke("memory:get"), update: invoke("memory:update"), forget: invoke("memory:forget"), delete: invoke("memory:delete"), pin: invoke("memory:pin"), sourceTrace: invoke("memory:sourceTrace") }),

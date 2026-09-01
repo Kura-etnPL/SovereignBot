@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { app, dialog, Notification, shell } from "electron";
 import { desktopVersion } from "./lib/desktop-version.js";
 import { installAppProtocolHandler, registerAppSchemePrivileged } from "./protocol.js";
@@ -41,6 +41,7 @@ import { createThisPcService } from "./this-pc-service.js";
 import { createComputerTargetController } from "./computer-target-controller.js";
 import { createLocalIsolatedComputer } from "./local-isolated-computer.js";
 import { createDesktopDataLifecycle } from "./data-lifecycle.js";
+import { createSquirrelUpdateExecutor, createUpdateService } from "./update-service.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -109,6 +110,23 @@ async function main() {
         await runSmokeMode({ app });
         return;
     }
+    if (process.argv.includes("--desktop-migration-check")) {
+        const { createDesktopDataLifecycle } = await import("./data-lifecycle.js");
+        const lifecycle = createDesktopDataLifecycle({
+            dataDir: defaultDataDir(),
+            migrationHook: async () => { if (process.env.SOVEREIGNBOT_INJECT_MIGRATION_FAILURE === "1") throw new Error("injected migration failure"); },
+        });
+        try {
+            const result = await lifecycle.recover();
+            process.stdout.write(`${JSON.stringify({ migration: "ok", result })}\n`);
+            app.exit(0);
+        }
+        catch (error) {
+            process.stdout.write(`${JSON.stringify({ migration: "failed", error: String(error?.message ?? error) })}\n`);
+            app.exit(1);
+        }
+        return;
+    }
 
     const dataDir = defaultDataDir();
     let jobs;
@@ -124,6 +142,18 @@ async function main() {
     });
     await dataLifecycle.recover();
     const services = createDesktopServices({ dataDir, dialog });
+    const updateFeedRoot = process.env.SOVEREIGNBOT_UPDATE_FEED_DIR;
+    const updates = createUpdateService({
+        dataDir,
+        currentVersion: desktopVersion(),
+        getChannel: () => services.getSettings().updateChannel,
+        setChannel: (channel) => services.updateSettings({ updateChannel: channel }),
+        dataLifecycle,
+        feedRoot: updateFeedRoot,
+        updateExecutor: updateFeedRoot && process.platform === "win32"
+            ? createSquirrelUpdateExecutor({ updateExe: join(dirname(app.getPath("exe")), "..", "Update.exe"), feedRoot: updateFeedRoot })
+            : undefined,
+    });
     const coworkerStore = createCoworkerStore({ persistPath: join(dataDir, "desktop-state", "coworkers.json") });
     coworkerStore.ensureDefaults();
     const conversationStore = createConversationStore({
@@ -521,6 +551,11 @@ async function main() {
                 "palette:execute": ({ paletteId, args }) => palette.execute({ commandId: paletteId, args }),
                 "settings:get": () => services.getSettings(),
                 "settings:update": (patch) => services.updateSettings(patch),
+                "update:status": () => updates.status(),
+                "update:check": () => updates.check(),
+                "update:stage": () => updates.stage(),
+                "update:apply": () => updates.apply(),
+                "update:setChannel": ({ channel }) => updates.setChannel(channel),
                 "data:status": () => dataLifecycle.status(),
                 "data:listBackups": () => dataLifecycle.listBackups(),
                 "data:backup": () => dataLifecycle.backup(),

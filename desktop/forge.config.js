@@ -1,8 +1,12 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { flipFusesOn, verifyFusesOn } from "./scripts/fuses-core.mjs";
+import { releaseSigningConfig } from "./scripts/release-signing.mjs";
+import { assertStableSource, collectSourceProvenance } from "./scripts/release-provenance.mjs";
 
 const rootDirname = new URL(".", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const signing = releaseSigningConfig();
+assertStableSource({ repoRoot: join(rootDirname, ".."), provenance: collectSourceProvenance({ repoRoot: join(rootDirname, "..") }), signingStatus: signing.status });
 
 /** @type {import('@electron-forge/shared-types').ForgeConfig} */
 export default {
@@ -55,6 +59,7 @@ export default {
                 noMsi: true,
                 // Required by the generated .nuspec; kept aligned with the repo owner.
                 authors: "Kura-etnPL",
+                ...signing.makerConfig,
             },
         },
     ],

@@ -113,6 +113,16 @@ jobs:
           echo "notes=$notes" >> "$GITHUB_OUTPUT"
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
 
+      - name: Enforce stable version and signer boundary
+        if: steps.meta.outputs.publish == 'true'
+        working-directory: desktop
+        env:
+          SOVEREIGNBOT_RELEASE_MODE: stable
+          SOVEREIGNBOT_RELEASE_CHANNEL: stable
+          SOVEREIGNBOT_WINDOWS_CERTIFICATE_FILE: ${{ secrets.SOVEREIGNBOT_WINDOWS_CERTIFICATE_FILE }}
+          SOVEREIGNBOT_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.SOVEREIGNBOT_WINDOWS_CERTIFICATE_PASSWORD }}
+        run: npm run release-version
+
       - name: Install desktop toolchain (locked)
         if: steps.meta.outputs.publish == 'true'
         working-directory: desktop
@@ -141,6 +151,11 @@ jobs:
       - name: Make Squirrel installer (win32-x64)
         if: steps.meta.outputs.publish == 'true'
         working-directory: desktop
+        env:
+          SOVEREIGNBOT_RELEASE_MODE: stable
+          SOVEREIGNBOT_RELEASE_CHANNEL: stable
+          SOVEREIGNBOT_WINDOWS_CERTIFICATE_FILE: ${{ secrets.SOVEREIGNBOT_WINDOWS_CERTIFICATE_FILE }}
+          SOVEREIGNBOT_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.SOVEREIGNBOT_WINDOWS_CERTIFICATE_PASSWORD }}
         run: npm run make
 
       - name: Verify Electron fuses on packaged tree
@@ -177,6 +192,10 @@ jobs:
         working-directory: desktop
         env:
           GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOVEREIGNBOT_RELEASE_MODE: stable
+          SOVEREIGNBOT_RELEASE_CHANNEL: stable
+          SOVEREIGNBOT_WINDOWS_CERTIFICATE_FILE: ${{ secrets.SOVEREIGNBOT_WINDOWS_CERTIFICATE_FILE }}
+          SOVEREIGNBOT_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.SOVEREIGNBOT_WINDOWS_CERTIFICATE_PASSWORD }}
         run: npm run release-manifest
 
       - name: Secret scan over packaged payload
