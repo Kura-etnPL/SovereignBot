@@ -109,6 +109,10 @@ async function main() {
         coworkerStore,
     });
     const artifactStore = createArtifactStore({ dataDir });
+    conversationStore.setArtifactReferenceValidator(({ conversationId, artifactIds }) => {
+        for (const artifactId of artifactIds)
+            artifactStore.validateReference(artifactId, conversationId);
+    });
     const attachmentAwareConversationStore = createAttachmentAwareConversationStore(conversationStore, artifactStore);
     const skillStore = createSkillStore({ persistPath: join(dataDir, "desktop-state", "skills.json") });
     const workerNodeStore = createWorkerNodeStore({ dataDir });

@@ -205,6 +205,12 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             return publicView(requirePublicArtifact(id));
         },
 
+        validateReference(id, conversationId) {
+            const entry = requireArtifact(id);
+            if (entry.conversationId && entry.conversationId !== String(conversationId)) throw new Error("artifact reference does not belong to this conversation");
+            return { id: entry.id };
+        },
+
         managedPath(id) {
             return storagePath(requirePublicArtifact(id));
         },

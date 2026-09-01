@@ -104,6 +104,7 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         : [];
 
     let resolveTeamRoute = typeof teamRouteResolver === "function" ? teamRouteResolver : undefined;
+    let validateArtifactReferences;
 
     function save() { saveJsonState(persistPath, { schema: CONVERSATIONS_SCHEMA, conversations }); }
     function requireConversation(id) { const conversation = conversations.find((entry) => entry.id === String(id)); if (!conversation) throw new Error(`unknown conversation id: ${id}`); return conversation; }
@@ -187,6 +188,7 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         const text = boundedText(payload.text, "text", MAX_MESSAGE_TEXT, { required: true });
         const mentions = idList(payload.mentions, "mentions", { max: MAX_PARTICIPANTS });
         const artifactIds = idList(payload.artifactIds, "artifactIds");
+        validateArtifactReferences?.({ conversationId: conversation.id, artifactIds });
         const replyTo = payload.replyTo;
         if (replyTo !== undefined && (!validMessageId(replyTo) || !conversation.messages.some((entry) => entry.id === replyTo))) throw new Error("replyTo must reference an existing message in this conversation");
         const clientMessageId = boundedText(payload.clientMessageId, "clientMessageId", 128);
@@ -212,6 +214,10 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         setTeamRouteResolver(resolver) {
             if (resolver !== undefined && typeof resolver !== "function") throw new Error("team route resolver must be a function");
             resolveTeamRoute = resolver;
+        },
+        setArtifactReferenceValidator(validator) {
+            if (validator !== undefined && typeof validator !== "function") throw new Error("artifact reference validator must be a function");
+            validateArtifactReferences = validator;
         },
         list() { return { schema: CONVERSATIONS_SCHEMA, conversations: conversations.map(summarize) }; },
         get(id) { const conversation = requireConversation(id); return { ...summarize(conversation), messages: clone(conversation.messages) }; },

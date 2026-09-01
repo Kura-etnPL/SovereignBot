@@ -37,6 +37,15 @@ function fanoutPhase() {
     return undefined;
 }
 
+function p1CollaborationPhase() {
+    if (process.env.FAKE_PROVIDER_P1_CANARY !== "1" || !/P1_COLLABORATION/.test(prompt)) return undefined;
+    if (/SOVEREIGN_REVIEW:|^review:/m.test(prompt) || /candidateResult|previousReviewNotes/.test(prompt)) return "p1-review";
+    if (/You are (?:P1 )?Researcher\./m.test(prompt)) return "p1-researcher";
+    if (/You are (?:P1 )?Chief(?: of Staff)?\./m.test(prompt) && /P1 Reviewer approved|Independent review approved|fix verified/.test(prompt)) return "p1-chief-final";
+    if (/You are (?:P1 )?Chief(?: of Staff)?\./m.test(prompt)) return "p1-chief";
+    return undefined;
+}
+
 function fanoutRoster() {
     const ids = prompt.match(/coworker_[a-f0-9]{16}/gi) ?? [];
     return [...new Set(ids)];
@@ -46,7 +55,7 @@ const resumeIndex = args.indexOf("resume");
 const resumed = resumeIndex >= 0;
 const sessionId = resumed ? args[resumeIndex + 1] : `fake-codex-session-${Date.now().toString(36)}`;
 const cwd = process.cwd();
-const kind = fanoutPhase() ?? phase();
+const kind = fanoutPhase() ?? p1CollaborationPhase() ?? phase();
 const negativeFanout = /negative-stop/.test(prompt);
 
 // The V4.5 real Worker Node gate can hold one explicitly marked task long enough
@@ -57,7 +66,7 @@ if (cancelHoldMs > 0 && /V45_CANCEL_HOLD/.test(prompt))
     await new Promise((resolve) => setTimeout(resolve, Math.min(cancelHoldMs, 60_000)));
 
 if (kind === "fanout-child")
-    await new Promise((resolve) => setTimeout(resolve, negativeFanout ? 1_200 : 260));
+    await new Promise((resolve) => setTimeout(resolve, negativeFanout ? 60_000 : 260));
 
 if (args.includes("--help")) {
     process.stdout.write([
@@ -90,7 +99,25 @@ const PROPOSAL = {
 };
 
 let text;
-if (kind === "fanout-owner") {
+if (kind === "p1-chief") {
+    const researcher = /(?:P1 )?Researcher \((coworker_[a-f0-9]{16})\)/i.exec(prompt)?.[1];
+    writeFileSync(join(cwd, "p1-research-note.md"), "# P1 research note\n\nDeterministic artifact reference.\n", "utf8");
+    text = `P1 Chief woke Researcher with a bounded artifact reference.\nSOVEREIGN_ARTIFACTS: [{"path":"p1-research-note.md","title":"P1 research note"}]\nSOVEREIGN_HANDOFFS: [${JSON.stringify(researcher)}]`;
+}
+else if (kind === "p1-researcher") {
+    const reviewer = /(?:P1 )?Reviewer \((coworker_[a-f0-9]{16})\)/i.exec(prompt)?.[1];
+    const reference = /"artifactIds"\s*:\s*\[[^\]]+\]/.test(prompt) ? " P1_ARTIFACT_REFERENCE_RECEIVED(fake)." : "";
+    text = `P1 Researcher reply${reference} Requesting bounded Reviewer review.\nSOVEREIGN_HANDOFFS: [${JSON.stringify(reviewer)}]`;
+}
+else if (kind === "p1-review") {
+    text = resumed || /previousReviewNotes/.test(prompt)
+        ? `P1 Reviewer approved the revised Researcher result.\nSOVEREIGN_REVIEW: "approved"`
+        : `P1 Reviewer requested changes from Researcher.\nSOVEREIGN_REVIEW: "changes-requested"`;
+}
+else if (kind === "p1-chief-final") {
+    text = "P1 Chief joined the approved Researcher result and delivered the final outcome.";
+}
+else if (kind === "fanout-owner") {
     const [firstChild, secondChild, reviewer] = fanoutRoster();
     const stopMarker = negativeFanout ? " negative-stop" : "";
     text = `parallel bounded work requested\nSOVEREIGN_FANOUT: ${JSON.stringify({

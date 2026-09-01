@@ -137,6 +137,27 @@ test("coworker-to-coworker handoff is durable data, not execution authority", ()
     }
 });
 
+test("artifact references are validated against the conversation before durable append", () => {
+    const { root, conversations, chief, coder } = fixture();
+    try {
+        const team = conversations.createTeam({ title: "Artifact scope", coworkerIds: [chief.id, coder.id] });
+        conversations.setArtifactReferenceValidator(({ conversationId, artifactIds }) => {
+            if (conversationId === team.id && artifactIds.includes("artifact_wrong_channel"))
+                throw new Error("artifact reference does not belong to this conversation");
+        });
+        assert.throws(
+            () => conversations.postUserMessage(team.id, { text: "bad artifact", artifactIds: ["artifact_wrong_channel"] }),
+            /does not belong to this conversation/,
+        );
+        assert.equal(conversations.get(team.id).messages.length, 0);
+        const accepted = conversations.postUserMessage(team.id, { text: "known artifact", artifactIds: ["artifact_in_channel"] });
+        assert.deepEqual(accepted.artifactIds, ["artifact_in_channel"]);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("conversation membership and threading fail closed", () => {
     const { root, coworkerStore, conversations, chief, coder, researcher } = fixture();
     try {

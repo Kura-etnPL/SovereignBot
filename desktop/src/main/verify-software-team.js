@@ -438,6 +438,157 @@ export async function runVerifySoftwareTeam({
             await getHost().runtime.operatorSessions.revoke(externalSession.token);
         }
 
+        // P1 requirement audit: exercise the direct Bot-to-Bot collaboration
+        // contract through the public renderer API. This deliberately uses a
+        // fresh declarative pack so the chain is unambiguous: Chief -> Researcher
+        // -> Reviewer (changes requested) -> Researcher -> Reviewer (approved)
+        // -> Chief. The unrelated Software Team roster is not a participant.
+        const p1Pack = {
+            schema: "sovereignbot.desktop.team-pack.v1",
+            id: "p1-grok-collaboration",
+            name: "P1 Collaboration Team",
+            description: "Requirement-level directed collaboration canary.",
+            coworkers: [
+                {
+                    key: "chief",
+                    name: "P1 Chief",
+                    role: "Own the bounded outcome and coordinate the team.",
+                    instructions: "Wake Researcher, preserve the attached artifact reference, and synthesize only after Reviewer approves.",
+                    avatar: "✦",
+                    modelBinding: { profile: "automatic" },
+                },
+                {
+                    key: "researcher",
+                    name: "P1 Researcher",
+                    role: "Investigate the bounded question and prepare evidence.",
+                    instructions: "Use the referenced artifact as evidence, then request Reviewer review.",
+                    avatar: "⌕",
+                    modelBinding: { profile: "efficient", provider: "codex", model: "luna" },
+                },
+                {
+                    key: "reviewer",
+                    name: "P1 Reviewer",
+                    role: "Review the Researcher result and return a strict decision.",
+                    instructions: "Request one concrete revision on the first pass, then approve the revised result.",
+                    avatar: "✓",
+                    modelBinding: { profile: "efficient", provider: "codex", model: "luna" },
+                },
+            ],
+            channels: [{
+                key: "project",
+                name: "P1 Collaboration Room",
+                kind: "project",
+                instructions: "Chief scopes, Researcher investigates, Reviewer checks, and Chief synthesizes.",
+                playbookId: "p1-collaboration",
+            }],
+            playbooks: [{
+                id: "p1-collaboration",
+                name: "P1 Collaboration",
+                description: "Chief scopes -> Researcher investigates -> Reviewer reviews -> Chief synthesizes.",
+                steps: ["chief", "researcher", "reviewer", "chief"],
+            }],
+        };
+        const importedP1 = await renderer(`window.sovereignbot.teams.importPack(${JSON.stringify({ pack: p1Pack })})`);
+        const p1Team = importedP1.team;
+        const p1Channel = p1Team.channels[0];
+        const [p1ChiefId, p1ResearcherId, p1ReviewerId] = p1Team.coworkerIds;
+        check("P1_DIRECTED_TEAM_READY", importedP1.imported === true && p1Team.coworkerIds.length === 3
+            && p1Channel?.name === "P1 Collaboration Room", {
+            team: p1Team.name,
+            coworkers: p1Team.coworkerIds.length,
+            channel: p1Channel?.name,
+        });
+        await renderer(`openConversation(${JSON.stringify(p1Channel.conversationId)})`);
+        await waitFor("P1 Collaboration Room visible", async () => await renderer(`document.getElementById("conversation-title")?.textContent === ${JSON.stringify(p1Channel.name)}`), 30_000);
+
+        const staleArtifactRejected = await expectRendererReject(`window.sovereignbot.conversations.send(${JSON.stringify({
+            conversationId: p1Channel.conversationId,
+            text: "P1 stale artifact reference must be rejected.",
+            artifactIds: [artifact.id],
+            clientMessageId: "p1-stale-artifact",
+        })})`);
+        check("P1_STALE_ARTIFACT_REFERENCE_REJECTED", staleArtifactRejected, { referencedArtifact: artifact?.id, sourceConversation: channel.conversationId, targetConversation: p1Channel.conversationId });
+
+        await renderer(`window.sovereignbot.conversations.send(${JSON.stringify({
+            conversationId: p1Channel.conversationId,
+            text: "P1_COLLABORATION: Chief wake Researcher with the attached artifact reference, ask Researcher to request Reviewer review, and return an approved final outcome.",
+            clientMessageId: "p1-collaboration-positive",
+        })})`);
+        const p1Finished = await waitFor("P1 directed collaboration completion", async () => {
+            const teamState = await renderer(`window.sovereignbot.teams.get({ teamId: ${JSON.stringify(p1Team.id)} })`);
+            const conversation = await renderer(`window.sovereignbot.conversations.get({ conversationId: ${JSON.stringify(p1Channel.conversationId)} })`);
+            const activity = await renderer(`window.sovereignbot.teams.activity({ conversationId: ${JSON.stringify(p1Channel.conversationId)}, limit: 40 })`);
+            return teamState?.flow?.stage === "complete" && conversation.messages.some((entry) => entry.text.includes("P1 Chief joined"))
+                ? { team: teamState, conversation, activity }
+                : false;
+        }, 90_000);
+        const p1Messages = p1Finished.conversation.messages;
+        const p1SenderIds = [...new Set(p1Messages.map((entry) => entry.senderId))];
+        const p1AllowedSenders = new Set(["user", p1ChiefId, p1ResearcherId, p1ReviewerId]);
+        const p1BotMessages = p1Messages.filter((entry) => entry.senderId !== "user");
+        const p1ChiefReply = p1BotMessages.find((entry) => entry.senderId === p1ChiefId && entry.text.includes("P1 Chief woke"));
+        const p1ResearcherReply = p1BotMessages.find((entry) => entry.senderId === p1ResearcherId && entry.text.includes("P1 Researcher reply"));
+        const p1ReviewMessages = p1BotMessages.filter((entry) => entry.senderId === p1ReviewerId);
+        const p1FinalChief = p1BotMessages.find((entry) => entry.senderId === p1ChiefId && entry.text.includes("P1 Chief joined"));
+        const p1Labels = new Set((p1Finished.activity?.events ?? []).map((entry) => entry.label));
+        const p1Directed = p1ChiefReply?.mentions?.length === 1 && p1ChiefReply.mentions[0] === p1ResearcherId
+            && p1ResearcherReply?.mentions?.length === 1 && p1ResearcherReply.mentions[0] === p1ReviewerId
+            && p1BotMessages.every((entry) => !entry.mentions?.includes("everyone"))
+            && p1BotMessages.every((entry) => entry.replyTo && p1Messages.some((candidate) => candidate.id === entry.replyTo))
+            && p1ChiefReply.artifactIds?.length > 0;
+        const p1RevisionAndApproval = p1ReviewMessages.length >= 2
+            && p1ReviewMessages.some((entry) => entry.text.includes("requested changes"))
+            && p1ReviewMessages.some((entry) => entry.text.includes("approved"));
+        check("P1_DIRECTED_HANDOFF_REVIEW_CHAIN", p1Finished.team.flow.stage === "complete"
+            && p1Finished.team.flow.status === "available" && p1Finished.team.flow.currentOwnerId === undefined
+            && p1SenderIds.every((id) => p1AllowedSenders.has(id)) && p1Directed && p1RevisionAndApproval
+            && Boolean(p1FinalChief) && p1Messages.some((entry) => entry.text.includes("P1_ARTIFACT_REFERENCE_RECEIVED(fake)")), {
+            senderIds: p1SenderIds,
+            messageCount: p1Messages.length,
+            reviewCount: p1ReviewMessages.length,
+            stage: p1Finished.team.flow.stage,
+            status: p1Finished.team.flow.status,
+            currentOwnerId: p1Finished.team.flow.currentOwnerId,
+        });
+        check("P1_ACTIVITY_AND_SAFE_PROJECTION", ["Handoff requested", "Review requested", "Changes requested", "Approved", "Completed"].every((label) => p1Labels.has(label))
+            && !containsAny({ team: p1Finished.team, conversation: p1Finished.conversation, activity: p1Finished.activity }, [dataDir, "providerSession", "cwd", "runId", "requestId", "operationId", "operationToken"]), {
+            labels: [...p1Labels],
+            forbidden: containsAny({ team: p1Finished.team, conversation: p1Finished.conversation, activity: p1Finished.activity }, [dataDir, "providerSession", "cwd", "runId", "requestId", "operationId", "operationToken"]) ?? null,
+        });
+        if (p1Finished.team.flow.routingDecision !== undefined) {
+            check("P1_ROUTER_DECISION_SAFE_SHAPE", Object.keys(p1Finished.team.flow.routingDecision).sort().join(",") === "boundedTask,handoffType,reason,targetCoworkerId", p1Finished.team.flow.routingDecision);
+        }
+        result.screenshots.push(await capture("p1-directed-collaboration.png"));
+
+        // Inactive targets fail closed through the same public send path. The
+        // archived Researcher must receive no work and the room must surface
+        // Attention without exposing provider/runtime internals.
+        await renderer(`window.sovereignbot.coworkers.archive(${JSON.stringify({ coworkerId: p1ResearcherId })})`);
+        await renderer(`window.sovereignbot.conversations.send(${JSON.stringify({
+            conversationId: p1Channel.conversationId,
+            text: "P1_COLLABORATION inactive-target: route this bounded request to Researcher.",
+            mentions: [p1ResearcherId],
+            clientMessageId: "p1-inactive-target",
+        })})`);
+        const p1Attention = await waitFor("P1 inactive target attention", async () => {
+            const teamState = await renderer(`window.sovereignbot.teams.get({ teamId: ${JSON.stringify(p1Team.id)} })`);
+            const conversation = await renderer(`window.sovereignbot.conversations.get({ conversationId: ${JSON.stringify(p1Channel.conversationId)} })`);
+            const activity = await renderer(`window.sovereignbot.teams.activity({ conversationId: ${JSON.stringify(p1Channel.conversationId)}, limit: 12 })`);
+            return teamState?.flow?.status === "needs-attention" && activity?.events?.some((entry) => entry.label === "Attention")
+                ? { team: teamState, conversation, activity }
+                : false;
+        }, 30_000);
+        const inactiveMessageIndex = p1Attention.conversation.messages.findIndex((entry) => entry.clientMessageId === "p1-inactive-target");
+        const inactiveBotReply = p1Attention.conversation.messages.slice(Math.max(0, inactiveMessageIndex)).some((entry) => entry.senderId === p1ResearcherId && entry.text.includes("P1 Researcher reply"));
+        check("P1_INACTIVE_TARGET_FAILS_CLOSED", !inactiveBotReply && p1Attention.team.flow.status === "needs-attention"
+            && p1Attention.activity.events.some((entry) => entry.label === "Attention")
+            && !containsAny(p1Attention, [dataDir, "providerSession", "cwd", "session", "token"]), {
+            status: p1Attention.team.flow.status,
+            attention: p1Attention.activity.events.some((entry) => entry.label === "Attention"),
+            researcherReplied: inactiveBotReply,
+        });
+        await renderer(`window.sovereignbot.coworkers.restore(${JSON.stringify({ coworkerId: p1ResearcherId })})`);
+
         // Exercise the same public product path for a four-coworker team. The pack is
         // imported through the renderer so Electron IPC, TeamService's governed
         // workspace provisioning, runtime refresh, and the normal UI projection all
