@@ -65,6 +65,16 @@ function projectTarget(value, { list = false, create = false } = {}) {
     exact(input, new Set(["projectId"]));
     return { projectId: projectId(input.projectId) };
 }
+function thisPcTarget(value, { list = false } = {}) {
+    const input = objectPayload(value);
+    const allowed = list ? new Set(["projectId", "coworkerId", "limit"]) : new Set(["projectId", "coworkerId"]);
+    exact(input, allowed);
+    const out = { projectId: projectId(input.projectId) };
+    if (input.coworkerId !== undefined) out.coworkerId = identifier(input.coworkerId, "coworkerId");
+    else if (!list) throw new Error("coworkerId is required");
+    if (list && input.limit !== undefined) out.limit = positiveInteger(input.limit, "limit", 1, 50);
+    return out;
+}
 const SEARCH_TYPES = new Set(["conversations", "channels", "coworkers", "projects", "artifacts", "skills", "playbooks", "routines"]);
 const PALETTE_IDS = new Set(["new-coworker", "new-team", "new-channel", "run-routine", "teach-skill", "open-computer", "search"]);
 function searchTarget(value) {
@@ -359,6 +369,12 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "artifact:reveal": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["artifactId"])); return { artifactId: identifier(value.artifactId, "artifactId") }; }),
     "artifact:hub": spec(2048, (payload) => { if (payload === undefined || payload === null) return { limit: 100 }; const value = objectPayload(payload); exact(value, new Set(["limit", "teamId", "channelId", "coworkerId", "type"])); return { limit: value.limit === undefined ? 100 : positiveInteger(value.limit, "limit", 1, 500), ...(value.teamId ? { teamId: identifier(value.teamId, "teamId") } : {}), ...(value.channelId ? { channelId: identifier(value.channelId, "channelId") } : {}), ...(value.coworkerId ? { coworkerId: identifier(value.coworkerId, "coworkerId") } : {}), ...(value.type ? { type: string(value.type, "type", 120, true) } : {}) }; }),
     "computer:history": spec(1024, (payload) => { if (payload === undefined || payload === null) return { limit: 100 }; const value = objectPayload(payload); exact(value, new Set(["limit"])); return { limit: value.limit === undefined ? 100 : positiveInteger(value.limit, "limit", 1, 500) }; }),
+    "thisPc:list": spec(2048, (payload) => thisPcTarget(payload, { list: true })),
+    "thisPc:frame": spec(2048, (payload) => thisPcTarget(payload)),
+    "thisPc:snapshot": spec(2048, (payload) => thisPcTarget(payload)),
+    "thisPc:takeOver": spec(2048, (payload) => thisPcTarget(payload)),
+    "thisPc:handBack": spec(2048, (payload) => thisPcTarget(payload)),
+    "thisPc:health": spec(2048, (payload) => thisPcTarget(payload)),
 });
 
 export function validateV3IpcRequest(channel, payload) {

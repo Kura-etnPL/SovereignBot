@@ -3,6 +3,64 @@
 (() => {
   if (!window.sovereignbot?.computer || !window.sovereignbot?.operator || typeof renderDetails !== "function") return;
 
+  // Conversation details keeps a compact, safe compatibility view. It resolves
+  // the Project server-side through the public Project projection and never uses
+  // the legacy operator/agent-shaped Computer payload.
+  if (window.sovereignbot?.thisPc) {
+    const baseRenderDetails = renderDetails;
+    function ensureSafeSection() {
+      const panel = document.getElementById("details-panel");
+      if (!panel) return undefined;
+      let section = document.getElementById("details-computer-section");
+      if (!section) {
+        section = document.createElement("section");
+        section.id = "details-computer-section";
+        section.className = "detail-section computer-section";
+        const label = document.createElement("span"); label.className = "detail-label"; label.textContent = "This PC / 此电脑";
+        const root = document.createElement("div"); root.id = "details-computers"; root.className = "computer-list";
+        section.append(label, root);
+        panel.insertBefore(section, document.getElementById("details-artifacts-section") || panel.querySelector(".future-section") || null);
+      }
+      if (!section.querySelector(".computer-context-help")) {
+        const productTitle = document.createElement("strong");
+        productTitle.className = "computer-product-title";
+        productTitle.textContent = "This PC / 此电脑";
+        const help = document.createElement("p");
+        help.className = "computer-context-help computer-note";
+        help.textContent = "Context options / 上下文选项: Shared computer/login / 共享电脑登录 · Private computer profile / 私有电脑配置";
+        section.insertBefore(productTitle, section.querySelector("#details-computers"));
+        section.insertBefore(help, section.querySelector("#details-computers"));
+      }
+      return section;
+    }
+    async function safeRender(conversation) {
+      const section = ensureSafeSection(); const root = section?.querySelector("#details-computers"); if (!root) return;
+      root.textContent = "Checking This PC…";
+      try {
+        const projects = (await window.sovereignbot.projects.list({ includeArchived: false, limit: 50 })).projects ?? [];
+        const project = projects.find((entry) => entry.teams?.some((team) => team.channels?.some((channel) => channel.conversationId === conversation.id)));
+        if (!project) { root.textContent = "Open This PC to choose a Project / 请在此电脑中选择项目"; return; }
+        const result = await window.sovereignbot.thisPc.list({ projectId: project.projectId, limit: 50 });
+        root.textContent = "";
+        for (const computer of (result.computers ?? []).filter((entry) => participantCoworkers(conversation).some((member) => member.id === entry.coworkerId))) {
+          const card = document.createElement("article"); card.className = "computer-card";
+          const name = document.createElement("strong"); name.textContent = computer.coworkerName || "Coworker";
+          const mode = document.createElement("span"); mode.textContent = `Profile / 登录方式: ${computer.context?.kind === "private" ? "Private computer profile / 私有电脑配置" : "Shared computer/login / 共享电脑登录"}`;
+          const status = document.createElement("span"); status.textContent = `Status / 状态: ${computer.status} · ${computer.statusMessage}`;
+          card.append(name, mode, status);
+          const actions = document.createElement("div"); actions.className = "computer-actions-row";
+          if (computer.canTakeOver) actions.append(Object.assign(document.createElement("button"), { type: "button", className: "computer-action primary", textContent: "Take Over / 接管", onclick: async () => { await window.sovereignbot.thisPc.takeOver({ projectId: project.projectId, coworkerId: computer.coworkerId }); await safeRender(conversation); } }));
+          if (computer.canHandBack) actions.append(Object.assign(document.createElement("button"), { type: "button", className: "computer-action primary", textContent: "Hand Back / 交还", onclick: async () => { await window.sovereignbot.thisPc.handBack({ projectId: project.projectId, coworkerId: computer.coworkerId }); await safeRender(conversation); } }));
+          card.append(actions); root.append(card);
+        }
+        if (!root.children.length) root.textContent = "No Coworker Computer lane in this Project.";
+      } catch { root.textContent = "This PC status is unavailable."; }
+    }
+    renderDetails = function renderDetailsWithSafeComputer(conversation) { baseRenderDetails(conversation); void safeRender(conversation); };
+    ensureSafeSection();
+    return;
+  }
+
   const baseRenderDetails = renderDetails;
   let refreshSeq = 0;
 

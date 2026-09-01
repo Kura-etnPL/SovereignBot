@@ -1,0 +1,8 @@
+.this-pc-nav-entry { width: calc(100% - 24px); margin: 4px 12px 12px; }
+.this-pc-card { display: grid; gap: 7px; }
+.this-pc-card h2 { margin: 0; }
+.this-pc-detail { margin: 0; color: var(--text-3); font-size: 10px; line-height: 1.45; }
+.this-pc-screen { width: min(100%, 760px); max-height: 360px; object-fit: contain; border: 1px solid var(--line); border-radius: 10px; background: #080808; }
+.this-pc-frame-site, .this-pc-snapshot-summary { margin: 0; color: var(--text-3); font-size: 10px; }
+.this-pc-subsection { padding-top: 7px; border-top: 1px solid var(--line); }
+.this-pc-subsection h3 { margin: 0 0 3px; font-size: 11px; }

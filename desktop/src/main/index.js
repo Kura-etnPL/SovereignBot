@@ -36,6 +36,7 @@ import { createMemoryService } from "./memory-service.js";
 import { createProjectService } from "./project-service.js";
 import { createSearchService } from "./search-service.js";
 import { createCommandPaletteService } from "./command-palette-service.js";
+import { createThisPcService } from "./this-pc-service.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -212,6 +213,14 @@ async function main() {
     });
     projectService.setMemoryService(memoryService);
     const productSurfaces = createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime: host.runtime, getRuntime: () => host.runtime });
+    const thisPc = createThisPcService({
+        projectService,
+        coworkerStore,
+        artifactStore,
+        runtime: host.runtime,
+        getRuntime: () => host.runtime,
+        getBinding: (coworkerId) => host.rosterSummary()?.coworkerBindings?.[coworkerId],
+    });
     const search = createSearchService({
         teamService,
         conversationStore,
@@ -563,6 +572,12 @@ async function main() {
                     return { ...app, refresh };
                 },
                 "connectedApps:health": (payload) => connectedApps.health(payload),
+                "thisPc:list": (payload) => thisPc.list(payload),
+                "thisPc:frame": (payload) => thisPc.frame(payload.projectId, payload.coworkerId),
+                "thisPc:snapshot": (payload) => thisPc.snapshot(payload.projectId, payload.coworkerId),
+                "thisPc:takeOver": (payload) => thisPc.takeOver(payload.projectId, payload.coworkerId),
+                "thisPc:handBack": (payload) => thisPc.handBack(payload.projectId, payload.coworkerId),
+                "thisPc:health": (payload) => thisPc.health(payload.projectId, payload.coworkerId),
                 ...createSkillHandlers({
                     skillStore,
                     conversationStore,

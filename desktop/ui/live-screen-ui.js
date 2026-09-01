@@ -1,7 +1,9 @@
 "use strict";
 
 (() => {
-  if (!window.sovereignbot?.computer?.frame || typeof renderDetails !== "function") return;
+  // Live screen is rendered by This PC with a Project/Coworker scope. The
+  // legacy agent-scoped decorator must not expose internal runtime IDs.
+  if (window.sovereignbot?.thisPc || !window.sovereignbot?.computer?.frame || typeof renderDetails !== "function") return;
 
   const baseRenderDetails = renderDetails;
   let generation = 0;
