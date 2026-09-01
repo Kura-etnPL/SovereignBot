@@ -472,8 +472,12 @@ async function main() {
                 "conversation:stop": async ({ conversationId }) => coworkerDispatcher.stopConversation(conversationId),
                 "conversation:redirect": async ({ conversationId, text, mentions, replyTo, clientMessageId }) => {
                     if (teamService.isArchivedConversation(conversationId)) throw new Error("archived channel is read-only");
-                    const stopped = await coworkerDispatcher.stopConversation(conversationId, "conversation redirected by the user");
-                    teamService.recordCollaborationEvent({ conversationId, type: "run.redirected", status: "redirected", actorId: "user", reason: "Work was redirected by the user." });
+                    const redirectContext = teamService.collaborationContextForConversation(conversationId);
+                    const stopped = await coworkerDispatcher.stopConversation(conversationId, "conversation redirected by the user", "desktop-operator", redirectContext);
+                    const afterStop = teamService.collaborationContextForConversation(conversationId);
+                    if (redirectContext && afterStop?.runId === redirectContext.runId) {
+                        teamService.recordCollaborationEvent({ conversationId, type: "run.redirected", status: "redirected", actorId: "user", reason: "Work was redirected by the user.", runId: redirectContext.runId, requestId: afterStop.requestId, operationId: afterStop.operationId, operationToken: afterStop.operationToken, expectedVersion: afterStop.version, idempotencyKey: `run.redirected:${redirectContext.runId}:${afterStop.version}` });
+                    }
                     const message = conversationStore.postUserMessage(conversationId, { text, mentions, replyTo, clientMessageId });
                     const deliveries = coworkerDispatcher.dispatchMessage(conversationId, message.id);
                     return { stopped, message, scheduledRecipients: deliveries.length };

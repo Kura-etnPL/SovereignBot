@@ -14,7 +14,38 @@ function fixture() {
     const conversations = createConversationStore({ persistPath: join(root, "conversations.json"), coworkerStore: coworkers });
     const services = createDesktopServices({ dataDir: root, dialog: {} });
     const teams = createTeamService({ dataDir: root, coworkerStore: coworkers, conversationStore: conversations, services });
+    teams.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => ({
+        targetCoworkerId,
+        agentId: "test-agent",
+        workspaceId: workspaceId ?? teams.workspaceIdForConversation(conversationId),
+    }));
     return { root, coworkers, conversations, services, teams };
+}
+
+function commitHandoff(teams, args) {
+    const target = teams.previewHandoff(args);
+    if (!target) return teams.nextHandoff(args);
+    const context = teams.collaborationContextForConversation(args.conversation.id);
+    const runtimeProof = teams.authorizeHandoffTarget({
+        conversationId: args.conversation.id,
+        sourceCoworkerId: args.coworkerId,
+        targetCoworkerId: target,
+        expectedVersion: context.version,
+        expectedRunId: context.runId,
+        expectedRequestId: context.requestId,
+        expectedOperationId: context.operationId,
+        expectedOperationToken: context.operationToken,
+    });
+    return teams.nextHandoff({
+        ...args,
+        runtimeProof,
+        expectedTargetCoworkerId: target,
+        expectedVersion: context.version,
+        expectedRunId: context.runId,
+        expectedRequestId: context.requestId,
+        expectedOperationId: context.operationId,
+        expectedOperationToken: context.operationToken,
+    });
 }
 
 test("Software Team installation is idempotent and keeps workspace paths out of public state", () => {
@@ -43,14 +74,14 @@ test("Software Team installation is idempotent and keeps workspace paths out of 
         const userMessage = conversations.postUserMessage(conversation.id, { text: "Deliver a small fix." });
         teams.onMessageQueued({ conversation: conversations.get(conversation.id), message: userMessage });
         assert.equal(teams.status(first.team.id).currentOwnerId, first.team.coworkerIds[0]);
-        const chiefHandoff = teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: userMessage });
+        const chiefHandoff = commitHandoff(teams, { conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: userMessage });
         assert.equal(chiefHandoff, first.team.coworkerIds[1]);
         assert.equal(teams.status(first.team.id).routingDecision.targetCoworkerId, first.team.coworkerIds[1]);
         assert.equal(teams.status(first.team.id).routingDecision.handoffType, "delegate");
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: userMessage }), chiefHandoff);
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[1], source: { id: "message-coding", senderId: first.team.coworkerIds[0], text: "Implement the requested software change." } }), first.team.coworkerIds[2]);
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[2], source: { id: "message-review", senderId: first.team.coworkerIds[1], text: "Review the implementation." } }), first.team.coworkerIds[0]);
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: { id: "message-synthesis", senderId: first.team.coworkerIds[2], text: "Synthesize the reviewed result." } }), undefined);
+        assert.equal(commitHandoff(teams, { conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: userMessage }), chiefHandoff);
+        assert.equal(commitHandoff(teams, { conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[1], source: { id: "message-coding", senderId: first.team.coworkerIds[0], text: "Implement the requested software change." } }), first.team.coworkerIds[2]);
+        assert.equal(commitHandoff(teams, { conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[2], source: { id: "message-review", senderId: first.team.coworkerIds[1], text: "Review the implementation." } }), first.team.coworkerIds[0]);
+        assert.equal(commitHandoff(teams, { conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: { id: "message-synthesis", senderId: first.team.coworkerIds[2], text: "Synthesize the reviewed result." } }), undefined);
         assert.equal(teams.status(first.team.id).stage, "complete");
 
         const disk = JSON.parse(readFileSync(join(root, "desktop-state", "teams.json"), "utf8"));
@@ -84,7 +115,7 @@ test("declarative secondary Team Packs reuse the governed team path", () => {
 
         const userMessage = conversations.postUserMessage(installed.team.channels[0].conversationId, { text: "Investigate this bounded question." });
         teams.onMessageQueued({ conversation: conversations.get(installed.team.channels[0].conversationId), message: userMessage });
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(installed.team.channels[0].conversationId), coworkerId: installed.team.coworkerIds[0], source: userMessage }), installed.team.coworkerIds[1]);
+        assert.equal(commitHandoff(teams, { conversation: conversations.get(installed.team.channels[0].conversationId), coworkerId: installed.team.coworkerIds[0], source: userMessage }), installed.team.coworkerIds[1]);
         assert.equal(coworkers.list().coworkers.length, 3);
         assert.equal(JSON.stringify(teams.list()).includes("providerAccountId"), false);
     }
@@ -112,7 +143,7 @@ test("ordinary teams create a Project Channel and route the next user turn to th
         teams.onMessageQueued({ conversation: conversations.get(created.conversation.id), message: first });
         assert.equal(teams.currentOwnerForConversation(created.conversation.id), chief.id);
 
-        const handoff = teams.nextHandoff({
+        const handoff = commitHandoff(teams, {
             conversation: conversations.get(created.conversation.id),
             coworkerId: chief.id,
             source: first,

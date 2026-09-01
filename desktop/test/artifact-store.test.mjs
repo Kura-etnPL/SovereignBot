@@ -110,3 +110,22 @@ test("coworker artifacts remain private until the publish gate commits them", ()
         rmSync(root, { recursive: true, force: true });
     }
 });
+
+test("artifact publication rolls back in-memory visibility when persistence fails", () => {
+    const { root, workspace } = fixture();
+    const dataDir = join(root, "data");
+    const persistPath = join(dataDir, "desktop-state", "artifacts.json");
+    const store = createArtifactStore({ dataDir, persistPath });
+    try {
+        writeFileSync(join(workspace, "rollback.md"), "rollback me", "utf8");
+        const artifact = store.ingestWorkspaceFile({ workspaceId: "workspace_project", workspacePath: workspace, relativePath: "rollback.md", published: false });
+        rmSync(persistPath, { force: true });
+        mkdirSync(persistPath, { recursive: true });
+        assert.throws(() => store.publishArtifacts([artifact.id]));
+        assert.equal(store.list().artifacts.length, 0);
+        assert.throws(() => store.get(artifact.id), /not published/);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});

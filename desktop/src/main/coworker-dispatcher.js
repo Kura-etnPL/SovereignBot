@@ -448,7 +448,8 @@ export function createCoworkerDispatcher({
         return run;
     }
 
-    async function stopConversation(conversationId, reason = "conversation stopped by the user", actor = "desktop-operator") {
+    async function stopConversation(conversationId, reason = "conversation stopped by the user", actor = "desktop-operator", expectedContext) {
+        const controlContext = expectedContext ?? teamFlow?.collaborationContextForConversation?.(conversationId);
         const prefix = `${conversationId}:`;
         const taskIds = [...activeTasks.entries()]
             .filter(([key]) => key.startsWith(prefix))
@@ -472,7 +473,7 @@ export function createCoworkerDispatcher({
             // Cancellation must remain best-effort even if a delivery disappeared
             // concurrently; the orchestrator cancellation result is still useful.
         }
-        teamFlow?.stopRun?.(conversationId, reason);
+        teamFlow?.stopRun?.(conversationId, reason, controlContext);
         return {
             requested: taskIds.length,
             cancelled: results.filter((entry) => entry.status === "fulfilled").length,

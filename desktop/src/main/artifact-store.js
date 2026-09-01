@@ -259,13 +259,21 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
         publishArtifacts(ids = []) {
             if (!Array.isArray(ids) || ids.length > 12) throw new Error("artifact ids must be an array of at most 12 entries");
             const published = [];
-            for (const id of ids) {
-                const entry = requireArtifact(id);
-                entry.published = true;
-                published.push(publicView(entry));
+            const previous = new Map();
+            try {
+                for (const id of ids) {
+                    const entry = requireArtifact(id);
+                    if (!previous.has(entry.id)) previous.set(entry.id, entry.published !== false);
+                    entry.published = true;
+                    published.push(publicView(entry));
+                }
+                if (ids.length) save();
+                return published;
             }
-            if (ids.length) save();
-            return published;
+            catch (error) {
+                for (const [id, wasPublished] of previous) requireArtifact(id).published = wasPublished;
+                throw error;
+            }
         },
     };
 }

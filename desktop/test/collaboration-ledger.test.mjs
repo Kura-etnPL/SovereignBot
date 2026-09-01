@@ -126,6 +126,10 @@ test("stop and restart create distinct runs and do not wake the stopped run", ()
         const secondFlow = teams.get(created.team.id).flow;
         assert.notEqual(secondFlow.runId, firstRun);
         assert.equal(secondFlow.status, "active");
+        const activeContext = teams.collaborationContextForConversation(created.conversation.id);
+        assert.throws(() => teams.stopRun(created.conversation.id, "stale stop", { ...activeContext, expectedVersion: activeContext.version - 1 }), /stale/);
+        assert.throws(() => teams.recordCollaborationEvent({ conversationId: created.conversation.id, type: "run.redirected", status: "redirected", actorId: "user", ...activeContext, expectedVersion: activeContext.version - 1, idempotencyKey: "stale-redirect" }), /stale/);
+        assert.equal(teams.get(created.team.id).flow.status, "active");
         const events = teams.activity({ conversationId: created.conversation.id }).events;
         assert.ok(events.some((event) => event.kind === "stopped" && event.runId === firstRun));
         assert.ok(events.some((event) => event.kind === "started" && event.runId === secondFlow.runId));
@@ -135,6 +139,20 @@ test("stop and restart create distinct runs and do not wake the stopped run", ()
         assert.equal(reloadedFlow.runId, secondFlow.runId);
         assert.equal(reloadedTeams.activity({ conversationId: created.conversation.id }).events.length, events.length);
         assert.equal(reloadedTeams.collaborationContextForConversation(created.conversation.id).runId, secondFlow.runId);
+    }
+    finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("managed handoff hard-fails when the trusted runtime preflight provider is missing", () => {
+    const { root, coworkers, conversations, teams } = fixture();
+    try {
+        const chief = coworkers.create({ name: "Chief", role: "Coordinate work" });
+        const researcher = coworkers.create({ name: "Researcher", role: "Research" });
+        const created = teams.createTeam({ title: "No proof", coworkerIds: [chief.id, researcher.id] });
+        const first = conversations.postUserMessage(created.conversation.id, { text: "Do not launch without proof." });
+        teams.onMessageQueued({ conversation: conversations.get(created.conversation.id), message: first });
+        assert.throws(() => teams.nextHandoff({ conversation: conversations.get(created.conversation.id), coworkerId: chief.id, source: first, requestedCoworkerIds: [researcher.id], expectedTargetCoworkerId: researcher.id }), /preflight/);
+        assert.equal(teams.get(created.team.id).flow.currentOwnerId, chief.id);
     }
     finally { rmSync(root, { recursive: true, force: true }); }
 });

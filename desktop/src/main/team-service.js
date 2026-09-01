@@ -768,10 +768,16 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return { runId: run.runId, requestId: flow.requestId ?? run.requestId, operationId: flow.operationId ?? run.operationId, operationToken: flow.operationToken ?? run.operationToken, version: flow.version ?? 0, stage: flow.stage, ownerId: flow.ownerId };
     }
 
-    function stopRun(conversationId, reason = "Work stopped by the user.") {
+    function stopRun(conversationId, reason = "Work stopped by the user.", expected = {}) {
         const run = runForConversation(conversationId);
         if (!run || ["completed", "stopped"].includes(run.status)) return undefined;
-        return recordCollaborationEvent({ conversationId, type: "run.stopped", status: "stopped", actorId: "user", ownerId: run.ownerId, stage: run.stage, reason: "Work stopped by the user.", runId: run.runId, requestId: run.requestId, operationId: run.operationId, idempotencyKey: `run.stopped:${run.runId}` });
+        const context = collaborationContextForConversation(conversationId);
+        const expectedVersion = expected.expectedVersion ?? expected.version ?? context?.version ?? 0;
+        const runId = expected.expectedRunId ?? expected.runId ?? context?.runId ?? run.runId;
+        const requestId = expected.expectedRequestId ?? expected.requestId ?? context?.requestId ?? run.requestId;
+        const operationId = expected.expectedOperationId ?? expected.operationId ?? context?.operationId ?? run.operationId;
+        const operationToken = expected.expectedOperationToken ?? expected.operationToken ?? context?.operationToken ?? run.operationToken;
+        return recordCollaborationEvent({ conversationId, type: "run.stopped", status: "stopped", actorId: "user", ownerId: run.ownerId, stage: run.stage, reason: "Work stopped by the user.", runId, requestId, operationId, operationToken, expectedVersion, idempotencyKey: `run.stopped:${runId}` });
     }
 
     function setRuntimeHandoffPreflight(preflight) {
@@ -1400,15 +1406,15 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         if (expectedTargetCoworkerId !== undefined && expectedTargetCoworkerId !== target)
             throw new Error("handoff proposal changed before commit");
         if (target) {
+            if (!runtimeHandoffPreflight)
+                throw new Error("trusted runtime handoff preflight is unavailable");
             const targetCoworker = coworkerStore.get(target);
             if (targetCoworker.state !== "active")
                 throw new Error(`team handoff target is not active: ${target}`);
-            if (runtimeHandoffPreflight) {
-                const proof = runtimeProof?.proofId ? runtimeProofs.get(runtimeProof.proofId) : undefined;
-                if (!proof || proof.conversationId !== conversation.id || proof.targetCoworkerId !== target || proof.sourceCoworkerId !== coworkerId || proof.version !== (flow.version ?? 0) || proof.runId !== flow.runId || proof.requestId !== flow.requestId || proof.operationId !== flow.operationId || proof.operationToken !== flow.operationToken)
-                    throw new Error("trusted runtime handoff proof is missing or stale");
-                acceptedProofId = runtimeProof.proofId;
-            }
+            const proof = runtimeProof?.proofId ? runtimeProofs.get(runtimeProof.proofId) : undefined;
+            if (!proof || proof.conversationId !== conversation.id || proof.targetCoworkerId !== target || proof.sourceCoworkerId !== coworkerId || proof.version !== (flow.version ?? 0) || proof.runId !== flow.runId || proof.requestId !== flow.requestId || proof.operationId !== flow.operationId || proof.operationToken !== flow.operationToken)
+                throw new Error("trusted runtime handoff proof is missing or stale");
+            acceptedProofId = runtimeProof.proofId;
         }
         if (expectedVersion !== undefined && expectedVersion !== (flow.version ?? 0)) throw new Error("handoff flow version is stale");
         if (expectedRunId !== undefined && expectedRunId !== flow.runId) throw new Error("handoff run token is stale");
