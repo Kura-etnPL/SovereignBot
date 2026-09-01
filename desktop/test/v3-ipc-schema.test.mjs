@@ -21,6 +21,9 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     assert.match(ipcSource, /V3_IPC_CHANNELS/);
     assert.match(ipcSource, /validateV3IpcRequest/);
     assert.match(ipcSource, /ALL_IPC_CHANNELS/);
+    assert.match(ipcSource, /team:activity/);
+    const preloadSource = readFileSync(fileURLToPath(new URL("../src/main/preload.cjs", import.meta.url)), "utf8");
+    assert.match(preloadSource, /activity: invoke\("team:activity"\)/);
 });
 
 test("coworker create/update accepts product metadata but rejects execution authority recursively", () => {

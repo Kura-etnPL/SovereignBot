@@ -79,6 +79,11 @@ export function createCoworkerDispatcher({
         saveJsonState(persistPath, state);
     }
 
+    function recordTeamEvent(payload) {
+        try { return teamFlow?.recordCollaborationEvent?.(payload); }
+        catch { return undefined; }
+    }
+
     function requireBinding(coworkerId) {
         const snapshot = roster();
         const binding = snapshot?.coworkerBindings?.[coworkerId];
@@ -222,6 +227,7 @@ export function createCoworkerDispatcher({
 
         const { snapshot, binding } = requireBinding(coworkerId);
         const context = workspaceContext(coworker, conversation);
+        teamFlow?.claimStage?.({ conversationId, ownerId: coworkerId, messageId: source.id });
         const supervisorAgentId = snapshot.roles?.planner;
         if (!supervisorAgentId)
             throw new Error("coworker dispatch requires a ready supervisor/planner identity");
@@ -261,9 +267,13 @@ export function createCoworkerDispatcher({
         }
         await runtime.orchestrator.runUntilIdle();
         const finished = (await runtime.orchestrator.listTasks()).find((entry) => entry.id === task.id);
+        const currentSource = conversationStore.get(conversationId).messages.find((entry) => entry.id === messageId);
+        if (currentSource?.delivery?.[coworkerId]?.status !== "pending")
+            return { ok: false, taskId: task.id, stopped: true, reason: "stale collaboration result was discarded" };
         if (finished?.status !== "completed") {
-            const detail = String(finished?.error ?? `coworker turn ended as ${finished?.status ?? "unknown"}`).slice(0, 500);
+            const detail = "Coworker work did not complete.";
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail);
+            recordTeamEvent({ conversationId, type: "work.failed", status: "failed", actorId: coworkerId, ownerId: coworkerId, messageId, reason: detail });
             state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
             save();
             return { ok: false, taskId: task.id, error: detail };
@@ -271,6 +281,7 @@ export function createCoworkerDispatcher({
 
         if (isConversationBlocked(conversationId)) {
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "automation stopped for takeover or cancellation");
+            recordTeamEvent({ conversationId, type: "work.failed", status: "stopped", actorId: coworkerId, ownerId: coworkerId, messageId, reason: "Work was stopped before the result could be published." });
             return { ok: false, taskId: task.id, stopped: true, reason: "conversation is blocked for takeover or cancellation" };
         }
 
@@ -279,6 +290,7 @@ export function createCoworkerDispatcher({
             : "";
         if (!rawText) {
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "provider returned no text reply");
+            recordTeamEvent({ conversationId, type: "work.failed", status: "failed", actorId: coworkerId, ownerId: coworkerId, messageId, reason: "The coworker returned no usable result." });
             return { ok: false, taskId: task.id, error: "provider returned no text reply" };
         }
 
@@ -300,12 +312,32 @@ export function createCoworkerDispatcher({
             taskId: task.id,
         });
         const visibleText = artifactResult.text || (artifactResult.artifactIds.length ? `Created ${artifactResult.artifactIds.length} artifact${artifactResult.artifactIds.length === 1 ? "" : "s"}.` : "Completed the requested work.");
+        recordTeamEvent({ conversationId, type: "work.completed", status: "completed", actorId: coworkerId, ownerId: coworkerId, messageId: source.id, artifactIds: artifactResult.artifactIds, reason: "Result is ready for the next team step." });
+        const proposedTarget = teamFlow?.previewHandoff?.({
+            conversation,
+            coworkerId,
+            source,
+            requestedCoworkerIds: handoffResult.coworkerIds,
+        });
+        let targetReady = true;
+        if (proposedTarget) {
+            try {
+                const targetCoworker = coworkerStore.get(proposedTarget);
+                requireBinding(proposedTarget);
+                workspaceContext(targetCoworker, conversation);
+            }
+            catch {
+                targetReady = false;
+            }
+        }
         const productHandoff = teamFlow?.nextHandoff?.({
             conversation,
             coworkerId,
             source,
             requestedCoworkerIds: handoffResult.coworkerIds,
             replyText: artifactResult.text,
+            targetReady,
+            expectedTargetCoworkerId: proposedTarget,
         });
         // A Team Pack may own a bounded playbook sequence.  Its next stage is a
         // product routing decision, not authority supplied by model output; explicit
@@ -343,9 +375,10 @@ export function createCoworkerDispatcher({
         const previous = chains.get(key) ?? Promise.resolve();
         const run = previous
             .then(() => executeDelivery(conversationId, messageId, coworkerId))
-            .catch((error) => {
-                const detail = String(error?.message ?? error).slice(0, 500);
+            .catch(() => {
+                const detail = "Coworker work could not start or complete.";
                 try { conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail); } catch {}
+                recordTeamEvent({ conversationId, type: "work.failed", status: "failed", actorId: coworkerId, ownerId: coworkerId, messageId, reason: detail });
                 return { ok: false, error: detail };
             });
         chains.set(key, run);
@@ -381,6 +414,7 @@ export function createCoworkerDispatcher({
             // Cancellation must remain best-effort even if a delivery disappeared
             // concurrently; the orchestrator cancellation result is still useful.
         }
+        teamFlow?.stopRun?.(conversationId, reason);
         return {
             requested: taskIds.length,
             cancelled: results.filter((entry) => entry.status === "fulfilled").length,

@@ -32,6 +32,7 @@ test("V3 renderer consumes typed coworker/conversation APIs and never uses HTML 
         /sovereignbot\.conversations\.createTeam/,
         /sovereignbot\.conversations\.send/,
         /sovereignbot\.conversations\.get/,
+        /sovereignbot\.teams\.activity/,
     ]) assert.match(app, expression);
     assert.doesNotMatch(app, /innerHTML\s*=/);
     assert.doesNotMatch(app, /insertAdjacentHTML/);
@@ -77,6 +78,14 @@ test("Product hubs expose governed Connected Apps assignment without raw authori
     assert.match(productHubs, /connectedApps\.assign/);
     assert.match(productHubs, /appId: item\.id/);
     assert.doesNotMatch(productHubs, /providerToken|sessionId|rawPath|capabilityGrant/);
+});
+
+test("Team activity consumes the safe collaboration ledger projection", () => {
+    assert.match(productHubs, /flow\?\.activity/);
+    assert.match(productHubs, /Owner/);
+    assert.match(productHubs, /Stage/);
+    assert.match(productHubs, /Handoff to/);
+    assert.doesNotMatch(productHubs, /cwd|sessionId|providerToken|workspacePath/);
 });
 
 test("Product burst exposes independent Playbooks, Artifacts, History, Skills, Packs, and Channels pages", () => {

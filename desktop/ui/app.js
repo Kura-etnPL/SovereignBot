@@ -5,6 +5,7 @@ const state = {
   coworkers: [],
   conversations: [],
   teams: [],
+  teamActivity: { events: [] },
   teamPacks: [],
   channelTemplates: [],
   channels: [],
@@ -690,9 +691,13 @@ async function refreshConversation(forceScroll = false) {
   const id = state.selectedConversationId;
   if (!id || state.activeView !== "conversation") return;
   try {
-    const conversation = await window.sovereignbot.conversations.get({ conversationId: id });
+    const [conversation, activity] = await Promise.all([
+      window.sovereignbot.conversations.get({ conversationId: id }),
+      window.sovereignbot.teams.activity({ conversationId: id, limit: 24 }).catch(() => ({ events: [] })),
+    ]);
     if (state.selectedConversationId !== id) return;
     state.selectedConversation = conversation;
+    state.teamActivity = activity ?? { events: [] };
     markConversationRead(conversation);
     renderConversationHeader(conversation);
     renderMessages(conversation, forceScroll);
@@ -831,8 +836,13 @@ function renderDetails(conversation) {
     }
   }
   const pending = pendingUserRecipients(conversation);
+  const latestActivity = state.teamActivity?.events?.[0];
+  const activitySuffix = latestActivity?.kind === "handoff.requested" && latestActivity.targetCoworker
+    ? ` · Handoff → ${latestActivity.targetCoworker}`
+    : latestActivity?.kind === "work.completed" ? " · Result ready"
+      : latestActivity?.kind === "handoff.blocked" ? " · Needs attention" : "";
   $("details-current-work").textContent = team?.flow?.currentOwner
-    ? `${team.flow.status === "needs-attention" ? "Needs attention" : team.flow.status === "active" ? "Active" : "Waiting"} · ${team.flow.currentOwner}`
+    ? `${team.flow.status === "needs-attention" ? "Needs attention" : team.flow.status === "active" ? "Active" : team.flow.status === "stopped" ? "Stopped" : "Waiting"} · ${team.flow.currentOwner}${activitySuffix}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
 }
 

@@ -193,7 +193,29 @@
       for (const channel of team.channels ?? []) channels.set(channel.conversationId, { teamId: team.id, teamName: team.name, channelName: channel.name });
     }
     const filter = $("product-activity-filter")?.value ?? "all";
-    const entries = (conversations ?? [])
+    const ledgerEntries = (teams ?? []).flatMap((team) => (team.flow?.activity ?? []).map((event) => {
+      const scope = channels.get(event.conversationId);
+      const conversation = (conversations ?? []).find((entry) => entry.id === event.conversationId);
+      const summary = event.kind === "handoff.requested" && event.targetCoworker
+        ? `Handoff to ${event.targetCoworker} / 交接给 ${event.targetCoworker}`
+        : event.kind === "work.completed" ? "Result ready / 结果已就绪"
+          : event.kind === "handoff.blocked" ? "Needs attention / 需要处理"
+            : event.kind === "run.stopped" ? "Work stopped / 工作已停止"
+              : event.kind === "run.started" ? "Work started / 工作已开始" : "Team activity / 团队动态";
+      return {
+        conversation,
+        sender: event.owner || (event.actorId === "user" ? "You / 你" : "Team / 团队"),
+        coworkerId: event.ownerId,
+        teamId: team.id,
+        teamName: team.name,
+        channelName: scope?.channelName ?? conversation?.title ?? "Team Channel",
+        time: event.at,
+        summary: `${event.stage ? `${event.stage} · ` : ""}${summary}`,
+        status: event.status,
+        event,
+      };
+    }));
+    const fallbackEntries = (conversations ?? [])
       .filter((conversation) => conversation.messageCount > 0 && conversation.lastMessage)
       .map((conversation) => {
         const scope = channels.get(conversation.id);
@@ -210,7 +232,8 @@
           summary: conversation.lastMessage.textPreview || "Activity updated",
           status: scope?.teamId ? (teams.find((team) => team.id === scope.teamId)?.flow?.status ?? "available") : "recent",
         };
-      })
+      });
+    const entries = (ledgerEntries.length ? ledgerEntries : fallbackEntries)
       .filter((entry) => filter === "all" || (filter.startsWith("coworker:") && entry.coworkerId === filter.slice(9)) || (filter.startsWith("team:") && entry.teamId === filter.slice(5)))
       .sort((a, b) => String(b.time).localeCompare(String(a.time)))
       .slice(0, 24);
@@ -222,10 +245,10 @@
       const title = document.createElement("h3");
       title.textContent = `${entry.sender} · ${entry.channelName}`;
       heading.append(title);
-      card.append(heading, line("Team", entry.teamName), line("Activity", entry.summary), line("Time", entry.time), line("Status", entry.status));
+      card.append(heading, line("Team", entry.teamName), line("Owner", entry.event?.owner), line("Stage", entry.event?.stage), line("Activity", entry.summary), line("Result", entry.event?.artifactIds?.length ? `${entry.event.artifactIds.length} artifact(s)` : undefined), line("Time", entry.time), line("Status", entry.status));
       const actions = document.createElement("div");
       actions.className = "detail-actions";
-      if (entry.conversation.id && typeof openConversation === "function") actions.append(button("Open conversation / 打开会话", () => openConversation(entry.conversation.id)));
+      if (entry.conversation?.id && typeof openConversation === "function") actions.append(button("Open conversation / 打开会话", () => openConversation(entry.conversation.id)));
       card.append(actions);
       root.append(card);
     }

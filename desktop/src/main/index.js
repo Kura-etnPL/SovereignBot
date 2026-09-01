@@ -402,6 +402,7 @@ async function main() {
                     return { ...listed, packs: [...packs, ...recipes.filter((pack) => !known.has(pack.id))] };
                 },
                 "team:get": ({ teamId }) => teamService.get(teamId),
+                "team:activity": (payload) => teamService.activity(payload),
                 "team:installPack": async ({ packId }) => {
                     const result = productSurfaces.recipeList().some((pack) => pack.id === packId)
                         ? teamService.importPack(productSurfaces.getPackRecipe(packId))
@@ -465,6 +466,7 @@ async function main() {
                 "conversation:redirect": async ({ conversationId, text, mentions, replyTo, clientMessageId }) => {
                     if (teamService.isArchivedConversation(conversationId)) throw new Error("archived channel is read-only");
                     const stopped = await coworkerDispatcher.stopConversation(conversationId, "conversation redirected by the user");
+                    teamService.recordCollaborationEvent({ conversationId, type: "run.redirected", status: "redirected", actorId: "user", reason: "Work was redirected by the user." });
                     const message = conversationStore.postUserMessage(conversationId, { text, mentions, replyTo, clientMessageId });
                     const deliveries = coworkerDispatcher.dispatchMessage(conversationId, message.id);
                     return { stopped, message, scheduledRecipients: deliveries.length };

@@ -33,6 +33,9 @@ const CONVERSATION_CONTROL_CHANNELS = Object.freeze({
     "conversation:stop": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "conversation:redirect": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 32_000 }),
 });
+const TEAM_ACTIVITY_CHANNELS = Object.freeze({
+    "team:activity": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
+});
 const ROUTINE_CHANNELS = Object.freeze({
     "routine:create": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 16_000 }),
     "routine:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
@@ -65,6 +68,7 @@ const ALL_IPC_CHANNELS = Object.freeze({
     ...SKILL_CHANNELS,
     ...TEACH_CHANNELS,
     ...CONVERSATION_CONTROL_CHANNELS,
+    ...TEAM_ACTIVITY_CHANNELS,
     ...ROUTINE_CHANNELS,
     ...EVENT_TRIGGER_CHANNELS,
     ...WORKER_NODE_CHANNELS,
@@ -143,6 +147,20 @@ function participantIds(value) {
     for (const item of value) {
         if (item !== "everyone") generalId(item, "mention");
         if (!out.includes(item)) out.push(item);
+    }
+    return out;
+}
+
+function validateTeamActivityRequest(payload) {
+    exactKeys(payload, new Set(["teamId", "conversationId", "limit"]), "team:activity");
+    if (payload.teamId === undefined && payload.conversationId === undefined)
+        throw new Error("team:activity requires teamId or conversationId");
+    const out = {};
+    if (payload.teamId !== undefined) out.teamId = generalId(payload.teamId, "teamId");
+    if (payload.conversationId !== undefined) out.conversationId = conversationId(payload.conversationId);
+    if (payload.limit !== undefined) {
+        if (!Number.isInteger(payload.limit) || payload.limit < 1 || payload.limit > 100) throw new Error("limit must be an integer between 1 and 100");
+        out.limit = payload.limit;
     }
     return out;
 }
@@ -413,6 +431,8 @@ function validateConversationSend(payload) {
 function validateRequest(channel, payload) {
     if (channel === LIVE_FRAME_CHANNEL)
         return validateLiveFrame(payload);
+    if (TEAM_ACTIVITY_CHANNELS[channel])
+        return validateTeamActivityRequest(payload);
     if (channel === ATTACH_CHANNEL) {
         exactKeys(payload, new Set(["conversationId"]), channel);
         return { conversationId: conversationId(payload.conversationId) };
