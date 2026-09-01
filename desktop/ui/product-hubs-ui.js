@@ -254,35 +254,34 @@
     }
     if (!entries.length) { const p = document.createElement("p"); p.textContent = "No recent coworker activity yet. / 暂无最近同事动态。"; root.append(p); }
   }
-  function renderRecentProjects(teams, workspaces) {
+  function renderRecentProjects(projects) {
     const root = $("product-recent-projects");
     if (!root) return;
     clear(root);
-    const workspaceNames = new Map((workspaces?.workspaces ?? []).map((workspace) => [workspace.id, workspace.kind === "shared-project" ? "Shared project workspace / 共享项目工作区" : (workspace.label || "Private workspace / 私有工作区")]));
-    const projects = [...(teams ?? [])].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 8);
-    for (const team of projects) {
+    for (const project of (projects ?? []).slice(0, 8)) {
       const card = document.createElement("article");
       card.className = "settings-card";
       const heading = document.createElement("div");
       heading.className = "card-heading";
       const title = document.createElement("h3");
-      title.textContent = team.name;
+      title.textContent = project.name;
       heading.append(title);
-      card.append(heading, line("Workspace", workspaceNames.get(team.sharedWorkspaceId) ?? team.sharedWorkspaceLabel ?? "Shared project workspace"), line("Channel", team.channels?.[0]?.name ?? "Project Channel"), line("Coworkers", team.coworkerIds?.length ?? 0), line("Status", team.flow?.status ?? "available"), line("Updated", team.updatedAt));
-      const conversationId = team.channels?.[0]?.conversationId;
-      if (conversationId && typeof openConversation === "function") card.append(button("Open project / 打开项目", () => openConversation(conversationId)));
+      card.append(heading, line("Teams", project.counts?.teams), line("Channels", project.counts?.channels), line("Coworkers", project.counts?.coworkers), line("Status", project.state), line("Updated", project.updatedAt));
+      const conversationId = project.teams?.[0]?.channels?.[0]?.conversationId;
+      if (conversationId && typeof openConversation === "function") card.append(button("Open project / 打开项目", async () => { await api.projects.open({ projectId: project.projectId }); openConversation(conversationId); }));
       root.append(card);
     }
-    if (!projects.length) { const p = document.createElement("p"); p.textContent = "No projects yet. / 暂无项目。"; root.append(p); }
+    if (!(projects ?? []).length) { const p = document.createElement("p"); p.textContent = "No Projects yet. / 暂无项目。"; root.append(p); }
   }
   async function refresh() {
-    const [teams, coworkers, workspaces] = await Promise.all([
+    const [teams, coworkers, workspaces, projects] = await Promise.all([
       api.teams.list({}),
       api.coworkers.list({}),
       api.workspaces?.list ? api.workspaces.list({}) : Promise.resolve({ workspaces: [] }),
+      api.projects?.list ? api.projects.list({ limit: 8 }) : Promise.resolve({ projects: [] }),
     ]);
     renderWorkspaceSwitcher(workspaces);
-    renderRecentProjects(teams.teams ?? [], workspaces);
+    renderRecentProjects(projects.projects ?? []);
     const filter = $("artifact-hub-filter");
     if (filter && filter.options.length === 1) {
       for (const team of teams.teams ?? []) {
@@ -316,36 +315,6 @@
     }
     const channelFilter = $("product-channel-filter");
     if (channelFilter && ![...channelFilter.options].some((option) => option.value === "unread")) { const option = document.createElement("option"); option.value = "unread"; option.textContent = "Unread / 未读"; channelFilter.insertBefore(option, channelFilter.options[channelFilter.options.length - 1] ?? null); }
-    const productHeader = $("view-product-hubs")?.querySelector(".page-header");
-    if (productHeader && !$("product-workspace-switch") && api.workspaces?.list && api.workspaces?.setDefault) {
-      const controls = document.createElement("div");
-      controls.className = "detail-actions";
-      const label = document.createElement("span");
-      label.textContent = "Project / workspace / 项目工作区";
-      const select = document.createElement("select");
-      select.id = "product-workspace-switch";
-      select.setAttribute("aria-label", "Project workspace switcher");
-      const feedback = document.createElement("span");
-      feedback.id = "product-workspace-result";
-      feedback.className = "setting-feedback";
-      select.addEventListener("change", async () => {
-        if (!select.value) return;
-        select.disabled = true;
-        try {
-          const result = await api.workspaces.setDefault({ id: select.value });
-          if (!result?.ok) throw new Error("Workspace selection was not accepted.");
-          feedback.textContent = "Active workspace updated / 已切换工作区";
-          if (typeof refreshSettingsData === "function") await refreshSettingsData();
-          await refresh();
-        } catch (e) {
-          feedback.textContent = String(e?.message ?? e).slice(0, 180);
-        } finally {
-          select.disabled = false;
-        }
-      });
-      controls.append(label, select);
-      productHeader.append(controls, feedback);
-    }
     $("nav-product-hubs")?.addEventListener("click", async () => { switchView("product-hubs"); try { await refresh(); } catch (e) { error($("product-playbooks"), e); } }); $("product-hubs-refresh")?.addEventListener("click", () => void refresh()); $("artifact-hub-filter")?.addEventListener("change", () => void refresh()); $("product-channel-filter")?.addEventListener("change", () => void refresh()); $("product-channel-switch")?.addEventListener("change", (event) => { if (event.target.value && typeof openConversation === "function") void openConversation(event.target.value); }); $("playbook-create")?.addEventListener("click", () => void createPlaybook());
   }
   window.addEventListener("DOMContentLoaded", setup);
@@ -414,6 +383,56 @@
     controls.append(team, template, add);
     heading.append(controls);
   });
+})();
+
+// First-class Project surface.  Project ids are used only as opaque IPC selectors;
+// all visible labels come from the safe Project projection and never from workspaces.
+(() => {
+  const api = window.sovereignbot;
+  if (!api?.projects) return;
+  const $ = (id) => document.getElementById(id);
+  const clear = (node) => { if (node) node.textContent = ""; };
+  const error = (reason) => { const node = $("project-result"); if (node) node.textContent = String(reason?.message ?? reason).slice(0, 240); };
+  const setResult = (value) => { const node = $("project-result"); if (node) node.textContent = value; };
+  const button = (label, fn) => { const node = document.createElement("button"); node.type = "button"; node.className = "quiet-action"; node.textContent = label; node.addEventListener("click", () => Promise.resolve().then(fn).catch(error)); return node; };
+  const element = (tag, textContent) => { const node = document.createElement(tag); if (textContent !== undefined) node.textContent = textContent; return node; };
+  async function copy(value) { try { await navigator.clipboard.writeText(JSON.stringify(value, null, 2)); setResult("Project export copied / 项目导出已复制"); } catch { setResult("Clipboard is unavailable / 剪贴板不可用"); } }
+  function ensureView() {
+    if ($("nav-projects") && $("view-projects")) return;
+    const nav = document.createElement("button"); nav.id = "nav-projects"; nav.type = "button"; nav.className = "utility-nav"; nav.textContent = "◈ Projects / 项目";
+    nav.addEventListener("click", () => { if (typeof switchView === "function") switchView("projects"); document.querySelectorAll(".utility-nav").forEach((item) => item.classList.toggle("active", item === nav)); void refresh(); });
+    $("nav-work")?.parentElement?.prepend(nav);
+    const view = document.createElement("section"); view.id = "view-projects"; view.className = "main-view settings-view hidden";
+    const header = element("header"); header.className = "page-header";
+    const intro = element("div"); const eyebrow = element("span", "PROJECTS / 项目"); eyebrow.className = "eyebrow"; intro.append(eyebrow, element("h1", "Projects"), element("p", "Projects organize Teams, Channels, Coworkers, Files, Artifacts, Skills, Playbooks, Routines, Triggers, Memory, and Connected Apps."));
+    const controls = element("div"); controls.className = "detail-actions"; const switcher = element("select"); switcher.id = "project-switcher"; switcher.setAttribute("aria-label", "Project switcher"); switcher.append(element("option", "Choose a Project / 选择项目")); const refreshButton = element("button", "Refresh / 刷新"); refreshButton.id = "project-refresh"; refreshButton.type = "button"; refreshButton.className = "quiet-action"; const createButton = element("button", "New Project / 新建项目"); createButton.id = "project-create"; createButton.type = "button"; createButton.className = "hero-action"; controls.append(switcher, refreshButton, createButton); header.append(intro, controls);
+    const result = element("p"); result.id = "project-result"; result.className = "setting-feedback";
+    const card = element("section"); card.className = "settings-card span-2"; const cardHeading = element("div"); cardHeading.className = "card-heading"; const cardCopy = element("div"); cardCopy.append(element("h2", "Recent Projects / 最近项目"), element("p", "Switch, inspect, archive, restore, export, or back up a Project. Trusted workspace details remain hidden.")); cardHeading.append(cardCopy); const list = element("div"); list.id = "project-list"; list.className = "project-list"; card.append(cardHeading, list); view.append(header, result, card);
+    $("view-product-hubs")?.parentElement?.insertBefore(view, $("view-product-hubs"));
+    $("project-switcher")?.addEventListener("change", async (event) => { if (!event.target.value) return; try { const project = await api.projects.open({ projectId: event.target.value }); setResult(`Opened ${project.name} / 已打开`); const conversationId = project.teams?.[0]?.channels?.[0]?.conversationId; if (conversationId && typeof openConversation === "function") openConversation(conversationId); await refresh(); } catch (reason) { error(reason); } });
+    $("project-refresh")?.addEventListener("click", () => void refresh());
+    $("project-create")?.addEventListener("click", async () => { const name = window.prompt("Project name / 项目名称"); if (!name) return; try { await api.projects.create({ name }); setResult("Project created / 项目已创建"); await refresh(); } catch (reason) { error(reason); } });
+  }
+  function render(projects) {
+    const root = $("project-list"); if (!root) return; clear(root);
+    const switcher = $("project-switcher"); if (switcher) { const current = switcher.value; switcher.textContent = ""; const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Choose a Project / 选择项目"; switcher.append(placeholder); for (const project of projects) { const option = document.createElement("option"); option.value = project.projectId; option.textContent = `${project.name}${project.state === "archived" ? " · Archived / 已归档" : ""}`; switcher.append(option); } if ([...switcher.options].some((option) => option.value === current)) switcher.value = current; }
+    for (const project of projects) {
+      const card = document.createElement("article"); card.className = "project-card";
+      const title = document.createElement("h3"); title.textContent = project.name;
+      const status = document.createElement("p"); status.textContent = `${project.state === "archived" ? "Archived / 已归档" : "Active / 活跃"} · ${project.available ? "Available / 可用" : "Unavailable / 不可用"}`;
+      const counts = document.createElement("p"); counts.className = "project-counts"; counts.textContent = Object.entries(project.counts ?? {}).map(([key, value]) => `${key}: ${value}`).join(" · ");
+      const contents = document.createElement("p"); contents.textContent = (project.teams ?? []).map((team) => `${team.name} (${team.channels?.length ?? 0} channels)`).join(" · ") || "No Teams yet / 暂无团队";
+      const actions = document.createElement("div"); actions.className = "detail-actions";
+      actions.append(button("Open / 打开", async () => { await api.projects.open({ projectId: project.projectId }); const conversationId = project.teams?.[0]?.channels?.[0]?.conversationId; if (conversationId && typeof openConversation === "function") openConversation(conversationId); await refresh(); }));
+      actions.append(button(project.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (project.state === "archived" ? api.projects.restore : api.projects.archive)({ projectId: project.projectId }); await refresh(); }));
+      actions.append(button("Export / 导出", async () => copy(await api.projects.export({ projectId: project.projectId }))));
+      actions.append(button("Backup / 备份", async () => { await api.projects.backup({ projectId: project.projectId }); setResult("Portable Project backup created / 可移植项目备份已创建"); }));
+      card.append(title, status, counts, contents, actions); root.append(card);
+    }
+    if (!projects.length) { const empty = document.createElement("p"); empty.textContent = "No Projects yet / 暂无项目"; root.append(empty); }
+  }
+  async function refresh() { ensureView(); try { const result = await api.projects.list({ includeArchived: true, limit: 50 }); render(result.projects ?? []); } catch (reason) { error(reason); } }
+  window.addEventListener("DOMContentLoaded", () => { ensureView(); void refresh(); });
 })();
 
 // Independent product pages. The original Product Hubs overview remains a

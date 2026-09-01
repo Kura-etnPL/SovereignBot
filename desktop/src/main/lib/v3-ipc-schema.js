@@ -52,6 +52,19 @@ function memoryTarget(value, { withMemoryId = false, withPatch = false, withPinn
     }
     return result;
 }
+function projectId(value) { if (typeof value !== "string" || !/^project_[a-f0-9]{16}$/i.test(value)) throw new Error("projectId must be a Project identifier"); return value; }
+function projectTarget(value, { list = false, create = false } = {}) {
+    if (list) {
+        if (value === undefined || value === null) return {};
+        const input = objectPayload(value); exact(input, new Set(["includeArchived", "limit"]));
+        if (input.includeArchived !== undefined && typeof input.includeArchived !== "boolean") throw new Error("includeArchived must be boolean");
+        return { includeArchived: input.includeArchived === true, ...(input.limit === undefined ? {} : { limit: positiveInteger(input.limit, "limit", 1, 100) }) };
+    }
+    const input = objectPayload(value);
+    if (create) { exact(input, new Set(["name"])); return { name: string(input.name, "name", 120, true) }; }
+    exact(input, new Set(["projectId"]));
+    return { projectId: projectId(input.projectId) };
+}
 function modelBindingShape(value) {
     if (!isPlainObject(value)) throw new Error("modelBinding must be an object");
     exact(value, new Set(["profile", "provider", "model"]));
@@ -210,6 +223,14 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "memory:delete": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true })),
     "memory:pin": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true, withPinned: true })),
     "memory:sourceTrace": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true })),
+    "project:list": spec(2048, (payload) => projectTarget(payload, { list: true })),
+    "project:get": spec(1024, (payload) => projectTarget(payload)),
+    "project:create": spec(2048, (payload) => projectTarget(payload, { create: true })),
+    "project:open": spec(1024, (payload) => projectTarget(payload)),
+    "project:archive": spec(1024, (payload) => projectTarget(payload)),
+    "project:restore": spec(1024, (payload) => projectTarget(payload)),
+    "project:export": spec(1024, (payload) => projectTarget(payload)),
+    "project:backup": spec(1024, (payload) => projectTarget(payload)),
     "conversation:list": spec(1024, empty),
     "conversation:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["conversationId"])); return { conversationId: identifier(value.conversationId, "conversationId") }; }),
     "conversation:createDirect": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),

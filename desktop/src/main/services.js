@@ -157,6 +157,12 @@ export function createDesktopServices({ dataDir, dialog }) {
             };
         },
 
+        // Main-process-only hydration for product registries.  The path is never
+        // returned through IPC; consumers must retain only the trusted opaque id.
+        listWorkspacesInternal() {
+            return structuredClone(workspaceSnapshot());
+        },
+
         async addWorkspaceViaDialog(parentWindow) {
             const result = await dialog.showOpenDialog(parentWindow, {
                 title: "Choose a workspace folder",

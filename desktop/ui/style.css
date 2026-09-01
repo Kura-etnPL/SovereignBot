@@ -249,6 +249,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .workspace-card { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 9px; align-items: center; padding: 10px 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
 .workspace-card code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 10px; }
 .workspace-card button { border: 0; background: transparent; color: var(--text-3); cursor: pointer; }
+.project-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.project-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.project-card h3 { margin: 0 0 6px; font-size: 14px; }
+.project-card p { margin: 5px 0; color: var(--text-3); font-size: 10px; line-height: 1.45; }
+.project-card .project-counts { color: var(--text-2); }
+.project-card .detail-actions { margin-top: 12px; }
 .setting-field { display: flex; flex-direction: column; gap: 7px; color: var(--text-2); font-size: 11px; margin-top: 14px; }
 .setting-field select, .modal select, .modal input, .modal textarea { width: 100%; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel-2); color: var(--text); padding: 9px 10px; outline: none; }
 .toggle-row { margin-top: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-2); }

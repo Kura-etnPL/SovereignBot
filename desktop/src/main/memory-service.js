@@ -37,10 +37,13 @@ function sourceDraft(value) {
     return { type: value.type, ...(value.sourceId ? { sourceId: value.sourceId } : {}), ...(value.label ? { label: sourceLabel(value.label) } : {}) };
 }
 
-export function createMemoryService({ runtime, getRuntime, services, coworkerStore, teamService, conversationStore, artifactStore, getJobs = () => undefined } = {}) {
+export function createMemoryService({ runtime, getRuntime, services, coworkerStore, teamService, conversationStore, artifactStore, getJobs = () => undefined, projectResolver = () => undefined } = {}) {
     if (!runtime || !coworkerStore || !teamService || !conversationStore || !artifactStore)
         throw new Error("memory service requires existing runtime and product stores");
     const resolveRuntime = typeof getRuntime === "function" ? getRuntime : () => runtime;
+    function resolveProject(id) {
+        try { return projectResolver(id); } catch { return undefined; }
+    }
 
     function memoryStore() {
         const value = resolveRuntime()?.memory;
@@ -55,7 +58,7 @@ export function createMemoryService({ runtime, getRuntime, services, coworkerSto
             teamService.get(target.ownerId);
         } else {
             const team = teamService.list().teams.find((entry) => entry.id === target.ownerId);
-            const trustedProject = typeof services?.workspacePath === "function" && services.workspacePath(target.ownerId);
+            const trustedProject = resolveProject(target.ownerId);
             if (!team && !trustedProject) throw new Error(`unknown project: ${target.ownerId}`);
         }
         return target;
@@ -66,8 +69,10 @@ export function createMemoryService({ runtime, getRuntime, services, coworkerSto
     function projectMatches(target, team, conversation) {
         if (target.kind !== "project") return false;
         if (team?.id === target.ownerId) return true;
+        const project = resolveProject(target.ownerId);
+        if (project?.workspaceId && (team?.sharedWorkspaceId === project.workspaceId)) return true;
         const channel = team?.channels?.find((entry) => entry.conversationId === conversation?.id);
-        return Boolean(channel?.workspaceId && channel.workspaceId === target.ownerId);
+        return Boolean(project?.workspaceId && channel?.workspaceId === project.workspaceId);
     }
     function sourceConversation(sourceId) {
         const conversation = conversationStore.get(sourceId);

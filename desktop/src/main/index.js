@@ -33,6 +33,7 @@ import { createConnectedAppsService } from "./connected-apps.js";
 import { createExternalTeamControlServer } from "./external-team-control.js";
 import { createProductSurfaceService } from "./product-surface-service.js";
 import { createMemoryService } from "./memory-service.js";
+import { createProjectService } from "./project-service.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -132,8 +133,27 @@ async function main() {
     conversationStore.setTeamRouteResolver((conversation) => teamService.currentOwnerForConversation(conversation.id));
     const connectedApps = createConnectedAppsService({ dataDir, teamService, coworkerStore });
     teamService.setCoworkerAppAccessResolver((coworkerId) => connectedApps.assignedToolsForCoworker(coworkerId));
-
     let host;
+    let jobs;
+    let routines;
+    let eventTriggers;
+    const projectService = createProjectService({
+        dataDir,
+        services,
+        teamService,
+        coworkerStore,
+        artifactStore,
+        skillStore,
+        connectedApps,
+        getRoutines: () => routines?.list(),
+        getEventTriggers: () => eventTriggers?.list(),
+        getJobs: () => jobs,
+        getComputers: async () => {
+            if (!host?.runtime?.computer?.listComputers) throw new Error("Computer lease state is unavailable");
+            return host.runtime.computer.listComputers();
+        },
+    });
+
     try {
         host = await startRuntimeHost({
             dataDir,
@@ -156,9 +176,6 @@ async function main() {
     let win;
     let bridge;
     let goals;
-    let jobs;
-    let routines;
-    let eventTriggers;
     let chiefLoop;
     let coworkerDispatcher;
     let teachOnce;
@@ -172,7 +189,9 @@ async function main() {
         conversationStore,
         artifactStore,
         getJobs: () => jobs,
+        projectResolver: (projectId) => projectService.resolveProject(projectId),
     });
+    projectService.setMemoryService(memoryService);
     const productSurfaces = createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime: host.runtime, getRuntime: () => host.runtime });
     teamService.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => {
         const binding = host.rosterSummary()?.coworkerBindings?.[targetCoworkerId];
@@ -382,6 +401,14 @@ async function main() {
                     eventTriggers?.reconcile();
                     return { removed };
                 },
+                "project:list": (payload) => projectService.list(payload),
+                "project:get": ({ projectId }) => projectService.get(projectId),
+                "project:create": ({ name }) => projectService.create({ name }),
+                "project:open": ({ projectId }) => projectService.open(projectId),
+                "project:archive": ({ projectId }) => projectService.archive(projectId),
+                "project:restore": ({ projectId }) => projectService.restore(projectId),
+                "project:export": ({ projectId }) => projectService.export(projectId),
+                "project:backup": ({ projectId }) => projectService.backup(projectId),
                 "settings:get": () => services.getSettings(),
                 "settings:update": (patch) => services.updateSettings(patch),
                 "provider:getRoster": () => host.rosterSummary(),
