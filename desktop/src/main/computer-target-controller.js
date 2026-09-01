@@ -40,8 +40,17 @@ export function createComputerTargetController({ workerNodeStore, audit, now = (
         const target = normalizeTarget(job.computerTarget);
         if (!target) throw new Error("Computer target is required");
         const normalized = validateComputerActionList(actions ?? [{ operation: "snapshot", input: {} }]);
-        const resolved = await workerNodeStore.resolveComputerTarget(target.nodeId, target.workspaceId, target.computerId);
-        if (resolved.computer.currentLoad >= resolved.computer.capacity) throw new Error("selected Worker Computer capacity is exhausted");
+        let resolved;
+        try { resolved = await workerNodeStore.resolveComputerTarget(target.nodeId, target.workspaceId, target.computerId); }
+        catch (error) {
+            await audit?.append?.({ type: "computer.worker_action_failed", actor: job.ownerCoworkerId, subject: job.id, data: { nodeId: target.nodeId, workspaceId: target.workspaceId, computerId: target.computerId, reason: String(error?.message ?? error).slice(0, 300) } });
+            throw error;
+        }
+        if (resolved.computer.currentLoad >= resolved.computer.capacity) {
+            const error = new Error("selected Worker Computer capacity is exhausted");
+            await audit?.append?.({ type: "computer.worker_action_failed", actor: job.ownerCoworkerId, subject: job.id, data: { nodeId: target.nodeId, workspaceId: target.workspaceId, computerId: target.computerId, reason: error.message } });
+            throw error;
+        }
         const key = job.id;
         active.set(key, { cancelled: false });
         const results = [];
@@ -78,10 +87,44 @@ export function createComputerTargetController({ workerNodeStore, audit, now = (
         finally { active.delete(key); }
     }
 
+    async function leaseAction({ job, operation, actorId } = {}) {
+        if (!job?.id || !job.ownerCoworkerId) throw new Error("Computer lease identity is required");
+        if (!["takeover", "release"].includes(operation)) throw new Error("Computer lease operation is not supported");
+        const target = normalizeTarget(job.computerTarget);
+        if (!target) throw new Error("computerTarget is required");
+        if (typeof actorId !== "string" || !actorId.trim() || actorId.length > 120) throw new Error("actorId is invalid");
+        const resolved = await workerNodeStore.resolveComputerTarget(target.nodeId, target.workspaceId, target.computerId);
+        const envelope = {
+            protocol: "sovereign-worker-computer/1",
+            requestId: stableId(job.id, operation === "takeover" ? 9001 : 9002, operation),
+            jobId: job.id,
+            ownerCoworkerId: job.ownerCoworkerId,
+            ...(job.projectId ? { projectId: job.projectId } : {}),
+            workspaceId: target.workspaceId,
+            computerId: target.computerId,
+            operation,
+            input: { actorId: actorId.trim() },
+            attempt: Number.isInteger(job.attempt) ? job.attempt : 0,
+            createdAt: now(),
+        };
+        await audit?.append?.({ type: `computer.worker_${operation}_requested`, actor: job.ownerCoworkerId, subject: job.id, data: { requestId: envelope.requestId, nodeId: target.nodeId, workspaceId: target.workspaceId, computerId: target.computerId, operation } });
+        try {
+            const response = await resolved.client.computerAction(envelope);
+            await audit?.append?.({ type: `computer.worker_${operation}_completed`, actor: job.ownerCoworkerId, subject: job.id, data: { requestId: envelope.requestId, operation, duplicate: response?.duplicate === true } });
+            return { target, operation, requestId: envelope.requestId, duplicate: response?.duplicate === true, result: publicResult(response?.result) };
+        }
+        catch (error) {
+            await audit?.append?.({ type: `computer.worker_${operation}_failed`, actor: job.ownerCoworkerId, subject: job.id, data: { requestId: envelope.requestId, operation, reason: String(error?.message ?? error).slice(0, 300) } });
+            throw error;
+        }
+    }
+
     return {
         normalizeTarget,
         normalizeActions(value) { return validateComputerActionList(value ?? [{ operation: "snapshot", input: {} }]); },
         execute,
+        takeover(params) { return leaseAction({ ...params, operation: "takeover" }); },
+        release(params) { return leaseAction({ ...params, operation: "release" }); },
         cancel(jobId) { const entry = active.get(jobId); if (!entry) return false; entry.cancelled = true; return true; },
         publicTarget(value) { return normalizeTarget(value); },
     };

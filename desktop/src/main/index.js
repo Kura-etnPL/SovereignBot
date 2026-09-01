@@ -723,6 +723,11 @@ async function main() {
                 "workerNode:refresh": ({ nodeId }) => workerNodeStore.refresh(nodeId),
                 "workerNode:setEnabled": ({ nodeId, enabled }) => workerNodeStore.setEnabled(nodeId, enabled),
                 "workerNode:remove": ({ nodeId }) => workerNodeStore.remove(nodeId),
+                "workerNode:trustBegin": ({ nodeId, transport, ttlMs }) => workerNodeStore.trust.beginPairing(nodeId, { transport, ...(ttlMs === undefined ? {} : { ttlMs }) }),
+                "workerNode:trustComplete": ({ nodeId, offer, response }) => workerNodeStore.trust.completePairing(nodeId, offer, response),
+                "workerNode:trustCompleteViaDialog": ({ nodeId }) => workerNodeStore.trustCompleteViaDialog(win, dialog, nodeId),
+                "workerNode:trustRevoke": ({ nodeId }) => workerNodeStore.trust.revoke(nodeId),
+                "workerNode:trustRotate": ({ nodeId }) => workerNodeStore.trust.rotate(nodeId),
             },
         });
     }

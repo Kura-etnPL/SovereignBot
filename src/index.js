@@ -39,3 +39,5 @@ export * from "./worker-node-protocol.js";
 export * from "./worker-node-server.js";
 export * from "./worker-computer-action-store.js";
 export * from "./worker-computer-protocol.js";
+export * from "./worker-secure-transport.js";
+export * from "./worker-trust-store.js";

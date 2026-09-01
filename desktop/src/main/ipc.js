@@ -64,6 +64,11 @@ const WORKER_NODE_CHANNELS = Object.freeze({
     "workerNode:refresh": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "workerNode:setEnabled": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "workerNode:remove": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "workerNode:trustBegin": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
+    "workerNode:trustComplete": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 16384 }),
+    "workerNode:trustCompleteViaDialog": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "workerNode:trustRevoke": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "workerNode:trustRotate": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
 const ALL_IPC_CHANNELS = Object.freeze({
     ...IPC_CHANNELS,
@@ -439,6 +444,24 @@ function validateWorkerNodeRequest(channel, payload) {
         if (payload.nodeId === undefined) return {};
         if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
         return { nodeId: payload.nodeId };
+    }
+    if (["workerNode:trustRevoke", "workerNode:trustRotate", "workerNode:trustCompleteViaDialog"].includes(channel)) {
+        exactKeys(payload, new Set(["nodeId"]), channel);
+        if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
+        return { nodeId: payload.nodeId };
+    }
+    if (channel === "workerNode:trustBegin") {
+        exactKeys(payload, new Set(["nodeId", "transport", "ttlMs"]), channel);
+        if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
+        if (!['lan', 'remote-relay'].includes(payload.transport)) throw new Error("transport must be lan or remote-relay");
+        if (payload.ttlMs !== undefined && (!Number.isInteger(payload.ttlMs) || payload.ttlMs < 1000 || payload.ttlMs > 600000)) throw new Error("ttlMs is invalid");
+        return { nodeId: payload.nodeId, transport: payload.transport, ...(payload.ttlMs === undefined ? {} : { ttlMs: payload.ttlMs }) };
+    }
+    if (channel === "workerNode:trustComplete") {
+        exactKeys(payload, new Set(["nodeId", "offer", "response"]), channel);
+        if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
+        if (!payload.offer || typeof payload.offer !== "object" || Array.isArray(payload.offer) || !payload.response || typeof payload.response !== "object" || Array.isArray(payload.response)) throw new Error("pairing offer and response are required");
+        return { nodeId: payload.nodeId, offer: structuredClone(payload.offer), response: structuredClone(payload.response) };
     }
     exactKeys(payload, new Set(["nodeId", "enabled"]), channel);
     if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
