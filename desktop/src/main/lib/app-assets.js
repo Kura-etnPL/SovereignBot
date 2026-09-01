@@ -21,6 +21,7 @@ export const APP_ASSETS = Object.freeze({
     "/computer-ui.js": Object.freeze({ file: "computer-ui.js", type: JS }),
     "/live-screen-ui.js": Object.freeze({ file: "live-screen-ui.js", type: JS }),
     "/product-hubs-ui.js": Object.freeze({ file: "product-hubs-ui.js", type: JS }),
+    "/search-palette-ui.js": Object.freeze({ file: "search-palette-ui.js", type: JS }),
     "/skills-ui.js": Object.freeze({ file: "skills-ui.js", type: JS }),
     "/teach-ui.js": Object.freeze({ file: "teach-ui.js", type: JS }),
     "/chief-ui.js": Object.freeze({ file: "chief-ui.js", type: JS }),

@@ -65,6 +65,42 @@ function projectTarget(value, { list = false, create = false } = {}) {
     exact(input, new Set(["projectId"]));
     return { projectId: projectId(input.projectId) };
 }
+const SEARCH_TYPES = new Set(["conversations", "channels", "coworkers", "projects", "artifacts", "skills", "playbooks", "routines"]);
+const PALETTE_IDS = new Set(["new-coworker", "new-team", "new-channel", "run-routine", "teach-skill", "open-computer", "search"]);
+function searchTarget(value) {
+    if (value === undefined || value === null) return { query: "", types: [...SEARCH_TYPES], limit: 50 };
+    const input = objectPayload(value);
+    exact(input, new Set(["query", "types", "projectId", "limit"]));
+    const query = input.query === undefined ? "" : string(input.query, "query", 300);
+    if (input.types !== undefined && (!Array.isArray(input.types) || input.types.length > SEARCH_TYPES.size || input.types.some((entry) => typeof entry !== "string" || !SEARCH_TYPES.has(entry)))) throw new Error("search types are invalid");
+    const types = input.types === undefined ? [...SEARCH_TYPES] : [...new Set(input.types)];
+    return { query, types, ...(input.projectId === undefined ? {} : { projectId: projectId(input.projectId) }), limit: input.limit === undefined ? 50 : positiveInteger(input.limit, "limit", 1, 100) };
+}
+function paletteArgs(value, allowed, label) { const input = objectPayload(value ?? {}); exact(input, allowed); return input; }
+function paletteTarget(value) {
+    const input = objectPayload(value);
+    exact(input, new Set(["paletteId", "args"]));
+    if (typeof input.paletteId !== "string" || !PALETTE_IDS.has(input.paletteId)) throw new Error("paletteId is invalid");
+    const allowed = {
+        search: new Set(),
+        "new-coworker": new Set(["name", "role", "instructions"]),
+        "new-team": new Set(["title", "coworkerIds", "leadCoworkerId"]),
+        "new-channel": new Set(["teamId", "name"]),
+        "run-routine": new Set(["routineId"]),
+        "teach-skill": new Set(["coworkerId", "name", "description"]),
+        "open-computer": new Set(["coworkerId"]),
+    }[input.paletteId];
+    const args = paletteArgs(input.args, allowed, input.paletteId);
+    const out = { paletteId: input.paletteId, args: structuredClone(args) };
+    const requiredString = (key, max) => { if (args[key] !== undefined) string(args[key], key, max, true); else throw new Error(`${key} is required`); };
+    if (input.paletteId === "new-coworker") { requiredString("name", 80); requiredString("role", 120); if (args.instructions !== undefined) string(args.instructions, "instructions", 12_000); }
+    if (input.paletteId === "new-team") { requiredString("title", 120); if (!Array.isArray(args.coworkerIds) || args.coworkerIds.length < 2 || args.coworkerIds.length > 7) throw new Error("coworkerIds must contain 2-7 IDs"); idArray(args.coworkerIds, "coworkerIds", 7); if (args.leadCoworkerId !== undefined) identifier(args.leadCoworkerId, "leadCoworkerId"); }
+    if (input.paletteId === "new-channel") { identifier(args.teamId, "teamId"); requiredString("name", 120); }
+    if (["run-routine"].includes(input.paletteId)) identifier(args.routineId, "routineId");
+    if (input.paletteId === "teach-skill") { identifier(args.coworkerId, "coworkerId"); requiredString("name", 100); if (args.description !== undefined) string(args.description, "description", 280); }
+    if (input.paletteId === "open-computer") identifier(args.coworkerId, "coworkerId");
+    return out;
+}
 function modelBindingShape(value) {
     if (!isPlainObject(value)) throw new Error("modelBinding must be an object");
     exact(value, new Set(["profile", "provider", "model"]));
@@ -231,6 +267,9 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "project:restore": spec(1024, (payload) => projectTarget(payload)),
     "project:export": spec(1024, (payload) => projectTarget(payload)),
     "project:backup": spec(1024, (payload) => projectTarget(payload)),
+    "search:query": spec(4096, (payload) => searchTarget(payload)),
+    "palette:list": spec(1024, empty),
+    "palette:execute": spec(16 * 1024, (payload) => paletteTarget(payload)),
     "conversation:list": spec(1024, empty),
     "conversation:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["conversationId"])); return { conversationId: identifier(value.conversationId, "conversationId") }; }),
     "conversation:createDirect": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),

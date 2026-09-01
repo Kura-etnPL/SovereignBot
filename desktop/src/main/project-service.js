@@ -166,6 +166,13 @@ export function createProjectService({
     return {
         schema: PROJECTS_SCHEMA,
         resolveProject(id) { return clone(requireProject(validId(id))); },
+        // Main-process-only scope materialization for bounded product queries.  It
+        // reuses the same association resolver as Project pages and never crosses IPC.
+        resolveScope(id) {
+            const project = requireProject(validId(id));
+            const a = association(project);
+            return { projectId: project.projectId, workspaceId: project.workspaceId, teamIds: [...a.teamIds], channelIds: a.channels.map((entry) => entry.id), conversationIds: [...a.conversationIds], coworkerIds: [...a.coworkerIds] };
+        },
         setMemoryService(service) { memoryService = service; },
         async list({ includeArchived = false, limit = 50 } = {}) {
             ensureMigration();

@@ -34,6 +34,8 @@ import { createExternalTeamControlServer } from "./external-team-control.js";
 import { createProductSurfaceService } from "./product-surface-service.js";
 import { createMemoryService } from "./memory-service.js";
 import { createProjectService } from "./project-service.js";
+import { createSearchService } from "./search-service.js";
+import { createCommandPaletteService } from "./command-palette-service.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -179,6 +181,7 @@ async function main() {
     let chiefLoop;
     let coworkerDispatcher;
     let teachOnce;
+    let palette;
     let externalTeamControl;
     const memoryService = createMemoryService({
         runtime: host.runtime,
@@ -193,6 +196,16 @@ async function main() {
     });
     projectService.setMemoryService(memoryService);
     const productSurfaces = createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime: host.runtime, getRuntime: () => host.runtime });
+    const search = createSearchService({
+        teamService,
+        conversationStore,
+        coworkerStore,
+        projectService,
+        artifactStore,
+        skillStore,
+        productSurfaces,
+        getRoutines: () => routines?.list(),
+    });
     teamService.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => {
         const binding = host.rosterSummary()?.coworkerBindings?.[targetCoworkerId];
         if (!binding?.ready || binding.agentId !== coworkerAgentId(targetCoworkerId)) throw new Error("target coworker provider binding is not ready");
@@ -331,6 +344,21 @@ async function main() {
         generateDraft: teachOnceRuntime.generateDraft,
         testExecutor: teachOnceRuntime.testExecutor,
     });
+    palette = createCommandPaletteService({
+        createCoworker: async ({ name, role, instructions }) => ({
+            coworker: coworkerStore.create({ name, role, instructions }),
+            refresh: await refreshCoworkerRuntime(),
+        }),
+        createTeam: ({ title, coworkerIds, leadCoworkerId }) => teamService.createTeam({ title, coworkerIds, leadCoworkerId }),
+        createChannel: ({ teamId, name }) => teamService.createChannel({ teamId, name }),
+        runRoutine: (routineId) => routines.runNow(routineId),
+        teachSkill: (payload) => teachOnce.start(payload),
+        openComputer: ({ coworkerId }) => {
+            const coworker = coworkerStore.get(coworkerId);
+            if (coworker.state === "archived") throw new Error("archived coworker has no Computer lane");
+            return { action: "open-computer", coworkerId: coworker.id };
+        },
+    });
 
     const configuredExternalPort = process.env.SOVEREIGNBOT_EXTERNAL_TEAM_CONTROL_PORT;
     const externalPort = configuredExternalPort === undefined ? 0 : Number(configuredExternalPort);
@@ -409,6 +437,9 @@ async function main() {
                 "project:restore": ({ projectId }) => projectService.restore(projectId),
                 "project:export": ({ projectId }) => projectService.export(projectId),
                 "project:backup": ({ projectId }) => projectService.backup(projectId),
+                "search:query": (payload) => search.query(payload),
+                "palette:list": () => palette.list(),
+                "palette:execute": ({ paletteId, args }) => palette.execute({ commandId: paletteId, args }),
                 "settings:get": () => services.getSettings(),
                 "settings:update": (patch) => services.updateSettings(patch),
                 "provider:getRoster": () => host.rosterSummary(),
