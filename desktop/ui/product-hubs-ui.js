@@ -2,12 +2,13 @@
 
 (() => {
   const api = window.sovereignbot;
-  if (!api?.playbooks || !api?.artifacts?.hub || !api?.computer?.history || !api?.connectedApps?.list) return;
+  if (!api?.playbooks || !api?.artifacts?.hub || !api?.computer?.history || !api?.connectedApps || typeof api.connectedApps.list !== "function" || typeof api.connectedApps.search !== "function") return;
   const $ = (id) => document.getElementById(id);
   const clear = (node) => { if (node) node.textContent = ""; };
   const button = (label, fn, className = "quiet-action") => { const b = document.createElement("button"); b.type = "button"; b.className = className; b.textContent = label; b.addEventListener("click", () => void fn(b)); return b; };
   const line = (label, value) => { const span = document.createElement("span"); span.textContent = `${label}: ${value ?? "—"}`; return span; };
   const error = (root, reason) => { const p = document.createElement("p"); p.className = "inline-error"; p.textContent = String(reason?.message ?? reason).slice(0, 220); root.append(p); };
+  let connectedAppsProjectId = "";
   async function copy(value) { try { await navigator.clipboard.writeText(JSON.stringify(value, null, 2)); } catch {} }
   function renderPlaybooks(items, teams) {
     const root = $("product-playbooks"); clear(root);
@@ -136,18 +137,25 @@
     for (const item of items) { const card = document.createElement("article"); card.className = "settings-card"; const h = document.createElement("h3"); h.textContent = item.name; card.append(h, line("Status", item.state), line("Assigned", item.assignedTeamIds.length ? "Team" : "Not assigned")); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(button("Export", async () => copy(await api.skills.export({ skillId: item.id })))); actions.append(button("Duplicate", async () => { await api.skills.duplicate({ skillId: item.id }); await refresh(); })); card.append(actions); root.append(card); }
     root.append(button("Import skill / 导入技能", async () => { const raw = window.prompt("Paste safe Skill JSON"); if (!raw) return; await api.skills.import({ skill: JSON.parse(raw) }); await refresh(); }));
   }
-  function renderConnectedApps(items, teams, coworkers) {
+  function renderConnectedApps(items, teams, coworkers, projects) {
     const root = $("product-connected-apps"); if (!root) return; clear(root);
+    const project = (projects ?? []).find((entry) => entry.projectId === connectedAppsProjectId);
+    const projectTeamIds = new Set((project?.teams ?? []).map((entry) => entry.id));
+    const projectCoworkerIds = new Set((project?.coworkers ?? []).map((entry) => entry.id));
+    const visibleTeams = connectedAppsProjectId ? teams.filter((entry) => projectTeamIds.has(entry.id)) : teams;
+    const visibleCoworkers = connectedAppsProjectId ? coworkers.filter((entry) => projectCoworkerIds.has(entry.id)) : coworkers;
     for (const item of items) {
       const card = document.createElement("article"); card.className = "settings-card";
-      const h = document.createElement("h3"); h.textContent = item.name; card.append(h, line("State", item.state), line("Capabilities", (item.capabilities ?? []).join(" · ")), line("Policy", item.approval?.summary || "Governor-controlled"));
+      const h = document.createElement("h3"); h.textContent = item.name; card.append(h, line("Connection", item.connection?.state), line("Health", `${item.health?.state ?? item.state} · ${item.health?.summary ?? ""}`), line("Capabilities", (item.capabilities ?? []).join(" · ")), line("Approval", item.approval?.summary || "Governor-controlled"));
       const actions = document.createElement("div"); actions.className = "detail-actions";
+      if (item.connectionState === "connected") actions.append(button("Disconnect / 断开", async () => { try { await api.connectedApps.disconnect({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}) }); await refresh(); } catch (e) { error(root, e); } }));
+      else actions.append(button("Connect / 连接", async () => { try { await api.connectedApps.connect({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}) }); await refresh(); } catch (e) { error(root, e); } }));
       const teamSelect = document.createElement("select"); teamSelect.setAttribute("aria-label", "Team for " + item.name);
-      for (const team of teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = "Team: " + team.name; teamSelect.append(option); }
-      if (teamSelect.options.length) actions.append(teamSelect, button("Assign team / 分配团队", async () => { try { await api.connectedApps.assign({ appId: item.id, teamId: teamSelect.value, enabled: !item.assignedTeamIds.includes(teamSelect.value) }); await refresh(); } catch (e) { error(root, e); } }));
+      for (const team of visibleTeams) { const option = document.createElement("option"); option.value = team.id; option.textContent = "Team: " + team.name; teamSelect.append(option); }
+      if (teamSelect.options.length) actions.append(teamSelect, button("Assign team / 分配团队", async () => { try { await api.connectedApps.assign({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}), teamId: teamSelect.value, enabled: !item.assignedTeamIds.includes(teamSelect.value) }); await refresh(); } catch (e) { error(root, e); } }));
       const coworkerSelect = document.createElement("select"); coworkerSelect.setAttribute("aria-label", "Coworker for " + item.name);
-      for (const coworker of coworkers) { const option = document.createElement("option"); option.value = coworker.id; option.textContent = "Coworker: " + coworker.name; coworkerSelect.append(option); }
-      if (coworkerSelect.options.length) actions.append(coworkerSelect, button("Assign coworker / 分配同事", async () => { try { await api.connectedApps.assign({ appId: item.id, coworkerId: coworkerSelect.value, enabled: !item.assignedCoworkerIds.includes(coworkerSelect.value) }); await refresh(); } catch (e) { error(root, e); } }));
+      for (const coworker of visibleCoworkers) { const option = document.createElement("option"); option.value = coworker.id; option.textContent = "Coworker: " + coworker.name; coworkerSelect.append(option); }
+      if (coworkerSelect.options.length) actions.append(coworkerSelect, button("Assign coworker / 分配同事", async () => { try { await api.connectedApps.assign({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}), coworkerId: coworkerSelect.value, enabled: !item.assignedCoworkerIds.includes(coworkerSelect.value) }); await refresh(); } catch (e) { error(root, e); } }));
       card.append(actions); root.append(card);
     }
     if (!items.length) { const p = document.createElement("p"); p.textContent = "No connected apps available. / 暂无可用连接。"; root.append(p); }
@@ -278,10 +286,19 @@
       api.teams.list({}),
       api.coworkers.list({}),
       api.workspaces?.list ? api.workspaces.list({}) : Promise.resolve({ workspaces: [] }),
-      api.projects?.list ? api.projects.list({ limit: 8 }) : Promise.resolve({ projects: [] }),
+      api.projects?.list ? api.projects.list({ limit: 50 }) : Promise.resolve({ projects: [] }),
     ]);
     renderWorkspaceSwitcher(workspaces);
     renderRecentProjects(projects.projects ?? []);
+    const connectedAppsProject = $("connected-app-project");
+    if (connectedAppsProject) {
+      const selectedProject = connectedAppsProject.value;
+      connectedAppsProject.textContent = "";
+      connectedAppsProject.append(new Option("All Projects / 全部项目", ""));
+      for (const project of (projects.projects ?? []).filter((entry) => entry.state === "active")) connectedAppsProject.append(new Option(project.name, project.projectId));
+      connectedAppsProject.value = [...connectedAppsProject.options].some((option) => option.value === selectedProject) ? selectedProject : "";
+      connectedAppsProjectId = connectedAppsProject.value;
+    }
     const filter = $("artifact-hub-filter");
     if (filter && filter.options.length === 1) {
       for (const team of teams.teams ?? []) {
@@ -298,8 +315,11 @@
       for (const team of teams.teams ?? []) { const option = document.createElement("option"); option.value = `team:${team.id}`; option.textContent = `By Team / 团队: ${team.name}`; activityFilter.append(option); }
       for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = `coworker:${coworker.id}`; option.textContent = `By Coworker / 同事: ${coworker.name}`; activityFilter.append(option); }
     }
-    const [playbooks, artifacts, history, skills, channels, conversations, connectedApps] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations.list({}), api.connectedApps.list({})]);
-    renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? [], coworkers.coworkers ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? [], teams.channelTemplates ?? []); renderActivityFeed(teams.teams ?? [], coworkers.coworkers ?? [], conversations.conversations ?? []); renderSkills(skills.skills ?? []); renderConnectedApps(connectedApps.apps ?? [], teams.teams ?? [], coworkers.coworkers ?? []); renderPacks(teams.packs ?? []);
+    const connectedAppPayload = { limit: 64, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}), ...($("connected-app-search")?.value.trim() ? { query: $("connected-app-search").value.trim() } : {}) };
+    const [playbooks, artifacts, history, skills, channels, conversations, connectedApps] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations.list({}), api.connectedApps.search(connectedAppPayload)]);
+    const healthApps = await Promise.all((connectedApps.apps ?? []).map((item) => api.connectedApps.health({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}) }).catch(() => item)));
+    connectedApps.apps = healthApps;
+    renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? [], coworkers.coworkers ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? [], teams.channelTemplates ?? []); renderActivityFeed(teams.teams ?? [], coworkers.coworkers ?? [], conversations.conversations ?? []); renderSkills(skills.skills ?? []); renderConnectedApps(connectedApps.apps ?? [], teams.teams ?? [], coworkers.coworkers ?? [], projects.projects ?? []); renderPacks(teams.packs ?? []);
   }
   async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description") ?? ""; const rawSteps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; await api.playbooks.create({ playbook: { name, description, steps: rawSteps.split(",").map((x) => x.trim()).filter(Boolean) } }); await refresh(); }
   function setup() {
@@ -311,7 +331,9 @@
       const section = document.createElement("section"); section.className = "settings-card";
       const heading = document.createElement("div"); heading.className = "card-heading";
       const copy = document.createElement("div"); const title = document.createElement("h2"); title.textContent = "Connected Apps / 已连接应用"; const description = document.createElement("p"); description.textContent = "Governed capabilities assigned to a Team or Coworker; every action remains task-bound."; copy.append(title, description);
-      const root = document.createElement("div"); root.id = "product-connected-apps"; root.className = "workspace-cards"; heading.append(copy); section.append(heading, root); skillRoot.closest(".settings-grid")?.insertBefore(section, skillRoot.closest(".settings-card")?.nextElementSibling);
+      const controls = document.createElement("div"); controls.className = "detail-actions"; const search = document.createElement("input"); search.id = "connected-app-search"; search.type = "search"; search.maxLength = 120; search.placeholder = "Search apps / 搜索应用"; search.setAttribute("aria-label", "Search Connected Apps"); const project = document.createElement("select"); project.id = "connected-app-project"; project.setAttribute("aria-label", "Project scope for Connected Apps"); project.append(new Option("All Projects / 全部项目", "")); controls.append(search, project); heading.append(copy, controls);
+      const root = document.createElement("div"); root.id = "product-connected-apps"; root.className = "workspace-cards"; section.append(heading, root); skillRoot.closest(".settings-grid")?.insertBefore(section, skillRoot.closest(".settings-card")?.nextElementSibling);
+      search.addEventListener("input", () => void refresh()); project.addEventListener("change", () => { connectedAppsProjectId = project.value; void refresh(); });
     }
     const channelFilter = $("product-channel-filter");
     if (channelFilter && ![...channelFilter.options].some((option) => option.value === "unread")) { const option = document.createElement("option"); option.value = "unread"; option.textContent = "Unread / 未读"; channelFilter.insertBefore(option, channelFilter.options[channelFilter.options.length - 1] ?? null); }

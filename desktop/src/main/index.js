@@ -133,13 +133,28 @@ async function main() {
         teamIdsForCoworker: (id) => teamService.list().teams.filter((team) => team.coworkerIds.includes(id)).map((team) => team.id),
     });
     conversationStore.setTeamRouteResolver((conversation) => teamService.currentOwnerForConversation(conversation.id));
-    const connectedApps = createConnectedAppsService({ dataDir, teamService, coworkerStore });
+    let projectService;
+    const connectedApps = createConnectedAppsService({
+        dataDir,
+        teamService,
+        coworkerStore,
+        getProjectScope: (id) => projectService?.resolveScope(id),
+        healthProbe: async ({ appId }) => {
+            if (appId === "sovereignbot-computer") {
+                if (!host?.runtime?.computer?.listComputers) return { health: "unavailable" };
+                const computers = await host.runtime.computer.listComputers();
+                return { health: Array.isArray(computers) && computers.length ? "ready" : "unavailable" };
+            }
+            if (appId === "sovereignbot-workspace") return { health: services.listWorkspacesInternal?.().workspaces?.length ? "ready" : "unavailable" };
+            return { health: "unavailable" };
+        },
+    });
     teamService.setCoworkerAppAccessResolver((coworkerId) => connectedApps.assignedToolsForCoworker(coworkerId));
     let host;
     let jobs;
     let routines;
     let eventTriggers;
-    const projectService = createProjectService({
+    projectService = createProjectService({
         dataDir,
         services,
         teamService,
@@ -155,6 +170,7 @@ async function main() {
             return host.runtime.computer.listComputers();
         },
     });
+    connectedApps.setProjectScopeResolver((id) => projectService.resolveScope(id));
 
     try {
         host = await startRuntimeHost({
@@ -529,12 +545,24 @@ async function main() {
                 "channel:update": ({ channelId, patch }) => teamService.updateChannel(channelId, patch),
                 "channel:archive": ({ channelId }) => teamService.archiveChannel(channelId),
                 "channel:restore": ({ channelId }) => teamService.restoreChannel(channelId),
-                "connectedApps:list": () => connectedApps.list(),
+                "connectedApps:list": (payload) => connectedApps.list(payload),
+                "connectedApps:search": (payload) => connectedApps.search(payload),
                 "connectedApps:assign": async (payload) => {
                     const app = connectedApps.setAssignment(payload);
                     const refresh = await refreshCoworkerRuntime();
                     return { ...app, refresh };
                 },
+                "connectedApps:connect": async (payload) => {
+                    const app = await connectedApps.connect(payload);
+                    const refresh = await refreshCoworkerRuntime();
+                    return { ...app, refresh };
+                },
+                "connectedApps:disconnect": async (payload) => {
+                    const app = await connectedApps.disconnect(payload);
+                    const refresh = await refreshCoworkerRuntime();
+                    return { ...app, refresh };
+                },
+                "connectedApps:health": (payload) => connectedApps.health(payload),
                 ...createSkillHandlers({
                     skillStore,
                     conversationStore,

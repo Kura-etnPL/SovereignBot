@@ -9,7 +9,7 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
         "coworker:list", "coworker:get", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
         "conversation:list", "conversation:get", "conversation:createDirect", "conversation:createTeam", "conversation:send",
         "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:exportPlaybook", "team:importPlaybook", "team:createChannelFromTemplate", "channel:list", "channel:get", "channel:create", "channel:update", "channel:archive", "channel:restore",
-        "connectedApps:list", "connectedApps:assign",
+        "connectedApps:list", "connectedApps:search", "connectedApps:assign", "connectedApps:connect", "connectedApps:disconnect", "connectedApps:health",
     ];
     for (const channel of expected)
         assert.ok(V3_IPC_CHANNELS[channel], channel);
@@ -214,4 +214,8 @@ test("connected app assignment accepts only an opaque target and no authority fi
         () => validateV3IpcRequest("connectedApps:assign", { ...payload, coworkerId: "coworker_1111111111111111" }),
         /exactly one/,
     );
+    assert.deepEqual(validateV3IpcRequest("connectedApps:assign", { ...payload, projectId: "project_1111111111111111" }), { ...payload, projectId: "project_1111111111111111" });
+    assert.deepEqual(validateV3IpcRequest("connectedApps:list", { projectId: "project_1111111111111111", query: "workspace", limit: 10 }), { projectId: "project_1111111111111111", query: "workspace", limit: 10 });
+    assert.throws(() => validateV3IpcRequest("connectedApps:list", { path: "C:/private" }), /unexpected request field/);
+    assert.throws(() => validateV3IpcRequest("connectedApps:connect", { appId: "app", url: "https://example.invalid" }), /unexpected request field/);
 });

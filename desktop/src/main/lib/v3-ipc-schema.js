@@ -101,6 +101,11 @@ function paletteTarget(value) {
     if (input.paletteId === "open-computer") identifier(args.coworkerId, "coworkerId");
     return out;
 }
+function connectedAppsQueryTarget(payload) {
+    if (payload === undefined || payload === null) return {};
+    const value = objectPayload(payload); exact(value, new Set(["projectId", "query", "limit"]));
+    return { ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }), ...(value.query === undefined ? {} : { query: string(value.query, "query", 120) }), ...(value.limit === undefined ? {} : { limit: positiveInteger(value.limit, "limit", 1, 100) }) };
+}
 function modelBindingShape(value) {
     if (!isPlainObject(value)) throw new Error("modelBinding must be an object");
     exact(value, new Set(["profile", "provider", "model"]));
@@ -308,19 +313,33 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "channel:update": spec(16 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["channelId", "patch"])); const patch = objectPayload(value.patch); exact(patch, new Set(["name", "kind", "instructions", "workspaceId", "playbookId"])); if (!Object.keys(patch).length) throw new Error("channel patch must not be empty"); if (patch.name !== undefined) string(patch.name, "name", 120, true); if (patch.kind !== undefined && !["work", "personal", "project"].includes(patch.kind)) throw new Error("channel kind is invalid"); if (patch.instructions !== undefined) string(patch.instructions, "instructions", 12_000); return { channelId: identifier(value.channelId, "channelId"), patch: { ...(patch.name === undefined ? {} : { name: patch.name }), ...(patch.kind === undefined ? {} : { kind: patch.kind }), ...(patch.instructions === undefined ? {} : { instructions: patch.instructions }), ...(patch.workspaceId === undefined ? {} : { workspaceId: identifier(patch.workspaceId, "workspaceId") }), ...(patch.playbookId === undefined ? {} : { playbookId: identifier(patch.playbookId, "playbookId") }) } }; }),
     "channel:archive": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["channelId"])); return { channelId: identifier(value.channelId, "channelId") }; }),
     "channel:restore": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["channelId"])); return { channelId: identifier(value.channelId, "channelId") }; }),
-    "connectedApps:list": spec(1024, empty),
+    "connectedApps:list": spec(2048, connectedAppsQueryTarget),
+    "connectedApps:search": spec(2048, connectedAppsQueryTarget),
     "connectedApps:assign": spec(2048, (payload) => {
         const value = objectPayload(payload);
-        exact(value, new Set(["appId", "teamId", "coworkerId", "enabled"]));
+        exact(value, new Set(["appId", "projectId", "teamId", "coworkerId", "enabled"]));
         if ((value.teamId === undefined) === (value.coworkerId === undefined))
             throw new Error("connected app assignment requires exactly one teamId or coworkerId");
         if (typeof value.enabled !== "boolean") throw new Error("enabled must be boolean");
         return {
             appId: identifier(value.appId, "appId"),
+            ...(value.projectId !== undefined ? { projectId: projectId(value.projectId) } : {}),
             ...(value.teamId !== undefined ? { teamId: identifier(value.teamId, "teamId") } : {}),
             ...(value.coworkerId !== undefined ? { coworkerId: identifier(value.coworkerId, "coworkerId") } : {}),
             enabled: value.enabled,
         };
+    }),
+    "connectedApps:connect": spec(2048, (payload) => {
+        const value = objectPayload(payload); exact(value, new Set(["appId", "projectId"]));
+        return { appId: identifier(value.appId, "appId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }) };
+    }),
+    "connectedApps:disconnect": spec(2048, (payload) => {
+        const value = objectPayload(payload); exact(value, new Set(["appId", "projectId"]));
+        return { appId: identifier(value.appId, "appId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }) };
+    }),
+    "connectedApps:health": spec(2048, (payload) => {
+        const value = objectPayload(payload); exact(value, new Set(["appId", "projectId"]));
+        return { appId: identifier(value.appId, "appId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }) };
     }),
     "conversation:send": spec(32 * 1024, (payload) => {
         const value = objectPayload(payload);

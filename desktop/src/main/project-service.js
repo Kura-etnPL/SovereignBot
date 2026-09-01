@@ -106,7 +106,7 @@ export function createProjectService({
         const triggers = getEventTriggers()?.triggers ?? [];
         const projectRoutines = routines.filter((entry) => entry.workspaceId === project.workspaceId || coworkerIds.has(entry.coworkerId));
         const projectTriggers = triggers.filter((entry) => entry.workspaceId === project.workspaceId || projectRoutines.some((routine) => routine.id === entry.routineId));
-        const apps = (connectedApps?.list?.().apps ?? []).filter((entry) => (entry.assignedTeamIds ?? []).some((id) => teamIds.has(id)) || (entry.assignedCoworkerIds ?? []).some((id) => coworkerIds.has(id)));
+        const apps = (connectedApps?.listForScope?.({ projectId: project.projectId, scope: { projectId: project.projectId, teamIds: [...teamIds], coworkerIds: [...coworkerIds] } })?.apps ?? connectedApps?.list?.().apps ?? []).filter((entry) => (entry.assignedTeamIds ?? []).some((id) => teamIds.has(id)) || (entry.assignedCoworkerIds ?? []).some((id) => coworkerIds.has(id)));
         return { projectTeams, teamIds, channels, coworkerIds, conversationIds, artifacts, skills, projectRoutines, projectTriggers, apps };
     }
     async function memoryRows(project) {
@@ -171,7 +171,7 @@ export function createProjectService({
         resolveScope(id) {
             const project = requireProject(validId(id));
             const a = association(project);
-            return { projectId: project.projectId, workspaceId: project.workspaceId, teamIds: [...a.teamIds], channelIds: a.channels.map((entry) => entry.id), conversationIds: [...a.conversationIds], coworkerIds: [...a.coworkerIds] };
+            return { projectId: project.projectId, workspaceId: project.workspaceId, state: project.state, teamIds: [...a.teamIds], channelIds: a.channels.map((entry) => entry.id), conversationIds: [...a.conversationIds], coworkerIds: [...a.coworkerIds] };
         },
         setMemoryService(service) { memoryService = service; },
         async list({ includeArchived = false, limit = 50 } = {}) {
