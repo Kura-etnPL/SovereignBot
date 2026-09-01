@@ -14,7 +14,7 @@ const MAX_COLLABORATION_RUNS = 128;
 const MAX_COLLABORATION_EVENTS = 1_024;
 const TEAM_ID = /^team_[a-f0-9]{16}$/i;
 const CHANNEL_ID = /^channel_[a-f0-9]{16}$/i;
-const COLLABORATION_ID = /^(run|request|operation|event)_[a-f0-9]{16}$/i;
+const COLLABORATION_ID = /^(run|request|operation|event|token)_[a-f0-9]{16}$/i;
 const COLLABORATION_EVENT_TYPES = new Set([
     "run.started", "work.started", "handoff.requested", "work.completed", "run.completed",
     "work.failed", "handoff.blocked", "run.stopped", "run.redirected",
@@ -273,10 +273,13 @@ function sanitizeCollaboration(value, teamIds, conversationIds) {
             const runId = collaborationId(entry.runId, "runId", "run");
             const requestId = collaborationId(entry.requestId, "requestId", "request");
             const operationId = collaborationId(entry.operationId, "operationId", "operation");
+            const operationToken = entry.operationToken === undefined
+                ? `token_${operationId.slice("operation_".length)}`
+                : collaborationId(entry.operationToken, "operationToken", "token");
             if (!conversationIds.has(entry.conversationId) || !teamIds.has(entry.teamId)) continue;
             if (!COLLABORATION_STATUSES.has(entry.status) || !["chief", "coding-lead", "specialist", "reviewer", "synthesis", "complete"].includes(entry.stage)) continue;
             if (typeof entry.createdAt !== "string" || typeof entry.updatedAt !== "string") continue;
-            result.runs.push({ runId, teamId: entry.teamId, conversationId: entry.conversationId, requestId, operationId, status: entry.status, stage: entry.stage, ...(entry.ownerId ? { ownerId: safeId(entry.ownerId, "ownerId") } : {}), createdAt: entry.createdAt, updatedAt: entry.updatedAt });
+            result.runs.push({ runId, teamId: entry.teamId, conversationId: entry.conversationId, requestId, operationId, operationToken, status: entry.status, stage: entry.stage, version: Number.isInteger(entry.version) && entry.version >= 0 ? entry.version : 0, ...(entry.ownerId ? { ownerId: safeId(entry.ownerId, "ownerId") } : {}), createdAt: entry.createdAt, updatedAt: entry.updatedAt });
         }
         catch {}
     }
@@ -503,6 +506,8 @@ function sanitizePersisted(value) {
                 ...(typeof flow.runId === "string" && /^run_[a-f0-9]{16}$/i.test(flow.runId) ? { runId: flow.runId } : {}),
                 ...(typeof flow.requestId === "string" && /^request_[a-f0-9]{16}$/i.test(flow.requestId) ? { requestId: flow.requestId } : {}),
                 ...(typeof flow.operationId === "string" && /^operation_[a-f0-9]{16}$/i.test(flow.operationId) ? { operationId: flow.operationId } : {}),
+                ...(typeof flow.operationToken === "string" && /^token_[a-f0-9]{16}$/i.test(flow.operationToken) ? { operationToken: flow.operationToken } : {}),
+                ...(Number.isInteger(flow.version) && flow.version >= 0 && flow.version <= 1_000_000 ? { version: flow.version } : {}),
                 ...(typeof flow.ownerId === "string" ? { ownerId: flow.ownerId.slice(0, 160) } : {}),
                 ...(COLLABORATION_STATUSES.has(flow.runStatus) ? { runStatus: flow.runStatus } : {}),
                 ...(typeof flow.attentionReason === "string" ? { attentionReason: safeLedgerText(flow.attentionReason, "attentionReason") } : {}),
@@ -539,7 +544,19 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
     const loaded = sanitizePersisted(loadJsonState(persistPath, null));
     const state = { schema: TEAMS_SCHEMA, ...loaded };
     state.collaboration ??= { schema: COLLABORATION_SCHEMA, runs: [], events: [] };
+    for (const flow of Object.values(state.flows)) {
+        const run = state.collaboration.runs.find((entry) => entry.runId === flow.runId);
+        if (!run) continue;
+        flow.requestId ??= run.requestId;
+        flow.operationId ??= run.operationId;
+        flow.operationToken ??= run.operationToken;
+        flow.ownerId ??= run.ownerId;
+        flow.stage ??= run.stage;
+        flow.version ??= run.version ?? 0;
+    }
     let resolveCoworkerAppAccess;
+    let runtimeHandoffPreflight;
+    const runtimeProofs = new Map();
 
     function save() {
         saveJsonState(persistPath, state);
@@ -580,14 +597,26 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         if (!event) return undefined;
         const ownerId = event.ownerId;
         const targetCoworkerId = event.targetCoworkerId;
+        const productEvent = {
+            "run.started": { kind: "started", label: "Work started", status: "working" },
+            "work.started": { kind: "working", label: "Working", status: "working" },
+            "handoff.requested": { kind: "handoff", label: "Handoff", status: "working" },
+            "work.completed": { kind: "result", label: "Result ready", status: "completed" },
+            "run.completed": { kind: "completed", label: "Completed", status: "completed" },
+            "work.failed": { kind: "attention", label: "Needs attention", status: "attention" },
+            "handoff.blocked": { kind: "attention", label: "Needs attention", status: "attention" },
+            "run.stopped": { kind: "stopped", label: "Stopped", status: "stopped" },
+            "run.redirected": { kind: "redirected", label: "Redirected", status: "working" },
+        }[event.type] ?? { kind: "activity", label: "Team activity", status: "working" };
         return {
             eventId: event.eventId,
             runId: event.runId,
             requestId: event.requestId,
             operationId: event.operationId,
             conversationId: event.conversationId,
-            kind: event.type,
-            status: event.status,
+            kind: productEvent.kind,
+            label: productEvent.label,
+            status: productEvent.status,
             ...(event.actorId ? { actorId: event.actorId } : {}),
             ...(ownerId ? { ownerId, owner: coworkerName(ownerId) } : {}),
             ...(targetCoworkerId ? { targetCoworkerId, targetCoworker: coworkerName(targetCoworkerId) } : {}),
@@ -608,24 +637,34 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             .map(publicCollaborationEvent);
     }
 
-    function recordCollaborationEvent({ conversationId, type, status = "active", actorId, ownerId, targetCoworkerId, stage, messageId, artifactIds, reason, runId, requestId, operationId, idempotencyKey } = {}) {
+    function recordCollaborationEvent({ conversationId, type, status = "active", actorId, ownerId, targetCoworkerId, stage, messageId, artifactIds, reason, runId, requestId, operationId, operationToken, idempotencyKey, expectedVersion, flowPatch } = {}) {
         const context = teamContextForConversation(conversationId);
         if (!context) return undefined;
         if (!COLLABORATION_EVENT_TYPES.has(type)) throw new Error(`unknown collaboration event type: ${type}`);
         if (!COLLABORATION_STATUSES.has(status)) throw new Error(`unknown collaboration event status: ${status}`);
         const flow = state.flows[context.team.id] ?? {};
+        if (idempotencyKey) {
+            const existing = state.collaboration.events.find((entry) => entry.conversationId === String(conversationId) && entry.idempotencyKey === idempotencyKey);
+            if (existing) return clone(existing);
+        }
         const run = state.collaboration.runs.find((entry) => entry.runId === (runId ?? flow.runId)) ?? runForConversation(conversationId);
         if (!run) return undefined;
+        const currentRunId = flow.runId ?? run.runId;
+        const currentRequestId = flow.requestId ?? run.requestId;
+        const currentOperationId = flow.operationId ?? run.operationId;
+        const currentOperationToken = flow.operationToken ?? run.operationToken;
+        if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || expectedVersion !== (flow.version ?? 0)))
+            throw new Error("collaboration flow version is stale");
+        if (runId !== undefined && runId !== currentRunId && !(type === "run.started" && flowPatch?.runId === runId)) throw new Error("collaboration run token is stale");
+        if (requestId !== undefined && requestId !== flow.requestId && !(["run.started", "handoff.requested"].includes(type) && flowPatch?.requestId === requestId)) throw new Error("collaboration request token is stale");
+        if (operationId !== undefined && operationId !== flow.operationId && !(["run.started", "handoff.requested"].includes(type) && flowPatch?.operationId === operationId)) throw new Error("collaboration operation token is stale");
+        if (operationToken !== undefined && operationToken !== flow.operationToken && !(["run.started", "handoff.requested"].includes(type) && flowPatch?.operationToken === operationToken)) throw new Error("collaboration operation proof is stale");
         for (const [id, label] of [[ownerId, "ownerId"], [targetCoworkerId, "targetCoworkerId"]]) {
             if (id !== undefined && !context.team.coworkerIds.includes(id))
                 throw new Error(`${label} must be a member of the team`);
         }
         if (actorId !== undefined && !["user", "system"].includes(actorId) && !context.team.coworkerIds.includes(actorId))
             throw new Error("actorId must be a team member or system actor");
-        if (idempotencyKey) {
-            const existing = state.collaboration.events.find((entry) => entry.conversationId === String(conversationId) && entry.idempotencyKey === idempotencyKey);
-            if (existing) return clone(existing);
-        }
         const event = {
             eventId: idFactory("event"),
             runId: run.runId,
@@ -647,20 +686,26 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         state.collaboration.events.push(event);
         if (state.collaboration.events.length > MAX_COLLABORATION_EVENTS)
             state.collaboration.events.splice(0, state.collaboration.events.length - MAX_COLLABORATION_EVENTS);
+        const nextFlow = { ...flow, ...(flowPatch ?? {}), version: (flow.version ?? 0) + 1 };
         const runStatus = type === "run.completed" ? "completed" : type === "run.stopped" ? "stopped" : ["work.failed", "handoff.blocked"].includes(type) ? "attention" : status === "redirected" ? "redirected" : undefined;
         if (runStatus) {
             run.status = runStatus;
-            flow.runStatus = runStatus;
-            state.flows[context.team.id] = flow;
+            nextFlow.runStatus = runStatus;
         }
+        run.requestId = nextFlow.requestId ?? run.requestId;
+        run.operationId = nextFlow.operationId ?? run.operationId;
+        run.operationToken = nextFlow.operationToken ?? run.operationToken;
+        run.ownerId = nextFlow.ownerId ?? run.ownerId;
+        run.stage = nextFlow.stage ?? run.stage;
+        run.version = nextFlow.version;
         run.updatedAt = event.createdAt;
         if (["work.failed", "handoff.blocked"].includes(type)) {
-            flow.runStatus = "attention";
-            flow.attentionReason = event.reason ?? "Team work needs your attention.";
+            nextFlow.runStatus = "attention";
+            nextFlow.attentionReason = event.reason ?? "Team work needs your attention.";
             if (targetCoworkerId && !flow.attentionCoworkerIds?.includes(targetCoworkerId))
-                flow.attentionCoworkerIds = [...(flow.attentionCoworkerIds ?? []), targetCoworkerId].slice(0, 8);
-            state.flows[context.team.id] = flow;
+                nextFlow.attentionCoworkerIds = [...(flow.attentionCoworkerIds ?? []), targetCoworkerId].slice(0, 8);
         }
+        state.flows[context.team.id] = nextFlow;
         save();
         return clone(event);
     }
@@ -675,6 +720,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             conversationId: String(conversationId),
             requestId: idFactory("request"),
             operationId: idFactory("operation"),
+            operationToken: idFactory("token"),
             status: "active",
             stage,
             ownerId,
@@ -685,22 +731,23 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         if (state.collaboration.runs.length > MAX_COLLABORATION_RUNS)
             state.collaboration.runs.splice(0, state.collaboration.runs.length - MAX_COLLABORATION_RUNS);
         const flow = state.flows[context.team.id] ?? {};
-        state.flows[context.team.id] = {
+        const flowPatch = {
             ...flow,
             runId: run.runId,
             requestId: run.requestId,
             operationId: run.operationId,
+            operationToken: run.operationToken,
             ownerId,
             runStatus: "active",
+            version: flow.version ?? 0,
             attentionCoworkerIds: [],
             attentionReason: undefined,
         };
-        save();
-        recordCollaborationEvent({ conversationId, type: "run.started", status: "active", actorId: "user", ownerId, stage, messageId, runId: run.runId, requestId: run.requestId, operationId: run.operationId, idempotencyKey: `run.started:${messageId}` });
+        recordCollaborationEvent({ conversationId, type: "run.started", status: "active", actorId: "user", ownerId, stage, messageId, runId: run.runId, requestId: run.requestId, operationId: run.operationId, operationToken: run.operationToken, expectedVersion: flow.version ?? 0, flowPatch, idempotencyKey: `run.started:${messageId}` });
         return clone(run);
     }
 
-    function claimStage({ conversationId, ownerId, messageId, idempotencyKey } = {}) {
+    function claimStage({ conversationId, ownerId, messageId, idempotencyKey, expectedVersion, expectedRunId, expectedRequestId, expectedOperationId, expectedOperationToken } = {}) {
         const context = teamContextForConversation(conversationId);
         if (!context) return undefined;
         if (!context.team.coworkerIds.includes(ownerId)) throw new Error("stage owner must be a team member");
@@ -709,17 +756,47 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const run = runForConversation(conversationId);
         if (!run || flow.runStatus === "stopped") throw new Error("collaboration run is not active");
         if (flow.ownerId && flow.ownerId !== ownerId) throw new Error(`stage owner is already claimed by ${flow.ownerId}`);
-        flow.ownerId = ownerId;
-        flow.runStatus = "active";
-        state.flows[context.team.id] = flow;
-        save();
-        return publicCollaborationEvent(recordCollaborationEvent({ conversationId, type: "work.started", status: "active", actorId: ownerId, ownerId, stage: flow.stage, messageId, runId: run.runId, requestId: run.requestId, operationId: run.operationId, idempotencyKey: idempotencyKey ?? `work.started:${messageId}:${ownerId}` }));
+        return publicCollaborationEvent(recordCollaborationEvent({ conversationId, type: "work.started", status: "active", actorId: ownerId, ownerId, stage: flow.stage, messageId, runId: expectedRunId ?? run.runId, requestId: expectedRequestId ?? run.requestId, operationId: expectedOperationId ?? run.operationId, operationToken: expectedOperationToken ?? run.operationToken, expectedVersion: expectedVersion ?? (flow.version ?? 0), flowPatch: { ownerId, runStatus: "active" }, idempotencyKey: idempotencyKey ?? `work.started:${messageId}:${ownerId}` }));
+    }
+
+    function collaborationContextForConversation(conversationId) {
+        const context = teamContextForConversation(conversationId);
+        if (!context) return undefined;
+        const flow = state.flows[context.team.id] ?? {};
+        const run = runForConversation(conversationId);
+        if (!run || !flow.runId) return undefined;
+        return { runId: run.runId, requestId: flow.requestId ?? run.requestId, operationId: flow.operationId ?? run.operationId, operationToken: flow.operationToken ?? run.operationToken, version: flow.version ?? 0, stage: flow.stage, ownerId: flow.ownerId };
     }
 
     function stopRun(conversationId, reason = "Work stopped by the user.") {
         const run = runForConversation(conversationId);
         if (!run || ["completed", "stopped"].includes(run.status)) return undefined;
         return recordCollaborationEvent({ conversationId, type: "run.stopped", status: "stopped", actorId: "user", ownerId: run.ownerId, stage: run.stage, reason: "Work stopped by the user.", runId: run.runId, requestId: run.requestId, operationId: run.operationId, idempotencyKey: `run.stopped:${run.runId}` });
+    }
+
+    function setRuntimeHandoffPreflight(preflight) {
+        if (preflight !== undefined && typeof preflight !== "function") throw new Error("runtime handoff preflight must be a function");
+        runtimeHandoffPreflight = preflight;
+    }
+
+    function authorizeHandoffTarget({ conversationId, sourceCoworkerId, targetCoworkerId, expectedVersion, expectedRunId, expectedRequestId, expectedOperationId, expectedOperationToken } = {}) {
+        const context = teamContextForConversation(conversationId);
+        if (!context) throw new Error("handoff conversation is not a managed team channel");
+        const flow = state.flows[context.team.id] ?? {};
+        if (!runtimeHandoffPreflight) throw new Error("trusted runtime handoff preflight is unavailable");
+        if (expectedVersion !== undefined && expectedVersion !== (flow.version ?? 0)) throw new Error("handoff flow version is stale");
+        if (expectedRunId !== undefined && expectedRunId !== flow.runId) throw new Error("handoff run token is stale");
+        if (expectedRequestId !== undefined && expectedRequestId !== flow.requestId) throw new Error("handoff request token is stale");
+        if (expectedOperationId !== undefined && expectedOperationId !== flow.operationId) throw new Error("handoff operation token is stale");
+        if (expectedOperationToken !== undefined && expectedOperationToken !== flow.operationToken) throw new Error("handoff operation proof is stale");
+        if (!context.team.coworkerIds.includes(sourceCoworkerId) || !context.team.coworkerIds.includes(targetCoworkerId)) throw new Error("handoff participants must be team members");
+        if (coworkerStore.get(targetCoworkerId).state !== "active") throw new Error("handoff target is not active");
+        const runtime = runtimeHandoffPreflight({ conversationId: String(conversationId), sourceCoworkerId, targetCoworkerId, workspaceId: channelForConversation(conversationId)?.workspaceId });
+        if (!runtime || runtime.targetCoworkerId !== targetCoworkerId || typeof runtime.agentId !== "string" || typeof runtime.workspaceId !== "string") throw new Error("trusted runtime handoff preflight was not accepted");
+        const proofId = idFactory("token");
+        const proof = { proofId, conversationId: String(conversationId), sourceCoworkerId, targetCoworkerId, runId: flow.runId, requestId: flow.requestId, operationId: flow.operationId, operationToken: flow.operationToken, version: flow.version ?? 0, agentId: runtime.agentId, workspaceId: runtime.workspaceId };
+        runtimeProofs.set(proofId, proof);
+        return { proofId, targetCoworkerId, agentId: runtime.agentId, workspaceId: runtime.workspaceId };
     }
 
     function handoffOrder(team) {
@@ -1274,7 +1351,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         delete state.flows[team.id].lastHandoffSourceId;
         delete state.flows[team.id].lastHandoffTargetId;
         team.updatedAt = updatedAt;
-        save();
+        if (!startsNewRun) save();
         if (startsNewRun)
             startRun({ conversationId: conversation.id, ownerId: order[ownerIndex], stage: stageForIndex(ownerIndex, order), messageId: message.id });
     }
@@ -1314,52 +1391,56 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return resolveHandoff(args)?.target;
     }
 
-    function nextHandoff({ conversation, coworkerId, source, requestedCoworkerIds = [], targetReady = true, expectedTargetCoworkerId } = {}) {
+    function nextHandoff({ conversation, coworkerId, source, requestedCoworkerIds = [], expectedTargetCoworkerId, expectedVersion, expectedRunId, expectedRequestId, expectedOperationId, expectedOperationToken, runtimeProof } = {}) {
         const decision = resolveHandoff({ conversation, coworkerId, source, requestedCoworkerIds });
         if (!decision) return undefined;
         if (decision.duplicate) return decision.target;
         const { team, flow, target } = decision;
+        let acceptedProofId;
         if (expectedTargetCoworkerId !== undefined && expectedTargetCoworkerId !== target)
             throw new Error("handoff proposal changed before commit");
-        if (target && targetReady !== true) {
-            recordCollaborationEvent({ conversationId: conversation.id, type: "handoff.blocked", status: "attention", actorId: coworkerId, ownerId: coworkerId, targetCoworkerId: target, stage: flow.stage, reason: "The next teammate is not ready to receive this work.", runId: flow.runId, requestId: flow.requestId, operationId: flow.operationId, idempotencyKey: `handoff.blocked:${source?.id ?? "unknown"}:${target}` });
-            return undefined;
-        }
         if (target) {
             const targetCoworker = coworkerStore.get(target);
             if (targetCoworker.state !== "active")
                 throw new Error(`team handoff target is not active: ${target}`);
+            if (runtimeHandoffPreflight) {
+                const proof = runtimeProof?.proofId ? runtimeProofs.get(runtimeProof.proofId) : undefined;
+                if (!proof || proof.conversationId !== conversation.id || proof.targetCoworkerId !== target || proof.sourceCoworkerId !== coworkerId || proof.version !== (flow.version ?? 0) || proof.runId !== flow.runId || proof.requestId !== flow.requestId || proof.operationId !== flow.operationId || proof.operationToken !== flow.operationToken)
+                    throw new Error("trusted runtime handoff proof is missing or stale");
+                acceptedProofId = runtimeProof.proofId;
+            }
         }
+        if (expectedVersion !== undefined && expectedVersion !== (flow.version ?? 0)) throw new Error("handoff flow version is stale");
+        if (expectedRunId !== undefined && expectedRunId !== flow.runId) throw new Error("handoff run token is stale");
+        if (expectedRequestId !== undefined && expectedRequestId !== flow.requestId) throw new Error("handoff request token is stale");
+        if (expectedOperationId !== undefined && expectedOperationId !== flow.operationId) throw new Error("handoff operation token is stale");
+        if (expectedOperationToken !== undefined && expectedOperationToken !== flow.operationToken) throw new Error("handoff operation proof is stale");
+        if (acceptedProofId) runtimeProofs.delete(acceptedProofId);
         if (decision.terminal) {
-            flow.stage = "complete";
-            delete flow.handoffIndex;
-            flow.runStatus = "completed";
-            delete flow.ownerId;
-            state.flows[team.id] = flow;
-            team.updatedAt = now();
-            save();
-            recordCollaborationEvent({ conversationId: conversation.id, type: "run.completed", status: "completed", actorId: coworkerId, stage: "complete", runId: flow.runId, requestId: flow.requestId, operationId: flow.operationId, idempotencyKey: `run.completed:${source?.id ?? flow.runId}` });
+            recordCollaborationEvent({ conversationId: conversation.id, type: "run.completed", status: "completed", actorId: coworkerId, stage: "complete", runId: flow.runId, requestId: flow.requestId, operationId: flow.operationId, operationToken: flow.operationToken, expectedVersion: expectedVersion ?? (flow.version ?? 0), flowPatch: { stage: "complete", handoffIndex: undefined, ownerId: undefined, runStatus: "completed" }, idempotencyKey: `run.completed:${source?.id ?? flow.runId}` });
             return undefined;
         }
-        flow.handoffIndex = decision.nextIndex;
-        flow.stage = decision.stage;
-        flow.ownerId = target;
-        flow.requestId = idFactory("request");
-        flow.operationId = idFactory("operation");
-        flow.runStatus = "active";
-        flow.attentionReason = undefined;
-        flow.attentionCoworkerIds = [];
-        if (decision.routingDecision) flow.routingDecision = decision.routingDecision;
+        const nextRequestId = idFactory("request");
+        const nextOperationId = idFactory("operation");
+        const nextOperationToken = idFactory("token");
+        const flowPatch = {
+            handoffIndex: decision.nextIndex,
+            stage: decision.stage,
+            ownerId: target,
+            requestId: nextRequestId,
+            operationId: nextOperationId,
+            operationToken: nextOperationToken,
+            runStatus: "active",
+            attentionReason: undefined,
+            attentionCoworkerIds: [],
+            ...(decision.routingDecision ? { routingDecision: decision.routingDecision } : {}),
+            ...(source?.id ? { lastHandoffSourceId: source.id, lastHandoffTargetId: target } : {}),
+            updatedAt: now(),
+        };
         if (source?.id) {
-            flow.lastHandoffSourceId = source.id;
-            if (target) flow.lastHandoffTargetId = target;
-            else delete flow.lastHandoffTargetId;
+            // The source message is part of the transition's idempotency key.
         }
-        flow.updatedAt = now();
-        state.flows[team.id] = flow;
-        team.updatedAt = flow.updatedAt;
-        save();
-        recordCollaborationEvent({ conversationId: conversation.id, type: "handoff.requested", status: "active", actorId: coworkerId, ownerId: coworkerId, targetCoworkerId: target, stage: flow.stage, messageId: source?.id, runId: flow.runId, requestId: flow.requestId, operationId: flow.operationId, idempotencyKey: `handoff.requested:${source?.id ?? "unknown"}:${target}` });
+        recordCollaborationEvent({ conversationId: conversation.id, type: "handoff.requested", status: "active", actorId: coworkerId, ownerId: coworkerId, targetCoworkerId: target, stage: decision.stage, messageId: source?.id, runId: flow.runId, requestId: nextRequestId, operationId: nextOperationId, operationToken: nextOperationToken, expectedVersion: expectedVersion ?? (flow.version ?? 0), flowPatch, idempotencyKey: `handoff.requested:${source?.id ?? "unknown"}:${target}` });
         return target;
     }
 
@@ -1448,6 +1529,9 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         claimStage,
         stopRun,
         recordCollaborationEvent,
+        setRuntimeHandoffPreflight,
+        authorizeHandoffTarget,
+        collaborationContextForConversation,
         activity({ conversationId, teamId, limit = 24 } = {}) {
             if (conversationId !== undefined) {
                 const context = teamContextForConversation(conversationId);

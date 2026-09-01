@@ -837,10 +837,10 @@ function renderDetails(conversation) {
   }
   const pending = pendingUserRecipients(conversation);
   const latestActivity = state.teamActivity?.events?.[0];
-  const activitySuffix = latestActivity?.kind === "handoff.requested" && latestActivity.targetCoworker
+  const activitySuffix = latestActivity?.kind === "handoff" && latestActivity.targetCoworker
     ? ` · Handoff → ${latestActivity.targetCoworker}`
-    : latestActivity?.kind === "work.completed" ? " · Result ready"
-      : latestActivity?.kind === "handoff.blocked" ? " · Needs attention" : "";
+    : latestActivity?.kind === "result" ? " · Result ready"
+      : latestActivity?.kind === "attention" ? " · Needs attention" : "";
   $("details-current-work").textContent = team?.flow?.currentOwner
     ? `${team.flow.status === "needs-attention" ? "Needs attention" : team.flow.status === "active" ? "Active" : team.flow.status === "stopped" ? "Stopped" : "Waiting"} · ${team.flow.currentOwner}${activitySuffix}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";

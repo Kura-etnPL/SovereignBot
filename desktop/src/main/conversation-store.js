@@ -122,6 +122,8 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
                 // @everyone) are the only way to fan work out; an ordinary message
                 // must not wake every Bot in the roster.
                 const routedOwner = resolveTeamRoute?.(conversation);
+                if (routedOwner === senderId)
+                    return [];
                 if (routedOwner && coworkers.includes(routedOwner))
                     return [routedOwner];
                 const lead = conversation.leadCoworkerId ?? coworkers[0];

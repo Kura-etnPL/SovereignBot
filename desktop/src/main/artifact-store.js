@@ -98,7 +98,7 @@ function publicView(entry) {
     // Both paths are main-process-only implementation details. `sourceRelativePath`
     // points back into a trusted workspace and is just as sensitive as the managed
     // storage path; renderer-facing artifact APIs must never carry either one.
-    const { storageRelativePath: _storagePath, sourceRelativePath: _sourcePath, ...visible } = entry;
+    const { storageRelativePath: _storagePath, sourceRelativePath: _sourcePath, published: _published, ...visible } = entry;
     return clone(visible);
 }
 
@@ -113,7 +113,7 @@ function sanitizePersisted(entry) {
         if (typeof entry.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(entry.sha256)) return undefined;
         if (typeof entry.storageRelativePath !== "string" || !entry.storageRelativePath) return undefined;
         if (typeof entry.createdAt !== "string") return undefined;
-        return { ...entry };
+        return { ...entry, published: entry.published !== false };
     } catch {
         return undefined;
     }
@@ -135,6 +135,12 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
     function requireArtifact(id) {
         const artifact = artifacts.find((entry) => entry.id === String(id));
         if (!artifact) throw new Error(`unknown artifact id: ${id}`);
+        return artifact;
+    }
+
+    function requirePublicArtifact(id) {
+        const artifact = requireArtifact(id);
+        if (artifact.published === false) throw new Error("artifact is not published");
         return artifact;
     }
 
@@ -176,22 +182,22 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
 
         list({ conversationId, coworkerId, limit = 100 } = {}) {
             if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact list limit must be 1..500");
-            let result = artifacts;
+            let result = artifacts.filter((entry) => entry.published !== false);
             if (conversationId !== undefined) result = result.filter((entry) => entry.conversationId === conversationId);
             if (coworkerId !== undefined) result = result.filter((entry) => entry.createdByCoworkerId === coworkerId);
             return { schema: ARTIFACTS_SCHEMA, artifacts: result.slice(-limit).reverse().map(publicView) };
         },
 
         get(id) {
-            return publicView(requireArtifact(id));
+            return publicView(requirePublicArtifact(id));
         },
 
         managedPath(id) {
-            return storagePath(requireArtifact(id));
+            return storagePath(requirePublicArtifact(id));
         },
 
         previewText(id) {
-            const entry = requireArtifact(id);
+            const entry = requirePublicArtifact(id);
             if (!entry.mimeType.startsWith("text/") && entry.mimeType !== "application/json")
                 return { artifact: publicView(entry), preview: undefined, truncated: false };
             const full = storagePath(entry);
@@ -202,7 +208,7 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
 
         contextForMessage(artifactIds = []) {
             return artifactIds.slice(0, 12).map((id) => {
-                const entry = requireArtifact(id);
+                const entry = requirePublicArtifact(id);
                 const result = { id: entry.id, title: entry.title, fileName: entry.fileName, mimeType: entry.mimeType, size: entry.size };
                 if (entry.sourceKind === "user" && (entry.mimeType.startsWith("text/") || entry.mimeType === "application/json")) {
                     const buffer = readFileSync(storagePath(entry));
@@ -227,7 +233,7 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             });
         },
 
-        ingestWorkspaceFile({ workspaceId, workspacePath, relativePath, title, createdByCoworkerId, conversationId, sourceMessageId }) {
+        ingestWorkspaceFile({ workspaceId, workspacePath, relativePath, title, createdByCoworkerId, conversationId, sourceMessageId, published = true }) {
             const safePath = safeRelativePath(relativePath);
             const { actual, stat } = assertWorkspaceFile(workspacePath, safePath);
             if (typeof workspaceId !== "string" || !workspaceId) throw new Error("workspaceId is required");
@@ -240,6 +246,7 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
                 title,
                 metadata: {
                     sourceKind: "coworker",
+                    published: published !== false,
                     workspaceId,
                     sourceRelativePath: safePath,
                     ...(createdByCoworkerId ? { createdByCoworkerId } : {}),
@@ -247,6 +254,18 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
                     ...(sourceMessageId ? { sourceMessageId } : {}),
                 },
             });
+        },
+
+        publishArtifacts(ids = []) {
+            if (!Array.isArray(ids) || ids.length > 12) throw new Error("artifact ids must be an array of at most 12 entries");
+            const published = [];
+            for (const id of ids) {
+                const entry = requireArtifact(id);
+                entry.published = true;
+                published.push(publicView(entry));
+            }
+            if (ids.length) save();
+            return published;
         },
     };
 }

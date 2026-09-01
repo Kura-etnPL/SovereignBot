@@ -80,8 +80,28 @@ export function createCoworkerDispatcher({
     }
 
     function recordTeamEvent(payload) {
-        try { return teamFlow?.recordCollaborationEvent?.(payload); }
-        catch { return undefined; }
+        try {
+            const context = teamFlow?.collaborationContextForConversation?.(payload.conversationId);
+            return teamFlow?.recordCollaborationEvent?.({
+                ...payload,
+                ...(context ? {
+                    runId: payload.runId ?? context.runId,
+                    requestId: payload.requestId ?? context.requestId,
+                    operationId: payload.operationId ?? context.operationId,
+                    operationToken: payload.operationToken ?? context.operationToken,
+                    expectedVersion: payload.expectedVersion ?? context.version,
+                } : {}),
+            });
+        }
+        catch (error) { throw error; }
+    }
+
+    function publishGate(conversationId, messageId, coworkerId, expected) {
+        const current = conversationStore.get(conversationId).messages.find((entry) => entry.id === messageId);
+        if (current?.delivery?.[coworkerId]?.status !== "pending") return false;
+        if (!expected || !teamFlow?.collaborationContextForConversation) return true;
+        const context = teamFlow.collaborationContextForConversation(conversationId);
+        return Boolean(context && context.runId === expected.runId && context.ownerId === coworkerId && context.operationId === expected.operationId && context.operationToken === expected.operationToken);
     }
 
     function requireBinding(coworkerId) {
@@ -191,6 +211,7 @@ export function createCoworkerDispatcher({
                     createdByCoworkerId: coworkerId,
                     conversationId,
                     sourceMessageId,
+                    published: false,
                 });
                 artifactIds.push(artifact.id);
                 await runtime.audit.append({
@@ -227,7 +248,9 @@ export function createCoworkerDispatcher({
 
         const { snapshot, binding } = requireBinding(coworkerId);
         const context = workspaceContext(coworker, conversation);
-        teamFlow?.claimStage?.({ conversationId, ownerId: coworkerId, messageId: source.id });
+        const stageContext = teamFlow?.collaborationContextForConversation?.(conversationId);
+        teamFlow?.claimStage?.({ conversationId, ownerId: coworkerId, messageId: source.id, ...(stageContext ? { ...stageContext, expectedVersion: stageContext.version } : {}) });
+        const executionContext = teamFlow?.collaborationContextForConversation?.(conversationId);
         const supervisorAgentId = snapshot.roles?.planner;
         if (!supervisorAgentId)
             throw new Error("coworker dispatch requires a ready supervisor/planner identity");
@@ -267,8 +290,7 @@ export function createCoworkerDispatcher({
         }
         await runtime.orchestrator.runUntilIdle();
         const finished = (await runtime.orchestrator.listTasks()).find((entry) => entry.id === task.id);
-        const currentSource = conversationStore.get(conversationId).messages.find((entry) => entry.id === messageId);
-        if (currentSource?.delivery?.[coworkerId]?.status !== "pending")
+        if (!publishGate(conversationId, messageId, coworkerId, executionContext))
             return { ok: false, taskId: task.id, stopped: true, reason: "stale collaboration result was discarded" };
         if (finished?.status !== "completed") {
             const detail = "Coworker work did not complete.";
@@ -311,6 +333,10 @@ export function createCoworkerDispatcher({
             sourceMessageId: source.id,
             taskId: task.id,
         });
+        if (!publishGate(conversationId, messageId, coworkerId, executionContext)) {
+            conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "stale collaboration result was discarded");
+            return { ok: false, taskId: task.id, stopped: true, reason: "stale collaboration result was discarded" };
+        }
         const visibleText = artifactResult.text || (artifactResult.artifactIds.length ? `Created ${artifactResult.artifactIds.length} artifact${artifactResult.artifactIds.length === 1 ? "" : "s"}.` : "Completed the requested work.");
         recordTeamEvent({ conversationId, type: "work.completed", status: "completed", actorId: coworkerId, ownerId: coworkerId, messageId: source.id, artifactIds: artifactResult.artifactIds, reason: "Result is ready for the next team step." });
         const proposedTarget = teamFlow?.previewHandoff?.({
@@ -319,26 +345,32 @@ export function createCoworkerDispatcher({
             source,
             requestedCoworkerIds: handoffResult.coworkerIds,
         });
-        let targetReady = true;
+        let runtimeProof;
+        let handoffBlocked = false;
         if (proposedTarget) {
             try {
-                const targetCoworker = coworkerStore.get(proposedTarget);
-                requireBinding(proposedTarget);
-                workspaceContext(targetCoworker, conversation);
+                const handoffContext = teamFlow?.collaborationContextForConversation?.(conversationId);
+                runtimeProof = teamFlow?.authorizeHandoffTarget?.({
+                    conversationId,
+                    sourceCoworkerId: coworkerId,
+                    targetCoworkerId: proposedTarget,
+                    ...(handoffContext ? {
+                        expectedVersion: handoffContext.version,
+                        expectedRunId: handoffContext.runId,
+                        expectedRequestId: handoffContext.requestId,
+                        expectedOperationId: handoffContext.operationId,
+                        expectedOperationToken: handoffContext.operationToken,
+                    } : {}),
+                });
+                if (teamFlow?.authorizeHandoffTarget && !runtimeProof) throw new Error("handoff runtime proof was not created");
             }
             catch {
-                targetReady = false;
+                handoffBlocked = true;
             }
         }
-        const productHandoff = teamFlow?.nextHandoff?.({
-            conversation,
-            coworkerId,
-            source,
-            requestedCoworkerIds: handoffResult.coworkerIds,
-            replyText: artifactResult.text,
-            targetReady,
-            expectedTargetCoworkerId: proposedTarget,
-        });
+        if (handoffBlocked)
+            recordTeamEvent({ conversationId, type: "handoff.blocked", status: "attention", actorId: coworkerId, ownerId: coworkerId, targetCoworkerId: proposedTarget, messageId: source.id, reason: "The next teammate is not ready to receive this work." });
+        const productHandoff = handoffBlocked ? undefined : proposedTarget;
         // A Team Pack may own a bounded playbook sequence.  Its next stage is a
         // product routing decision, not authority supplied by model output; explicit
         // manifests remain available for ordinary user-created teams.
@@ -348,12 +380,36 @@ export function createCoworkerDispatcher({
             : managedTeam
                 ? []
                 : handoffResult.coworkerIds.slice(0, 1);
+        if (!publishGate(conversationId, messageId, coworkerId, executionContext)) {
+            conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "stale collaboration result was discarded");
+            return { ok: false, taskId: task.id, stopped: true, reason: "stale collaboration result was discarded" };
+        }
+        artifactStore?.publishArtifacts?.(artifactResult.artifactIds);
         const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, {
             text: visibleText.slice(0, MAX_REPLY_TEXT),
             replyTo: source.id,
             ...(nextCoworkerIds.length ? { mentions: nextCoworkerIds } : {}),
             ...(artifactResult.artifactIds.length ? { artifactIds: artifactResult.artifactIds } : {}),
         });
+        if (!handoffBlocked && (productHandoff || managedTeam)) {
+            const handoffContext = teamFlow?.collaborationContextForConversation?.(conversationId);
+            teamFlow?.nextHandoff?.({
+                conversation,
+                coworkerId,
+                source,
+                requestedCoworkerIds: handoffResult.coworkerIds,
+                replyText: artifactResult.text,
+                runtimeProof,
+                expectedTargetCoworkerId: productHandoff,
+                ...(handoffContext ? {
+                    expectedVersion: handoffContext.version,
+                    expectedRunId: handoffContext.runId,
+                    expectedRequestId: handoffContext.requestId,
+                    expectedOperationId: handoffContext.operationId,
+                    expectedOperationToken: handoffContext.operationToken,
+                } : {}),
+            });
+        }
         conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
         state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
         save();
@@ -378,8 +434,10 @@ export function createCoworkerDispatcher({
             .catch(() => {
                 const detail = "Coworker work could not start or complete.";
                 try { conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail); } catch {}
-                recordTeamEvent({ conversationId, type: "work.failed", status: "failed", actorId: coworkerId, ownerId: coworkerId, messageId, reason: detail });
-                return { ok: false, error: detail };
+                let ledgerFailure = false;
+                try { recordTeamEvent({ conversationId, type: "work.failed", status: "failed", actorId: coworkerId, ownerId: coworkerId, messageId, reason: detail }); }
+                catch { ledgerFailure = true; }
+                return { ok: false, error: detail, ...(ledgerFailure ? { attention: true, reason: "Team activity could not be recorded." } : {}) };
             });
         chains.set(key, run);
         run.finally(() => {

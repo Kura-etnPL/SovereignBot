@@ -87,3 +87,26 @@ test("artifact state reloads from its versioned metadata without exposing manage
         rmSync(root, { recursive: true, force: true });
     }
 });
+
+test("coworker artifacts remain private until the publish gate commits them", () => {
+    const { root, workspace, store } = fixture();
+    try {
+        writeFileSync(join(workspace, "pending.md"), "not public yet", "utf8");
+        const artifact = store.ingestWorkspaceFile({
+            workspaceId: "workspace_project",
+            workspacePath: workspace,
+            relativePath: "pending.md",
+            published: false,
+        });
+        assert.equal(store.list().artifacts.length, 0);
+        assert.throws(() => store.get(artifact.id), /not published/);
+        assert.throws(() => store.previewText(artifact.id), /not published/);
+        assert.deepEqual(store.publishArtifacts([artifact.id]).map((entry) => entry.id), [artifact.id]);
+        assert.equal(store.previewText(artifact.id).preview, "not public yet");
+        const reloaded = createArtifactStore({ dataDir: join(root, "data") });
+        assert.equal(reloaded.list().artifacts.length, 1);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});

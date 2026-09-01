@@ -23,7 +23,7 @@ import { createTeachOnceController } from "./teach-once-controller.js";
 import { createTeachOnceRuntime } from "./teach-once-runtime.js";
 import { createCoworkerDispatcher } from "./coworker-dispatcher.js";
 import { openProviderLogin } from "./provider-login.js";
-import { validateRoleAssignment } from "./provider-roster.js";
+import { coworkerAgentId, validateRoleAssignment } from "./provider-roster.js";
 import { attachWindowLifecycle } from "./lifecycle.js";
 import { createTrayController } from "./tray.js";
 import { createWorkerNodeStore } from "./worker-node-store.js";
@@ -157,6 +157,13 @@ async function main() {
     let teachOnce;
     let externalTeamControl;
     const productSurfaces = createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime: host.runtime, getRuntime: () => host.runtime });
+    teamService.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => {
+        const binding = host.rosterSummary()?.coworkerBindings?.[targetCoworkerId];
+        if (!binding?.ready || binding.agentId !== coworkerAgentId(targetCoworkerId)) throw new Error("target coworker provider binding is not ready");
+        const trustedWorkspaceId = teamService.workspaceIdForConversation(conversationId);
+        if (!workspaceId || trustedWorkspaceId !== workspaceId || !services.workspacePath(workspaceId)) throw new Error("target team workspace is unavailable");
+        return { targetCoworkerId, agentId: binding.agentId, workspaceId };
+    });
     const blockedConversations = new Set();
     let quitting = false;
     let shutdownStarted = false;
