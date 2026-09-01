@@ -1,5 +1,5 @@
-import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
+import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 
@@ -178,6 +178,7 @@ function sanitizePersistedOutcome(value) {
         coworkerId: value.coworkerId,
         messageId: value.messageId,
         clientRequestId: typeof value.clientRequestId === "string" ? value.clientRequestId.slice(0, 128) : undefined,
+        inputHash: typeof value.inputHash === "string" && /^[a-f0-9]{64}$/i.test(value.inputHash) ? value.inputHash : undefined,
         inputPreview: publicText(value.inputPreview),
         artifactIds: Array.isArray(value.artifactIds) ? value.artifactIds.filter((entry) => typeof entry === "string" && OPAQUE_ID.test(entry)).slice(0, MAX_ARTIFACTS) : [],
         status: value.status,
@@ -341,6 +342,8 @@ export function createExternalTeamControlApi({
     getAudit = () => audit,
     getRoutineController = () => routineController,
     getJobs = () => jobs,
+    controllerRegistry,
+    projectService,
     now = () => new Date().toISOString(),
     makeOutcomeId: makeOutcomeIdFn = makeOutcomeId,
 } = {}) {
@@ -398,6 +401,53 @@ export function createExternalTeamControlApi({
         const outcome = outcomes.get(String(outcomeId));
         if (!outcome) throw new Error("unknown outcome: " + outcomeId);
         return outcome;
+    }
+
+    function controllerBinding(principal) {
+        if (!principal?.deviceId || !controllerRegistry?.get) throw new Error("paired external controller authority is unavailable");
+        return controllerRegistry.get(principal.deviceId);
+    }
+
+    function projectContainsTeam(projectId, teamId) {
+        try { return projectService?.resolveScope?.(projectId)?.teamIds?.includes(teamId) === true; }
+        catch { return false; }
+    }
+
+    function visibleTeam(team, principal) {
+        if (!principal) return true;
+        const binding = controllerBinding(principal);
+        if (binding.teamIds.includes(team.id)) return true;
+        return binding.projectIds.some((projectId) => projectContainsTeam(projectId, team.id));
+    }
+
+    function visibleTeams(principal) {
+        return teamService.list().teams.filter((team) => visibleTeam(team, principal));
+    }
+
+    function principalContext(input = {}, principal) {
+        if (input.teamId !== undefined) {
+            const team = requireTeam(input.teamId);
+            const channel = input.channelId === undefined ? undefined : requireChannel(team.id, input.channelId);
+            const binding = principal ? controllerBinding(principal) : undefined;
+            const boundProjectId = binding?.projectIds.find((projectId) => projectContainsTeam(projectId, team.id));
+            return { teamId: team.id, ...(channel?.projectId ? { projectId: channel.projectId } : {}), ...(team.projectId ? { projectId: team.projectId } : {}), ...(boundProjectId ? { projectId: boundProjectId } : {}) };
+        }
+        if (input.outcomeId !== undefined) {
+            const outcome = requireOutcome(input.outcomeId);
+            const binding = principal ? controllerBinding(principal) : undefined;
+            const boundProjectId = binding?.projectIds.find((projectId) => projectContainsTeam(projectId, outcome.teamId));
+            return { teamId: outcome.teamId, ...(outcome.projectId ? { projectId: outcome.projectId } : {}), ...(boundProjectId ? { projectId: boundProjectId } : {}) };
+        }
+        if (input.routineId !== undefined) {
+            const routine = getRoutineController()?.list?.().routines?.find((entry) => entry.id === input.routineId);
+            if (!routine) throw new Error("unknown routine: " + input.routineId);
+            return { ...(routine.teamId ? { teamId: routine.teamId } : {}), ...(routine.projectId ? { projectId: routine.projectId } : {}) };
+        }
+        return {};
+    }
+
+    function inputHash(request) {
+        return createHash("sha256").update(JSON.stringify({ teamId: request.team.id, channelId: request.channel.id, coworkerId: request.coworkerId, text: request.text, artifactIds: request.artifactIds, options: request.options })).digest("hex");
     }
 
     function messageChain(conversation, rootMessageId) {
@@ -519,14 +569,15 @@ export function createExternalTeamControlApi({
     const api = {
         protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
 
-        listTeams() {
-            return { protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL, teams: teamService.list().teams.map(publicTeam) };
+        listTeams(_input = {}, principal) {
+            return { protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL, teams: visibleTeams(principal).map(publicTeam) };
         },
 
-        listCoworkers() {
+        listCoworkers(_input = {}, principal) {
+            const visibleCoworkerIds = new Set(visibleTeams(principal).flatMap((team) => team.coworkerIds ?? []));
             return {
                 protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
-                coworkers: coworkerStore.list().coworkers.map((entry) => ({
+                coworkers: coworkerStore.list().coworkers.filter((entry) => !principal || visibleCoworkerIds.has(entry.id)).map((entry) => ({
                     id: entry.id,
                     name: publicText(entry.name),
                     role: publicText(entry.role),
@@ -536,21 +587,21 @@ export function createExternalTeamControlApi({
             };
         },
 
-        listChannels(input = {}) {
+        listChannels(input = {}, principal) {
             rejectAuthority(input);
             exactKeys(input, new Set(["teamId", "includeArchived"]), "listChannels");
             if (input.includeArchived !== undefined && typeof input.includeArchived !== "boolean") throw new Error("listChannels.includeArchived must be boolean");
             const teamId = input.teamId === undefined ? undefined : opaqueId(input.teamId, "teamId");
-            if (teamId) requireTeam(teamId);
+            if (teamId) { requireTeam(teamId); if (principal && !visibleTeams(principal).some((team) => team.id === teamId)) throw new Error("external controller Team binding denied"); }
             const channels = teamService.listChannels(teamId ? { teamId, includeArchived: input.includeArchived === true } : { includeArchived: input.includeArchived === true }).channels;
-            return { protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL, channels: channels.map(publicChannel) };
+            return { protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL, channels: channels.filter((channel) => !principal || visibleTeams(principal).some((team) => team.id === channel.teamId)).map(publicChannel) };
         },
 
         sendMessage(input) {
             return this.submitOutcome(input);
         },
 
-        getConversation(input) {
+        getConversation(input, principal) {
             const { channel } = validateChannelRead(input, "getConversation");
             const conversation = conversationStore.get(channel.conversationId);
             return {
@@ -562,12 +613,13 @@ export function createExternalTeamControlApi({
             };
         },
 
-        listSkills(input = {}) {
+        listSkills(input = {}, principal) {
             if (!skillStore?.list) throw new Error("skills are unavailable");
             rejectAuthority(input, "listSkills");
             exactKeys(input, new Set(["includeArchived"]), "listSkills");
             if (input.includeArchived !== undefined && typeof input.includeArchived !== "boolean") throw new Error("listSkills.includeArchived must be boolean");
-            const skills = skillStore.list({ includeArchived: input.includeArchived === true }).skills ?? [];
+            const allowedTeams = new Set(visibleTeams(principal).map((team) => team.id));
+            const skills = (skillStore.list({ includeArchived: input.includeArchived === true }).skills ?? []).filter((skill) => !principal || (skill.assignedTeamIds ?? []).some((id) => allowedTeams.has(id)));
             return {
                 protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
                 skills: skills.slice(0, MAX_LIST_ITEMS).map((skill) => ({
@@ -581,10 +633,12 @@ export function createExternalTeamControlApi({
             };
         },
 
-        listRoutines() {
+        listRoutines(_input = {}, principal) {
             const currentRoutineController = getRoutineController();
             if (!currentRoutineController?.list) throw new Error("routines are unavailable");
-            const routines = currentRoutineController.list().routines ?? [];
+            const allowedTeams = new Set(visibleTeams(principal).map((team) => team.id));
+            const allowedCoworkers = new Set([...allowedTeams].flatMap((teamId) => requireTeam(teamId).coworkerIds ?? []));
+            const routines = (currentRoutineController.list().routines ?? []).filter((routine) => !principal || (routine.teamId && allowedTeams.has(routine.teamId)) || (routine.coworkerId && allowedCoworkers.has(routine.coworkerId)));
             return {
                 protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
                 routines: routines.slice(0, MAX_LIST_ITEMS).map((routine) => ({
@@ -620,12 +674,14 @@ export function createExternalTeamControlApi({
             };
         },
 
-        getAttention() {
+        getAttention(_input = {}, principal) {
             const currentJobs = getJobs();
             if (!currentJobs?.attentionJobs) throw new Error("attention center is unavailable");
-            const attention = currentJobs.attentionJobs().jobs ?? [];
+            const allowedTeams = new Set(visibleTeams(principal).map((team) => team.id));
+            const attention = (currentJobs.attentionJobs().jobs ?? []).filter((job) => !principal || (job.teamId && allowedTeams.has(job.teamId)));
             const takeoverAttention = [...outcomes.values()]
                 .filter((outcome) => outcome.status === "needs_attention")
+                .filter((outcome) => !principal || allowedTeams.has(outcome.teamId))
                 .map((outcome) => ({
                     id: outcome.id,
                     title: `External takeover: ${outcome.inputPreview}`,
@@ -657,7 +713,10 @@ export function createExternalTeamControlApi({
             const request = validateSubmit(input);
             if (request.clientRequestId) {
                 const existing = [...outcomes.values()].find((entry) => entry.clientRequestId === request.clientRequestId && entry.teamId === request.team.id && entry.channelId === request.channel.id);
-                if (existing) return publicOutcome(existing);
+                if (existing) {
+                    if (existing.inputHash && existing.inputHash !== inputHash(request)) throw new Error("clientRequestId conflicts with a different request");
+                    return publicOutcome(existing);
+                }
             }
             if (conversationBlocked(request.channel.conversationId))
                 throw new Error("channel is blocked for takeover or cancellation");
@@ -678,6 +737,7 @@ export function createExternalTeamControlApi({
                 conversationId: request.channel.conversationId,
                 messageId: message.id,
                 clientRequestId: request.clientRequestId,
+                inputHash: inputHash(request),
                 inputPreview: publicText(request.text),
                 artifactIds: [...request.artifactIds],
                 status: "queued",
@@ -756,18 +816,66 @@ export function createExternalTeamControlApi({
             outcome.takeoverReason = safeReason;
             outcome.updatedAt = now();
             save();
-            if (currentStatus !== "needs_attention") {
-                await activeAudit.append({
-                    type: "takeover.requested",
-                    actor: "external-operator",
-                    data: {
-                        ...(outcome.coworkerId ? { coworkerId: outcome.coworkerId } : {}),
-                        action: "request takeover",
-                        status: "needs_attention",
-                    },
-                });
-            }
+            await activeAudit.append({
+                type: "takeover.requested",
+                actor: "external-operator",
+                data: {
+                    ...(outcome.coworkerId ? { coworkerId: outcome.coworkerId } : {}),
+                    action: "request takeover",
+                    status: "needs_attention",
+                },
+            });
             return publicOutcome(outcome);
+        },
+
+        async invoke(operation, input = {}, principal) {
+            if (!isPlainObject(input)) throw new Error("secure external control input must be an object");
+            if (!controllerRegistry?.authorize) throw new Error("paired external controller authority is unavailable");
+            let context;
+            let release;
+            try {
+                context = principalContext(input, principal);
+                controllerRegistry.authorize(principal?.deviceId, operation, { ...context, ...(principal?.transport ? { transport: principal.transport } : {}) });
+                release = controllerRegistry.beginRequest?.(principal.deviceId);
+            }
+            catch (error) {
+                const activeAudit = getAudit();
+                if (activeAudit?.append) {
+                    try { await activeAudit.append({ type: "external.control.denied", actor: "external-controller", data: { operation: publicText(operation).slice(0, 64), reason: safeError(error) } }); }
+                    catch {}
+                }
+                throw error;
+            }
+            try {
+                switch (operation) {
+                    case "listTeams": return this.listTeams({}, principal);
+                    case "listCoworkers": return this.listCoworkers({}, principal);
+                    case "listChannels": return this.listChannels(input, principal);
+                    case "sendMessage": return this.submitOutcome(input, principal);
+                    case "getConversation": return this.getConversation(input, principal);
+                    case "submitOutcome": return this.submitOutcome(input, principal);
+                    case "getStatus": return this.getOutcomeStatus(input.outcomeId);
+                    case "cancel": return this.cancelOutcome(input.outcomeId);
+                    case "getArtifacts": return this.getArtifacts(input.outcomeId);
+                    case "listSkills": return this.listSkills(input, principal);
+                    case "listRoutines": return this.listRoutines({}, principal);
+                    case "runRoutineNow": return this.runRoutineNow(input);
+                    case "getAttention": return this.getAttention({}, principal);
+                    case "requestTakeover": return await this.requestTakeover(input.outcomeId, { ...(input.reason === undefined ? {} : { reason: input.reason }) });
+                    default: throw new Error("secure external control operation is not supported");
+                }
+            }
+            catch (error) {
+                const activeAudit = getAudit();
+                if (activeAudit?.append) {
+                    try { await activeAudit.append({ type: "external.control.failed", actor: "external-controller", data: { operation: publicText(operation).slice(0, 64), reason: safeError(error) } }); }
+                    catch {}
+                }
+                throw error;
+            }
+            finally {
+                release?.();
+            }
         },
 
         publicStatus() {
@@ -779,6 +887,7 @@ export function createExternalTeamControlApi({
                 mcpProtocolVersion: EXTERNAL_MCP_PROTOCOL_VERSION,
                 methods: ["listTeams", "listCoworkers", "listChannels", "sendMessage", "getConversation", "listSkills", "listRoutines", "runRoutineNow", "getAttention", "submitOutcome", "getOutcomeStatus", "getArtifacts", "cancelOutcome", "requestTakeover"],
                 mcpMethods: [...EXTERNAL_MCP_METHODS],
+                secureControl: { transport: "paired-device-direct-or-opaque-relay", operations: ["listTeams", "listCoworkers", "listChannels", "sendMessage", "getConversation", "submitOutcome", "getStatus", "cancel", "getArtifacts", "listSkills", "listRoutines", "runRoutineNow", "getAttention", "requestTakeover"] },
             };
         },
     };

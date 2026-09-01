@@ -18,12 +18,28 @@ export const WORKER_SECURE_VERSION = 1;
 export const WORKER_PAIRING_TTL_MS = 10 * 60 * 1000;
 export const WORKER_TRUST_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const WORKER_TRANSPORTS = Object.freeze(["loopback", "lan", "remote-relay"]);
+export const EXTERNAL_CONTROL_OPERATIONS = Object.freeze([
+    "listTeams",
+    "listCoworkers",
+    "listChannels",
+    "sendMessage",
+    "getConversation",
+    "submitOutcome",
+    "getStatus",
+    "cancel",
+    "getArtifacts",
+    "listSkills",
+    "listRoutines",
+    "runRoutineNow",
+    "getAttention",
+    "requestTakeover",
+]);
 
 const ID = /^[a-z][a-z0-9_-]{2,95}$/;
 const DEVICE_ID = /^device_[0-9a-f]{16}$/i;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const MAX_FRAME_BYTES = 96 * 1024;
-const REQUEST_KINDS = new Set(["computer.health", "computer.action"]);
+const REQUEST_KINDS = new Set(["computer.health", "computer.action", "control.call"]);
 
 function object(value, label) {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
@@ -227,10 +243,21 @@ export function publicTrustRecord(value, { now = () => Date.now() } = {}) {
 }
 
 function securePayload(value) {
-    exactKeys(value, new Set(["kind", "envelope"]), "secure Worker request");
+    exactKeys(value, new Set(["kind", "envelope", "operation", "input"]), "secure Worker request");
     if (!REQUEST_KINDS.has(value.kind)) throw new Error("secure Worker request kind is not supported");
-    if (value.kind === "computer.action") return { kind: value.kind, envelope: validateComputerEnvelope(value.envelope) };
+    if (value.kind === "computer.action") {
+        if (value.operation !== undefined || value.input !== undefined) throw new Error("computer action request cannot contain control fields");
+        return { kind: value.kind, envelope: validateComputerEnvelope(value.envelope) };
+    }
+    if (value.kind === "control.call") {
+        if (value.envelope !== undefined) throw new Error("external control request cannot contain a computer envelope");
+        if (typeof value.operation !== "string" || !EXTERNAL_CONTROL_OPERATIONS.includes(value.operation)) throw new Error("secure external control operation is not supported");
+        object(value.input, "secure external control input");
+        if (Buffer.byteLength(canonicalSecureJson(value.input), "utf8") > 48 * 1024) throw new Error("secure external control input is too large");
+        return { kind: value.kind, operation: value.operation, input: structuredClone(value.input) };
+    }
     if (value.envelope !== undefined) throw new Error("computer health request cannot contain an envelope");
+    if (value.operation !== undefined || value.input !== undefined) throw new Error("computer health request cannot contain control fields");
     return { kind: value.kind };
 }
 
@@ -360,6 +387,38 @@ export function attachSecureWorkerComputerServer(channel, { computerHealth, comp
         if (payload.kind === "computer.health") return computerHealth();
         if (payload.kind === "computer.action") return computerAction(validateComputerEnvelope(payload.envelope));
         throw new Error("secure Worker payload kind is not supported");
+    });
+    return channel;
+}
+
+export function createSecureExternalControlClient(channel) {
+    if (!channel?.request) throw new Error("secure external control client requires a channel");
+    const call = (operation, input = {}) => channel.request({ kind: "control.call", operation, input });
+    return Object.freeze({
+        listTeams: () => call("listTeams"),
+        listCoworkers: () => call("listCoworkers"),
+        listChannels: (input = {}) => call("listChannels", input),
+        sendMessage: (input) => call("sendMessage", input),
+        getConversation: (input) => call("getConversation", input),
+        submitOutcome: (input) => call("submitOutcome", input),
+        getStatus: (input) => call("getStatus", input),
+        cancel: (input) => call("cancel", input),
+        getArtifacts: (input) => call("getArtifacts", input),
+        listSkills: (input = {}) => call("listSkills", input),
+        listRoutines: () => call("listRoutines"),
+        runRoutineNow: (input) => call("runRoutineNow", input),
+        getAttention: () => call("getAttention"),
+        requestTakeover: (input) => call("requestTakeover", input),
+    });
+}
+
+export function attachSecureExternalControlServer(channel, { invoke } = {}) {
+    if (!channel?.setRequestHandler || typeof invoke !== "function") throw new Error("secure external control server requires a bounded invoker");
+    channel.setRequestHandler(async (payload) => {
+        exactKeys(payload, new Set(["kind", "operation", "input"]), "secure external control payload");
+        if (payload.kind !== "control.call" || !EXTERNAL_CONTROL_OPERATIONS.includes(payload.operation)) throw new Error("secure external control operation is not supported");
+        object(payload.input, "secure external control input");
+        return invoke(payload.operation, structuredClone(payload.input), { deviceId: channel.peerDeviceId, transport: channel.transport });
     });
     return channel;
 }

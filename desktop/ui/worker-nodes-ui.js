@@ -2,6 +2,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   let nodes = [];
+  let controllers = [];
   let pollTimer;
 
   function zh() { return document.documentElement.lang === "zh-CN"; }
@@ -51,13 +52,38 @@
     }
   }
 
+  function renderControllers() {
+    const root = $("external-controller-list");
+    if (!root) return;
+    root.textContent = "";
+    if (!controllers.length) {
+      const empty = document.createElement("p"); empty.className = "setting-feedback";
+      empty.textContent = label("No paired external controllers yet.", "尚未配对外部控制器。"); root.append(empty); return;
+    }
+    for (const controller of controllers) {
+      const card = document.createElement("article"); card.className = "workspace-card";
+      const title = document.createElement("h3"); title.textContent = `${text(controller.name)} · ${text(controller.deviceId)}`;
+      const meta = document.createElement("p"); meta.textContent = `${label("Status", "状态")}: ${text(controller.status)} · ${label("Health", "健康")}: ${text(controller.health)} · ${label("Transport", "传输")}: ${text(controller.transport)} · ${label("Last seen", "最后在线")}: ${controller.lastSeenAt ? new Date(controller.lastSeenAt).toLocaleString() : "—"}`;
+      const scopes = document.createElement("p"); scopes.textContent = `${label("Scopes", "范围")}: ${(controller.scopes ?? []).join(", ") || "—"}`;
+      const bindings = document.createElement("p"); bindings.textContent = `${label("Teams", "团队")}: ${(controller.teamIds ?? []).join(", ") || "—"} · ${label("Projects", "项目")}: ${(controller.projectIds ?? []).join(", ") || "—"}`;
+      const actions = document.createElement("div"); actions.className = "worker-node-actions";
+      const revoke = document.createElement("button"); revoke.type = "button"; revoke.className = "quiet-action"; revoke.textContent = label("Revoke", "撤销"); revoke.disabled = !["active", "rotating"].includes(controller.status); revoke.addEventListener("click", async () => { revoke.disabled = true; try { await window.sovereignbot.externalControllers.revoke({ deviceId: controller.deviceId }); await load(); } finally { revoke.disabled = false; } });
+      const rotate = document.createElement("button"); rotate.type = "button"; rotate.className = "quiet-action"; rotate.textContent = label("Rotate", "轮换"); rotate.disabled = !["active"].includes(controller.status); rotate.addEventListener("click", async () => { rotate.disabled = true; try { await window.sovereignbot.externalControllers.rotate({ deviceId: controller.deviceId }); await load(); } finally { rotate.disabled = false; } });
+      actions.append(revoke, rotate); card.append(title, meta, scopes, bindings, actions); root.append(card);
+    }
+  }
+
   async function load() {
-    try { nodes = (await window.sovereignbot.workerNodes.list({})).nodes ?? []; render(); } catch (error) { const root = $("worker-node-list"); if (root) root.textContent = text(error?.message ?? error).slice(0, 400); }
+    try {
+      const [nodeResult, controllerResult] = await Promise.all([window.sovereignbot.workerNodes.list({}), window.sovereignbot.externalControllers.list({})]);
+      nodes = nodeResult.nodes ?? []; controllers = controllerResult.controllers ?? []; render(); renderControllers();
+    } catch (error) { const root = $("worker-node-list"); if (root) root.textContent = text(error?.message ?? error).slice(0, 400); }
   }
 
   function show() {
     for (const view of document.querySelectorAll(".main-view")) view.classList.add("hidden");
     $("view-worker-nodes")?.classList.remove("hidden");
+    $("view-external-controllers")?.classList.remove("hidden");
     for (const id of ["nav-work", "nav-attention", "nav-routines", "nav-triggers", "nav-settings", "nav-worker-nodes"]) $(id)?.classList.remove("active");
     $("nav-worker-nodes")?.classList.add("active");
     clearTimeout(pollTimer);
@@ -68,6 +94,7 @@
   function bind() {
     $("nav-worker-nodes")?.addEventListener("click", show);
     $("worker-node-refresh")?.addEventListener("click", () => { void window.sovereignbot.workerNodes.refresh({}).then(load); });
+    $("external-controller-refresh")?.addEventListener("click", () => { void load(); });
     $("worker-node-pair")?.addEventListener("click", async () => {
       const result = $("worker-node-result"); if (result) result.textContent = label("Choose a pairing bundle…", "请选择配对文件…");
       try { const outcome = await window.sovereignbot.workerNodes.pairViaDialog({}); if (result) result.textContent = outcome?.paired ? label("Worker Node paired.", "工作节点已配对。") : label("Pairing cancelled.", "已取消配对。"); await load(); }

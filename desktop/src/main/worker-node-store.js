@@ -325,6 +325,9 @@ export function createWorkerNodeStore({ dataDir, persistPath, credentialsPath, c
                 return saveTrustProjection(nodeId, rotated ?? { status: "rotating", transport: publicTrust(node.trust).transport, deviceId });
             },
         },
+        // The main process may reuse this paired identity for the bounded
+        // External Control Plane. It is never exposed through preload/IPC.
+        secureTrustStore() { return localTrustStore; },
         refresh,
         setEnabled(nodeId, enabled) {
             if (typeof enabled !== "boolean") throw new Error("enabled must be boolean");

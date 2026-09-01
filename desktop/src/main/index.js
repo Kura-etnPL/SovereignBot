@@ -28,6 +28,7 @@ import { antigravityAccountNamespace } from "./antigravity-provider.js";
 import { attachWindowLifecycle } from "./lifecycle.js";
 import { createTrayController } from "./tray.js";
 import { createWorkerNodeStore } from "./worker-node-store.js";
+import { createExternalControllerStore } from "./external-controller-store.js";
 import { createTeamService } from "./team-service.js";
 import { createConnectedAppsService } from "./connected-apps.js";
 import { createExternalTeamControlServer } from "./external-team-control.js";
@@ -123,6 +124,7 @@ async function main() {
     const attachmentAwareConversationStore = createAttachmentAwareConversationStore(conversationStore, artifactStore);
     const skillStore = createSkillStore({ persistPath: join(dataDir, "desktop-state", "skills.json") });
     const workerNodeStore = createWorkerNodeStore({ dataDir });
+    const externalControllerStore = createExternalControllerStore({ dataDir, trustStore: workerNodeStore.secureTrustStore() });
     const teamService = createTeamService({
         dataDir,
         coworkerStore,
@@ -428,6 +430,8 @@ async function main() {
         getAudit: () => host.runtime.audit,
         getRoutineController: () => routines,
         getJobs: () => jobs,
+        controllerRegistry: externalControllerStore,
+        projectService,
     });
     try {
         await externalTeamControl.start();
@@ -728,6 +732,12 @@ async function main() {
                 "workerNode:trustCompleteViaDialog": ({ nodeId }) => workerNodeStore.trustCompleteViaDialog(win, dialog, nodeId),
                 "workerNode:trustRevoke": ({ nodeId }) => workerNodeStore.trust.revoke(nodeId),
                 "workerNode:trustRotate": ({ nodeId }) => workerNodeStore.trust.rotate(nodeId),
+                "externalController:list": () => externalControllerStore.list(),
+                "externalController:get": ({ deviceId }) => externalControllerStore.get(deviceId),
+                "externalController:pairingBegin": ({ transport, ttlMs, trustTtlMs } = {}) => externalControllerStore.beginPairing({ transport, ...(ttlMs === undefined ? {} : { ttlMs }), ...(trustTtlMs === undefined ? {} : { trustTtlMs }) }),
+                "externalController:pairingComplete": ({ offer, response, scopes, teamIds, projectIds, expiresAt } = {}) => externalControllerStore.completePairing(offer, response, { scopes, teamIds, projectIds, ...(expiresAt === undefined ? {} : { expiresAt }) }),
+                "externalController:revoke": ({ deviceId }) => externalControllerStore.revoke(deviceId),
+                "externalController:rotate": ({ deviceId }) => externalControllerStore.rotate(deviceId),
             },
         });
     }
