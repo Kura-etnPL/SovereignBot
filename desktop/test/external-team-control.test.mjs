@@ -3,9 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { AuditLog } from "../../src/audit.js";
 import { createConversationStore } from "../src/main/conversation-store.js";
 import { createCoworkerStore } from "../src/main/coworker-store.js";
 import { createExternalTeamControlApi, createExternalTeamControlServer } from "../src/main/external-team-control.js";
+import { createProductSurfaceService } from "../src/main/product-surface-service.js";
 import { createDesktopServices } from "../src/main/services.js";
 import { createTeamService } from "../src/main/team-service.js";
 
@@ -16,6 +18,7 @@ function fixture() {
     const services = createDesktopServices({ dataDir: root, dialog: {} });
     const teams = createTeamService({ dataDir: root, coworkerStore: coworkers, conversationStore: conversations, services });
     const installed = teams.installPack("software-team").team;
+    const audit = new AuditLog(join(root, "audit.jsonl"));
     const blocked = new Set();
     const cancellations = [];
     const api = createExternalTeamControlApi({
@@ -37,9 +40,10 @@ function fixture() {
         blockConversation: (conversationId) => blocked.add(conversationId),
         isConversationBlocked: (conversationId) => blocked.has(conversationId),
         cancelConversation: (conversationId, reason) => { cancellations.push({ conversationId, reason }); },
+        audit,
         makeOutcomeId: () => "outcome_0000000000000001",
     });
-    return { root, teams, conversations, installed, api, blocked, cancellations };
+    return { root, teams, coworkers, conversations, installed, api, audit, blocked, cancellations };
 }
 
 test("external team control exposes bounded opaque team operations and idempotent outcomes", () => {
@@ -104,6 +108,7 @@ test("external team control server is loopback-only and requires an operator ses
         coworkerStore: { list: () => ({ coworkers: [] }) },
         conversationStore: { get: () => { throw new Error("unused"); }, postUserMessage: () => { throw new Error("unused"); } },
         dispatchMessage: () => [],
+        getAudit: () => ({ append: async () => undefined }),
         authenticate: async (token) => token === "operator-session-test",
     });
     try {
@@ -153,13 +158,14 @@ test("external team control server is loopback-only and requires an operator ses
     }
 });
 
-test("external product projections remain bounded and reuse governed channel delivery", () => {
-    const { root, api, installed } = fixture();
+test("external product projections remain bounded and reuse governed channel delivery", async () => {
+    const { root, api, teams, coworkers, audit, installed } = fixture();
     try {
         const channel = installed.channels[0];
         const sent = api.sendMessage({
             teamId: installed.id,
             channelId: channel.id,
+            coworkerId: installed.coworkerIds[0],
             text: "Inspect the bounded release.",
             clientRequestId: "external-message-1",
         });
@@ -169,13 +175,40 @@ test("external product projections remain bounded and reuse governed channel del
         assert.equal(api.listRoutines().routines[0].name, "Daily review");
         assert.equal(api.runRoutineNow({ routineId: "routine_0000000000000001" }).result.job.status, "queued");
         assert.equal(api.getAttention().jobs[0].status, "needs_attention");
-        const takeover = api.requestTakeover(sent.id, { reason: "operator needs a human token=secret C:\\private\\takeover.txt" });
+        const takeover = await api.requestTakeover(sent.id, { reason: "operator needs a human token=secret C:\\private\\takeover.txt" });
         assert.equal(takeover.status, "needs_attention");
         const attention = api.getAttention();
         assert.equal(attention.jobs.some((job) => job.id === sent.id && job.status === "needs_attention"), true);
         assert.equal(JSON.stringify(attention).includes("secret"), false);
         assert.equal(JSON.stringify(attention).includes("C:\\private"), false);
         assert.throws(() => api.getConversation({ teamId: installed.id, channelId: channel.id, path: "E:/private" }), /not allowed/);
+
+        const productSurfaces = createProductSurfaceService({
+            dataDir: root,
+            teamService: teams,
+            coworkerStore: coworkers,
+            artifactStore: { list: () => ({ artifacts: [] }) },
+            runtime: { audit },
+        });
+        const history = await productSurfaces.computerHistory();
+        const event = history.history.find((entry) => entry.eventType === "takeover.requested");
+        assert.deepEqual(event && {
+            source: event.source,
+            activity: event.activity,
+            coworkerId: event.coworkerId,
+            status: event.status,
+        }, {
+            source: "takeover",
+            activity: "request takeover",
+            coworkerId: installed.coworkerIds[0],
+            status: "attention",
+        });
+        assert.equal(JSON.stringify(history).includes("secret"), false);
+        assert.equal(JSON.stringify(history).includes("C:\\private"), false);
+        assert.equal(JSON.stringify(history).includes("session"), false);
+        const auditRows = await audit.readAll();
+        const takeoverRow = auditRows.find((entry) => entry.type === "takeover.requested");
+        assert.deepEqual(Object.keys(takeoverRow.data).sort(), ["action", "coworkerId", "status"]);
     }
     finally {
         rmSync(root, { recursive: true, force: true });

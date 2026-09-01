@@ -498,6 +498,9 @@
         const instructions = window.prompt("Instructions", item.instructions); if (instructions === null) return;
         await api.skills.update({ skillId: item.id, patch: { name, description, instructions } }); await refresh();
       }, root));
+      if (item.state === "active") actions.append(button("Create Routine / 创建例行任务", () => {
+        document.dispatchEvent(new CustomEvent("sovereignbot:create-routine-from-skill", { detail: { skillId: item.id } }));
+      }, root));
       const teamSelect = select("Team for skill " + item.name); for (const team of cache.teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = `Team: ${team.name}`; teamSelect.append(option); }
       if (teamSelect.options.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.skills.assign({ skillId: item.id, targetKind: "team", targetId: teamSelect.value, enabled: !(item.assignedTeamIds ?? []).includes(teamSelect.value) }); await refresh(); }, root));
       const coworkerSelect = select("Coworker for skill " + item.name); for (const coworker of cache.coworkers) { const option = document.createElement("option"); option.value = coworker.id; option.textContent = `Coworker: ${coworker.name}`; coworkerSelect.append(option); }

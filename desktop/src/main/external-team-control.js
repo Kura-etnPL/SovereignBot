@@ -337,11 +337,13 @@ export function createExternalTeamControlApi({
     isConversationBlocked = () => false,
     cancelConversation = () => undefined,
     requestAttention = () => undefined,
+    audit,
+    getAudit = () => audit,
     now = () => new Date().toISOString(),
     makeOutcomeId: makeOutcomeIdFn = makeOutcomeId,
 } = {}) {
-    if (!dataDir || !teamService?.list || !teamService?.getChannel || !coworkerStore?.list || !conversationStore?.get || !conversationStore?.postUserMessage || typeof dispatchMessage !== "function")
-        throw new Error("external team control requires team, coworker, conversation and dispatch services");
+    if (!dataDir || !teamService?.list || !teamService?.getChannel || !coworkerStore?.list || !conversationStore?.get || !conversationStore?.postUserMessage || typeof dispatchMessage !== "function" || typeof getAudit !== "function")
+        throw new Error("external team control requires team, coworker, conversation, dispatch, and audit services");
     const persistPath = join(dataDir, "desktop-state", "external-team-outcomes.json");
     const loaded = loadJsonState(persistPath, null);
     const outcomes = new Map(
@@ -730,21 +732,36 @@ export function createExternalTeamControlApi({
             return publicOutcome(outcome);
         },
 
-        requestTakeover(outcomeId, input = {}) {
+        async requestTakeover(outcomeId, input = {}) {
             const outcome = requireOutcome(outcomeId);
             if (!isPlainObject(input)) throw new Error("requestTakeover payload must be an object");
             rejectAuthority(input);
             exactKeys(input, new Set(["reason"]), "requestTakeover");
             const reason = boundedText(input.reason, "reason", 500) ?? "External operator requested takeover.";
-            if (["completed", "failed", "cancelled"].includes(sync(outcome).status))
+            const safeReason = publicText(reason).slice(0, 500);
+            const currentStatus = sync(outcome).status;
+            if (["completed", "failed", "cancelled"].includes(currentStatus))
                 return publicOutcome(outcome);
+            const activeAudit = getAudit();
+            if (!activeAudit || typeof activeAudit.append !== "function") throw new Error("external takeover audit is unavailable");
             block(outcome.conversationId, "external-takeover");
-            try { requestAttention({ outcomeId: outcome.id, conversationId: outcome.conversationId, reason }); }
+            try { requestAttention({ outcomeId: outcome.id, conversationId: outcome.conversationId, reason: safeReason }); }
             catch {}
             outcome.status = "needs_attention";
-            outcome.takeoverReason = reason;
+            outcome.takeoverReason = safeReason;
             outcome.updatedAt = now();
             save();
+            if (currentStatus !== "needs_attention") {
+                await activeAudit.append({
+                    type: "takeover.requested",
+                    actor: "external-operator",
+                    data: {
+                        ...(outcome.coworkerId ? { coworkerId: outcome.coworkerId } : {}),
+                        action: "request takeover",
+                        status: "needs_attention",
+                    },
+                });
+            }
             return publicOutcome(outcome);
         },
 
@@ -824,7 +841,7 @@ export function createExternalTeamControlServer({
         };
     }
 
-    function toolCall(name, input) {
+    async function toolCall(name, input) {
         if (typeof name !== "string" || !name) throw new Error("tools/call name is required");
         if (!isPlainObject(input)) throw new Error("tools/call arguments must be an object");
         rejectAuthority(input, "tools/call.arguments");
@@ -864,7 +881,7 @@ export function createExternalTeamControlServer({
                 return api.cancelOutcome(input.outcomeId);
             case "requestTakeover":
                 exactKeys(input, new Set(["outcomeId", "reason"]), "requestTakeover");
-                return api.requestTakeover(input.outcomeId, input);
+                return await api.requestTakeover(input.outcomeId, input);
             default:
                 throw new Error("unknown MCP tool: " + name);
         }
@@ -900,7 +917,7 @@ export function createExternalTeamControlServer({
                 case "tools/call":
                     if (!isPlainObject(params)) throw new Error("tools/call params must be an object");
                     exactKeys(params, new Set(["name", "arguments"]), "tools/call");
-                    result = rpcToolResult(toolCall(params.name, params.arguments ?? {}));
+                    result = rpcToolResult(await toolCall(params.name, params.arguments ?? {}));
                     break;
                 default:
                     if (hasId) send(response, 200, rpcError(id, -32601, "method not found"));
@@ -961,7 +978,7 @@ export function createExternalTeamControlServer({
                     return;
                 }
                 if (request.method === "POST" && parts.length === 5 && parts[4] === "takeover") {
-                    send(response, 200, api.requestTakeover(outcomeId, await readJson(request)));
+                    send(response, 200, await api.requestTakeover(outcomeId, await readJson(request)));
                     return;
                 }
             }
