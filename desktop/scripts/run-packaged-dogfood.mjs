@@ -25,7 +25,7 @@ function sha256(bytes) { return createHash("sha256").update(bytes).digest("hex")
 async function main() {
   const exe = findPackagedExe();
   const dataDir = await mkdtemp(join(tmpdir(), "sovereign-packaged-dogfood-"));
-  const transcriptPath = join(dataDir, "fake-provider-transcript.jsonl");
+  const transcriptPath = `${dataDir}-fake-provider-transcript.jsonl`;
   const evidenceDir = `${dataDir}-evidence`;
   const electronUserDataDir = `${dataDir}-electron-userdata`;
   const child = spawn(exe, ["--disable-gpu", `--user-data-dir=${electronUserDataDir}`, "--verify-software-team"], {
@@ -79,6 +79,7 @@ async function main() {
     await rm(dataDir, { recursive: true, force: true }).catch(() => {});
     await rm(evidenceDir, { recursive: true, force: true }).catch(() => {});
     await rm(electronUserDataDir, { recursive: true, force: true }).catch(() => {});
+    await rm(transcriptPath, { force: true }).catch(() => {});
   }
 }
 
