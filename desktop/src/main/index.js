@@ -32,6 +32,7 @@ import { createTeamService } from "./team-service.js";
 import { createConnectedAppsService } from "./connected-apps.js";
 import { createExternalTeamControlServer } from "./external-team-control.js";
 import { createProductSurfaceService } from "./product-surface-service.js";
+import { createMemoryService } from "./memory-service.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -162,6 +163,16 @@ async function main() {
     let coworkerDispatcher;
     let teachOnce;
     let externalTeamControl;
+    const memoryService = createMemoryService({
+        runtime: host.runtime,
+        getRuntime: () => host.runtime,
+        services,
+        coworkerStore,
+        teamService,
+        conversationStore,
+        artifactStore,
+        getJobs: () => jobs,
+    });
     const productSurfaces = createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime: host.runtime, getRuntime: () => host.runtime });
     teamService.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => {
         const binding = host.rosterSummary()?.coworkerBindings?.[targetCoworkerId];
@@ -521,6 +532,13 @@ async function main() {
                     });
                     return { coworker: updated, refresh: await refreshCoworkerRuntime() };
                 },
+                "memory:list": (payload) => memoryService.list(payload),
+                "memory:get": (payload) => memoryService.get(payload),
+                "memory:update": (payload) => memoryService.update(payload),
+                "memory:forget": (payload) => memoryService.forget(payload),
+                "memory:delete": (payload) => memoryService.delete(payload),
+                "memory:pin": (payload) => memoryService.pin(payload),
+                "memory:sourceTrace": (payload) => memoryService.sourceTrace(payload),
                 "artifact:attachViaDialog": ({ conversationId }) => pickConversationAttachments({ win, dialog, artifactStore, conversationId }),
                 "artifact:reveal": ({ artifactId }) => {
                     const managedPath = artifactStore.managedPath(artifactId);

@@ -280,6 +280,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .member-row .member-status { margin-left: auto; color: var(--text-3); font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
 .member-row .member-edit { margin-left: auto; }
 .member-row .member-status + .member-edit { margin-left: 8px; }
+.memory-row { display: grid; gap: 5px; padding: 8px 0; border-top: 1px solid var(--line); }
+.memory-row:first-child { border-top: 0; }
+.memory-row strong { color: var(--text-2); font-size: 12px; }
+.memory-row span, .memory-row small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.memory-row .detail-actions .quiet-action { flex: 0 1 auto; }
 .future-chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
 .future-chip-row span { padding: 4px 7px; border-radius: 7px; background: var(--panel-2); color: var(--text-3); font-size: 9px; }
 .activity-drawer { position: fixed; z-index: 30; right: 16px; top: 16px; bottom: 16px; width: min(460px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line-strong); border-radius: 18px; background: color-mix(in srgb, var(--panel) 96%, transparent); box-shadow: var(--shadow); overflow-y: auto; }

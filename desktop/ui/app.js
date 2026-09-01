@@ -874,6 +874,71 @@ function renderDetails(conversation) {
   } else $("details-current-work").textContent = team?.flow?.currentOwner
     ? `${team.flow.status === "needs-attention" ? "Attention" : team.flow.status === "active" ? "Active" : team.flow.status === "stopped" ? "Attention" : "Waiting"} · ${team.flow.currentOwner}${activitySuffix}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
+  void renderMemorySections(conversation, team);
+}
+
+function memoryTarget(scope, ownerId) { return { scope, ownerId, limit: 20 }; }
+
+async function renderMemorySection(sectionId, listId, scope, ownerId) {
+  const section = $(sectionId);
+  const root = $(listId);
+  if (!section || !root || !ownerId || !window.sovereignbot?.memory?.list) return;
+  show(section);
+  clearNode(root);
+  try {
+    const result = await window.sovereignbot.memory.list(memoryTarget(scope, ownerId));
+    const memories = result?.memories ?? [];
+    if (!memories.length) {
+      const empty = document.createElement("small");
+      empty.textContent = "No memories yet.";
+      root.append(empty);
+      return;
+    }
+    for (const memory of memories) {
+      const row = document.createElement("div");
+      row.className = "memory-row";
+      const title = document.createElement("strong");
+      title.textContent = `${memory.title}${memory.pinned ? " · pinned" : ""}`;
+      const content = document.createElement("span");
+      content.textContent = memory.content;
+      const source = document.createElement("small");
+      source.textContent = `Source: ${memory.source?.label ?? "Unavailable"}`;
+      const actions = document.createElement("div");
+      actions.className = "detail-actions";
+      const action = (label, handler) => { const button = document.createElement("button"); button.type = "button"; button.className = "quiet-action"; button.textContent = label; button.addEventListener("click", handler); actions.append(button); };
+      action(memory.pinned ? "Unpin" : "Pin", async () => { await window.sovereignbot.memory.pin({ ...memoryTarget(scope, ownerId), memoryId: memory.id, pinned: !memory.pinned }); await renderMemorySection(sectionId, listId, scope, ownerId); });
+      action("Edit", async () => {
+        const next = window.prompt("Edit memory content", memory.content);
+        if (next === null) return;
+        await window.sovereignbot.memory.update({ ...memoryTarget(scope, ownerId), memoryId: memory.id, patch: { title: memory.title, content: next, tags: memory.tags } });
+        await renderMemorySection(sectionId, listId, scope, ownerId);
+      });
+      action("Forget", async () => { await window.sovereignbot.memory.forget({ ...memoryTarget(scope, ownerId), memoryId: memory.id }); await renderMemorySection(sectionId, listId, scope, ownerId); });
+      action("Delete", async () => { if (!window.confirm("Delete this memory?")) return; await window.sovereignbot.memory.delete({ ...memoryTarget(scope, ownerId), memoryId: memory.id }); await renderMemorySection(sectionId, listId, scope, ownerId); });
+      action("Source", async () => { const trace = await window.sovereignbot.memory.sourceTrace({ ...memoryTarget(scope, ownerId), memoryId: memory.id }); source.textContent = `Source: ${trace?.label ?? "Unavailable"}`; });
+      row.append(title, content, source, actions);
+      root.append(row);
+    }
+  } catch (error) {
+    const message = document.createElement("small");
+    message.textContent = text(error?.message || error).replace(/^.*Error: /, "");
+    root.append(message);
+  }
+}
+
+async function renderMemorySections(conversation, team) {
+  const members = participantCoworkers(conversation);
+  const coworkerId = conversation?.kind === "direct" ? members[0]?.id : undefined;
+  const channel = team?.channels?.find((entry) => entry.conversationId === conversation?.id);
+  const projectId = team?.id ?? channel?.workspaceId;
+  for (const [sectionId, listId, scope, ownerId] of [
+    ["details-coworker-memory", "details-coworker-memory-list", "coworker", coworkerId],
+    ["details-team-memory", "details-team-memory-list", "team", team?.id],
+    ["details-project-memory", "details-project-memory-list", "project", projectId],
+  ]) {
+    if (!ownerId) { hide($(sectionId)); continue; }
+    await renderMemorySection(sectionId, listId, scope, ownerId);
+  }
 }
 
 function renderCoworkerConnectedApps(coworker) {

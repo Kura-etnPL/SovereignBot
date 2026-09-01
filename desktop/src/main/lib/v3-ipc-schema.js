@@ -27,6 +27,31 @@ function string(value, name, max, required = false) { if (value === undefined ||
 function idArray(value, name, max) { if (value === undefined) return undefined; if (!Array.isArray(value) || value.length > max) throw new Error(`${name} must be an array of at most ${max} identifiers`); return [...new Set(value.map((entry) => identifier(entry, name)))]; }
 function exact(value, allowed) { for (const key of Object.keys(value)) { if (!allowed.has(key)) throw new Error(`unexpected request field: ${key}`); } }
 function positiveInteger(value, name, min, max) { if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer from ${min} to ${max}`); return value; }
+function memoryTarget(value, { withMemoryId = false, withPatch = false, withPinned = false } = {}) {
+    const allowed = new Set(["scope", "ownerId", ...(withMemoryId ? ["memoryId"] : []), ...(withPatch ? ["patch"] : []), ...(withPinned ? ["pinned"] : []), ...(withMemoryId ? [] : ["query", "limit", "includeForgotten"]) ]);
+    const input = objectPayload(value);
+    exact(input, allowed);
+    if (!["coworker", "team", "project"].includes(input.scope)) throw new Error("memory scope is invalid");
+    const result = { scope: input.scope, ownerId: identifier(input.ownerId, `${input.scope}Id`) };
+    if (withMemoryId) result.memoryId = identifier(input.memoryId, "memoryId");
+    if (withPatch) {
+        const patch = objectPayload(input.patch);
+        exact(patch, new Set(["title", "content", "tags"]));
+        if (patch.title !== undefined) string(patch.title, "title", 180, true);
+        if (patch.content !== undefined) string(patch.content, "content", 20_000, true);
+        if (patch.tags !== undefined) idArray(patch.tags, "tags", 16);
+        result.patch = structuredClone(patch);
+    } else if (withPinned) {
+        if (typeof input.pinned !== "boolean") throw new Error("pinned must be boolean");
+        result.pinned = input.pinned;
+    } else {
+        if (input.query !== undefined) result.query = string(input.query, "query", 300);
+        result.limit = input.limit === undefined ? 50 : positiveInteger(input.limit, "limit", 1, 100);
+        if (input.includeForgotten !== undefined && typeof input.includeForgotten !== "boolean") throw new Error("includeForgotten must be boolean");
+        result.includeForgotten = input.includeForgotten === true;
+    }
+    return result;
+}
 function modelBindingShape(value) {
     if (!isPlainObject(value)) throw new Error("modelBinding must be an object");
     exact(value, new Set(["profile", "provider", "model"]));
@@ -178,6 +203,13 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "coworker:update": spec(24 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId", "patch"])); return { coworkerId: identifier(value.coworkerId, "coworkerId"), patch: coworkerShape(value.patch, { patch: true }) }; }),
     "coworker:archive": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),
     "coworker:restore": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),
+    "memory:list": spec(4096, (payload) => memoryTarget(payload)),
+    "memory:get": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true })),
+    "memory:update": spec(24 * 1024, (payload) => memoryTarget(payload, { withMemoryId: true, withPatch: true })),
+    "memory:forget": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true })),
+    "memory:delete": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true })),
+    "memory:pin": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true, withPinned: true })),
+    "memory:sourceTrace": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true })),
     "conversation:list": spec(1024, empty),
     "conversation:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["conversationId"])); return { conversationId: identifier(value.conversationId, "conversationId") }; }),
     "conversation:createDirect": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),
