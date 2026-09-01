@@ -40,6 +40,7 @@ import { createCommandPaletteService } from "./command-palette-service.js";
 import { createThisPcService } from "./this-pc-service.js";
 import { createComputerTargetController } from "./computer-target-controller.js";
 import { createLocalIsolatedComputer } from "./local-isolated-computer.js";
+import { createDesktopDataLifecycle } from "./data-lifecycle.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -110,6 +111,18 @@ async function main() {
     }
 
     const dataDir = defaultDataDir();
+    let jobs;
+    let routines;
+    let eventTriggers;
+    let computerTargetController;
+    let localIsolatedComputer;
+    const dataLifecycle = createDesktopDataLifecycle({
+        dataDir,
+        stopRuntime: async () => { try { eventTriggers?.stop(); } catch {} try { routines?.stop(); } catch {} },
+        releaseLeases: async () => { try { await computerTargetController?.releaseAllLeases?.({ jobs: jobs?.listJobs?.().jobs ?? [] }); } catch {} },
+        clearControllerCache: async () => { try { computerTargetController?.clearCache?.(); } catch {} },
+    });
+    await dataLifecycle.recover();
     const services = createDesktopServices({ dataDir, dialog });
     const coworkerStore = createCoworkerStore({ persistPath: join(dataDir, "desktop-state", "coworkers.json") });
     coworkerStore.ensureDefaults();
@@ -156,11 +169,6 @@ async function main() {
     });
     teamService.setCoworkerAppAccessResolver((coworkerId) => connectedApps.assignedToolsForCoworker(coworkerId));
     let host;
-    let jobs;
-    let routines;
-    let eventTriggers;
-    let computerTargetController;
-    let localIsolatedComputer;
     projectService = createProjectService({
         dataDir,
         services,
@@ -513,6 +521,13 @@ async function main() {
                 "palette:execute": ({ paletteId, args }) => palette.execute({ commandId: paletteId, args }),
                 "settings:get": () => services.getSettings(),
                 "settings:update": (patch) => services.updateSettings(patch),
+                "data:status": () => dataLifecycle.status(),
+                "data:listBackups": () => dataLifecycle.listBackups(),
+                "data:backup": () => dataLifecycle.backup(),
+                "data:restore": ({ id }) => dataLifecycle.restoreBackup({ id }),
+                "data:export": () => dataLifecycle.exportData(),
+                "data:prepareReset": () => dataLifecycle.prepareReset(),
+                "data:reset": ({ confirmation, backupId }) => dataLifecycle.cleanReset({ confirmation, backupId }),
                 "provider:getRoster": () => host.rosterSummary(),
                 "provider:refresh": async () => applyProviderRefresh(await host.refreshProviders({ isBusy: goalsBusy })),
                 "provider:openLogin": async ({ provider }) => {

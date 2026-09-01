@@ -1788,8 +1788,47 @@ function renderAdvancedRoster() {
   $("advanced-roster").textContent = lines.join("\n\n") || "No active runtime agents.";
 }
 
+function ensureDataLifecycleCard() {
+  if ($("data-lifecycle-card")) return;
+  const settingsGrid = $("view-settings")?.querySelector(".settings-grid");
+  if (!settingsGrid || !window.sovereignbot.dataLifecycle) return;
+  const card = document.createElement("section");
+  card.id = "data-lifecycle-card";
+  card.className = "settings-card span-2";
+  const heading = document.createElement("div"); heading.className = "card-heading";
+  const copy = document.createElement("div"); const title = document.createElement("h2"); title.textContent = "Data lifecycle"; const description = document.createElement("p"); description.textContent = "Local backups, redacted export, and confirmed product-state reset. Credentials, browser profiles, leases, and private computer state stay local."; copy.append(title, description);
+  const refreshButton = document.createElement("button"); refreshButton.id = "data-lifecycle-refresh"; refreshButton.className = "quiet-action"; refreshButton.type = "button"; refreshButton.textContent = "Refresh"; heading.append(copy, refreshButton);
+  const status = document.createElement("div"); status.id = "data-lifecycle-status"; status.className = "setting-feedback"; status.textContent = "Checking local state…";
+  const actions = document.createElement("div"); actions.className = "detail-actions";
+  for (const [id, label] of [["data-lifecycle-backup", "Create backup"], ["data-lifecycle-export", "Export data"], ["data-lifecycle-reset", "Clean reset…"]]) { const button = document.createElement("button"); button.id = id; button.className = "quiet-action"; button.type = "button"; button.textContent = label; actions.append(button); }
+  const backups = document.createElement("div"); backups.id = "data-lifecycle-backups"; backups.className = "workspace-cards";
+  const result = document.createElement("p"); result.id = "data-lifecycle-result"; result.className = "setting-feedback";
+  card.append(heading, status, actions, backups, result);
+  settingsGrid.prepend(card);
+  const refresh = async () => {
+    try {
+      const [status, listed] = await Promise.all([window.sovereignbot.dataLifecycle.status({}), window.sovereignbot.dataLifecycle.listBackups({})]);
+      $("data-lifecycle-status").textContent = `State V${status.stateVersion} · ${listed.backups.length} validated backup(s)`;
+      const root = $("data-lifecycle-backups"); clearNode(root);
+      for (const backup of listed.backups) {
+        const row = document.createElement("div"); row.className = "workspace-card";
+        const label = document.createElement("span"); label.textContent = `${backup.id} · ${backup.files} files · ${backup.createdAt}`;
+        const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = "Restore";
+        restore.addEventListener("click", async () => { if (!window.confirm("Restore this validated backup? Current product state will be backed up first.")) return; try { await window.sovereignbot.dataLifecycle.restore({ id: backup.id }); $("data-lifecycle-result").textContent = "Backup restored. Restarting runtime surfaces is required."; await refresh(); } catch (error) { $("data-lifecycle-result").textContent = text(error?.message || error); } });
+        row.append(label, restore); root.append(row);
+      }
+    } catch (error) { if ($("data-lifecycle-status")) $("data-lifecycle-status").textContent = text(error?.message || error); }
+  };
+  $("data-lifecycle-refresh").addEventListener("click", refresh);
+  $("data-lifecycle-backup").addEventListener("click", async () => { try { const result = await window.sovereignbot.dataLifecycle.backup({}); $("data-lifecycle-result").textContent = `Backup ${result.id} created.`; await refresh(); } catch (error) { $("data-lifecycle-result").textContent = text(error?.message || error); } });
+  $("data-lifecycle-export").addEventListener("click", async () => { try { const result = await window.sovereignbot.dataLifecycle.export({}); $("data-lifecycle-result").textContent = `Redacted export ${result.id} created.`; } catch (error) { $("data-lifecycle-result").textContent = text(error?.message || error); } });
+  $("data-lifecycle-reset").addEventListener("click", async () => { if (!window.confirm("Create a backup and prepare a confirmed clean reset? Protected credentials, browser profiles, and computer state are retained.")) return; try { const prepared = await window.sovereignbot.dataLifecycle.prepareReset({}); const phrase = window.prompt(`Type RESET to confirm clean reset. Backup: ${prepared.backupId}`); if (phrase !== "RESET") return; await window.sovereignbot.dataLifecycle.reset({ confirmation: prepared.confirmation, backupId: prepared.backupId }); $("data-lifecycle-result").textContent = "Product state reset completed."; await refresh(); } catch (error) { $("data-lifecycle-result").textContent = text(error?.message || error); } });
+  void refresh();
+}
+
 async function refreshSettingsData() {
   try {
+    ensureDataLifecycleCard();
     const [settings, workspaces, firstRun, roster, connectedApps] = await Promise.all([
       window.sovereignbot.settings.get({}),
       window.sovereignbot.workspaces.list({}),

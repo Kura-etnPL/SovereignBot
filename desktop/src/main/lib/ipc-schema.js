@@ -236,6 +236,21 @@ export const IPC_CHANNELS = Object.freeze({
     }),
     "job:attention": emptyRequest(),
     "settings:get": emptyRequest(),
+    "data:status": emptyRequest(),
+    "data:listBackups": emptyRequest(),
+    "data:backup": emptyRequest(),
+    "data:export": emptyRequest(),
+    "data:prepareReset": emptyRequest(),
+    "data:restore": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({ id: stringField(100) }, 1024),
+    }),
+    "data:reset": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 2048,
+        validateRequest: requiredFields({ confirmation: stringField(100), backupId: stringField(100) }, 2048),
+    }),
     "provider:getRoster": emptyRequest(),
     "provider:refresh": emptyRequest(),
     "provider:openLogin": Object.freeze({

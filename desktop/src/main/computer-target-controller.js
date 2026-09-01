@@ -221,6 +221,21 @@ export function createComputerTargetController({ workerNodeStore, audit, localIs
         takeover(params) { return leaseAction({ ...params, operation: "takeover" }); },
         release(params) { return leaseAction({ ...params, operation: "release" }); },
         cancel(jobId) { const entry = active.get(jobId); if (!entry) return false; entry.cancelled = true; entry.cancel?.(); return true; },
+        clearCache() {
+            for (const [jobId, entry] of active) {
+                entry.cancelled = true;
+                try { entry.cancel?.(); } catch {}
+                active.delete(jobId);
+            }
+        },
+        async releaseAllLeases({ jobs = [] } = {}) {
+            let released = 0;
+            for (const job of jobs) {
+                if (!job?.computerTarget || !job.ownerCoworkerId) continue;
+                try { await leaseAction({ job, operation: "release", actorId: "desktop-clean-reset" }); released += 1; } catch {}
+            }
+            return released;
+        },
         listTargets,
         publicTarget(value) { return normalizeTarget(value); },
     };
