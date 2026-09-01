@@ -326,7 +326,7 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
             if (!plainObject(input)) throw new Error("skill import must be an object");
             if (input.schema !== "sovereignbot.desktop.skill.v1") throw new Error("skill schema is invalid");
             const { schema: _schema, ...document } = input;
-            const created = this.create(document);
+            const created = this.create({ ...document, source: "imported" });
             return { imported: true, skill: created };
         },
         duplicateSkill(id) {

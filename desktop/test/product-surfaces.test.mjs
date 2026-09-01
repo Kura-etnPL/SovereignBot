@@ -59,7 +59,7 @@ test("skill transfer is declarative and duplicate starts unassigned", () => {
   const source = store.create({ name: "Review", description: "Safe review", instructions: "Review the result", steps: ["check"], requestedCapabilities: ["workspace"] });
   const exported = store.exportSkill(source.id);
   assert.equal(exported.assignedTeamIds, undefined);
-  const imported = store.importSkill({ ...exported, source: "imported" }).skill;
+  const imported = store.importSkill(exported).skill;
   const duplicate = store.duplicateSkill(source.id);
   const retested = store.retestSkill(source.id);
   assert.equal(imported.assignedTeamIds.length, 0);

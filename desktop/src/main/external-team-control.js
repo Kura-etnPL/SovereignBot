@@ -339,6 +339,8 @@ export function createExternalTeamControlApi({
     requestAttention = () => undefined,
     audit,
     getAudit = () => audit,
+    getRoutineController = () => routineController,
+    getJobs = () => jobs,
     now = () => new Date().toISOString(),
     makeOutcomeId: makeOutcomeIdFn = makeOutcomeId,
 } = {}) {
@@ -580,8 +582,9 @@ export function createExternalTeamControlApi({
         },
 
         listRoutines() {
-            if (!routineController?.list) throw new Error("routines are unavailable");
-            const routines = routineController.list().routines ?? [];
+            const currentRoutineController = getRoutineController();
+            if (!currentRoutineController?.list) throw new Error("routines are unavailable");
+            const routines = currentRoutineController.list().routines ?? [];
             return {
                 protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
                 routines: routines.slice(0, MAX_LIST_ITEMS).map((routine) => ({
@@ -599,12 +602,13 @@ export function createExternalTeamControlApi({
         },
 
         runRoutineNow(input) {
-            if (!routineController?.runNow) throw new Error("routine execution is unavailable");
+            const currentRoutineController = getRoutineController();
+            if (!currentRoutineController?.runNow) throw new Error("routine execution is unavailable");
             if (!isPlainObject(input)) throw new Error("runRoutineNow payload must be an object");
             rejectAuthority(input, "runRoutineNow");
             exactKeys(input, new Set(["routineId"]), "runRoutineNow");
             const routineId = opaqueId(input.routineId, "routineId");
-            const result = routineController.runNow(routineId);
+            const result = currentRoutineController.runNow(routineId);
             return {
                 protocol: EXTERNAL_TEAM_CONTROL_PROTOCOL,
                 routineId,
@@ -617,8 +621,9 @@ export function createExternalTeamControlApi({
         },
 
         getAttention() {
-            if (!jobs?.attentionJobs) throw new Error("attention center is unavailable");
-            const attention = jobs.attentionJobs().jobs ?? [];
+            const currentJobs = getJobs();
+            if (!currentJobs?.attentionJobs) throw new Error("attention center is unavailable");
+            const attention = currentJobs.attentionJobs().jobs ?? [];
             const takeoverAttention = [...outcomes.values()]
                 .filter((outcome) => outcome.status === "needs_attention")
                 .map((outcome) => ({

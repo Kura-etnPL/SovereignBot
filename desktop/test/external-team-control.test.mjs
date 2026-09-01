@@ -19,6 +19,13 @@ function fixture() {
     const teams = createTeamService({ dataDir: root, coworkerStore: coworkers, conversationStore: conversations, services });
     const installed = teams.installPack("software-team").team;
     const audit = new AuditLog(join(root, "audit.jsonl"));
+    let routineController = {
+        list: () => ({ routines: [{ id: "routine_0000000000000001", name: "Daily review", enabled: true, coworkerId: installed.coworkerIds[0], skillId: "skill_0000000000000001", schedule: { type: "daily", time: "09:00" }, lastStatus: "completed" }] }),
+        runNow: (routineId) => ({ routineId, job: { id: "job_0000000000000001", status: "queued" } }),
+    };
+    let jobs = {
+        attentionJobs: () => ({ jobs: [{ id: "job_0000000000000001", title: "Review needed", status: "needs_attention", priority: "normal", ownerCoworkerId: installed.coworkerIds[0], conversationId: installed.channels[0].conversationId, createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z" }] }),
+    };
     const blocked = new Set();
     const cancellations = [];
     const api = createExternalTeamControlApi({
@@ -30,20 +37,15 @@ function fixture() {
         skillStore: {
             list: () => ({ skills: [{ id: "skill_0000000000000001", name: "Release review", description: "Review bounded releases.", state: "active", assignedCoworkerIds: [], assignedTeamIds: [installed.id] }] }),
         },
-        routineController: {
-            list: () => ({ routines: [{ id: "routine_0000000000000001", name: "Daily review", enabled: true, coworkerId: installed.coworkerIds[0], skillId: "skill_0000000000000001", schedule: { type: "daily", time: "09:00" }, lastStatus: "completed" }] }),
-            runNow: (routineId) => ({ routineId, job: { id: "job_0000000000000001", status: "queued" } }),
-        },
-        jobs: {
-            attentionJobs: () => ({ jobs: [{ id: "job_0000000000000001", title: "Review needed", status: "needs_attention", priority: "normal", ownerCoworkerId: installed.coworkerIds[0], conversationId: installed.channels[0].conversationId, createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z" }] }),
-        },
+        getRoutineController: () => routineController,
+        getJobs: () => jobs,
         blockConversation: (conversationId) => blocked.add(conversationId),
         isConversationBlocked: (conversationId) => blocked.has(conversationId),
         cancelConversation: (conversationId, reason) => { cancellations.push({ conversationId, reason }); },
         audit,
         makeOutcomeId: () => "outcome_0000000000000001",
     });
-    return { root, teams, coworkers, conversations, installed, api, audit, blocked, cancellations };
+    return { root, teams, coworkers, conversations, installed, api, audit, blocked, cancellations, setRuntimeControllers: (nextRoutineController, nextJobs) => { routineController = nextRoutineController; jobs = nextJobs; } };
 }
 
 test("external team control exposes bounded opaque team operations and idempotent outcomes", () => {
@@ -209,6 +211,24 @@ test("external product projections remain bounded and reuse governed channel del
         const auditRows = await audit.readAll();
         const takeoverRow = auditRows.find((entry) => entry.type === "takeover.requested");
         assert.deepEqual(Object.keys(takeoverRow.data).sort(), ["action", "coworkerId", "status"]);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("external routine and attention projections follow runtime service replacement", () => {
+    const { root, api, setRuntimeControllers } = fixture();
+    try {
+        setRuntimeControllers({
+            list: () => ({ routines: [{ id: "routine_0000000000000001", name: "Replacement routine", enabled: true, coworkerId: "coworker_0000000000000001", skillId: "skill_0000000000000001", schedule: { type: "daily", time: "10:00" }, lastStatus: "queued" }] }),
+            runNow: (routineId) => ({ routineId, routine: { id: routineId, name: "Replacement routine", enabled: true }, job: { id: "job_2222222222222222", title: "Replacement job", status: "queued" } }),
+        }, {
+            attentionJobs: () => ({ jobs: [{ id: "job_3333333333333333", title: "Replacement attention", status: "needs_attention", priority: "high", createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z" }] }),
+        });
+        assert.equal(api.listRoutines().routines[0].name, "Replacement routine");
+        assert.equal(api.runRoutineNow({ routineId: "routine_0000000000000001" }).result.job.id, "job_2222222222222222");
+        assert.equal(api.getAttention().jobs[0].id, "job_3333333333333333");
     }
     finally {
         rmSync(root, { recursive: true, force: true });

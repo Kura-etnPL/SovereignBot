@@ -310,6 +310,8 @@ async function main() {
         isConversationBlocked: (conversationId) => blockedConversations.has(conversationId),
         cancelConversation: (conversationId, reason) => coworkerDispatcher.cancelConversation(conversationId, reason),
         getAudit: () => host.runtime.audit,
+        getRoutineController: () => routines,
+        getJobs: () => jobs,
     });
     try {
         await externalTeamControl.start();
