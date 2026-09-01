@@ -28,6 +28,7 @@ async function main() {
   const transcriptPath = `${dataDir}-fake-provider-transcript.jsonl`;
   const evidenceDir = `${dataDir}-evidence`;
   const electronUserDataDir = `${dataDir}-electron-userdata`;
+  const backupsDir = `${dataDir}.backups`;
   const child = spawn(exe, ["--disable-gpu", `--user-data-dir=${electronUserDataDir}`, "--verify-software-team"], {
     env: {
       ...process.env,
@@ -80,6 +81,7 @@ async function main() {
     await rm(evidenceDir, { recursive: true, force: true }).catch(() => {});
     await rm(electronUserDataDir, { recursive: true, force: true }).catch(() => {});
     await rm(transcriptPath, { force: true }).catch(() => {});
+    await rm(backupsDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
