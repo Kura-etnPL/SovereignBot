@@ -9,7 +9,7 @@ const DISPATCH_SCHEMA = "sovereignbot.desktop.coworker-dispatch.v1";
 const MAX_CONTEXT_MESSAGES = 32;
 const MAX_CONTEXT_TEXT = 4_000;
 const MAX_REPLY_TEXT = 20_000;
-const MAX_SESSION_ID = 2_000;
+const MAX_CONTINUITY_REF = 512;
 const MAX_HANDOFF_DEPTH = 4;
 
 function stateKey(conversationId, coworkerId) {
@@ -21,13 +21,14 @@ function safeSessionState(value, expectedKind) {
         return undefined;
     if (value.kind !== expectedKind)
         return undefined;
-    if (typeof value.sessionId !== "string" || !value.sessionId || value.sessionId.length > MAX_SESSION_ID)
+    const key = expectedKind === "chatgpt-web" ? "continuationRef" : "sessionId";
+    if (typeof value[key] !== "string" || !value[key] || value[key].length > MAX_CONTINUITY_REF)
         return undefined;
-    return { kind: value.kind, sessionId: value.sessionId };
+    return { kind: value.kind, [key]: value[key] };
 }
 
 function providerKindForHarness(harnessKind) {
-    return harnessKind === "codex" ? "codex" : harnessKind === "claude-code" ? "claude-code" : undefined;
+    return harnessKind === "codex" ? "codex" : harnessKind === "claude-code" ? "claude-code" : harnessKind === "chatgpt-web" ? "chatgpt-web" : undefined;
 }
 
 function redactWorkspacePath(value, workspacePath) {

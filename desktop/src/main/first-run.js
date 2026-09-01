@@ -71,6 +71,7 @@ export function createFirstRunService({ host, services }) {
             ]) {
                 providers[label] = await describeProvider(() => host.coreModules[key]({}), label === "claude" ? "claude-code" : label, versionArgs);
             }
+            providers["chatgpt-web"] = host.rosterSummary?.().providers?.["chatgpt-web"] ?? { found: false, health: "unavailable", reason: "Use Sign in to connect ChatGPT Web." };
             return {
                 core: { ok: true },
                 providers,

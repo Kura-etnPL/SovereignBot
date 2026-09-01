@@ -6,6 +6,8 @@ import { verifyVendorTree } from "./lib/vendor-integrity.js";
 import { describeProvider } from "./lib/provider-discovery.js";
 import { loadJsonState } from "./lib/desktop-state.js";
 import { buildPolicyRules, buildProviderRoster, resolveFakeProviderLaunch } from "./provider-roster.js";
+import { accountIsolationNamespace } from "./provider-account.js";
+import { createChatGPTWebProviderFactory } from "./chatgpt-web-provider.js";
 import { prepareInternalNode } from "./internal-node.js";
 
 const DESKTOP_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -111,7 +113,7 @@ export async function loadCoreResolvers() {
 // settings, and the persistent Coworker Registry. Coworkers are converted into dedicated
 // provider-backed runtime agents only here; renderer messages and model output never mint
 // runtime identities or capabilities.
-export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = () => [], getCoworkerAppAccess = () => undefined, workerNodeClientResolver }) {
+export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = () => [], getCoworkerAppAccess = () => undefined, workerNodeClientResolver, chatgptWebDriverFactory }) {
     if (typeof getSettings !== "function")
         throw new Error("runtime host requires a settings reader");
     if (typeof getCoworkers !== "function")
@@ -121,6 +123,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
 
     const { createRuntime } = await loadCore();
     const coreModules = await loadCoreResolvers();
+    const defaultChatGPTAccount = accountIsolationNamespace("chatgpt-web", "default");
 
     const fakeLaunchers = {
         codex: resolveFakeProviderLaunch({ ...process.env, provider: "codex" }),
@@ -155,6 +158,9 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         return {
             codex: resolveFast(coreModules.resolveCodexLaunch, "codex", fakeLaunchers.codex),
             claude: resolveFast(coreModules.resolveClaudeCodeLaunch, "claude-code", fakeLaunchers.claude),
+            "chatgpt-web": chatgptWebEnabled
+                ? { provider: "chatgpt-web", found: true, source: "dedicated-profile", auth: { state: "unverified" }, health: "ready", interactiveLoginAvailable: true }
+                : chatgptWebUnavailable(),
         };
     }
 
@@ -175,7 +181,10 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                 ["--version"],
             ),
         ]);
-        return { codex, claude };
+        const chatgptWeb = chatgptWebEnabled
+            ? await chatgptWebFactory.health(defaultChatGPTAccount)
+            : chatgptWebUnavailable();
+        return { codex, claude, "chatgpt-web": { provider: "chatgpt-web", ...chatgptWeb } };
     }
 
     function computerRuntimeConfig() {
@@ -196,6 +205,17 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                 },
             },
         };
+    }
+
+    const chatgptWebEnabled = process.env.SOVEREIGNBOT_CHATGPT_WEB_ENABLED === "1" || typeof chatgptWebDriverFactory === "function";
+    const chatgptWebFactory = createChatGPTWebProviderFactory({
+        dataDir,
+        driverConfig: computerRuntimeConfig().config?.driver ?? {},
+        driverFactory: chatgptWebDriverFactory,
+    });
+
+    function chatgptWebUnavailable() {
+        return { provider: "chatgpt-web", found: false, health: "unavailable", auth: { state: "signed-out" }, reason: "ChatGPT Web is not connected; use Sign in to connect the dedicated profile." };
     }
 
     function coworkerSnapshot() {
@@ -224,6 +244,8 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                 ...(disabled ? { reason: "Provider disabled in Settings" } : result.reason ? { reason: String(result.reason).slice(0, 300) } : {}),
                 authState,
                 usable: roster.providers[key] === true,
+                ...(Array.isArray(result.capabilities) ? { capabilities: result.capabilities.filter((entry) => typeof entry === "string").slice(0, 16) } : {}),
+                ...(Array.isArray(result.models) ? { models: result.models.filter((entry) => typeof entry === "string").slice(0, 16) } : {}),
             };
         };
         return {
@@ -241,6 +263,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             providers: {
                 codex: publicProvider("codex"),
                 claude: publicProvider("claude"),
+                "chatgpt-web": publicProvider("chatgpt-web"),
             },
         };
     }
@@ -276,7 +299,12 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                     repeatWindowMs: 180000,
                     rules: buildPolicyRules(nextRoster.agents),
                 },
-            }, workerNodeClientResolver ? { workerNodeClientResolver } : {});
+            }, {
+                ...(workerNodeClientResolver ? { workerNodeClientResolver } : {}),
+                chatgptWebAdapterResolver: (agent) => agent.harness?.kind === "chatgpt-web"
+                    ? chatgptWebFactory.get(agent.harness.accountNamespace ?? defaultChatGPTAccount)
+                    : undefined,
+            });
 
             // PolicyVersionStore intentionally keeps the active policy across a runtime
             // rebuild.  Reconcile only the exact per-agent rules generated from the
@@ -360,6 +388,9 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             return roster.mode;
         },
         coreModules,
+        openChatGPTWebLogin() {
+            return chatgptWebFactory.openLogin(defaultChatGPTAccount);
+        },
         rosterSummary() {
             return structuredClone(summary);
         },
@@ -373,6 +404,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         },
         async close() {
             await runtime.close();
+            await chatgptWebFactory.close();
         },
     };
 }

@@ -94,6 +94,7 @@ function bindingFor(coworkerId) {
 function humanProvider(provider) {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude Code";
+  if (provider === "chatgpt-web") return "ChatGPT Web / Sol";
   return "Automatic";
 }
 
@@ -313,7 +314,7 @@ function renderReadiness() {
     summary.textContent = providers.length ? `${providers.join(" + ")} ready · ${readyCoworkers} coworker lanes` : `${readyCoworkers} coworker lanes ready`;
     dot.classList.remove("offline");
   } else {
-    summary.textContent = blocked?.health === "signed-out" ? "Sign in to Codex or Claude Code"
+    summary.textContent = blocked?.health === "signed-out" ? "Sign in to an AI provider"
       : blocked?.health === "capacity-limited" ? "Provider capacity is limited"
         : blocked?.health === "unavailable" ? "Provider unavailable — check Settings"
           : "Connect Codex or Claude Code";
@@ -1603,7 +1604,7 @@ function renderProviderCards() {
   const root = $("provider-cards");
   clearNode(root);
   const firstRunProviders = state.firstRun?.providers ?? {};
-  for (const provider of ["codex", "claude"]) {
+  for (const provider of ["codex", "claude", "chatgpt-web"]) {
     const info = firstRunProviders[provider] ?? {};
     const rosterProvider = state.roster?.providers?.[provider] ?? {};
     const health = rosterProvider.health ?? (rosterProvider.usable ? "ready" : info.found ? "unavailable" : "unavailable");
@@ -1623,15 +1624,15 @@ function renderProviderCards() {
           : health === "unavailable" ? "Unavailable" : "Checking";
     head.append(name, status);
     const detail = document.createElement("p");
-    detail.textContent = rosterProvider.reason || (info.found ? (info.version || "CLI detected") : "Install the local CLI, then refresh.");
+    detail.textContent = rosterProvider.reason || (provider === "chatgpt-web" ? "Use the dedicated profile for a normal ChatGPT Web sign-in, then refresh." : info.found ? (info.version || "CLI detected") : "Install the local CLI, then refresh.");
     const actions = document.createElement("div");
     actions.className = "provider-actions";
     const signIn = document.createElement("button");
     signIn.type = "button";
-    signIn.textContent = info.found ? "Open sign-in" : "Try detection";
+    signIn.textContent = provider === "chatgpt-web" ? "Sign in" : info.found ? "Open sign-in" : "Try detection";
     signIn.addEventListener("click", async () => {
       try {
-        if (info.found) await window.sovereignbot.providers.openLogin({ provider });
+        if (provider === "chatgpt-web" || info.found) await window.sovereignbot.providers.openLogin({ provider });
         else await window.sovereignbot.providers.refresh({});
         await refreshSettingsData();
       } catch (error) {

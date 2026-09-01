@@ -274,6 +274,12 @@ async function main() {
                 return;
             }
 
+            if (request.method === "POST" && url.pathname === "/text") {
+                await startSession();
+                send(response, 200, { text: await client.visibleText(), leaseId: sessionLease });
+                return;
+            }
+
             if (request.method === "POST" && url.pathname === "/navigate") {
                 const body = await readJson(request);
                 const target = new URL(String(body.url));

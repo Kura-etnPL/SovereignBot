@@ -240,7 +240,7 @@ export const IPC_CHANNELS = Object.freeze({
         direction: "renderer->main",
         maxPayloadBytes: 1024,
         validateRequest: requiredFields({
-            provider: enumField(["codex", "claude"]),
+            provider: enumField(["codex", "claude", "chatgpt-web"]),
         }, 1024),
     }),
     "provider:setRoleAssignment": Object.freeze({
@@ -276,7 +276,7 @@ function validateProvidersShape(value) {
     if (!isPlainObject(value) || Object.keys(value).length === 0)
         throw new Error("providers must be a non-empty object");
     for (const [provider, entry] of Object.entries(value)) {
-        if (!["codex", "claude"].includes(provider))
+        if (!["codex", "claude", "chatgpt-web"].includes(provider))
             throw new Error(`unknown provider: ${String(provider).slice(0, 20)}`);
         if (!isPlainObject(entry))
             throw new Error(`${provider} settings must be an object`);

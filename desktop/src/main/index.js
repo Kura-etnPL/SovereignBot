@@ -374,6 +374,10 @@ async function main() {
                 "provider:getRoster": () => host.rosterSummary(),
                 "provider:refresh": async () => applyProviderRefresh(await host.refreshProviders({ isBusy: goalsBusy })),
                 "provider:openLogin": async ({ provider }) => {
+                    if (provider === "chatgpt-web") {
+                        const login = await host.openChatGPTWebLogin();
+                        return { login, refresh: { applied: false, reason: "manual-sign-in", roster: host.rosterSummary() } };
+                    }
                     const resolver = provider === "codex"
                         ? () => host.coreModules.resolveCodexLaunch({})
                         : () => host.coreModules.resolveClaudeCodeLaunch({});

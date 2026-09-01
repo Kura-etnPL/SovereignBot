@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { ClaudeCodeHarness } from "./claude-code-harness.js";
 import { CodexHarness } from "./codex-harness.js";
 import { WorkerNodeHarness } from "./worker-node-harness.js";
+import { ChatGPTWebHarness } from "./chatgpt-web-harness.js";
 
 const TOOL_BRIDGE_MANAGERS = new WeakMap();
 const HARNESS_ACTIVITY = new WeakMap();
@@ -249,6 +250,8 @@ export function harnessTarget(harness) {
         return harness.command ?? process.env.SOVEREIGNBOT_CLAUDE_BIN ?? "claude";
     if (harness.kind === "worker-node")
         return "worker-node";
+    if (harness.kind === "chatgpt-web")
+        return "chatgpt-web";
     return "echo";
 }
 
@@ -264,6 +267,8 @@ function createBaseHarness(agent) {
             return new ClaudeCodeHarness(agent.harness);
         case "worker-node":
             return new WorkerNodeHarness(agent);
+        case "chatgpt-web":
+            return new ChatGPTWebHarness(agent);
         default:
             throw new Error(`unsupported harness kind: ${agent.harness.kind}`);
     }
@@ -271,7 +276,7 @@ function createBaseHarness(agent) {
 
 export function createHarness(agent) {
     const base = createBaseHarness(agent);
-    const providerSafe = ["codex", "claude-code"].includes(agent.harness.kind)
+    const providerSafe = ["codex", "claude-code", "chatgpt-web"].includes(agent.harness.kind)
         ? new ProviderResultBoundaryHarness(base)
         : base;
     const manager = TOOL_BRIDGE_MANAGERS.get(agent);

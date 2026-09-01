@@ -7,6 +7,7 @@ import { GovernedToolBridgeManager } from "./governed-tool-bridge.js";
 import { Governor } from "./governor.js";
 import { registerAgentToolBridgeManager } from "./harness.js";
 import { registerAgentWorkerNodeClient } from "./worker-node-harness.js";
+import { registerAgentChatGPTWebAdapter } from "./chatgpt-web-harness.js";
 import { MemoryStore } from "./memory.js";
 import { OperatorSessionStore } from "./operator-session.js";
 import { Orchestrator } from "./orchestrator.js";
@@ -101,6 +102,8 @@ export async function createRuntime(config, options = {}) {
             registerAgentToolBridgeManager(agent, governedToolBridge);
         if (agent.harness?.kind === "worker-node" && options.workerNodeClientResolver)
             registerAgentWorkerNodeClient(agent, options.workerNodeClientResolver);
+        if (agent.harness?.kind === "chatgpt-web" && options.chatgptWebAdapterResolver)
+            registerAgentChatGPTWebAdapter(agent, options.chatgptWebAdapterResolver(agent));
     }
 
     return {
@@ -123,6 +126,8 @@ export async function createRuntime(config, options = {}) {
             for (const agent of runtimeConfig.agents) {
                 if (agent.harness?.kind === "worker-node")
                     registerAgentWorkerNodeClient(agent, undefined);
+                if (agent.harness?.kind === "chatgpt-web")
+                    registerAgentChatGPTWebAdapter(agent, undefined);
             }
             await governedToolBridge.close();
             await (managedComputerDriverFactory ?? computerDriverFactory)?.close?.();

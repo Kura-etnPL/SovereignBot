@@ -725,7 +725,9 @@ export class Orchestrator {
 
     compatibleAgents(task) {
         const required = new Set(task.requiredCapabilities ?? []);
-        const pinnedAgentId = task.harnessState?.sessionId ? task.assignedAgentId : undefined;
+        const pinnedAgentId = (task.harnessState?.sessionId || task.harnessState?.continuationRef)
+            ? task.assignedAgentId
+            : undefined;
         return this.agents.filter((agent) => {
             if (agent.role === "supervisor" && task.allowSupervisorExecution !== true)
                 return false;
@@ -812,7 +814,7 @@ export class Orchestrator {
             type: "task.started",
             actor: agent.id,
             subject: task.id,
-            data: { title: running.task.title, resumed: Boolean(running.task.harnessState?.sessionId) },
+            data: { title: running.task.title, resumed: Boolean(running.task.harnessState?.sessionId || running.task.harnessState?.continuationRef) },
         });
 
         const updateHarnessState = async (statePatch) => {

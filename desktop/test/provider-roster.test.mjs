@@ -216,7 +216,7 @@ test("connected app assignments grant only the receiver's governed tool groups",
     assert.deepEqual(roster.coworkerBindings[coworker.id].connectedAppIds, ["sovereignbot-workspace"]);
 });
 
-test("reserved providers fail closed until an explicit executable adapter is registered", () => {
+test("reserved providers fail closed while ChatGPT Web is a first-class registered target", () => {
     const antigravityCoworker = {
         id: "coworker_aaaaaaaaaaaaaaaa",
         name: "Reserved Provider Coworker",
@@ -235,10 +235,27 @@ test("reserved providers fail closed until an explicit executable adapter is reg
         chooseCoworkerProvider(antigravityCoworker, { antigravity: true, claude: true }),
         undefined,
     );
-    assert.equal(
-        chooseCoworkerProvider({ modelBinding: { profile: "deep" } }, { "chatgpt-web": true, claude: true }),
-        undefined,
-    );
+    assert.equal(chooseCoworkerProvider({ modelBinding: { profile: "deep" } }, { "chatgpt-web": true, claude: true }), "chatgpt-web");
+});
+
+test("ChatGPT Web / Sol fills only an explicit coworker Deep lane, never hidden orchestration roles", () => {
+    const coworker = {
+        id: "coworker_ffffffffffffffff",
+        name: "Sol Coworker",
+        state: "active",
+        modelBinding: { profile: "deep", provider: "chatgpt-web", model: "sol", providerAccountId: "account-a" },
+    };
+    const roster = buildProviderRoster({
+        discovery: { codex: READY(), claude: READY(), "chatgpt-web": READY({ models: ["sol"], capabilities: ["chat", "continuation"] }) },
+        settings: {},
+        coworkers: [coworker],
+    });
+    assert.deepEqual(roster.roles, { planner: "claude-planner", worker: "codex-worker", reviewer: "claude-reviewer", synthesizer: "claude-synthesizer" });
+    const agent = roster.agents.find((entry) => entry.id === "coworker-agent-ffffffffffffffff");
+    assert.equal(agent.harness.kind, "chatgpt-web");
+    assert.equal(agent.harness.model, "sol");
+    assert.match(agent.harness.accountNamespace, /^provider-account-[a-f0-9]{32}$/);
+    assert.equal(JSON.stringify(agent).includes("account-a"), false);
 });
 
 test("deep requires an explicit strong Codex target and efficient maps to Luna", () => {
