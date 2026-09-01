@@ -39,6 +39,7 @@ import { createSearchService } from "./search-service.js";
 import { createCommandPaletteService } from "./command-palette-service.js";
 import { createThisPcService } from "./this-pc-service.js";
 import { createComputerTargetController } from "./computer-target-controller.js";
+import { createLocalIsolatedComputer } from "./local-isolated-computer.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -158,6 +159,8 @@ async function main() {
     let jobs;
     let routines;
     let eventTriggers;
+    let computerTargetController;
+    let localIsolatedComputer;
     projectService = createProjectService({
         dataDir,
         services,
@@ -254,6 +257,7 @@ async function main() {
         try { eventTriggers?.stop(); } catch {}
         try { routines?.stop(); } catch {}
         try { chiefLoop?.stop(); } catch {}
+        try { await localIsolatedComputer?.close?.(); } catch {}
         try { await Promise.race([externalTeamControl?.close?.() ?? Promise.resolve(), delay(5_000)]); } catch {}
         try {
             await Promise.race([coworkerDispatcher?.flush?.() ?? Promise.resolve(), delay(15_000)]);
@@ -303,7 +307,24 @@ async function main() {
         try { routines?.stop(); } catch {}
         try { chiefLoop?.stop(); } catch {}
         bridge = createOperatorBridge(host.runtime);
-        const computerTargetController = createComputerTargetController({ workerNodeStore, audit: host.runtime.audit });
+        localIsolatedComputer?.close?.().catch?.(() => {});
+        localIsolatedComputer = createLocalIsolatedComputer({ services, audit: host.runtime.audit });
+        const thisPcComputer = {
+            resolve: async () => ({
+                computer: { state: "online", capacity: 1, currentLoad: 0, capabilities: ["snapshot", "takeover", "release"] },
+                execute: async (envelope) => {
+                    if (!envelope.projectId) throw new Error("This PC Computer target requires a Project scope");
+                    if (envelope.operation !== "snapshot") throw new Error(`This PC Computer does not support ${envelope.operation} through Job execution`);
+                    return thisPc.snapshot(envelope.projectId, envelope.ownerCoworkerId);
+                },
+                lease: async (envelope) => {
+                    if (!envelope.projectId) throw new Error("This PC Computer target requires a Project scope");
+                    if (envelope.operation === "takeover") return thisPc.takeOver(envelope.projectId, envelope.ownerCoworkerId, { actor: envelope.input.actorId });
+                    return thisPc.handBack(envelope.projectId, envelope.ownerCoworkerId, { actor: envelope.input.actorId });
+                },
+            }),
+        };
+        computerTargetController = createComputerTargetController({ workerNodeStore, localIsolatedComputer, thisPcComputer, audit: host.runtime.audit });
         goals = createGoalController({
             runtime: host.runtime,
             services,
@@ -723,6 +744,7 @@ async function main() {
                 "eventTrigger:setEnabled": ({ triggerId, enabled }) => eventTriggers.setEnabled(triggerId, enabled),
                 "eventTrigger:remove": ({ triggerId }) => eventTriggers.remove(triggerId),
                 "workerNode:pairViaDialog": () => workerNodeStore.pairViaDialog(win, dialog),
+                "computerTarget:list": () => computerTargetController?.listTargets?.() ?? { targets: [] },
                 "workerNode:list": () => workerNodeStore.list(),
                 "workerNode:get": ({ nodeId }) => workerNodeStore.get(nodeId),
                 "workerNode:refresh": ({ nodeId }) => workerNodeStore.refresh(nodeId),

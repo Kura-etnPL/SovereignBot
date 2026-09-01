@@ -70,6 +70,9 @@ const WORKER_NODE_CHANNELS = Object.freeze({
     "workerNode:trustRevoke": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "workerNode:trustRotate": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
+const COMPUTER_TARGET_CHANNELS = Object.freeze({
+    "computerTarget:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
+});
 const ALL_IPC_CHANNELS = Object.freeze({
     ...IPC_CHANNELS,
     ...V3_IPC_CHANNELS,
@@ -82,6 +85,7 @@ const ALL_IPC_CHANNELS = Object.freeze({
     ...ROUTINE_CHANNELS,
     ...EVENT_TRIGGER_CHANNELS,
     ...WORKER_NODE_CHANNELS,
+    ...COMPUTER_TARGET_CHANNELS,
 });
 
 function assertObject(payload, label) {
@@ -385,12 +389,26 @@ function validateRoutineRequest(channel, payload) {
 }
 
 function validateComputerTarget(value) {
-    exactKeys(value, new Set(["kind", "nodeId", "workspaceId", "computerId"]), "computer target");
-    if (value.kind !== "worker-computer") throw new Error("computer target kind must be worker-computer");
-    for (const [key, pattern] of [["nodeId", /^worker_[0-9a-f]{16}$/i], ["workspaceId", /^[A-Za-z0-9][\w:.-]{0,159}$/], ["computerId", /^[A-Za-z0-9][\w:.-]{0,159}$/]]) {
-        if (typeof value[key] !== "string" || !pattern.test(value[key])) throw new Error(`computer target ${key} is invalid`);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("computer target must be an object");
+    const identifier = (entry, key) => {
+        if (typeof entry !== "string" || !/^[A-Za-z0-9][\w:.-]{0,159}$/.test(entry)) throw new Error(`computer target ${key} is invalid`);
+        return entry;
+    };
+    if (["worker-computer", "vm"].includes(value.kind)) {
+        exactKeys(value, new Set(["kind", "nodeId", "workspaceId", "computerId"]), "computer target");
+        if (typeof value.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(value.nodeId)) throw new Error("computer target nodeId is invalid");
+        return { kind: value.kind, nodeId: value.nodeId, workspaceId: identifier(value.workspaceId, "workspaceId"), computerId: identifier(value.computerId, "computerId") };
     }
-    return { kind: "worker-computer", nodeId: value.nodeId, workspaceId: value.workspaceId, computerId: value.computerId };
+    if (["local-isolated", "cloud"].includes(value.kind)) {
+        exactKeys(value, value.kind === "cloud" ? new Set(["kind", "profileId", "workspaceId", "optIn"]) : new Set(["kind", "profileId", "workspaceId"]), "computer target");
+        if (value.kind === "cloud" && typeof value.optIn !== "boolean") throw new Error("computer target optIn is invalid");
+        return { kind: value.kind, profileId: identifier(value.profileId, "profileId"), workspaceId: identifier(value.workspaceId, "workspaceId"), ...(value.kind === "cloud" ? { optIn: value.optIn } : {}) };
+    }
+    if (value.kind === "this-pc") {
+        exactKeys(value, new Set(["kind", "workspaceId"]), "computer target");
+        return { kind: value.kind, workspaceId: identifier(value.workspaceId, "workspaceId") };
+    }
+    throw new Error("computer target kind is unsupported");
 }
 
 function validateEventPathPrefix(value) {
@@ -505,6 +523,10 @@ function validateRequest(channel, payload) {
         return validateEventTriggerRequest(channel, payload);
     if (WORKER_NODE_CHANNELS[channel])
         return validateWorkerNodeRequest(channel, payload);
+    if (COMPUTER_TARGET_CHANNELS[channel]) {
+        exactKeys(payload, new Set(), channel);
+        return {};
+    }
     if (channel === "conversation:send")
         return validateConversationSend(payload);
     return V3_IPC_CHANNELS[channel]

@@ -36,7 +36,7 @@ function normalizeExecutionTarget(value) {
 }
 
 function isWorkerNodeTarget(job) { return job.executionTarget?.kind === "worker-node"; }
-function isComputerTarget(job) { return job.computerTarget?.kind === "worker-computer"; }
+function isComputerTarget(job) { return Boolean(job.computerTarget); }
 function isEconomyFailure(message) { return /\[ECONOMY:(?:METERED_DISABLED|BUDGET_EXHAUSTED|TOTAL_CAP_EXCEEDED|SPEND_CAP_INVALID|LEDGER_CORRUPT|UNAVAILABLE)\]/i.test(String(message ?? "")); }
 function isTransportFailure(error) { return /worker-node transport unavailable|reconnect required/i.test(String(error?.message ?? error)); }
 function makeWorkerRequestId() { return `worker_request_${randomBytes(8).toString("hex")}`; }
@@ -242,7 +242,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         if (job.requestedWorkspaceId && project.workspaceId !== job.requestedWorkspaceId) throw new Error("Routine Job workspace does not match Project workspace");
       }
       const computerTarget = isComputerTarget(job) ? job.computerTarget : undefined;
-      if (computerTarget && !computerTargetController) throw new Error("Worker Computer target is unavailable");
+      if (computerTarget && !computerTargetController) throw new Error("Computer target is unavailable");
       if (computerTarget && job.requestedWorkspaceId && job.requestedWorkspaceId !== computerTarget.workspaceId) throw new Error("Computer target workspace does not match Job workspace");
       const remoteTarget = !computerTarget && isWorkerNodeTarget(job) ? workerNodeStore?.resolveDispatchTarget(job.executionTarget.nodeId, job.executionTarget.workspaceId) : undefined;
       if (isWorkerNodeTarget(job) && !remoteTarget)
@@ -253,7 +253,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         ? { snap: workerNodeRosterSnapshot(), binding: undefined }
         : requireCoworkerBinding(job.ownerCoworkerId);
       const ctx = computerTarget
-        ? { kind: "worker-computer", nodeId: computerTarget.nodeId, workspaceId: computerTarget.workspaceId, computerId: computerTarget.computerId }
+        ? { kind: "computer", targetKind: computerTarget.kind, ...(computerTarget.nodeId ? { nodeId: computerTarget.nodeId } : {}), ...(computerTarget.profileId ? { profileId: computerTarget.profileId } : {}), workspaceId: computerTarget.workspaceId, ...(computerTarget.computerId ? { computerId: computerTarget.computerId } : {}) }
         : remoteTarget
         ? { kind: "worker-node", nodeId: job.executionTarget.nodeId, workspaceId: job.executionTarget.workspaceId }
         : workspaceContext(job, coworker);
@@ -426,7 +426,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       const normalizedComputerTarget = computerTarget === undefined ? undefined : normalizeComputerTarget(computerTarget);
       if (normalizedComputerTarget && target.kind !== "local") throw new Error("Computer target cannot be combined with Worker Node executionTarget");
       const normalizedComputerActions = normalizedComputerTarget ? (computerTargetController?.normalizeActions?.(computerActions) ?? computerActions) : undefined;
-      if (normalizedComputerTarget && !computerTargetController) throw new Error("Worker Computer target is unavailable");
+      if (normalizedComputerTarget && !computerTargetController) throw new Error("Computer target is unavailable");
       if (target.kind === "local" && !normalizedComputerTarget && readiness) { const s = readiness(); if (!s?.allowed) throw new Error(s?.reason ?? "Connect at least one AI provider to run jobs."); }
       if (parentJobId) {
         const parent = getJob(parentJobId);

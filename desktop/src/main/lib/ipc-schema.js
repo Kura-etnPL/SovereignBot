@@ -431,14 +431,20 @@ function workerExecutionTarget(value) {
 
 function workerComputerTarget(value) {
     if (!isPlainObject(value)) throw new Error("computerTarget must be an object");
-    assertOnlyKnownKeys(value, ["kind", "nodeId", "workspaceId", "computerId"]);
-    if (value.kind !== "worker-computer") throw new Error("computerTarget.kind must be worker-computer");
-    return {
-        kind: "worker-computer",
-        nodeId: workerNodeIdField()(value.nodeId, "computerTarget.nodeId"),
-        workspaceId: idField()(value.workspaceId, "computerTarget.workspaceId"),
-        computerId: idField()(value.computerId, "computerTarget.computerId"),
-    };
+    if (["worker-computer", "vm"].includes(value.kind)) {
+        assertOnlyKnownKeys(value, ["kind", "nodeId", "workspaceId", "computerId"]);
+        return { kind: value.kind, nodeId: workerNodeIdField()(value.nodeId, "computerTarget.nodeId"), workspaceId: idField()(value.workspaceId, "computerTarget.workspaceId"), computerId: idField()(value.computerId, "computerTarget.computerId") };
+    }
+    if (["local-isolated", "cloud"].includes(value.kind)) {
+        assertOnlyKnownKeys(value, value.kind === "cloud" ? ["kind", "profileId", "workspaceId", "optIn"] : ["kind", "profileId", "workspaceId"]);
+        if (value.kind === "cloud" && typeof value.optIn !== "boolean") throw new Error("computerTarget.optIn must be boolean");
+        return { kind: value.kind, profileId: idField()(value.profileId, "computerTarget.profileId"), workspaceId: idField()(value.workspaceId, "computerTarget.workspaceId"), ...(value.kind === "cloud" ? { optIn: value.optIn } : {}) };
+    }
+    if (value.kind === "this-pc") {
+        assertOnlyKnownKeys(value, ["kind", "workspaceId"]);
+        return { kind: "this-pc", workspaceId: idField()(value.workspaceId, "computerTarget.workspaceId") };
+    }
+    throw new Error("computerTarget.kind is unsupported");
 }
 
 function computerActions(value) {

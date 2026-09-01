@@ -20,6 +20,7 @@
   let routinePollTimer;
   let currentRoutineId;
   let workerNodes = [];
+  let computerTargets = [];
 
   function statusClass(s) { return `job-status ${s}`; }
   function statusLabel(s) { return t(`work.status.${s}`, s); }
@@ -28,13 +29,18 @@
     if ($("job-execution") || !$("job-form-error")) return;
     const makeLabel = (caption, control) => { const label = document.createElement("label"); label.textContent = caption; label.append(control); return label; };
     const execution = document.createElement("select"); execution.id = "job-execution";
-    for (const [value, caption] of [["local", "This PC / 此电脑"], ["worker-node", "Paired Worker Node / 已配对工作节点"], ["worker-computer", "Worker Computer / 工作电脑"]]) { const option = document.createElement("option"); option.value = value; option.textContent = caption; execution.append(option); }
+    for (const [value, caption] of [["local", "This PC / 此电脑"], ["worker-node", "Paired Worker Node / 已配对工作节点"], ["worker-computer", "Worker Computer / 工作电脑"], ["vm", "VM Computer / 虚拟机电脑"], ["local-isolated", "Local Isolated / 本机隔离"], ["cloud", "Cloud Computer / 云电脑"]]) { const option = document.createElement("option"); option.value = value; option.textContent = caption; execution.append(option); }
     const node = document.createElement("select"); node.id = "job-node";
     const workspace = document.createElement("select"); workspace.id = "job-node-workspace";
     const computer = document.createElement("select"); computer.id = "job-computer";
+    const profile = document.createElement("select"); profile.id = "job-computer-profile";
+    const isolatedWorkspace = document.createElement("select"); isolatedWorkspace.id = "job-computer-workspace";
+    const optIn = document.createElement("input"); optIn.id = "job-cloud-optin"; optIn.type = "checkbox";
     const nodeFields = document.createElement("div"); nodeFields.id = "job-node-fields"; nodeFields.className = "hidden";
     nodeFields.append(makeLabel("Worker Node", node), makeLabel("Node workspace", workspace), makeLabel("Computer target", computer));
-    $("job-form-error").before(makeLabel("Execution", execution), nodeFields);
+    const profileFields = document.createElement("div"); profileFields.id = "job-profile-fields"; profileFields.className = "hidden";
+    profileFields.append(makeLabel("Computer profile", profile), makeLabel("Trusted workspace", isolatedWorkspace), makeLabel("Cloud cost opt-in", optIn));
+    $("job-form-error").before(makeLabel("Execution", execution), nodeFields, profileFields);
   }
 
   function renderList() {
@@ -193,6 +199,7 @@
     const workspace = $("job-node-workspace");
     if (!execution || !node || !workspace) return;
     try { workerNodes = (await window.sovereignbot.workerNodes.list({})).nodes ?? []; } catch { workerNodes = []; }
+    try { computerTargets = (await window.sovereignbot.computerTargets.list({})).targets ?? []; } catch { computerTargets = []; }
     node.textContent = "";
     for (const entry of workerNodes.filter((item) => item.enabled && item.status === "online")) {
       const option = document.createElement("option");
@@ -207,6 +214,20 @@
       option.value = entry.id;
       option.textContent = `${entry.name} (${entry.id})`;
       workspace.append(option);
+    }
+    const profile = $("job-computer-profile");
+    if (profile) {
+      profile.textContent = "";
+      for (const entry of computerTargets.filter((item) => ["local-isolated", "vm", "cloud"].includes(item.kind))) {
+        const option = document.createElement("option"); option.value = entry.id; option.textContent = `${entry.id} (${entry.state})`; profile.append(option);
+      }
+    }
+    const isolatedWorkspace = $("job-computer-workspace");
+    if (isolatedWorkspace) {
+      let workspaces = [];
+      try { workspaces = (await window.sovereignbot.workspaces.list({})).workspaces ?? []; } catch {}
+      isolatedWorkspace.textContent = "";
+      for (const entry of workspaces) { const option = document.createElement("option"); option.value = entry.id; option.textContent = `${entry.name} (${entry.id})`; isolatedWorkspace.append(option); }
     }
     execution.dispatchEvent(new Event("change"));
   }
@@ -619,10 +640,15 @@
       const mode = $("job-execution").value;
       const remote = ["worker-node", "worker-computer"].includes(mode);
       const computer = mode === "worker-computer";
+      const profileMode = ["vm", "local-isolated", "cloud"].includes(mode);
       $("job-node-fields")?.classList.toggle("hidden", !remote);
+      $("job-profile-fields")?.classList.toggle("hidden", !profileMode);
       $("job-node-workspace")?.toggleAttribute("required", remote);
       $("job-node")?.toggleAttribute("required", remote);
       $("job-computer")?.toggleAttribute("required", computer);
+      $("job-computer-profile")?.toggleAttribute("required", profileMode);
+      $("job-computer-workspace")?.toggleAttribute("required", profileMode);
+      $("job-cloud-optin")?.closest("label")?.classList.toggle("hidden", mode !== "cloud");
     });
     $("job-node")?.addEventListener("change", () => {
       const workspace = $("job-node-workspace");
@@ -646,7 +672,13 @@
         const target = mode === "worker-node"
           ? { kind: "worker-node", nodeId: $("job-node").value, workspaceId: $("job-node-workspace").value }
           : { kind: "local" };
-        const computerTarget = mode === "worker-computer" ? { kind: "worker-computer", nodeId: $("job-node").value, workspaceId: $("job-node-workspace").value, computerId: $("job-computer").value } : undefined;
+        let computerTarget;
+        if (mode === "worker-computer") computerTarget = { kind: "worker-computer", nodeId: $("job-node").value, workspaceId: $("job-node-workspace").value, computerId: $("job-computer").value };
+        if (["vm", "local-isolated", "cloud"].includes(mode)) {
+          const profile = computerTargets.find((entry) => entry.id === $("job-computer-profile").value);
+          if (!profile?.target || profile.kind !== mode) throw new Error("selected Computer profile is unavailable");
+          computerTarget = { ...profile.target, workspaceId: $("job-computer-workspace").value, ...(mode === "cloud" ? { optIn: $("job-cloud-optin").checked } : {}) };
+        }
         await window.sovereignbot.jobs.submit({ title: $("job-title").value.trim(), objective: $("job-objective").value.trim(), ownerCoworkerId: $("job-owner").value, executionTarget: target, ...(computerTarget ? { computerTarget, computerActions: [{ operation: "snapshot", input: {} }] } : {}) });
         $("job-dialog")?.close(); $("job-form")?.reset(); await refresh();
       }

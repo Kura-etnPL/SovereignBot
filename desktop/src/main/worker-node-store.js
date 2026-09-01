@@ -284,12 +284,21 @@ export function createWorkerNodeStore({ dataDir, persistPath, credentialsPath, c
         return { node: target.node, workspace: target.workspace, computer, client: target.client };
     }
 
+    async function resolveVmTarget(nodeId, workspaceId, computerId) {
+        const node = getNode(nodeId);
+        const trust = publicTrust(node.trust);
+        if (trust.status !== "trusted" || !["lan", "remote-relay"].includes(trust.transport))
+            throw new Error("VM Computer target requires a trusted secure Worker profile");
+        return resolveComputerTarget(nodeId, workspaceId, computerId);
+    }
+
     return {
         list() { return { schema: WORKER_NODES_SCHEMA, nodes: [...nodes.values()].map(publicRecord) }; },
         get(nodeId) { return publicRecord(getNode(nodeId)); },
         client(nodeId) { return privateClient(nodeId); },
         resolveDispatchTarget,
         resolveComputerTarget,
+        resolveVmTarget,
         async cancel(nodeId, remoteTaskId) {
             return privateClient(nodeId).cancel(remoteTaskId);
         },

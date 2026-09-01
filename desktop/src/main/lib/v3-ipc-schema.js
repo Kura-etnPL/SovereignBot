@@ -3,6 +3,8 @@
 // Messages/coworker/artifact metadata are data only: renderer payloads cannot carry
 // execution authority, provider continuity or secrets.
 
+import { validateComputerActionList } from "../../../vendor/core/src/worker-computer-protocol.js";
+
 const FORBIDDEN = [
     "actor", "owneragentid", "assignedagentid", "harnessstate", "sessionid", "bearer",
     "token", "capability", "password", "secret", "apikey", "env", "cwd", "command",
@@ -28,14 +30,27 @@ function idArray(value, name, max) { if (value === undefined) return undefined; 
 function exact(value, allowed) { for (const key of Object.keys(value)) { if (!allowed.has(key)) throw new Error(`unexpected request field: ${key}`); } }
 function positiveInteger(value, name, min, max) { if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer from ${min} to ${max}`); return value; }
 function workerComputerTargetShape(value) {
-    const target = objectPayload(value); exact(target, new Set(["kind", "nodeId", "workspaceId", "computerId"]));
-    if (target.kind !== "worker-computer" || typeof target.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(target.nodeId)) throw new Error("computerTarget is invalid");
-    return { kind: target.kind, nodeId: identifier(target.nodeId, "nodeId"), workspaceId: identifier(target.workspaceId, "workspaceId"), computerId: identifier(target.computerId, "computerId") };
+    const target = objectPayload(value);
+    if (["worker-computer", "vm"].includes(target.kind)) {
+        exact(target, new Set(["kind", "nodeId", "workspaceId", "computerId"]));
+        if (typeof target.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(target.nodeId)) throw new Error("computerTarget is invalid");
+        return { kind: target.kind, nodeId: identifier(target.nodeId, "nodeId"), workspaceId: identifier(target.workspaceId, "workspaceId"), computerId: identifier(target.computerId, "computerId") };
+    }
+    if (["local-isolated", "cloud"].includes(target.kind)) {
+        exact(target, target.kind === "cloud" ? new Set(["kind", "profileId", "workspaceId", "optIn"]) : new Set(["kind", "profileId", "workspaceId"]));
+        if (target.kind === "cloud" && typeof target.optIn !== "boolean") throw new Error("computerTarget optIn is invalid");
+        return { kind: target.kind, profileId: identifier(target.profileId, "profileId"), workspaceId: identifier(target.workspaceId, "workspaceId"), ...(target.kind === "cloud" ? { optIn: target.optIn } : {}) };
+    }
+    if (target.kind === "this-pc") {
+        exact(target, new Set(["kind", "workspaceId"]));
+        return { kind: target.kind, workspaceId: identifier(target.workspaceId, "workspaceId") };
+    }
+    throw new Error("computerTarget is invalid");
 }
 function workerComputerActionsShape(value) {
     if (!Array.isArray(value) || value.length < 1 || value.length > 8) throw new Error("computerActions must contain 1-8 actions");
-    const allowed = new Set(["snapshot", "navigate", "click", "type", "key", "scroll", "list_files", "read_file", "write_file", "request_help"]);
-    return value.map((entry) => { const action = objectPayload(entry); exact(action, new Set(["operation", "input"])); if (!allowed.has(action.operation)) throw new Error("computer action is invalid"); const input = objectPayload(action.input); for (const textValue of Object.values(input)) if (typeof textValue === "string" && /(?:[A-Za-z]:[\\/]|file:\/\/|bearer|token|cookie|password|secret|credential|session|continuity|provider|cwd|command|coordinates?|click\s+at)/i.test(textValue)) throw new Error("computer action contains private or authority data"); return { operation: action.operation, input: structuredClone(input) }; });
+    value.forEach((entry) => { objectPayload(entry); });
+    return validateComputerActionList(value);
 }
 function memoryTarget(value, { withMemoryId = false, withPatch = false, withPinned = false } = {}) {
     const allowed = new Set(["scope", "ownerId", ...(withMemoryId ? ["memoryId"] : []), ...(withPatch ? ["patch"] : []), ...(withPinned ? ["pinned"] : []), ...(withMemoryId ? [] : ["query", "limit", "includeForgotten"]) ]);
