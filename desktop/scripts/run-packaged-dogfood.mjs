@@ -3,7 +3,7 @@
 // boundary by the checked-in local fixture; no network or installer is involved.
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,13 +26,20 @@ async function main() {
   const exe = findPackagedExe();
   const dataDir = await mkdtemp(join(tmpdir(), "sovereign-packaged-dogfood-"));
   const transcriptPath = join(dataDir, "fake-provider-transcript.jsonl");
-  const child = spawn(exe, ["--disable-gpu", "--desktop-dogfood"], {
+  const evidenceDir = join(dataDir, "evidence");
+  const electronUserDataDir = `${dataDir}-electron-userdata`;
+  const child = spawn(exe, ["--disable-gpu", `--user-data-dir=${electronUserDataDir}`, "--verify-software-team"], {
     env: {
       ...process.env,
       SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: dataDir,
+      SOVEREIGNBOT_DESKTOP_DATA_DIR: dataDir,
+      SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR: evidenceDir,
+      SOVEREIGNBOT_PRODUCT_RUNTIME_DIR: join(dataDir, "private-runtime"),
+      SOVEREIGNBOT_VERIFY_SOFTWARE_TEAM: "1",
       FAKE_PROVIDER_NODE: process.env.FAKE_PROVIDER_NODE ?? join(DESKTOP_ROOT, "resources", "node", "node.exe"),
       FAKE_PROVIDER_DIR: process.env.FAKE_PROVIDER_DIR ?? join(DESKTOP_ROOT, "e2e", "fixtures"),
       FAKE_PROVIDER_TRANSCRIPT: transcriptPath,
+      FAKE_PROVIDER_TEAM_CANARY: "1",
       FAKE_PROVIDER_FANOUT_CANARY: "1",
       FAKE_PROVIDER_P1_CANARY: "1",
       FAKE_PROVIDER_INCLUDE_CWD: "1",
@@ -57,16 +64,20 @@ async function main() {
     });
     const jsonLines = stdout.split(/\r?\n/).filter((line) => line.trim().startsWith("{"));
     const result = jsonLines.length ? JSON.parse(jsonLines.at(-1)) : undefined;
-    if (exitCode !== 0 || result?.dogfood !== "ok")
-      throw new Error(`packaged dogfood failed: exit=${exitCode} result=${JSON.stringify(result)} stderr=${stderr.slice(-2000)}`);
-    const screenshot = join(dataDir, "smoke-home.png");
-    const screenshotBytes = existsSync(screenshot) ? await readFile(screenshot) : Buffer.alloc(0);
-    if (screenshotBytes.length < 10_000) throw new Error(`dogfood screenshot missing or implausibly small (${screenshotBytes.length} bytes)`);
-    console.log(JSON.stringify({ dogfood: "ok", fixtureBoundary: "LOCAL_FIXTURE", checks: result.checks, artifactHashes: { homeScreenshotSha256: sha256(screenshotBytes) } }));
+    if (exitCode !== 0 || !result?.checks) throw new Error(`packaged dogfood failed: exit=${exitCode} stderr=${stderr.slice(-2000)}`);
+    const checks = Object.fromEntries(Object.entries(result.checks).map(([name, value]) => [name, value?.ok === true]));
+    if (Object.values(checks).some((value) => value !== true)) throw new Error(`packaged dogfood checks failed: ${JSON.stringify(checks)}`);
+    const artifacts = {};
+    for (const file of readdirSync(evidenceDir, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".png"))) {
+      const bytes = await readFile(join(evidenceDir, file.name));
+      artifacts[file.name] = { sha256: sha256(bytes), bytes: bytes.length };
+    }
+    if (Object.keys(artifacts).length < 3) throw new Error("packaged dogfood did not produce the expected redacted screenshots");
+    console.log(JSON.stringify({ dogfood: "ok", fixtureBoundary: "LOCAL_FIXTURE", checks, artifactHashes: artifacts }));
   }
   finally {
     await rm(dataDir, { recursive: true, force: true }).catch(() => {});
-    await rm(`${dataDir}-electron-userdata`, { recursive: true, force: true }).catch(() => {});
+    await rm(electronUserDataDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
