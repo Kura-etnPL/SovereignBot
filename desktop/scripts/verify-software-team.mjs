@@ -56,6 +56,8 @@ const child = spawn(ELECTRON, [...ELECTRON_ARGS, `--user-data-dir=${ELECTRON_USE
     env,
     stdio: ["ignore", "pipe", "pipe"],
     shell: false,
+    windowsHide: true,
+    detached: false,
 });
 let stdout = "";
 let stderr = "";

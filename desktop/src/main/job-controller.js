@@ -46,7 +46,7 @@ export function makeJobId() { return `job_${randomBytes(8).toString("hex")}`; }
 function slice(v, n) { const s = String(v ?? "").replace(/\s+/g, " ").trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; }
 function depthOf(jobs, id) { let d = 0, cur = jobs.find(j => j.id === id); while (cur?.parentJobId && d < 100) { d += 1; cur = jobs.find(j => j.id === cur.parentJobId); } return d; }
 
-export function createJobController({ dataDir, runtime, roster, coworkerStore, services, skillStore, workerNodeStore, computerTargetController, projectService, teamService, persistPath, supervisorAgentId, readiness, now = () => new Date().toISOString(), makeId = makeJobId, makeRequestId = makeWorkerRequestId } = {}) {
+export function createJobController({ dataDir, runtime, roster, coworkerStore, services, skillStore, workerNodeStore, computerTargetController, projectService, teamService, persistPath, supervisorAgentId, readiness, onStatus, now = () => new Date().toISOString(), makeId = makeJobId, makeRequestId = makeWorkerRequestId } = {}) {
   if (!dataDir || !runtime?.orchestrator) throw new Error("job controller requires dataDir and runtime");
   if (typeof roster !== "function") throw new Error("job controller requires roster reader");
   if (!coworkerStore?.get) throw new Error("job controller requires coworkerStore");
@@ -171,7 +171,15 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     job.conversation.messages.push({ at: now(), role, kind, text: String(text).slice(0, 4000) });
     if (job.conversation.messages.length > MAX_MESSAGES) job.conversation.messages.splice(0, job.conversation.messages.length - MAX_MESSAGES);
   }
-  function setStatus(job, status) { job.status = status; job.updatedAt = now(); appendMessage(job, "status", `job status: ${status}`); }
+  function setStatus(job, status) {
+    const previous = job.status;
+    job.status = status;
+    job.updatedAt = now();
+    appendMessage(job, "status", `job status: ${status}`);
+    if (previous !== status) {
+      try { onStatus?.(publicJob(job), { previous, status }); } catch { /* notifications are best effort */ }
+    }
+  }
   function normalizeInternalContext(value) {
     if (value === undefined) return {};
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("internal job context must be an object");

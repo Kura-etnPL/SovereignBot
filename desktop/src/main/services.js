@@ -26,10 +26,20 @@ export const DESKTOP_SETTINGS_SCHEMA = Object.freeze({
     theme: Object.freeze(["system", "dark", "light"]),
     closeBehavior: Object.freeze(["ask", "tray", "quit"]),
     notifications: "boolean",
+    notificationPreferences: "notification-preferences",
     demoMode: "boolean",
+    defaultModelProfile: Object.freeze(["automatic", "efficient", "deep", "economy"]),
     language: Object.freeze(["system", "zh-CN", "en"]),
     updateChannel: Object.freeze(["stable", "preview", "off"]),
 });
+
+export const NOTIFICATION_CATEGORIES = Object.freeze([
+    "attention", "routine-completed", "trigger-fired", "coworker-finished", "channel-unread",
+]);
+
+function defaultNotificationPreferences() {
+    return Object.fromEntries(NOTIFICATION_CATEGORIES.map((category) => [category, true]));
+}
 
 function defaultSettings() {
     return {
@@ -37,9 +47,11 @@ function defaultSettings() {
         theme: "system",
         closeBehavior: "ask",
         notifications: true,
+        notificationPreferences: defaultNotificationPreferences(),
         // Explicit Demo Mode is the only non-test place Echo agents may run. Normal
         // production mode always requires a real, enabled provider.
         demoMode: false,
+        defaultModelProfile: "automatic",
         language: "system",
         updateChannel: "stable",
         providers: { codex: { enabled: true }, claude: { enabled: true }, "chatgpt-web": { enabled: true }, antigravity: { enabled: true }, economy: { enabled: true } },
@@ -51,6 +63,12 @@ function normalizeSettings(value) {
     const settings = { ...defaultSettings(), ...value };
     if (!["system", "zh-CN", "en"].includes(settings.language)) settings.language = "system";
     if (!["stable", "preview", "off"].includes(settings.updateChannel)) settings.updateChannel = "stable";
+    if (![
+        "automatic", "efficient", "deep", "economy",
+    ].includes(settings.defaultModelProfile)) settings.defaultModelProfile = "automatic";
+    settings.notificationPreferences = Object.fromEntries(NOTIFICATION_CATEGORIES.map((category) => [
+        category, value?.notificationPreferences?.[category] !== false,
+    ]));
     settings.providers = {
         codex: { enabled: value?.providers?.codex?.enabled !== false },
         claude: { enabled: value?.providers?.claude?.enabled !== false },
@@ -81,6 +99,15 @@ function validateRolesPatch(patch) {
             throw new Error(`unknown role: ${role}`);
         if (agentId !== null && !/^[A-Za-z0-9][\w:-]{0,63}$/.test(String(agentId)))
             throw new Error(`${role} assignment must be an agent identifier or null`);
+    }
+}
+
+function validateNotificationPreferencesPatch(patch) {
+    if (!patch || typeof patch !== "object" || Array.isArray(patch))
+        throw new Error("notificationPreferences must be an object");
+    for (const [category, enabled] of Object.entries(patch)) {
+        if (!NOTIFICATION_CATEGORIES.includes(category)) throw new Error(`unknown notification category: ${category}`);
+        if (typeof enabled !== "boolean") throw new Error(`${category} notification preference must be a boolean`);
     }
 }
 
@@ -243,6 +270,8 @@ export function createDesktopServices({ dataDir, dialog }) {
                 validateProvidersPatch(patch.providers);
             if (patch.roles !== undefined)
                 validateRolesPatch(patch.roles);
+            if (patch.notificationPreferences !== undefined)
+                validateNotificationPreferencesPatch(patch.notificationPreferences);
             for (const [key, allowed] of Object.entries(DESKTOP_SETTINGS_SCHEMA)) {
                 if (patch[key] === undefined)
                     continue;
@@ -255,6 +284,13 @@ export function createDesktopServices({ dataDir, dialog }) {
                     if (typeof patch[key] !== "boolean")
                         throw new Error(`${key} must be a boolean`);
                     settings[key] = patch[key];
+                }
+                else if (allowed === "notification-preferences") {
+                    validateNotificationPreferencesPatch(patch[key]);
+                    for (const category of NOTIFICATION_CATEGORIES) {
+                        if (patch[key][category] !== undefined)
+                            settings.notificationPreferences[category] = patch[key][category];
+                    }
                 }
             }
             if (patch.providers !== undefined) {

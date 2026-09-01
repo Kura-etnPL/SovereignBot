@@ -284,7 +284,7 @@ export const IPC_CHANNELS = Object.freeze({
             if (!isPlainObject(payload) || Object.keys(payload).length === 0)
                 throw new Error("settings update payload must be a non-empty object");
             assertNoForbiddenKeys(payload);
-            const allowed = new Set(["theme", "closeBehavior", "notifications", "demoMode", "language", "providers", "roles"]);
+            const allowed = new Set(["theme", "closeBehavior", "notifications", "notificationPreferences", "defaultModelProfile", "demoMode", "language", "providers", "roles"]);
             for (const key of Object.keys(payload)) {
                 if (!allowed.has(key))
                     throw new Error(`unexpected settings field: ${key.slice(0, 40)}`);
@@ -293,6 +293,11 @@ export const IPC_CHANNELS = Object.freeze({
                 validateProvidersShape(payload.providers);
             if (payload.roles !== undefined)
                 validateRolesShape(payload.roles);
+            if (payload.notificationPreferences !== undefined)
+                validateNotificationPreferencesShape(payload.notificationPreferences);
+            if (payload.defaultModelProfile !== undefined
+                && !["automatic", "efficient", "deep", "economy"].includes(payload.defaultModelProfile))
+                throw new Error("invalid defaultModelProfile");
             return payload;
         },
     }),
@@ -308,6 +313,16 @@ function validateProvidersShape(value) {
             throw new Error(`${provider} settings must be an object`);
         if (entry.enabled !== undefined && typeof entry.enabled !== "boolean")
             throw new Error(`${provider}.enabled must be a boolean`);
+    }
+}
+
+function validateNotificationPreferencesShape(value) {
+    if (!isPlainObject(value) || Object.keys(value).length === 0)
+        throw new Error("notificationPreferences must be a non-empty object");
+    const categories = new Set(["attention", "routine-completed", "trigger-fired", "coworker-finished", "channel-unread"]);
+    for (const [category, enabled] of Object.entries(value)) {
+        if (!categories.has(category)) throw new Error(`unknown notification category: ${String(category).slice(0, 40)}`);
+        if (typeof enabled !== "boolean") throw new Error(`${category} notification preference must be a boolean`);
     }
 }
 

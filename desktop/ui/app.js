@@ -1495,7 +1495,7 @@ function openCoworkerDialog(coworker) {
   $("coworker-name").value = coworker?.name ?? "";
   $("coworker-role").value = coworker?.role ?? "";
   $("coworker-instructions").value = coworker?.instructions ?? "";
-  $("coworker-provider").value = coworker?.modelBinding?.profile ?? "automatic";
+  $("coworker-provider").value = coworker?.modelBinding?.profile ?? state.settings?.defaultModelProfile ?? "automatic";
   syncEconomyControls();
   $("coworker-state").value = coworker?.state === "paused" ? "paused" : "active";
   $("coworker-workspace").value = coworker?.workspaceIds?.[0] ?? "";
@@ -1678,11 +1678,17 @@ function applyLocale(setting, systemLocale) {
 function renderSettings() {
   const settings = state.settings;
   if (!settings) return;
+  ensureSettingsPreferences();
   $("setting-theme").value = settings.theme ?? "system";
   document.body.dataset.theme = settings.theme ?? "system";
   $("setting-close").value = settings.closeBehavior ?? "ask";
   $("setting-notifications").checked = settings.notifications !== false;
   $("setting-demo-mode").checked = settings.demoMode === true;
+  $("setting-default-model-profile").value = settings.defaultModelProfile ?? "automatic";
+  for (const input of document.querySelectorAll("[data-notification-category]")) {
+    input.checked = settings.notificationPreferences?.[input.dataset.notificationCategory] !== false;
+    input.disabled = settings.notifications === false;
+  }
   $("setting-language").value = settings.language ?? "system";
   applyLocale(settings.language ?? "system", state.handshake?.locale);
 }
@@ -1787,6 +1793,54 @@ function renderWorkspaces() {
 function renderAdvancedRoster() {
   const lines = (state.roster?.agents ?? []).map((agent) => `${agent.name}\n  ${agent.harnessKind} · ${agent.capabilities.join(", ")}`);
   $("advanced-roster").textContent = lines.join("\n\n") || "No active runtime agents.";
+}
+
+function ensureSettingsPreferences() {
+  const appearance = $("setting-notifications")?.closest(".settings-card");
+  const advanced = document.querySelector("#view-settings .advanced-card");
+  if (advanced && !advanced.dataset.grouped) {
+    const advancedContent = document.createElement("div");
+    advancedContent.className = "advanced-settings-content";
+    for (const anchor of [$("provider-cards"), $("workspace-manager-list")]) {
+      const card = anchor?.closest(".settings-card");
+      if (card) advancedContent.append(card);
+    }
+    advanced.querySelector("#advanced-roster")?.before(advancedContent);
+    advanced.dataset.grouped = "true";
+  }
+  if (!appearance || $("setting-default-model-profile")) return;
+  const model = document.createElement("label");
+  model.className = "setting-field";
+  const modelLabel = document.createElement("span");
+  modelLabel.textContent = "Default Model Profile / 默认模型档位";
+  const modelSelect = document.createElement("select");
+  modelSelect.id = "setting-default-model-profile";
+  for (const [value, label] of [["automatic", "Automatic / 自动"], ["efficient", "Efficient / 高效"], ["deep", "Deep / 深度"], ["economy", "Economy / 经济"]]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    modelSelect.append(option);
+  }
+  model.append(modelLabel, modelSelect);
+  appearance.insertBefore(model, $("setting-notifications").closest(".toggle-row"));
+  const notifications = $("setting-notifications").closest(".toggle-row");
+  const group = document.createElement("div");
+  group.id = "notification-preferences";
+  group.className = "notification-preferences";
+  for (const [category, label] of [["attention", "Attention"], ["routine-completed", "Routine completed"], ["trigger-fired", "Trigger fired"], ["coworker-finished", "Coworker finished"], ["channel-unread", "Channel unread"]]) {
+    const row = document.createElement("label");
+    row.className = "toggle-row";
+    const labelText = document.createElement("span");
+    labelText.textContent = label;
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.dataset.notificationCategory = category;
+    row.append(labelText, input);
+    group.append(row);
+  }
+  notifications.after(group);
+  $("setting-default-model-profile").addEventListener("change", (event) => saveSimpleSetting("defaultModelProfile", event.target.value));
+  for (const input of group.querySelectorAll("input")) input.addEventListener("change", (event) => saveSimpleSetting("notificationPreferences", { [event.target.dataset.notificationCategory]: event.target.checked }));
 }
 
 function ensureDataLifecycleCard() {

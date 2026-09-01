@@ -1,4 +1,5 @@
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { mkdirSync } from "node:fs";
 import { app, dialog, Notification, shell } from "electron";
 import { desktopVersion } from "./lib/desktop-version.js";
 import { installAppProtocolHandler, registerAppSchemePrivileged } from "./protocol.js";
@@ -42,6 +43,7 @@ import { createComputerTargetController } from "./computer-target-controller.js"
 import { createLocalIsolatedComputer } from "./local-isolated-computer.js";
 import { createDesktopDataLifecycle } from "./data-lifecycle.js";
 import { createSquirrelUpdateExecutor, createUpdateService } from "./update-service.js";
+import { createNotificationService } from "./notification-service.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -63,11 +65,26 @@ function logStartupError(scope, error) {
     catch {}
     return message;
 }
-
 // Set the product name before Electron resolves userData/single-instance paths.
 // Packaged builds otherwise inherit the generic "Electron" profile, which can
 // collide with the host application's lock and corrupt smoke/installer isolation.
 app.setName("SovereignBot");
+
+// Packaged smoke/dogfood must isolate Electron's own profile as well as the
+// product data directory.  Otherwise the default per-user profile owns the
+// single-instance lock and can leave a hidden child alive without ever entering
+// the requested smoke branch.
+if ((process.argv.includes("--desktop-smoke") || process.argv.includes("--desktop-dogfood"))
+    && process.env.SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR) {
+    try {
+        const smokeDataDir = process.env.SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR;
+        const isolatedUserData = join(dirname(smokeDataDir), `${basename(smokeDataDir)}-electron-userdata`);
+        mkdirSync(isolatedUserData, { recursive: true });
+        app.setPath("userData", isolatedUserData);
+    }
+    catch {
+    }
+}
 
 if (!app.requestSingleInstanceLock()) {
     app.quit();
@@ -110,6 +127,11 @@ async function main() {
         await runSmokeMode({ app });
         return;
     }
+    if (process.argv.includes("--desktop-dogfood")) {
+        const { runSmokeMode } = await import("./smoke.js");
+        await runSmokeMode({ app, mode: "dogfood" });
+        return;
+    }
     if (process.argv.includes("--desktop-migration-check")) {
         const { createDesktopDataLifecycle } = await import("./data-lifecycle.js");
         const lifecycle = createDesktopDataLifecycle({
@@ -142,6 +164,7 @@ async function main() {
     });
     await dataLifecycle.recover();
     const services = createDesktopServices({ dataDir, dialog });
+    const notifications = createNotificationService({ dataDir, getSettings: () => services.getSettings(), NotificationClass: Notification });
     const updateFeedRoot = process.env.SOVEREIGNBOT_UPDATE_FEED_DIR;
     const updates = createUpdateService({
         dataDir,
@@ -370,15 +393,12 @@ async function main() {
             readiness: goalReadiness,
             roster: () => host.rosterSummary(),
             persistPath: join(dataDir, "desktop-state", "goals.json"),
-            onTerminal: (goal) => {
-                if (!services.getSettings().notifications || Notification.isSupported() === false)
-                    return;
-                new Notification({
-                    title: `SovereignBot goal ${goal.status}`,
-                    body: goal.status === "completed" ? goal.textPreview : `${goal.textPreview} — ${goal.error ?? "did not complete"}`,
-                    silent: true,
-                }).show();
-            },
+            onTerminal: (goal) => notifications.notify({
+                category: goal.status === "completed" ? "coworker-finished" : "attention",
+                key: `goal:${goal.id}:${goal.status}`,
+                title: goal.status === "completed" ? "Coworker finished" : "Attention needed",
+                body: goal.status === "completed" ? goal.textPreview : `${goal.textPreview} — ${goal.error ?? "did not complete"}`,
+            }),
         });
         jobs = createJobController({
             dataDir,
@@ -393,6 +413,19 @@ async function main() {
             computerTargetController,
             projectService,
             teamService,
+            onStatus: (job, transition) => {
+                if (transition.status === "needs_attention") {
+                    notifications.notify({ category: "attention", key: `job:${job.id}:attention`, title: "Attention needed", body: job.title });
+                }
+                else if (transition.status === "completed") {
+                    notifications.notify({
+                        category: job.eventMetadata ? "trigger-fired" : job.routineId ? "routine-completed" : "coworker-finished",
+                        key: `job:${job.id}:completed`,
+                        title: job.routineId ? "Routine completed" : "Coworker finished",
+                        body: job.title,
+                    });
+                }
+            },
         });
         routines = createRoutineController({ dataDir, jobController: jobs, coworkerStore, skillStore, services, projectService, teamService, computerTargetController });
         skillStore.setRetestRunner((skill) => {
@@ -816,7 +849,7 @@ async function main() {
     }
 
     const start = async () => {
-        win = createMainWindow();
+        win = createMainWindow({ smoke: process.argv.includes("--verify-software-team") });
         attachWindowLifecycle({
             win,
             getCloseBehavior: () => services.getSettings().closeBehavior,

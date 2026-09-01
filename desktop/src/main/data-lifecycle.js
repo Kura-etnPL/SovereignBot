@@ -5,7 +5,7 @@ import {
     createStateBackup,
     exportState,
     restoreStateBackup,
-} from "../../../src/state-transfer.js";
+} from "../../vendor/core/src/state-transfer.js";
 
 export const DESKTOP_LIFECYCLE_SCHEMA = "sovereignbot.desktop.lifecycle.v1";
 export const DESKTOP_STATE_VERSION = 4;
@@ -16,7 +16,7 @@ const DESKTOP_FILES = Object.freeze([
     "settings.json", "workspaces.json", "coworkers.json", "conversations.json", "artifacts.json",
     "goals.json", "jobs.json", "routines.json", "event-triggers.json", "teams.json", "skills.json",
     "projects.json", "product-surfaces.json", "teach-once.json", "coworker-dispatch.json",
-    "connected-apps.json", "external-team-outcomes.json",
+    "connected-apps.json", "external-team-outcomes.json", "notifications.json",
 ]);
 const CORE_FILES = Object.freeze(["tasks.json", "task-events.jsonl", "memory.jsonl", "repeat-state.json"]);
 const SECRET_KEYS = /(?:credential|secret|token|cookie|private|password|session|relay|browserprofile|sourcepath|storagepath|absolutepath|workspacepath|path|cwd|root|directory)/i;
@@ -138,7 +138,7 @@ function validateLifecycleManifest(manifest, format) {
 function isSafeBackupPath(path) {
     if (CORE_FILES.some((name) => path === `core/${name}`)) return true;
     if (path === "core/policy-versions/active.json" || /^core\/policy-versions\/versions\/policy_[a-f0-9-]{36}\.json$/i.test(path)) return true;
-    if (/^desktop-state\/(?:settings|workspaces|coworkers|conversations|artifacts|goals|jobs|routines|event-triggers|teams|skills|projects|product-surfaces|teach-once|coworker-dispatch|connected-apps|external-team-outcomes)\.json$/.test(path)) return true;
+    if (/^desktop-state\/(?:settings|workspaces|coworkers|conversations|artifacts|goals|jobs|routines|event-triggers|teams|skills|projects|product-surfaces|teach-once|coworker-dispatch|connected-apps|external-team-outcomes|notifications)\.json$/.test(path)) return true;
     return /^artifacts\/artifact_[a-f0-9]{16}\/[^/]+$/i.test(path);
 }
 async function readBundle(root, format) {
