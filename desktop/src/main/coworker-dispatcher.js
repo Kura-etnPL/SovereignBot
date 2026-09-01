@@ -21,14 +21,14 @@ function safeSessionState(value, expectedKind) {
         return undefined;
     if (value.kind !== expectedKind)
         return undefined;
-    const key = expectedKind === "chatgpt-web" ? "continuationRef" : "sessionId";
+    const key = ["chatgpt-web", "antigravity"].includes(expectedKind) ? "continuationRef" : "sessionId";
     if (typeof value[key] !== "string" || !value[key] || value[key].length > MAX_CONTINUITY_REF)
         return undefined;
     return { kind: value.kind, [key]: value[key] };
 }
 
 function providerKindForHarness(harnessKind) {
-    return harnessKind === "codex" ? "codex" : harnessKind === "claude-code" ? "claude-code" : harnessKind === "chatgpt-web" ? "chatgpt-web" : undefined;
+    return harnessKind === "codex" ? "codex" : harnessKind === "claude-code" ? "claude-code" : harnessKind === "chatgpt-web" ? "chatgpt-web" : harnessKind === "antigravity" ? "antigravity" : undefined;
 }
 
 function redactWorkspacePath(value, workspacePath) {

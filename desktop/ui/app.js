@@ -95,6 +95,7 @@ function humanProvider(provider) {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude Code";
   if (provider === "chatgpt-web") return "ChatGPT Web / Sol";
+  if (provider === "antigravity") return "Antigravity";
   return "Automatic";
 }
 
@@ -1418,10 +1419,13 @@ function openCoworkerDialog(coworker) {
   $("coworker-state").value = coworker?.state === "paused" ? "paused" : "active";
   $("coworker-workspace").value = coworker?.workspaceIds?.[0] ?? "";
   $("coworker-computer-profile").value = coworker?.computerProfileId ?? "";
-  $("coworker-advanced-provider").value = "";
-  $("coworker-advanced-account").value = "";
+  const rosterBinding = state.roster?.coworkerBindings?.[coworker?.id];
+  $("coworker-advanced-provider").value = rosterBinding?.provider ?? "";
+  $("coworker-advanced-account").value = rosterBinding?.accountSlot ?? "";
   $("coworker-advanced-model").value = "";
-  for (const id of ["coworker-advanced-provider", "coworker-advanced-account", "coworker-advanced-model"]) $(id).disabled = true;
+  $("coworker-advanced-provider").disabled = true;
+  $("coworker-advanced-account").disabled = rosterBinding?.provider !== "antigravity";
+  $("coworker-advanced-model").disabled = true;
   hide($("coworker-form-error"));
   openDialog("coworker-dialog");
 }
@@ -1483,9 +1487,9 @@ async function saveCoworker(event) {
   try {
     const profile = $("coworker-provider").value;
     const provider = $("coworker-advanced-provider").value;
-    const providerAccountId = $("coworker-advanced-account").value.trim();
+    const accountSlot = $("coworker-advanced-account").value;
     const model = $("coworker-advanced-model").value.trim();
-    if (!provider && (providerAccountId || model)) throw new Error("Choose a provider before pinning an account or model.");
+    if (!provider && (accountSlot || model)) throw new Error("Choose a provider before pinning an account or model.");
     const fields = {
           name: $("coworker-name").value.trim(),
           role: $("coworker-role").value.trim(),
@@ -1494,13 +1498,12 @@ async function saveCoworker(event) {
             modelBinding: {
               profile,
               ...(provider ? { provider } : {}),
-              ...(providerAccountId ? { providerAccountId } : {}),
               ...(model ? { model } : {}),
             },
             ...($("coworker-workspace").value ? { workspaceIds: [$("coworker-workspace").value] } : {}),
             ...($("coworker-computer-profile").value.trim() ? { computerProfileId: $("coworker-computer-profile").value.trim() } : {}),
           } : {
-            ...(profile !== state.editingCoworkerSnapshot?.modelBinding?.profile ? { modelBinding: { profile } } : {}),
+            ...(profile !== state.editingCoworkerSnapshot?.modelBinding?.profile ? { modelBinding: { profile, ...(state.roster?.coworkerBindings?.[state.editingCoworkerId]?.provider ? { provider: state.roster.coworkerBindings[state.editingCoworkerId].provider } : {}) } } : {}),
             ...(JSON.stringify($("coworker-workspace").value ? [$("coworker-workspace").value] : []) !== JSON.stringify(state.editingCoworkerSnapshot?.workspaceIds ?? [])
               ? { workspaceIds: $("coworker-workspace").value ? [$("coworker-workspace").value] : [] } : {}),
             ...($("coworker-computer-profile").value.trim() !== (state.editingCoworkerSnapshot?.computerProfileId ?? "")
@@ -1510,9 +1513,12 @@ async function saveCoworker(event) {
           }),
     };
     const wasEditing = Boolean(state.editingCoworkerId);
-    const result = wasEditing
+    let result = wasEditing
       ? await window.sovereignbot.coworkers.update({ coworkerId: state.editingCoworkerId, patch: fields })
       : await window.sovereignbot.coworkers.create({ coworker: fields });
+    const accountCoworkerId = result?.coworker?.id ?? state.editingCoworkerId;
+    if (provider === "antigravity" && accountSlot && accountCoworkerId)
+      result = await window.sovereignbot.providers.setCoworkerAccount({ coworkerId: accountCoworkerId, provider: "antigravity", accountSlot });
     $("coworker-dialog").close();
     const createdId = result?.coworker?.id;
     resetCoworkerDialog();
@@ -1604,7 +1610,7 @@ function renderProviderCards() {
   const root = $("provider-cards");
   clearNode(root);
   const firstRunProviders = state.firstRun?.providers ?? {};
-  for (const provider of ["codex", "claude", "chatgpt-web"]) {
+  for (const provider of ["codex", "claude", "chatgpt-web", "antigravity"]) {
     const info = firstRunProviders[provider] ?? {};
     const rosterProvider = state.roster?.providers?.[provider] ?? {};
     const health = rosterProvider.health ?? (rosterProvider.usable ? "ready" : info.found ? "unavailable" : "unavailable");
@@ -1624,12 +1630,12 @@ function renderProviderCards() {
           : health === "unavailable" ? "Unavailable" : "Checking";
     head.append(name, status);
     const detail = document.createElement("p");
-    detail.textContent = rosterProvider.reason || (provider === "chatgpt-web" ? "Use the dedicated profile for a normal ChatGPT Web sign-in, then refresh." : info.found ? (info.version || "CLI detected") : "Install the local CLI, then refresh.");
+    detail.textContent = rosterProvider.reason || (provider === "chatgpt-web" ? "Use the dedicated profile for a normal ChatGPT Web sign-in, then refresh." : provider === "antigravity" ? "Use Advanced settings to pin a dedicated Antigravity account." : info.found ? (info.version || "CLI detected") : "Install the local CLI, then refresh.");
     const actions = document.createElement("div");
     actions.className = "provider-actions";
     const signIn = document.createElement("button");
     signIn.type = "button";
-    signIn.textContent = provider === "chatgpt-web" ? "Sign in" : info.found ? "Open sign-in" : "Try detection";
+    signIn.textContent = ["chatgpt-web", "antigravity"].includes(provider) ? "Sign in" : info.found ? "Open sign-in" : "Try detection";
     signIn.addEventListener("click", async () => {
       try {
         if (provider === "chatgpt-web" || info.found) await window.sovereignbot.providers.openLogin({ provider });

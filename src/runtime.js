@@ -8,6 +8,7 @@ import { Governor } from "./governor.js";
 import { registerAgentToolBridgeManager } from "./harness.js";
 import { registerAgentWorkerNodeClient } from "./worker-node-harness.js";
 import { registerAgentChatGPTWebAdapter } from "./chatgpt-web-harness.js";
+import { registerAgentAntigravityAdapter } from "./antigravity-harness.js";
 import { MemoryStore } from "./memory.js";
 import { OperatorSessionStore } from "./operator-session.js";
 import { Orchestrator } from "./orchestrator.js";
@@ -104,6 +105,8 @@ export async function createRuntime(config, options = {}) {
             registerAgentWorkerNodeClient(agent, options.workerNodeClientResolver);
         if (agent.harness?.kind === "chatgpt-web" && options.chatgptWebAdapterResolver)
             registerAgentChatGPTWebAdapter(agent, options.chatgptWebAdapterResolver(agent));
+        if (agent.harness?.kind === "antigravity" && options.antigravityAdapterResolver)
+            registerAgentAntigravityAdapter(agent, options.antigravityAdapterResolver(agent));
     }
 
     return {
@@ -128,6 +131,8 @@ export async function createRuntime(config, options = {}) {
                     registerAgentWorkerNodeClient(agent, undefined);
                 if (agent.harness?.kind === "chatgpt-web")
                     registerAgentChatGPTWebAdapter(agent, undefined);
+                if (agent.harness?.kind === "antigravity")
+                    registerAgentAntigravityAdapter(agent, undefined);
             }
             await governedToolBridge.close();
             await (managedComputerDriverFactory ?? computerDriverFactory)?.close?.();

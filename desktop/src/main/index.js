@@ -24,6 +24,7 @@ import { createTeachOnceRuntime } from "./teach-once-runtime.js";
 import { createCoworkerDispatcher } from "./coworker-dispatcher.js";
 import { openProviderLogin } from "./provider-login.js";
 import { coworkerAgentId, validateRoleAssignment } from "./provider-roster.js";
+import { antigravityAccountNamespace } from "./antigravity-provider.js";
 import { attachWindowLifecycle } from "./lifecycle.js";
 import { createTrayController } from "./tray.js";
 import { createWorkerNodeStore } from "./worker-node-store.js";
@@ -378,6 +379,10 @@ async function main() {
                         const login = await host.openChatGPTWebLogin();
                         return { login, refresh: { applied: false, reason: "manual-sign-in", roster: host.rosterSummary() } };
                     }
+                    if (provider === "antigravity") {
+                        const login = await host.openAntigravityLogin(antigravityAccountNamespace("A"));
+                        return { login, refresh: { applied: false, reason: "manual-sign-in", roster: host.rosterSummary() } };
+                    }
                     const resolver = provider === "codex"
                         ? () => host.coreModules.resolveCodexLaunch({})
                         : () => host.coreModules.resolveClaudeCodeLaunch({});
@@ -499,6 +504,19 @@ async function main() {
                     const error = await shell.openPath(managedPath);
                     if (error) throw new Error(String(error).slice(0, 240));
                     return { ok: true };
+                },
+                "provider:setCoworkerAccount": async ({ coworkerId, accountSlot }) => {
+                    if (await host.hasActiveWork()) throw new Error("Cannot switch an Antigravity account while work is active");
+                    const current = coworkerStore.getInternal(coworkerId);
+                    const binding = current.modelBinding ?? { profile: "automatic" };
+                    const updated = coworkerStore.update(coworkerId, {
+                        modelBinding: {
+                            ...binding,
+                            provider: "antigravity",
+                            providerAccountId: `account-${accountSlot.toLowerCase()}`,
+                        },
+                    });
+                    return { coworker: updated, refresh: await refreshCoworkerRuntime() };
                 },
                 "artifact:attachViaDialog": ({ conversationId }) => pickConversationAttachments({ win, dialog, artifactStore, conversationId }),
                 "artifact:reveal": ({ artifactId }) => {

@@ -3,6 +3,7 @@ import { ClaudeCodeHarness } from "./claude-code-harness.js";
 import { CodexHarness } from "./codex-harness.js";
 import { WorkerNodeHarness } from "./worker-node-harness.js";
 import { ChatGPTWebHarness } from "./chatgpt-web-harness.js";
+import { AntigravityHarness } from "./antigravity-harness.js";
 
 const TOOL_BRIDGE_MANAGERS = new WeakMap();
 const HARNESS_ACTIVITY = new WeakMap();
@@ -252,6 +253,8 @@ export function harnessTarget(harness) {
         return "worker-node";
     if (harness.kind === "chatgpt-web")
         return "chatgpt-web";
+    if (harness.kind === "antigravity")
+        return "antigravity";
     return "echo";
 }
 
@@ -269,6 +272,8 @@ function createBaseHarness(agent) {
             return new WorkerNodeHarness(agent);
         case "chatgpt-web":
             return new ChatGPTWebHarness(agent);
+        case "antigravity":
+            return new AntigravityHarness(agent);
         default:
             throw new Error(`unsupported harness kind: ${agent.harness.kind}`);
     }
@@ -276,7 +281,7 @@ function createBaseHarness(agent) {
 
 export function createHarness(agent) {
     const base = createBaseHarness(agent);
-    const providerSafe = ["codex", "claude-code", "chatgpt-web"].includes(agent.harness.kind)
+    const providerSafe = ["codex", "claude-code", "chatgpt-web", "antigravity"].includes(agent.harness.kind)
         ? new ProviderResultBoundaryHarness(base)
         : base;
     const manager = TOOL_BRIDGE_MANAGERS.get(agent);

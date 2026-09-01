@@ -10,6 +10,7 @@ const PROVIDER_HARNESSES = Object.freeze({
     codex: "codex",
     claude: "claude-code",
     "chatgpt-web": "chatgpt-web",
+    antigravity: "antigravity",
 });
 const ORCHESTRATION_PROVIDERS = Object.freeze(["codex", "claude"]);
 export const WORKER_NODE_SUPERVISOR = "worker-node-supervisor";
@@ -96,7 +97,7 @@ function defaultRolesFor(usable) {
 }
 
 function agentName(provider, role) {
-    const providerLabel = provider === "codex" ? "Codex" : provider === "claude" ? "Claude Code" : "ChatGPT Web / Sol";
+    const providerLabel = provider === "codex" ? "Codex" : provider === "claude" ? "Claude Code" : provider === "chatgpt-web" ? "ChatGPT Web / Sol" : "Antigravity";
     const roleLabel = role[0].toUpperCase() + role.slice(1);
     return `${providerLabel} ${roleLabel}`;
 }
@@ -110,6 +111,8 @@ function harnessConfig(provider, _role, fakeLaunchers, model) {
         return { kind: harnessKind, command: fake.command, prefixArgs: [...fake.prefixArgs] };
     if (provider === "chatgpt-web")
         return { kind: harnessKind, model: model ?? "sol" };
+    if (provider === "antigravity")
+        return { kind: harnessKind, model: model ?? "antigravity" };
     // Workspaces chosen by the operator may be plain folders; Codex must not refuse
     // non-git directories. The execution cwd itself arrives per task through the
     // trusted execution context, never through static harness configuration.
@@ -193,15 +196,18 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCow
             continue;
         const modelBinding = effectiveModelBinding(coworker);
         const provider = chooseCoworkerProvider(coworker, usableProviders);
-        const accountNamespace = provider === "chatgpt-web"
-            ? accountIsolationNamespace(provider, modelBinding.providerAccountId ?? "default")
-            : provider && modelBinding.providerAccountId
-                ? accountIsolationNamespace(provider, modelBinding.providerAccountId)
+        const accountProvider = provider ?? modelBinding.provider;
+        const accountNamespace = ["chatgpt-web", "antigravity"].includes(accountProvider)
+            ? accountIsolationNamespace(accountProvider, modelBinding.providerAccountId ?? (accountProvider === "antigravity" ? "account-a" : "default"))
+            : accountProvider && modelBinding.providerAccountId
+                ? accountIsolationNamespace(accountProvider, modelBinding.providerAccountId)
             : undefined;
         if (!provider) {
             bindings[coworker.id] = {
                 ready: false,
                 profile: modelBinding.profile,
+                ...(modelBinding.provider ? { provider: modelBinding.provider } : {}),
+                ...(accountNamespace ? { accountNamespace } : {}),
                 reason: modelBinding.profile === "deep"
                     ? "Deep profile is unavailable; configure a healthy Deep provider or pinned strong model"
                     : modelBinding.profile === "economy"
@@ -217,7 +223,7 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCow
         const governedTools = Array.isArray(appAccess?.tools) ? [...new Set(appAccess.tools)] : [];
         const agent = {
             id,
-            name: `${coworker.name} · ${provider === "codex" ? "Codex" : provider === "claude" ? "Claude Code" : "ChatGPT Web / Sol"}`,
+            name: `${coworker.name} · ${provider === "codex" ? "Codex" : provider === "claude" ? "Claude Code" : provider === "chatgpt-web" ? "ChatGPT Web / Sol" : "Antigravity"}`,
             role: "worker",
             capabilities: ["general", coworkerCapability(coworker.id)],
             harness: { ...harnessConfig(provider, "coworker", fakeLaunchers, modelBinding.model), ...(accountNamespace ? { accountNamespace } : {}) },
@@ -251,8 +257,10 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
         codex: providerUsable(discovery.codex, settings, "codex"),
         claude: providerUsable(discovery.claude, settings, "claude"),
         "chatgpt-web": providerUsable(discovery["chatgpt-web"], settings, "chatgpt-web"),
+        antigravity: providerUsable(discovery.antigravity, settings, "antigravity"),
     };
     if (!usableProviders.codex && !usableProviders.claude) {
+        const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCoworkerAppAccess });
         const workerNodeAgents = includeWorkerNodeDispatcher
             ? [
                 {
@@ -280,10 +288,10 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
             ready: false,
             providers: usableProviders,
             roles: includeWorkerNodeDispatcher ? { planner: WORKER_NODE_SUPERVISOR } : {},
-            agents: workerNodeAgents,
+            agents: [...coworkerRuntime.agents, ...workerNodeAgents],
             coworkerBindings: Object.fromEntries((Array.isArray(coworkers) ? coworkers : [])
                 .filter((entry) => entry?.state === "active")
-                .map((entry) => [entry.id, { ready: false, reason: "no usable provider" }])),
+                .map((entry) => [entry.id, coworkerRuntime.bindings[entry.id] ?? { ready: false, reason: "no usable provider" }])),
         };
     }
 
@@ -365,7 +373,7 @@ export function buildDemoRoster() {
     return {
         mode: "demo",
         ready: true,
-        providers: { codex: false, claude: false },
+        providers: { codex: false, claude: false, "chatgpt-web": false, antigravity: false },
         roles: { planner: "demo-supervisor", worker: "demo-worker", reviewer: undefined, synthesizer: undefined },
         agents: [
             {

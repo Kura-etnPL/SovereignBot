@@ -24,7 +24,7 @@ function defaultSettings() {
         // production mode always requires a real, enabled provider.
         demoMode: false,
         language: "system",
-        providers: { codex: { enabled: true }, claude: { enabled: true }, "chatgpt-web": { enabled: true } },
+        providers: { codex: { enabled: true }, claude: { enabled: true }, "chatgpt-web": { enabled: true }, antigravity: { enabled: true } },
         roles: {},
     };
 }
@@ -36,6 +36,7 @@ function normalizeSettings(value) {
         codex: { enabled: value?.providers?.codex?.enabled !== false },
         claude: { enabled: value?.providers?.claude?.enabled !== false },
         "chatgpt-web": { enabled: value?.providers?.["chatgpt-web"]?.enabled !== false },
+        antigravity: { enabled: value?.providers?.antigravity?.enabled !== false },
     };
     settings.roles = value?.roles && typeof value.roles === "object" ? { ...value.roles } : {};
     return settings;
@@ -43,7 +44,7 @@ function normalizeSettings(value) {
 
 function validateProvidersPatch(patch) {
     for (const [provider, entry] of Object.entries(patch)) {
-        if (!["codex", "claude", "chatgpt-web"].includes(provider))
+        if (!["codex", "claude", "chatgpt-web", "antigravity"].includes(provider))
             throw new Error(`unknown provider: ${provider}`);
         if (typeof entry !== "object" || entry === null)
             throw new Error(`${provider} must be an object`);
@@ -225,7 +226,7 @@ export function createDesktopServices({ dataDir, dialog }) {
                 }
             }
             if (patch.providers !== undefined) {
-                for (const provider of ["codex", "claude"]) {
+                for (const provider of ["codex", "claude", "chatgpt-web", "antigravity"]) {
                     if (patch.providers[provider]?.enabled !== undefined)
                         settings.providers[provider].enabled = patch.providers[provider].enabled;
                 }

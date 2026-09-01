@@ -123,6 +123,14 @@ test("team pack transfer is declarative and rejects provider/account or workspac
     );
 });
 
+test("Antigravity account switching accepts only safe A/B/C slots and never renderer account IDs", () => {
+    assert.deepEqual(validateV3IpcRequest("provider:setCoworkerAccount", { coworkerId: "coworker_aaaaaaaaaaaaaaaa", provider: "antigravity", accountSlot: "B" }), {
+        coworkerId: "coworker_aaaaaaaaaaaaaaaa", provider: "antigravity", accountSlot: "B",
+    });
+    assert.throws(() => validateV3IpcRequest("provider:setCoworkerAccount", { coworkerId: "coworker_aaaaaaaaaaaaaaaa", provider: "antigravity", accountSlot: "account-b" }), /A, B, or C/);
+    assert.throws(() => validateV3IpcRequest("coworker:update", { coworkerId: "coworker_aaaaaaaaaaaaaaaa", patch: { modelBinding: { profile: "automatic", provider: "antigravity", providerAccountId: "account-b" } } }), /unexpected request field: providerAccountId/);
+});
+
 test("playbook transfer is declarative and rejects runtime state", () => {
     const playbook = {
         schema: "sovereignbot.desktop.playbook.v1",

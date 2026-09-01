@@ -29,7 +29,7 @@ function exact(value, allowed) { for (const key of Object.keys(value)) { if (!al
 function positiveInteger(value, name, min, max) { if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer from ${min} to ${max}`); return value; }
 function modelBindingShape(value) {
     if (!isPlainObject(value)) throw new Error("modelBinding must be an object");
-    exact(value, new Set(["profile", "provider", "providerAccountId", "model"]));
+    exact(value, new Set(["profile", "provider", "model"]));
     if (![
         "automatic", "efficient", "deep", "economy", "custom",
     ].includes(value.profile ?? "automatic")) throw new Error("modelBinding.profile is invalid");
@@ -165,7 +165,13 @@ function coworkerShape(value, { patch = false } = {}) {
 }
 function spec(maxPayloadBytes, validateRequest) { return Object.freeze({ direction: "renderer->main", maxPayloadBytes, validateRequest }); }
 
+function accountSlot(value) {
+    if (!["A", "B", "C"].includes(value)) throw new Error("accountSlot must be A, B, or C");
+    return value;
+}
+
 export const V3_IPC_CHANNELS = Object.freeze({
+    "provider:setCoworkerAccount": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId", "provider", "accountSlot"])); if (value.provider !== "antigravity") throw new Error("account account switching is only supported for Antigravity"); return { coworkerId: identifier(value.coworkerId, "coworkerId"), provider: value.provider, accountSlot: accountSlot(value.accountSlot) }; }),
     "coworker:list": spec(1024, (payload) => { if (payload === undefined || payload === null) return { includeArchived: false }; const value = objectPayload(payload); exact(value, new Set(["includeArchived"])); if (value.includeArchived !== undefined && typeof value.includeArchived !== "boolean") throw new Error("includeArchived must be boolean"); return { includeArchived: value.includeArchived === true }; }),
     "coworker:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),
     "coworker:create": spec(24 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworker"])); return { coworker: coworkerShape(value.coworker) }; }),
