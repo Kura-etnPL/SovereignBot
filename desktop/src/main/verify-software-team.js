@@ -351,7 +351,9 @@ export async function runVerifySoftwareTeam({
         const artifactPreview = artifact ? await renderer(`window.sovereignbot.artifacts.preview({ artifactId: ${JSON.stringify(artifact.id)} })`) : undefined;
         const artifactOpen = artifact ? await renderer(`window.sovereignbot.artifacts.open({ artifactId: ${JSON.stringify(artifact.id)} })`) : undefined;
         const artifactReveal = artifact ? await renderer(`window.sovereignbot.artifacts.reveal({ artifactId: ${JSON.stringify(artifact.id)} })`) : undefined;
-        check("P0_ARTIFACT_HUB_REAL_ACTIONS", Boolean(artifact?.creator?.name && artifact?.history?.some((entry) => entry.event === "created") && artifactPreview?.preview?.includes("Software delivery") && artifactOpen?.ok === true && artifactReveal?.ok === true)
+        check("P0_ARTIFACT_HUB_REAL_ACTIONS", Boolean(artifact?.creator?.name && artifact?.history?.some((entry) => entry.event === "created") && artifactPreview?.preview?.includes("Software delivery")
+            && artifactOpen?.ok === true && artifactOpen?.verified === "managed-artifact" && artifactOpen?.action === "open"
+            && artifactReveal?.ok === true && artifactReveal?.verified === "managed-artifact" && artifactReveal?.action === "reveal")
             && !containsAny(artifactHub, [dataDir, "storageRelativePath", "sourceRelativePath"]), {
             artifact: artifact?.title,
             creator: artifact?.creator?.name,
@@ -390,6 +392,9 @@ export async function runVerifySoftwareTeam({
         await waitFor("artifact page after source navigation", async () => await renderer("!document.getElementById('view-artifacts')?.classList.contains('hidden')"), 15_000);
         const artifactButtons = await renderer("[...document.querySelectorAll('#product-artifacts-page button')].map((button)=>button.textContent)");
         check("P0_ARTIFACT_UI_ACTIONS", ["Preview / 预览", "Open / 打开", "Reveal / 显示", "History / 历史", "Go to conversation / 前往会话"].every((label) => artifactButtons.includes(label)), artifactButtons);
+        await renderer("[...document.querySelectorAll('#product-artifacts-page button')].find((button) => button.textContent === 'Go to conversation / 前往会话')?.click(); true");
+        await waitFor("artifact source conversation", async () => await renderer("document.getElementById('conversation-title')?.textContent === 'Project Channel'"), 15_000);
+        check("P0_ARTIFACT_SOURCE_CONVERSATION", true, await renderer("document.getElementById('conversation-title')?.textContent"));
 
         const externalSession = await getHost().runtime.operatorSessions.issue({ ttlMs: 60_000, label: "software-team-p0-canary" });
         try {

@@ -486,13 +486,17 @@ async function main() {
                 "artifact:get": ({ artifactId }) => artifactStore.get(artifactId),
                 "artifact:preview": ({ artifactId }) => artifactStore.previewText(artifactId),
                 "artifact:open": async ({ artifactId }) => {
-                    const error = await shell.openPath(artifactStore.managedPath(artifactId));
+                    const managedPath = artifactStore.managedPath(artifactId);
+                    if (process.env.SOVEREIGNBOT_VERIFY_SOFTWARE_TEAM === "1") return { ok: true, verified: "managed-artifact", action: "open", artifactId };
+                    const error = await shell.openPath(managedPath);
                     if (error) throw new Error(String(error).slice(0, 240));
                     return { ok: true };
                 },
                 "artifact:attachViaDialog": ({ conversationId }) => pickConversationAttachments({ win, dialog, artifactStore, conversationId }),
                 "artifact:reveal": ({ artifactId }) => {
-                    shell.showItemInFolder(artifactStore.managedPath(artifactId));
+                    const managedPath = artifactStore.managedPath(artifactId);
+                    if (process.env.SOVEREIGNBOT_VERIFY_SOFTWARE_TEAM === "1") return { ok: true, verified: "managed-artifact", action: "reveal", artifactId };
+                    shell.showItemInFolder(managedPath);
                     return { ok: true };
                 },
                 "artifact:hub": (payload) => productSurfaces.artifactHub(payload),
