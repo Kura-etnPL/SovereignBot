@@ -1,10 +1,26 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createWorkspaceStore, canonicalizeWorkspacePath } from "./lib/workspaces.js";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 
 const WORKSPACES_FILE = "workspaces.json";
 const SETTINGS_FILE = "settings.json";
+const ECONOMY_CONFIG_FILE = "economy-providers.json";
+
+const DEFAULT_ECONOMY_CONFIG = Object.freeze({
+    providers: [],
+    metered: Object.freeze({ enabled: false, budget: 0, perRunCap: 0, totalCap: 0 }),
+});
+
+function loadTrustedEconomyConfig(path) {
+    if (!existsSync(path)) return DEFAULT_ECONOMY_CONFIG;
+    let value;
+    try { value = JSON.parse(readFileSync(path, "utf8")); }
+    catch { throw new Error("[ECONOMY:CONFIG_CORRUPT] Economy provider configuration cannot be parsed; execution is blocked"); }
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new Error("[ECONOMY:CONFIG_CORRUPT] Economy provider configuration is invalid; execution is blocked");
+    return value;
+}
 
 export const DESKTOP_SETTINGS_SCHEMA = Object.freeze({
     theme: Object.freeze(["system", "dark", "light"]),
@@ -24,7 +40,7 @@ function defaultSettings() {
         // production mode always requires a real, enabled provider.
         demoMode: false,
         language: "system",
-        providers: { codex: { enabled: true }, claude: { enabled: true }, "chatgpt-web": { enabled: true }, antigravity: { enabled: true } },
+        providers: { codex: { enabled: true }, claude: { enabled: true }, "chatgpt-web": { enabled: true }, antigravity: { enabled: true }, economy: { enabled: true } },
         roles: {},
     };
 }
@@ -37,6 +53,7 @@ function normalizeSettings(value) {
         claude: { enabled: value?.providers?.claude?.enabled !== false },
         "chatgpt-web": { enabled: value?.providers?.["chatgpt-web"]?.enabled !== false },
         antigravity: { enabled: value?.providers?.antigravity?.enabled !== false },
+        economy: { enabled: value?.providers?.economy?.enabled !== false },
     };
     settings.roles = value?.roles && typeof value.roles === "object" ? { ...value.roles } : {};
     return settings;
@@ -44,7 +61,7 @@ function normalizeSettings(value) {
 
 function validateProvidersPatch(patch) {
     for (const [provider, entry] of Object.entries(patch)) {
-        if (!["codex", "claude", "chatgpt-web", "antigravity"].includes(provider))
+        if (!["codex", "claude", "chatgpt-web", "antigravity", "economy"].includes(provider))
             throw new Error(`unknown provider: ${provider}`);
         if (typeof entry !== "object" || entry === null)
             throw new Error(`${provider} must be an object`);
@@ -70,6 +87,7 @@ export function createDesktopServices({ dataDir, dialog }) {
     const stateDir = join(dataDir, "desktop-state");
     const workspacesPath = join(stateDir, WORKSPACES_FILE);
     const settingsPath = join(stateDir, SETTINGS_FILE);
+    const economyConfigPath = join(stateDir, ECONOMY_CONFIG_FILE);
 
     const persistedWorkspaces = loadJsonState(workspacesPath, null);
     const store = createWorkspaceStore();
@@ -101,6 +119,7 @@ export function createDesktopServices({ dataDir, dialog }) {
         // backfills the new fields so old installs migrate in place, idempotently.
         settings = normalizeSettings(persistedSettings);
     }
+    const economyConfig = loadTrustedEconomyConfig(economyConfigPath);
 
     function workspaceSnapshot() {
         const snapshot = store.snapshot();
@@ -206,6 +225,10 @@ export function createDesktopServices({ dataDir, dialog }) {
             return structuredClone(settings);
         },
 
+        getEconomyConfig() {
+            return structuredClone(economyConfig);
+        },
+
         updateSettings(patch) {
             if (patch.providers !== undefined)
                 validateProvidersPatch(patch.providers);
@@ -226,7 +249,7 @@ export function createDesktopServices({ dataDir, dialog }) {
                 }
             }
             if (patch.providers !== undefined) {
-                for (const provider of ["codex", "claude", "chatgpt-web", "antigravity"]) {
+                for (const provider of ["codex", "claude", "chatgpt-web", "antigravity", "economy"]) {
                     if (patch.providers[provider]?.enabled !== undefined)
                         settings.providers[provider].enabled = patch.providers[provider].enabled;
                 }

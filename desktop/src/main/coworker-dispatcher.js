@@ -21,14 +21,14 @@ function safeSessionState(value, expectedKind) {
         return undefined;
     if (value.kind !== expectedKind)
         return undefined;
-    const key = ["chatgpt-web", "antigravity"].includes(expectedKind) ? "continuationRef" : "sessionId";
+    const key = ["chatgpt-web", "antigravity", "economy"].includes(expectedKind) ? "continuationRef" : "sessionId";
     if (typeof value[key] !== "string" || !value[key] || value[key].length > MAX_CONTINUITY_REF)
         return undefined;
     return { kind: value.kind, [key]: value[key] };
 }
 
 function providerKindForHarness(harnessKind) {
-    return harnessKind === "codex" ? "codex" : harnessKind === "claude-code" ? "claude-code" : harnessKind === "chatgpt-web" ? "chatgpt-web" : harnessKind === "antigravity" ? "antigravity" : undefined;
+    return harnessKind === "codex" ? "codex" : harnessKind === "claude-code" ? "claude-code" : harnessKind === "chatgpt-web" ? "chatgpt-web" : harnessKind === "antigravity" ? "antigravity" : harnessKind === "economy" ? "economy" : undefined;
 }
 
 function redactWorkspacePath(value, workspacePath) {
@@ -485,13 +485,15 @@ export function createCoworkerDispatcher({
         if (!resultGate)
             return { ok: false, taskId: task.id, stopped: true, reason: "stale collaboration result was discarded" };
         if (finished?.status !== "completed") {
-            const detail = "Coworker work did not complete.";
+            const detail = binding.provider === "economy"
+                ? String(finished?.error ?? "Economy work did not complete.").slice(0, 500)
+                : "Coworker work did not complete.";
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail);
             if (fanoutMode) await blockPendingFanout(detail);
-            else recordTeamEvent({ conversationId, type: "work.failed", status: "failed", actorId: coworkerId, ownerId: coworkerId, messageId, reason: detail });
+            else recordTeamEvent({ conversationId, type: "work.failed", status: binding.provider === "economy" ? "attention" : "failed", actorId: coworkerId, ownerId: coworkerId, messageId, reason: detail });
             state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
             save();
-            return { ok: false, taskId: task.id, error: detail };
+            return { ok: false, taskId: task.id, error: detail, ...(binding.provider === "economy" ? { attention: true, reason: detail } : {}) };
         }
 
         if (isConversationBlocked(conversationId)) {

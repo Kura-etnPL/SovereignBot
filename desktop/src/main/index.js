@@ -140,6 +140,7 @@ async function main() {
             getCoworkers: () => (coworkerStore.listInternal?.() ?? coworkerStore.list()).coworkers,
             getCoworkerAppAccess: (coworkerId) => connectedApps.assignedToolsForCoworker(coworkerId),
             workerNodeClientResolver: (nodeId) => workerNodeStore.client(nodeId),
+            economyConfig: services.getEconomyConfig(),
         });
     }
     catch (error) {
@@ -383,6 +384,8 @@ async function main() {
                         const login = await host.openAntigravityLogin(antigravityAccountNamespace("A"));
                         return { login, refresh: { applied: false, reason: "manual-sign-in", roster: host.rosterSummary() } };
                     }
+                    if (provider === "economy")
+                        throw new Error("Economy providers are configured by trusted main-process configuration; no renderer login is permitted");
                     const resolver = provider === "codex"
                         ? () => host.coreModules.resolveCodexLaunch({})
                         : () => host.coreModules.resolveClaudeCodeLaunch({});

@@ -1,13 +1,13 @@
 import { sanitizeRuntimeData } from "./runtime-data-redaction.js";
 
-const RESUMABLE_PROVIDER_KINDS = new Set(["codex", "claude-code", "chatgpt-web", "antigravity"]);
+const RESUMABLE_PROVIDER_KINDS = new Set(["codex", "claude-code", "chatgpt-web", "antigravity", "economy"]);
 const PROCESS_HARNESS_KINDS = new Set(["command", "codex", "claude-code"]);
 const TASK_RESULT_TAGS = new Set(["task-result", "candidate-result"]);
 const PROVIDER_SESSION_REDACTION = "[REDACTED_PROVIDER_SESSION]";
 
 function providerContinuityRef(task) {
     const state = task?.harnessState;
-    const key = ["chatgpt-web", "antigravity"].includes(state?.kind) ? "continuationRef" : "sessionId";
+    const key = ["chatgpt-web", "antigravity", "economy"].includes(state?.kind) ? "continuationRef" : "sessionId";
     return RESUMABLE_PROVIDER_KINDS.has(state?.kind) && typeof state[key] === "string" && state[key]
         ? state[key]
         : undefined;

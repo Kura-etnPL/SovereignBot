@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 export const DEFAULT_CONFIG_PATH = ".sovereignbot/config.json";
-const SUPPORTED_HARNESSES = new Set(["echo", "command", "codex", "claude-code", "chatgpt-web", "antigravity"]);
+const SUPPORTED_HARNESSES = new Set(["echo", "command", "codex", "claude-code", "chatgpt-web", "antigravity", "economy"]);
 const WORKER_NODE_PROVIDERS = new Set(["codex", "claude-code"]);
 const SUPPORTED_COMPUTER_DRIVERS = new Set(["webdriver-sidecar"]);
 const SUPPORTED_BROWSERS = new Set(["chrome", "edge", "firefox"]);

@@ -73,6 +73,7 @@ export function createFirstRunService({ host, services }) {
             }
             providers["chatgpt-web"] = host.rosterSummary?.().providers?.["chatgpt-web"] ?? { found: false, health: "unavailable", reason: "Use Sign in to connect ChatGPT Web." };
             providers.antigravity = host.rosterSummary?.().providers?.antigravity ?? { found: false, health: "unavailable", reason: "Use Advanced settings to connect an Antigravity account." };
+            providers.economy = host.rosterSummary?.().providers?.economy ?? { found: false, health: "unavailable", reason: "No Economy provider is configured." };
             return {
                 core: { ok: true },
                 providers,

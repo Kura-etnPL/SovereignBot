@@ -35,6 +35,7 @@ function normalizeExecutionTarget(value) {
 }
 
 function isWorkerNodeTarget(job) { return job.executionTarget?.kind === "worker-node"; }
+function isEconomyFailure(message) { return /\[ECONOMY:(?:METERED_DISABLED|BUDGET_EXHAUSTED|TOTAL_CAP_EXCEEDED|SPEND_CAP_INVALID|LEDGER_CORRUPT|UNAVAILABLE)\]/i.test(String(message ?? "")); }
 function isTransportFailure(error) { return /worker-node transport unavailable|reconnect required/i.test(String(error?.message ?? error)); }
 function makeWorkerRequestId() { return `worker_request_${randomBytes(8).toString("hex")}`; }
 function isValidIsoTimestamp(value) { return typeof value === "string" && value.length <= 64 && Number.isFinite(Date.parse(value)); }
@@ -85,6 +86,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     if (!s?.ready || s.mode === "demo") throw new Error(s?.mode === "demo" ? "demo roster" : "no ready AI provider roster");
     return s;
   }
+  function rosterProviderForJob(job) { return roster()?.coworkerBindings?.[job?.ownerCoworkerId]?.provider; }
   function requireCoworkerBinding(coworkerId) {
     const snap = rosterSnapshot();
     const b = snap.coworkerBindings?.[coworkerId];
@@ -312,6 +314,11 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       job.attempt = attempt;
       job.error = String(finished?.error ?? `job task ended as ${status}`).slice(0, 500);
       appendMessage(job, "answer", `Job attempt ${attempt} did not complete: ${job.error}`);
+      if (rosterProviderForJob(job) === "economy" || isEconomyFailure(job.error)) {
+        setStatus(job, "needs_attention");
+        job.attentionState = { reason: job.error, attempt, at: now() };
+        save(); return;
+      }
       if (attempt < CAPS.maxAttempts) {
         if (remoteTarget) {
           job.requestId = undefined;
@@ -343,6 +350,9 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
           setStatus(j, "needs_attention");
           j.attentionState = { reason: msg, attempt: j.attempt ?? 0, at: now() };
         }
+      } else if (rosterProviderForJob(j) === "economy" || isEconomyFailure(msg)) {
+        setStatus(j, "needs_attention");
+        j.attentionState = { reason: msg, attempt: j.attempt ?? 0, at: now() };
       } else if (attempt + 1 < CAPS.maxAttempts && !/no ready AI provider|demo roster/i.test(msg)) {
         j.attempt = attempt + 1;
         j.nextActionAt = new Date(Date.now() + 1000 * Math.pow(2, j.attempt)).toISOString();

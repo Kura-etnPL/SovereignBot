@@ -9,6 +9,7 @@ import { buildPolicyRules, buildProviderRoster, resolveFakeProviderLaunch } from
 import { accountIsolationNamespace } from "./provider-account.js";
 import { createChatGPTWebProviderFactory } from "./chatgpt-web-provider.js";
 import { antigravityAccountNamespace, createAntigravityProviderFactory } from "./antigravity-provider.js";
+import { createEconomyProviderFactory } from "./economy-provider.js";
 import { prepareInternalNode } from "./internal-node.js";
 
 const DESKTOP_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -114,7 +115,7 @@ export async function loadCoreResolvers() {
 // settings, and the persistent Coworker Registry. Coworkers are converted into dedicated
 // provider-backed runtime agents only here; renderer messages and model output never mint
 // runtime identities or capabilities.
-export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = () => [], getCoworkerAppAccess = () => undefined, workerNodeClientResolver, chatgptWebDriverFactory, antigravityDriverFactory }) {
+export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = () => [], getCoworkerAppAccess = () => undefined, workerNodeClientResolver, chatgptWebDriverFactory, antigravityDriverFactory, economyConfig, economyAdapterFactory }) {
     if (typeof getSettings !== "function")
         throw new Error("runtime host requires a settings reader");
     if (typeof getCoworkers !== "function")
@@ -166,6 +167,9 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             antigravity: antigravityEnabled
                 ? { provider: "antigravity", found: true, source: "dedicated-profile", auth: { state: "unverified" }, health: "ready", interactiveLoginAvailable: true }
                 : antigravityUnavailable(),
+            economy: economyFactory.available()
+                ? { provider: "economy", found: true, source: "trusted-config", auth: { state: "configured" }, health: "ready", configured: economyFactory.configured(), interactiveLoginAvailable: false }
+                : economyUnavailable(),
         };
     }
 
@@ -193,7 +197,8 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             ? await antigravityFactory.health(defaultAntigravityAccount)
             : antigravityUnavailable();
         const antigravityAccounts = antigravityEnabled ? await antigravityFactory.accounts() : [];
-        return { codex, claude, "chatgpt-web": { provider: "chatgpt-web", ...chatgptWeb }, antigravity: { provider: "antigravity", ...antigravity, accounts: antigravityAccounts } };
+        const economy = await economyFactory.health();
+        return { codex, claude, "chatgpt-web": { provider: "chatgpt-web", ...chatgptWeb }, antigravity: { provider: "antigravity", ...antigravity, accounts: antigravityAccounts }, economy: { provider: "economy", configured: economyFactory.configured(), ...economy } };
     }
 
     function computerRuntimeConfig() {
@@ -228,12 +233,16 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         driverConfig: computerRuntimeConfig().config?.driver ?? {},
         driverFactory: antigravityDriverFactory,
     });
+    const economyFactory = createEconomyProviderFactory({ dataDir, config: economyConfig ?? { providers: [], metered: { enabled: false, budget: 0, perRunCap: 0, totalCap: 0 } }, adapterFactory: economyAdapterFactory });
 
     function chatgptWebUnavailable() {
         return { provider: "chatgpt-web", found: false, health: "unavailable", auth: { state: "signed-out" }, reason: "ChatGPT Web is not connected; use Sign in to connect the dedicated profile." };
     }
     function antigravityUnavailable() {
         return { provider: "antigravity", found: false, health: "unavailable", auth: { state: "signed-out" }, reason: "Antigravity is not connected; use Advanced account setup to connect a dedicated profile." };
+    }
+    function economyUnavailable() {
+        return { provider: "economy", found: false, configured: economyFactory.configured(), health: "unavailable", auth: { state: "unavailable" }, reason: economyFactory.configured() ? "No configured Economy provider is available." : "No Economy provider is configured." };
     }
 
     function coworkerSnapshot() {
@@ -262,6 +271,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                 ...(disabled ? { reason: "Provider disabled in Settings" } : result.reason ? { reason: String(result.reason).slice(0, 300) } : {}),
                 authState,
                 usable: roster.providers[key] === true,
+                ...(key === "economy" ? { configured: result.configured === true } : {}),
                 ...(Array.isArray(result.capabilities) ? { capabilities: result.capabilities.filter((entry) => typeof entry === "string").slice(0, 16) } : {}),
                 ...(Array.isArray(result.models) ? { models: result.models.filter((entry) => typeof entry === "string").slice(0, 16) } : {}),
                 ...(Array.isArray(result.accounts) ? { accounts: result.accounts.map((entry) => ({ slot: entry.slot, health: entry.health, authState: entry.authState, ...(entry.reason ? { reason: String(entry.reason).slice(0, 300) } : {}), ...(Array.isArray(entry.capabilities) ? { capabilities: entry.capabilities.slice(0, 16) } : {}), ...(Array.isArray(entry.models) ? { models: entry.models.slice(0, 16) } : {}) })) } : {}),
@@ -292,6 +302,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                 claude: publicProvider("claude"),
                 "chatgpt-web": publicProvider("chatgpt-web"),
                 antigravity: publicProvider("antigravity"),
+                economy: publicProvider("economy"),
             },
         };
     }
@@ -314,6 +325,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             coworkers: coworkerSnapshot(),
             getCoworkerAppAccess,
             includeWorkerNodeDispatcher: Boolean(workerNodeClientResolver),
+            economyProviderId: economyFactory.defaultProviderId(),
         });
         let nextRuntime;
         try {
@@ -334,6 +346,9 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                     : undefined,
                 antigravityAdapterResolver: (agent) => agent.harness?.kind === "antigravity"
                     ? antigravityFactory.get(agent.harness.accountNamespace ?? defaultAntigravityAccount)
+                    : undefined,
+                economyAdapterResolver: (agent) => agent.harness?.kind === "economy"
+                    ? economyFactory.get(agent.harness.providerId)
                     : undefined,
             });
 
@@ -380,6 +395,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             coworkers: coworkerSnapshot(),
             getCoworkerAppAccess,
             includeWorkerNodeDispatcher: Boolean(workerNodeClientResolver),
+            economyProviderId: economyFactory.defaultProviderId(),
         });
         const sameShape =
             nextRoster.mode === roster.mode
@@ -425,6 +441,12 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         openAntigravityLogin(accountNamespace = defaultAntigravityAccount) {
             return antigravityFactory.openLogin(accountNamespace);
         },
+        openEconomyLogin() {
+            throw new Error("Economy providers are configured through the trusted main-process provider contract; renderer login is unavailable");
+        },
+        economyUsageSnapshot() {
+            return economyFactory.usageSnapshot();
+        },
         rosterSummary() {
             return structuredClone(summary);
         },
@@ -440,6 +462,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             await runtime.close();
             await chatgptWebFactory.close();
             await antigravityFactory.close();
+            await economyFactory.close();
         },
     };
 }

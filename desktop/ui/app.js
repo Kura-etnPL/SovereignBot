@@ -96,7 +96,21 @@ function humanProvider(provider) {
   if (provider === "claude") return "Claude Code";
   if (provider === "chatgpt-web") return "ChatGPT Web / Sol";
   if (provider === "antigravity") return "Antigravity";
+  if (provider === "economy") return "Economy";
   return "Automatic";
+}
+
+function economyAvailable() {
+  const provider = state.roster?.providers?.economy;
+  return provider?.configured === true && provider.usable === true && provider.health === "ready";
+}
+
+function syncEconomyControls() {
+  const available = economyAvailable();
+  const profileOption = $("coworker-economy-option");
+  const providerOption = $("coworker-economy-provider-option");
+  if (profileOption) { profileOption.hidden = !available; profileOption.disabled = !available; }
+  if (providerOption) { providerOption.hidden = !available; providerOption.disabled = !available; }
 }
 
 function humanModelProfile(profile) {
@@ -1416,6 +1430,7 @@ function openCoworkerDialog(coworker) {
   $("coworker-role").value = coworker?.role ?? "";
   $("coworker-instructions").value = coworker?.instructions ?? "";
   $("coworker-provider").value = coworker?.modelBinding?.profile ?? "automatic";
+  syncEconomyControls();
   $("coworker-state").value = coworker?.state === "paused" ? "paused" : "active";
   $("coworker-workspace").value = coworker?.workspaceIds?.[0] ?? "";
   $("coworker-computer-profile").value = coworker?.computerProfileId ?? "";
@@ -1610,7 +1625,9 @@ function renderProviderCards() {
   const root = $("provider-cards");
   clearNode(root);
   const firstRunProviders = state.firstRun?.providers ?? {};
-  for (const provider of ["codex", "claude", "chatgpt-web", "antigravity"]) {
+  syncEconomyControls();
+  const providerIds = ["codex", "claude", "chatgpt-web", "antigravity", ...(economyAvailable() ? ["economy"] : [])];
+  for (const provider of providerIds) {
     const info = firstRunProviders[provider] ?? {};
     const rosterProvider = state.roster?.providers?.[provider] ?? {};
     const health = rosterProvider.health ?? (rosterProvider.usable ? "ready" : info.found ? "unavailable" : "unavailable");
@@ -1630,15 +1647,15 @@ function renderProviderCards() {
           : health === "unavailable" ? "Unavailable" : "Checking";
     head.append(name, status);
     const detail = document.createElement("p");
-    detail.textContent = rosterProvider.reason || (provider === "chatgpt-web" ? "Use the dedicated profile for a normal ChatGPT Web sign-in, then refresh." : provider === "antigravity" ? "Use Advanced settings to pin a dedicated Antigravity account." : info.found ? (info.version || "CLI detected") : "Install the local CLI, then refresh.");
+    detail.textContent = rosterProvider.reason || (provider === "chatgpt-web" ? "Use the dedicated profile for a normal ChatGPT Web sign-in, then refresh." : provider === "antigravity" ? "Use Advanced settings to pin a dedicated Antigravity account." : provider === "economy" ? "Trusted Economy configuration is active; metered budget controls remain outside renderer settings." : info.found ? (info.version || "CLI detected") : "Install the local CLI, then refresh.");
     const actions = document.createElement("div");
     actions.className = "provider-actions";
     const signIn = document.createElement("button");
     signIn.type = "button";
-    signIn.textContent = ["chatgpt-web", "antigravity"].includes(provider) ? "Sign in" : info.found ? "Open sign-in" : "Try detection";
+    signIn.textContent = provider === "economy" ? "Refresh" : ["chatgpt-web", "antigravity"].includes(provider) ? "Sign in" : info.found ? "Open sign-in" : "Try detection";
     signIn.addEventListener("click", async () => {
       try {
-        if (provider === "chatgpt-web" || info.found) await window.sovereignbot.providers.openLogin({ provider });
+        if (provider !== "economy" && (provider === "chatgpt-web" || info.found)) await window.sovereignbot.providers.openLogin({ provider });
         else await window.sovereignbot.providers.refresh({});
         await refreshSettingsData();
       } catch (error) {

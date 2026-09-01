@@ -473,7 +473,7 @@ function safePackModelBinding(value) {
     if (!["automatic", "efficient", "deep", "economy", "custom"].includes(profile))
         throw new Error("team pack modelBinding.profile is invalid");
     const provider = value.provider === undefined ? undefined : safeId(value.provider, "modelBinding.provider");
-    if (provider && !["codex", "claude", "antigravity", "chatgpt-web"].includes(provider))
+    if (provider && !["codex", "claude", "antigravity", "chatgpt-web", "economy"].includes(provider))
         throw new Error("team pack modelBinding.provider is invalid");
     const model = value.model === undefined ? undefined : safeId(value.model, "modelBinding.model");
     if (profile === "custom" && (!provider || !model))

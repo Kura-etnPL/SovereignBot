@@ -33,7 +33,7 @@ function modelBindingShape(value) {
     if (![
         "automatic", "efficient", "deep", "economy", "custom",
     ].includes(value.profile ?? "automatic")) throw new Error("modelBinding.profile is invalid");
-    if (value.provider !== undefined && !["codex", "claude", "antigravity", "chatgpt-web"].includes(value.provider))
+    if (value.provider !== undefined && !["codex", "claude", "antigravity", "chatgpt-web", "economy"].includes(value.provider))
         throw new Error("modelBinding.provider is invalid");
     for (const [key, child] of [["providerAccountId", value.providerAccountId], ["model", value.model]]) {
         if (child !== undefined && (typeof child !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(child)))
@@ -51,7 +51,7 @@ function teamPackModelBindingShape(value) {
     const profile = value.profile ?? "automatic";
     if (!["automatic", "efficient", "deep", "economy", "custom"].includes(profile))
         throw new Error("team pack modelBinding.profile is invalid");
-    if (value.provider !== undefined && !["codex", "claude", "antigravity", "chatgpt-web"].includes(value.provider))
+    if (value.provider !== undefined && !["codex", "claude", "antigravity", "chatgpt-web", "economy"].includes(value.provider))
         throw new Error("team pack modelBinding.provider is invalid");
     for (const [key, child] of [["provider", value.provider], ["model", value.model]]) {
         if (child !== undefined && (typeof child !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(child)))

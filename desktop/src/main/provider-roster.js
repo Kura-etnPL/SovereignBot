@@ -11,6 +11,7 @@ const PROVIDER_HARNESSES = Object.freeze({
     claude: "claude-code",
     "chatgpt-web": "chatgpt-web",
     antigravity: "antigravity",
+    economy: "economy",
 });
 const ORCHESTRATION_PROVIDERS = Object.freeze(["codex", "claude"]);
 export const WORKER_NODE_SUPERVISOR = "worker-node-supervisor";
@@ -97,12 +98,12 @@ function defaultRolesFor(usable) {
 }
 
 function agentName(provider, role) {
-    const providerLabel = provider === "codex" ? "Codex" : provider === "claude" ? "Claude Code" : provider === "chatgpt-web" ? "ChatGPT Web / Sol" : "Antigravity";
+    const providerLabel = provider === "codex" ? "Codex" : provider === "claude" ? "Claude Code" : provider === "chatgpt-web" ? "ChatGPT Web / Sol" : provider === "antigravity" ? "Antigravity" : "Economy";
     const roleLabel = role[0].toUpperCase() + role.slice(1);
     return `${providerLabel} ${roleLabel}`;
 }
 
-function harnessConfig(provider, _role, fakeLaunchers, model) {
+function harnessConfig(provider, _role, fakeLaunchers, model, economyProviderId) {
     const harnessKind = PROVIDER_HARNESSES[provider];
     if (!harnessKind)
         throw new Error(`provider ${provider} has no registered executable harness`);
@@ -113,6 +114,8 @@ function harnessConfig(provider, _role, fakeLaunchers, model) {
         return { kind: harnessKind, model: model ?? "sol" };
     if (provider === "antigravity")
         return { kind: harnessKind, model: model ?? "antigravity" };
+    if (provider === "economy")
+        return { kind: harnessKind, providerId: economyProviderId ?? "default", model: model ?? "economy" };
     // Workspaces chosen by the operator may be plain folders; Codex must not refuse
     // non-git directories. The execution cwd itself arrives per task through the
     // trusted execution context, never through static harness configuration.
@@ -169,13 +172,13 @@ export function chooseCoworkerProvider(coworker, usableProviders = {}) {
         return undefined;
     }
     if (binding.profile === "economy") {
-        if (explicit && hasRegisteredHarness(explicit, usableProviders) && usableProviders.economy === true)
-            return explicit;
-        if (!explicit && usableProviders.economy === true) {
-            if (hasRegisteredHarness("codex", usableProviders)) return "codex";
-            if (hasRegisteredHarness("claude", usableProviders)) return "claude";
-        }
-        return undefined;
+        // Economy is a distinct provider lane. It must never be satisfied by a
+        // Codex/Claude fallback, including when those providers are capacity-limited.
+        if (usableProviders.economy !== true)
+            return undefined;
+        if (explicit && explicit !== "economy")
+            return undefined;
+        return "economy";
     }
     if (explicit)
         return hasRegisteredHarness(explicit, usableProviders) ? explicit : undefined;
@@ -188,7 +191,7 @@ export function chooseCoworkerProvider(coworker, usableProviders = {}) {
     return undefined;
 }
 
-function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCoworkerAppAccess }) {
+function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCoworkerAppAccess, economyProviderId }) {
     const agents = [];
     const bindings = {};
     for (const coworker of Array.isArray(coworkers) ? coworkers : []) {
@@ -223,10 +226,10 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCow
         const governedTools = Array.isArray(appAccess?.tools) ? [...new Set(appAccess.tools)] : [];
         const agent = {
             id,
-            name: `${coworker.name} · ${provider === "codex" ? "Codex" : provider === "claude" ? "Claude Code" : provider === "chatgpt-web" ? "ChatGPT Web / Sol" : "Antigravity"}`,
+            name: `${coworker.name} · ${provider === "codex" ? "Codex" : provider === "claude" ? "Claude Code" : provider === "chatgpt-web" ? "ChatGPT Web / Sol" : provider === "antigravity" ? "Antigravity" : "Economy"}`,
             role: "worker",
             capabilities: ["general", coworkerCapability(coworker.id)],
-            harness: { ...harnessConfig(provider, "coworker", fakeLaunchers, modelBinding.model), ...(accountNamespace ? { accountNamespace } : {}) },
+            harness: { ...harnessConfig(provider, "coworker", fakeLaunchers, modelBinding.model, modelBinding.providerAccountId ?? economyProviderId), ...(accountNamespace ? { accountNamespace } : {}) },
             maxConcurrency: 1,
             ...(governedTools.length ? { governedTools } : {}),
         };
@@ -244,7 +247,7 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCow
     return { agents, bindings };
 }
 
-export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false, coworkers = [], includeWorkerNodeDispatcher = false, getCoworkerAppAccess } = {}) {
+export function buildProviderRoster({ discovery, settings, fakeLaunchers, computerAvailable = false, coworkers = [], includeWorkerNodeDispatcher = false, getCoworkerAppAccess, economyProviderId } = {}) {
     if (!discovery || typeof discovery !== "object")
         throw new Error("provider roster requires discovery results");
 
@@ -258,9 +261,10 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
         claude: providerUsable(discovery.claude, settings, "claude"),
         "chatgpt-web": providerUsable(discovery["chatgpt-web"], settings, "chatgpt-web"),
         antigravity: providerUsable(discovery.antigravity, settings, "antigravity"),
+        economy: providerUsable(discovery.economy, settings, "economy"),
     };
     if (!usableProviders.codex && !usableProviders.claude) {
-        const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCoworkerAppAccess });
+        const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCoworkerAppAccess, economyProviderId });
         const workerNodeAgents = includeWorkerNodeDispatcher
             ? [
                 {
@@ -343,7 +347,7 @@ export function buildProviderRoster({ discovery, settings, fakeLaunchers, comput
             workerAgent.governedTools = ["computer"];
     }
 
-    const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCoworkerAppAccess });
+    const coworkerRuntime = buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCoworkerAppAccess, economyProviderId });
     // This identity is a narrow protocol adapter. It is never a planner/reviewer role,
     // never receives browser/computer capabilities, and is only compatible with tasks
     // explicitly stamped with the worker-node trusted context.
@@ -373,7 +377,7 @@ export function buildDemoRoster() {
     return {
         mode: "demo",
         ready: true,
-        providers: { codex: false, claude: false, "chatgpt-web": false, antigravity: false },
+        providers: { codex: false, claude: false, "chatgpt-web": false, antigravity: false, economy: false },
         roles: { planner: "demo-supervisor", worker: "demo-worker", reviewer: undefined, synthesizer: undefined },
         agents: [
             {
