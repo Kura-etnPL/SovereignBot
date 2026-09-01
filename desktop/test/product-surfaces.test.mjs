@@ -40,6 +40,8 @@ test("product surfaces provide safe playbook, artifact, computer, and pack proje
   assert.equal(team.playbooks.find((entry) => entry.id === "delivery").name, "Delivery updated");
   assert.equal(service.artifactHub().artifacts[0].storageRelativePath, undefined);
   assert.equal(service.artifactHub().artifacts[0].sourceRelativePath, undefined);
+  assert.equal(service.artifactHub({ type: "text/markdown" }).artifacts.length, 2);
+  assert.equal(service.artifactHub().artifacts[0].history[0].event, "created");
   assert.equal(JSON.stringify(service.artifactHub()).includes("C:\\private"), false);
   assert.equal(JSON.stringify(service.artifactHub()).includes("never-show"), false);
   assert.equal(service.artifactHub({ teamId: team.id }).artifacts.some((entry) => entry.id === "artifact_2222222222222222"), false);

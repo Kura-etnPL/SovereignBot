@@ -59,6 +59,15 @@ export async function runVerifySoftwareTeam({
         }
         throw new Error(`timed out waiting for ${label}: ${JSON.stringify(last)}`);
     };
+    const expectRendererReject = async (script) => {
+        try {
+            await renderer(script);
+            return false;
+        }
+        catch {
+            return true;
+        }
+    };
     const capture = async (name) => {
         const attempts = [];
         let image;
@@ -253,6 +262,176 @@ export async function runVerifySoftwareTeam({
             [...messages].reverse().find((entry) => entry.senderId === chiefId) ? "Chief of Staff" : undefined,
         ];
         check("OWNER_STATUS_AND_FINAL_SYNTHESIS", stageOwners[0]?.includes("Coding Lead") && stageOwners.slice(1).every(Boolean) && finished.flow.stage === "complete", stageOwners);
+
+        // Requirement audit through the independent product pages. These calls use
+        // the public preload API and the existing stores; no parallel product engine
+        // or test-only persistence is introduced.
+        const playbookFlowBefore = await renderer(`window.sovereignbot.teams.get({ teamId: ${JSON.stringify(team.id)} })`);
+        const createdPlaybook = await renderer(`window.sovereignbot.playbooks.create({ playbook: { name: "P0 Canary Method", description: "Bounded product acceptance method", steps: ["chief", "coding-lead", "reviewer", "chief"] } })`);
+        const exportedPlaybook = await renderer(`window.sovereignbot.playbooks.export({ playbookId: ${JSON.stringify(createdPlaybook.id)} })`);
+        const importedPlaybook = await renderer(`window.sovereignbot.playbooks.import({ playbook: ${JSON.stringify({ ...exportedPlaybook, id: "playbook_p0_imported" })} })`);
+        const duplicatedPlaybook = await renderer(`window.sovereignbot.playbooks.duplicate({ playbookId: ${JSON.stringify(createdPlaybook.id)} })`);
+        await renderer(`window.sovereignbot.playbooks.update({ playbookId: ${JSON.stringify(createdPlaybook.id)}, patch: { name: "P0 Canary Method Updated", description: "Updated bounded method", steps: ["chief", "reviewer", "chief"] } })`);
+        await renderer(`window.sovereignbot.playbooks.assign({ playbookId: ${JSON.stringify(createdPlaybook.id)}, teamId: ${JSON.stringify(team.id)} })`);
+        await renderer(`window.sovereignbot.playbooks.assign({ playbookId: "playbook_p0_imported", channelId: ${JSON.stringify(channel.id)} })`);
+        await renderer(`window.sovereignbot.playbooks.archive({ playbookId: "playbook_p0_imported" })`);
+        await renderer(`window.sovereignbot.playbooks.restore({ playbookId: "playbook_p0_imported" })`);
+        const playbookState = await renderer(`(async()=>({ library: await window.sovereignbot.playbooks.list({ includeArchived: true }), team: await window.sovereignbot.teams.get({ teamId: ${JSON.stringify(team.id)} }) }))()`);
+        check("P0_PLAYBOOK_LIBRARY_LIFECYCLE", createdPlaybook.id && exportedPlaybook.schema === "sovereignbot.desktop.playbook.v1"
+            && importedPlaybook.imported === true && duplicatedPlaybook.name === "P0 Canary Method copy"
+            && playbookState.library.playbooks.some((entry) => entry.id === "playbook_p0_imported" && entry.state === "active")
+            && playbookState.library.playbooks.some((entry) => entry.id === createdPlaybook.id && entry.name === "P0 Canary Method Updated")
+            && playbookState.team.playbooks.some((entry) => entry.id === createdPlaybook.id)
+            && playbookState.team.channels.some((entry) => entry.id === channel.id && entry.playbookId === "playbook_p0_imported")
+            && playbookState.team.flow.stage === playbookFlowBefore.flow.stage, {
+            imported: importedPlaybook.imported,
+            duplicate: duplicatedPlaybook.name,
+            assignedTeam: playbookState.team.playbooks.some((entry) => entry.id === createdPlaybook.id),
+            assignedChannel: playbookState.team.channels.some((entry) => entry.id === channel.id && entry.playbookId === "playbook_p0_imported"),
+            flowStage: playbookState.team.flow.stage,
+        });
+        check("P0_PLAYBOOK_AUTHORITY_REJECTED", await expectRendererReject(`window.sovereignbot.playbooks.import({ playbook: ${JSON.stringify({ ...exportedPlaybook, id: "playbook_p0_authority", capabilityGrant: "workspace" })} })`));
+
+        const createdSkill = await renderer(`window.sovereignbot.skills.create({ skill: { name: "P0 Canary Skill", description: "Safe declarative skill", instructions: "Summarize the bounded acceptance evidence." } })`);
+        const exportedSkill = await renderer(`window.sovereignbot.skills.export({ skillId: ${JSON.stringify(createdSkill.id)} })`);
+        const importedSkill = await renderer(`window.sovereignbot.skills.import({ skill: ${JSON.stringify({ ...exportedSkill, name: "P0 Imported Skill" })} })`);
+        const duplicatedSkill = await renderer(`window.sovereignbot.skills.duplicate({ skillId: ${JSON.stringify(createdSkill.id)} })`);
+        await renderer(`window.sovereignbot.skills.assign({ skillId: ${JSON.stringify(createdSkill.id)}, targetKind: "team", targetId: ${JSON.stringify(team.id)}, enabled: true })`);
+        await renderer(`window.sovereignbot.skills.assign({ skillId: ${JSON.stringify(createdSkill.id)}, targetKind: "coworker", targetId: ${JSON.stringify(chiefId)}, enabled: true })`);
+        const retestedSkill = await renderer(`window.sovereignbot.skills.retest({ skillId: ${JSON.stringify(createdSkill.id)} })`);
+        const archivedSkill = await renderer(`window.sovereignbot.skills.archive({ skillId: ${JSON.stringify(duplicatedSkill.id)} })`);
+        const restoredSkill = await renderer(`window.sovereignbot.skills.restore({ skillId: ${JSON.stringify(duplicatedSkill.id)} })`);
+        const routine = await renderer(`window.sovereignbot.routines.create({ name: "P0 Canary Routine", instruction: "Run the P0 canary skill through the governed Job path.", coworkerId: ${JSON.stringify(chiefId)}, skillId: ${JSON.stringify(createdSkill.id)}, workspaceId: ${JSON.stringify(team.sharedWorkspaceId)}, schedule: { type: "one-time", at: new Date(Date.now() + 3_600_000).toISOString() } })`);
+        const routineListed = await renderer(`window.sovereignbot.routines.list({})`);
+        await renderer(`window.sovereignbot.routines.remove({ routineId: ${JSON.stringify(routine.id)} })`);
+        check("P0_SKILL_LIBRARY_LIFECYCLE", createdSkill.id && exportedSkill.schema === "sovereignbot.desktop.skill.v1"
+            && importedSkill.imported === true && duplicatedSkill.name === "P0 Canary Skill copy"
+            && retestedSkill.tested === true && archivedSkill.state === "archived" && restoredSkill.state === "active"
+            && routineListed.routines.some((entry) => entry.id === routine.id && entry.skillId === createdSkill.id)
+            && (await renderer(`window.sovereignbot.skills.get({ skillId: ${JSON.stringify(createdSkill.id)} })`)).assignedTeamIds.includes(team.id), {
+            imported: importedSkill.imported,
+            duplicate: duplicatedSkill.name,
+            retested: retestedSkill.mode,
+            routine: routine.id,
+        });
+        check("P0_SKILL_AUTHORITY_REJECTED", await expectRendererReject(`window.sovereignbot.skills.import({ skill: ${JSON.stringify({ ...exportedSkill, name: "P0 Authority Skill", capabilityGrant: "computer" })} })`));
+
+        const duplicatedPack = await renderer('window.sovereignbot.teams.duplicatePack({ packId: "software-team" })');
+        const editedPack = await renderer(`window.sovereignbot.teams.editPack({ packId: ${JSON.stringify(duplicatedPack.id)}, patch: { name: "P0 Edited Software Recipe", description: "Edited safe recipe" } })`);
+        const exportedPack = await renderer(`window.sovereignbot.teams.exportPackRecipe({ packId: ${JSON.stringify(duplicatedPack.id)} })`);
+        const packCatalog = await renderer("window.sovereignbot.teams.list({})");
+        check("P0_TEAM_PACK_GALLERY_ROUNDTRIP", packCatalog.packs.some((entry) => entry.id === "software-team" && entry.category === "Software")
+            && packCatalog.packs.some((entry) => entry.id === "research-team" && entry.category === "Research")
+            && packCatalog.packs.some((entry) => entry.id === "content-team" && entry.category === "Content")
+            && packCatalog.packs.some((entry) => entry.id === "operations-team" && entry.category === "Operations")
+            && editedPack.name === "P0 Edited Software Recipe" && exportedPack.name === editedPack.name
+            && exportedPack.schema === "sovereignbot.desktop.team-pack.v1", {
+            firstPartyCategories: [...new Set(packCatalog.packs.filter((entry) => !entry.custom).map((entry) => entry.category))],
+            customPack: duplicatedPack.id,
+        });
+        check("P0_TEAM_PACK_AUTHORITY_REJECTED", await expectRendererReject(`window.sovereignbot.teams.editPack({ packId: ${JSON.stringify(duplicatedPack.id)}, patch: { capabilityGrant: "computer" } })`));
+
+        const workChannel = await renderer(`window.sovereignbot.channels.create({ teamId: ${JSON.stringify(team.id)}, name: "P0 Work Room", kind: "work", instructions: "Bounded work updates.", workspaceId: ${JSON.stringify(team.sharedWorkspaceId)}, playbookId: "software-delivery" })`);
+        const personalChannel = await renderer(`window.sovereignbot.channels.create({ teamId: ${JSON.stringify(team.id)}, name: "P0 Personal Room", kind: "personal", instructions: "Personal planning only.", workspaceId: ${JSON.stringify(team.sharedWorkspaceId)}, playbookId: "software-delivery" })`);
+        const updatedWorkChannel = await renderer(`window.sovereignbot.channels.update({ channelId: ${JSON.stringify(workChannel.channel.id)}, patch: { name: "P0 Work Room Updated", instructions: "Updated bounded work updates." } })`);
+        await renderer(`window.sovereignbot.channels.archive({ channelId: ${JSON.stringify(personalChannel.channel.id)} })`);
+        const restoredPersonalChannel = await renderer(`window.sovereignbot.channels.restore({ channelId: ${JSON.stringify(personalChannel.channel.id)} })`);
+        getConversationStore().postCoworkerMessage(workChannel.channel.conversationId, codingLeadId, { text: "P0 unread activity update" });
+        await renderer("window.refreshConversations?.(); true");
+        const channelCatalog = await renderer(`window.sovereignbot.channels.list({ teamId: ${JSON.stringify(team.id)}, includeArchived: true })`);
+        check("P0_CHANNEL_LIFECYCLE", ["work", "personal", "project"].every((kind) => channelCatalog.channels.some((entry) => entry.kind === kind))
+            && updatedWorkChannel.channel.name === "P0 Work Room Updated" && restoredPersonalChannel.channel.archived === false, {
+            kinds: [...new Set(channelCatalog.channels.map((entry) => entry.kind))],
+            work: updatedWorkChannel.channel.name,
+            personalRestored: restoredPersonalChannel.channel.archived === false,
+        });
+
+        const artifactHub = await renderer(`window.sovereignbot.artifacts.hub({ channelId: ${JSON.stringify(channel.id)}, type: "text/markdown", limit: 20 })`);
+        const artifact = artifactHub.artifacts?.[0];
+        const artifactPreview = artifact ? await renderer(`window.sovereignbot.artifacts.preview({ artifactId: ${JSON.stringify(artifact.id)} })`) : undefined;
+        const artifactOpen = artifact ? await renderer(`window.sovereignbot.artifacts.open({ artifactId: ${JSON.stringify(artifact.id)} })`) : undefined;
+        const artifactReveal = artifact ? await renderer(`window.sovereignbot.artifacts.reveal({ artifactId: ${JSON.stringify(artifact.id)} })`) : undefined;
+        check("P0_ARTIFACT_HUB_REAL_ACTIONS", Boolean(artifact?.creator?.name && artifact?.history?.some((entry) => entry.event === "created") && artifactPreview?.preview?.includes("Software delivery") && artifactOpen?.ok === true && artifactReveal?.ok === true)
+            && !containsAny(artifactHub, [dataDir, "storageRelativePath", "sourceRelativePath"]), {
+            artifact: artifact?.title,
+            creator: artifact?.creator?.name,
+            type: artifact?.mimeType,
+            history: artifact?.history?.length ?? 0,
+            opened: artifactOpen?.ok === true,
+            revealed: artifactReveal?.ok === true,
+        });
+
+        const computerHistory = await renderer("window.sovereignbot.computer.history({ limit: 100 })");
+        check("P0_COMPUTER_HISTORY_REDACTED", Array.isArray(computerHistory.history)
+            && computerHistory.history.every((entry) => entry.source && entry.activity && entry.summary && entry.status && entry.timestamp)
+            && !containsAny(computerHistory, [dataDir, "session", "cookie", "password", "coordinate", "webdriver", "rawPath"]), {
+            count: computerHistory.history.length,
+            sources: [...new Set(computerHistory.history.map((entry) => entry.source))],
+        });
+
+        const productPages = [
+            ["nav-playbooks", "view-playbooks"], ["nav-artifacts", "view-artifacts"], ["nav-computer-history", "view-computer-history"],
+            ["nav-skills", "view-skills"], ["nav-team-packs", "view-team-packs"], ["nav-channels", "view-channels"],
+        ];
+        for (const [navId, viewId] of productPages) {
+            await renderer(`document.getElementById(${JSON.stringify(navId)})?.click(); true`);
+            await waitFor(`${viewId} reachable`, async () => await renderer(`!document.getElementById(${JSON.stringify(viewId)})?.classList.contains("hidden")`), 15_000);
+        }
+        check("P0_PRODUCT_PAGES_REACHABLE", true, productPages.map(([, viewId]) => viewId));
+        await renderer("document.getElementById('nav-channels')?.click(); true");
+        await waitFor("unread channel filter", async () => {
+            await renderer("(()=>{ const filter=document.getElementById('product-channel-filter-page'); if (filter) { filter.value='unread'; filter.dispatchEvent(new Event('change',{bubbles:true})); } return true; })()");
+            return await renderer("document.getElementById('product-channels-page')?.innerText.includes('P0 Work Room Updated')");
+        }, 15_000);
+        const quickSwitchValue = await renderer(`(()=>{ const select=document.getElementById('product-channel-switch-page'); const option=[...select.options].find((entry)=>entry.textContent.includes('P0 Work Room Updated')); if (!option) return undefined; select.value=option.value; select.dispatchEvent(new Event('change',{bubbles:true})); return option.value; })()`);
+        await waitFor("channel quick switch", async () => await renderer(`document.getElementById('conversation-title')?.textContent === "P0 Work Room Updated"`), 15_000);
+        check("P0_CHANNEL_UNREAD_AND_QUICK_SWITCH", Boolean(quickSwitchValue), { conversationId: quickSwitchValue });
+        await renderer("document.getElementById('nav-artifacts')?.click(); true");
+        await waitFor("artifact page after source navigation", async () => await renderer("!document.getElementById('view-artifacts')?.classList.contains('hidden')"), 15_000);
+        const artifactButtons = await renderer("[...document.querySelectorAll('#product-artifacts-page button')].map((button)=>button.textContent)");
+        check("P0_ARTIFACT_UI_ACTIONS", ["Preview / 预览", "Open / 打开", "Reveal / 显示", "History / 历史", "Go to conversation / 前往会话"].every((label) => artifactButtons.includes(label)), artifactButtons);
+
+        const externalSession = await getHost().runtime.operatorSessions.issue({ ttlMs: 60_000, label: "software-team-p0-canary" });
+        try {
+            const externalBase = `http://127.0.0.1:${handshake.externalTeamControl.port}/mcp/v1`;
+            const externalRpc = async (name, args = {}) => {
+                const response = await fetch(externalBase, { method: "POST", headers: { authorization: `Bearer ${externalSession.token}`, "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: `p0-${name}`, method: "tools/call", params: { name, arguments: args } }) });
+                const body = await response.json();
+                if (body.error) throw new Error(body.error.message);
+                return body.result.structuredContent;
+            };
+            const externalTools = await externalRpc("listTeams");
+            const externalCoworkers = await externalRpc("listCoworkers");
+            const externalChannels = await externalRpc("listChannels", { teamId: team.id, includeArchived: true });
+            const externalConversation = await externalRpc("getConversation", { teamId: team.id, channelId: channel.id });
+            const externalSkills = await externalRpc("listSkills", { includeArchived: true });
+            const externalRoutines = await externalRpc("listRoutines");
+            const externalAttention = await externalRpc("getAttention");
+            const advertised = handshake.externalTeamControl.methods;
+            check("P0_EXTERNAL_CONTROL_SURFACE", ["listTeams", "listCoworkers", "listChannels", "sendMessage", "getConversation", "listSkills", "listRoutines", "runRoutineNow", "getAttention", "submitOutcome", "getOutcomeStatus", "getArtifacts", "cancelOutcome", "requestTakeover"].every((method) => advertised.includes(method))
+                && externalTools.teams?.some((entry) => entry.id === team.id)
+                && externalCoworkers.coworkers?.length >= 3 && externalChannels.channels?.some((entry) => entry.id === channel.id)
+                && externalConversation.messages?.length > 0 && Array.isArray(externalSkills.skills)
+                && Array.isArray(externalRoutines.routines) && Array.isArray(externalAttention.jobs)
+                && !containsAny({ externalTools, externalCoworkers, externalChannels, externalConversation, externalSkills, externalRoutines, externalAttention }, [dataDir, "cwd", "env", "provider", "session", "cookie", "secret", "token", "command", "policy"]), {
+                methods: advertised,
+                teams: externalTools.teams?.length ?? 0,
+                channels: externalChannels.channels?.length ?? 0,
+            });
+            const externalDenied = await (async () => {
+                try {
+                    await externalRpc("getConversation", { teamId: team.id, channelId: channel.id, cwd: "C:\\private" });
+                    return false;
+                }
+                catch {
+                    return true;
+                }
+            })();
+            check("P0_EXTERNAL_DENY_LIST", externalDenied);
+        }
+        finally {
+            await getHost().runtime.operatorSessions.revoke(externalSession.token);
+        }
 
         // Exercise the same public product path for a four-coworker team. The pack is
         // imported through the renderer so Electron IPC, TeamService's governed

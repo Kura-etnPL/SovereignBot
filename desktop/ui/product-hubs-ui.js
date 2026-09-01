@@ -489,10 +489,10 @@
     for (const item of items) {
       const card = document.createElement("article"); card.className = "settings-card";
       const title = document.createElement("h3"); title.textContent = item.title || item.fileName;
-      card.append(title, text("Type", item.mimeType), text("Creator", item.creator?.name), text("Team", item.team?.name), text("Channel", item.channel?.name), text("Created", item.createdAt), text("Status", item.status));
+      card.append(title, text("Type", item.mimeType), text("Creator", item.creator?.name), text("Team", item.team?.name), text("Channel", item.channel?.name), text("Created", item.createdAt), text("History", item.history?.map((entry) => `${entry.event} · ${entry.timestamp}`).join(", ")), text("Status", item.status));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Preview / 预览", async () => { const preview = await api.artifacts.preview({ artifactId: item.id }); window.alert(preview?.preview || "Preview is not available."); }, root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root));
-      if (item.conversationId) actions.append(button("Source conversation / 来源会话", () => openConversationSafe(item.conversationId), root));
+      actions.append(button("Preview / 预览", async () => { const preview = await api.artifacts.preview({ artifactId: item.id }); window.alert(preview?.preview || "Preview is not available."); }, root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root), button("History / 历史", () => window.alert((item.history ?? []).map((entry) => `${entry.event} · ${entry.timestamp}${entry.creator?.name ? ` · ${entry.creator.name}` : ""}`).join("\n") || "No history available."), root));
+      if (item.conversationId) actions.append(button("Go to conversation / 前往会话", () => openConversationSafe(item.conversationId), root));
       card.append(actions); root.append(card);
     }
     if (!items.length) root.append(text("Artifacts", "No artifacts yet."));
@@ -582,7 +582,12 @@
     cache.teams = teams.teams ?? []; cache.coworkers = coworkers.coworkers ?? []; cache.workspaces = workspaces.workspaces ?? []; cache.templates = teams.channelTemplates ?? [];
     const artifactScope = selected("artifact-hub-filter-page", "recent");
     const artifactOptions = [{ value: "recent", label: "Recent / 最近" }, ...cache.teams.flatMap((team) => [{ value: `team:${team.id}`, label: `By Team / 团队: ${team.name}` }, ...(team.channels ?? []).map((channel) => ({ value: `channel:${channel.id}`, label: `By Channel / 频道: ${channel.name}` }))]), ...cache.coworkers.map((coworker) => ({ value: `coworker:${coworker.id}`, label: `By Coworker / 同事: ${coworker.name}` }))];
-    populate("artifact-hub-filter-page", artifactOptions, artifactScope); const artifactPayload = { limit: 100 }; const resolvedScope = selected("artifact-hub-filter-page", artifactScope); if (resolvedScope.startsWith("team:")) artifactPayload.teamId = resolvedScope.slice(5); if (resolvedScope.startsWith("channel:")) artifactPayload.channelId = resolvedScope.slice(8); if (resolvedScope.startsWith("coworker:")) artifactPayload.coworkerId = resolvedScope.slice(9);
+    populate("artifact-hub-filter-page", artifactOptions, artifactScope);
+    const artifactCatalog = await api.artifacts.hub({ limit: 500 });
+    const artifactTypes = [...new Set((artifactCatalog.artifacts ?? []).map((entry) => entry.mimeType).filter(Boolean))].sort();
+    const artifactType = selected("artifact-hub-type-page", "");
+    populate("artifact-hub-type-page", [{ value: "", label: "All types / 全部类型" }, ...artifactTypes.map((value) => ({ value, label: value }))], artifactType);
+    const artifactPayload = { limit: 100 }; const resolvedScope = selected("artifact-hub-filter-page", artifactScope); if (resolvedScope.startsWith("team:")) artifactPayload.teamId = resolvedScope.slice(5); if (resolvedScope.startsWith("channel:")) artifactPayload.channelId = resolvedScope.slice(8); if (resolvedScope.startsWith("coworker:")) artifactPayload.coworkerId = resolvedScope.slice(9); const resolvedType = selected("artifact-hub-type-page", artifactType); if (resolvedType) artifactPayload.type = resolvedType;
     const historyScope = selected("computer-history-filter-page", "all"); populate("computer-history-filter-page", [{ value: "all", label: "All coworkers / 全部同事" }, ...cache.coworkers.map((coworker) => ({ value: coworker.id, label: `By Coworker / 同事: ${coworker.name}` }))], historyScope);
     const [playbookResult, artifactResult, historyResult, skillResult, channelResult, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations?.list ? api.conversations.list({}) : Promise.resolve({ conversations: [] })]);
     cache.conversations = conversations.conversations ?? [];
@@ -599,7 +604,7 @@
     $("team-pack-search-page")?.addEventListener("input", () => void refresh()); $("team-pack-category-page")?.addEventListener("change", () => void refresh());
     $("product-channel-create-page")?.addEventListener("click", () => { const teamId = $("product-channel-template-team-page")?.value || cache.teams[0]?.id; if (teamId) { try { openEditor(teamId); } catch (reason) { showError(pageRoots.channels, reason); } } });
     $("product-channel-template-add-page")?.addEventListener("click", () => void (async () => { const teamId = $("product-channel-template-team-page")?.value; const templateId = $("product-channel-template-page")?.value; if (!teamId || !templateId) return; await api.teams.createChannelFromTemplate({ teamId, templateId }); await refreshHost(); await refresh(); })().catch((reason) => showError(pageRoots.channels, reason)));
-    for (const id of ["artifact-hub-filter-page", "computer-history-filter-page", "product-channel-filter-page"]) $(id)?.addEventListener("change", () => void refresh());
+    for (const id of ["artifact-hub-filter-page", "artifact-hub-type-page", "computer-history-filter-page", "product-channel-filter-page"]) $(id)?.addEventListener("change", () => void refresh());
     $("product-channel-switch-page")?.addEventListener("change", (event) => openConversationSafe(event.target.value));
     api.onNavigate?.((target) => { if (navViews.has("nav-" + target) || ["product-hubs", "playbooks", "artifacts", "computer-history", "skills", "team-packs", "channels"].includes(target)) nav(target); });
     window.refreshIndependentProductPages = refresh;

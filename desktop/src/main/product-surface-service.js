@@ -157,15 +157,20 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
         return publicPlaybook(entry);
     }
     function exportPlaybook(playbookId) { const entry = playbookById(playbookId); return { schema: PLAYBOOK_SCHEMA, id: entry.id, name: entry.name, description: entry.description, steps: [...entry.steps] }; }
-    function artifactHub({ limit = 100, teamId, channelId, coworkerId } = {}) {
+    function artifactHub({ limit = 100, teamId, channelId, coworkerId, type } = {}) {
         if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact hub limit must be 1..500");
+        if (type !== undefined && (typeof type !== "string" || !type.trim() || type.length > 120)) throw new Error("artifact hub type must be a bounded string");
+        const normalizedType = type?.trim();
         const teams = teamService.list().teams; const channels = teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         const allowedConversationIds = new Set(channels.filter((channel) => (!teamId || channel.teamId === teamId) && (!channelId || channel.id === channelId)).map((channel) => channel.conversationId));
         const locationScoped = teamId !== undefined || channelId !== undefined;
         // Fetch the bounded store maximum before applying the location filter. A
         // recent unrelated artifact must not hide an older result from the selected
         // Team or Channel merely because the store sliced first.
-        const result = artifactStore.list({ limit: 500, coworkerId }).artifacts.filter((artifact) => !locationScoped ? true : Boolean(artifact.conversationId) && allowedConversationIds.has(artifact.conversationId)).slice(0, limit).map((artifact) => {
+        const result = artifactStore.list({ limit: 500, coworkerId }).artifacts
+            .filter((artifact) => !locationScoped ? true : Boolean(artifact.conversationId) && allowedConversationIds.has(artifact.conversationId))
+            .filter((artifact) => !normalizedType || artifact.mimeType === normalizedType)
+            .slice(0, limit).map((artifact) => {
             const channel = channels.find((item) => item.conversationId === artifact.conversationId); const creator = artifact.createdByCoworkerId ? coworkerStore.get(artifact.createdByCoworkerId) : undefined;
             return {
                 id: safeOpaqueId(artifact.id),
@@ -180,6 +185,11 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
                 channel: channel ? { id: safeOpaqueId(channel.id), name: safeHistoryText(channel.name, 120) } : undefined,
                 conversationId: safeOpaqueId(artifact.conversationId),
                 sourceMessageId: safeOpaqueId(artifact.sourceMessageId),
+                history: [{
+                    event: "created",
+                    timestamp: artifact.createdAt,
+                    creator: creator ? { id: safeOpaqueId(creator.id), name: safeHistoryText(creator.name, 120) } : undefined,
+                }],
                 status: "available",
             };
         });
