@@ -19,7 +19,10 @@ const COLLABORATION_EVENT_TYPES = new Set([
     "run.started", "work.started", "handoff.requested", "work.completed", "run.completed",
     "work.failed", "handoff.blocked", "run.stopped", "run.redirected",
     "handoff.accepted", "handoff.result", "review.requested", "review.accepted",
-    "review.submitted", "review.decision",
+    "review.submitted", "review.decision", "fanout.requested", "fanout.child.started",
+    "fanout.child.submitted", "fanout.review.requested", "fanout.review.started",
+    "fanout.reviewed", "fanout.join.requested", "fanout.joined",
+    "fanout.blocked",
 ]);
 const COLLABORATION_STATUSES = new Set(["active", "completed", "failed", "attention", "stopped", "redirected"]);
 const PROTOCOL_KINDS = new Set(["handoff", "review"]);
@@ -29,6 +32,10 @@ const PROTOCOL_STATES = new Set([
 ]);
 const MAX_PROTOCOL_REVISIONS = 2;
 const PROTOCOL_REQUEST_EVENTS = new Set(["run.started", "handoff.requested", "review.requested"]);
+const FANOUT_STATES = new Set(["requested", "running", "review_requested", "reviewing", "join_requested", "joining", "completed", "blocked", "stopped", "redirected"]);
+const FANOUT_CHILD_STATES = new Set(["requested", "running", "completed", "failed", "stopped"]);
+const MAX_FANOUT_CHILDREN = 4;
+const MAX_FANOUT_TEXT = 2_000;
 
 export const SOFTWARE_TEAM_PACK = Object.freeze({
     id: "software-team",
@@ -318,6 +325,81 @@ function publicActiveProtocol(value, coworkerName = (id) => id) {
     };
 }
 
+function safeActiveFanout(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    try {
+        const fanoutId = collaborationId(value.fanoutId, "fanoutId", "request");
+        const state = value.state;
+        if (!FANOUT_STATES.has(state)) return undefined;
+        const ownerCoworkerId = safeId(value.ownerCoworkerId, "fanout ownerCoworkerId");
+        const reviewerCoworkerId = safeId(value.reviewerCoworkerId, "fanout reviewerCoworkerId");
+        if (!Array.isArray(value.children) || value.children.length < 2 || value.children.length > MAX_FANOUT_CHILDREN) return undefined;
+        const keys = new Set();
+        const coworkerIds = new Set();
+        const children = value.children.map((child) => {
+            if (!child || typeof child !== "object" || Array.isArray(child)) throw new Error("invalid fanout child");
+            const key = safeId(child.key, "fanout child key", /^[A-Za-z][A-Za-z0-9_-]{0,31}$/);
+            if (keys.has(key)) throw new Error("duplicate fanout child key");
+            const coworkerId = safeId(child.coworkerId, "fanout child coworkerId");
+            if (coworkerIds.has(coworkerId)) throw new Error("duplicate fanout child coworker");
+            keys.add(key); coworkerIds.add(coworkerId);
+            const childId = collaborationId(child.childId, "fanout childId", "operation");
+            const childState = FANOUT_CHILD_STATES.has(child.state) ? child.state : "requested";
+            return {
+                childId,
+                key,
+                coworkerId,
+                task: safeLedgerText(child.task, "fanout child task", 800) ?? "Bounded specialist task",
+                ...(child.requiresComputer === true ? { requiresComputer: true } : {}),
+                workspaceKey: safeId(child.workspaceKey, "fanout workspaceKey", /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/),
+                state: childState,
+                ...(child.messageId ? { messageId: safeId(child.messageId, "fanout child messageId") } : {}),
+                ...(child.taskId ? { taskId: safeId(child.taskId, "fanout child taskId") } : {}),
+                ...(Array.isArray(child.artifactIds) ? { artifactIds: child.artifactIds.slice(0, 12).map((id) => safeId(id, "fanout artifactId")) } : {}),
+                ...(child.resultText ? { resultText: safeLedgerText(child.resultText, "fanout child result", MAX_FANOUT_TEXT) } : {}),
+                ...(typeof child.updatedAt === "string" ? { updatedAt: child.updatedAt } : {}),
+            };
+        });
+        if (coworkerIds.has(ownerCoworkerId) || coworkerIds.has(reviewerCoworkerId) || ownerCoworkerId === reviewerCoworkerId) return undefined;
+        return {
+            fanoutId,
+            state,
+            ownerCoworkerId,
+            reviewerCoworkerId,
+            children,
+            ...(value.sourceMessageId ? { sourceMessageId: safeId(value.sourceMessageId, "fanout sourceMessageId") } : {}),
+            ...(value.ownerMessageId ? { ownerMessageId: safeId(value.ownerMessageId, "fanout ownerMessageId") } : {}),
+            ...(value.reviewMessageId ? { reviewMessageId: safeId(value.reviewMessageId, "fanout reviewMessageId") } : {}),
+            ...(value.joinMessageId ? { joinMessageId: safeId(value.joinMessageId, "fanout joinMessageId") } : {}),
+            revision: Number.isInteger(value.revision) && value.revision >= 0 && value.revision <= MAX_PROTOCOL_REVISIONS ? value.revision : 0,
+            ...(value.reviewDecision ? { reviewDecision: ["approved", "changes-requested"].includes(value.reviewDecision) ? value.reviewDecision : undefined } : {}),
+            ...(value.reviewText ? { reviewText: safeLedgerText(value.reviewText, "fanout review", MAX_FANOUT_TEXT) } : {}),
+            ...(typeof value.createdAt === "string" ? { createdAt: value.createdAt } : {}),
+            ...(typeof value.updatedAt === "string" ? { updatedAt: value.updatedAt } : {}),
+        };
+    }
+    catch { return undefined; }
+}
+
+function publicActiveFanout(value, coworkerName = (id) => id) {
+    const fanout = safeActiveFanout(value);
+    if (!fanout) return undefined;
+    return {
+        state: fanout.state,
+        owner: coworkerName(fanout.ownerCoworkerId),
+        reviewer: coworkerName(fanout.reviewerCoworkerId),
+        revision: fanout.revision,
+        children: fanout.children.map((child) => ({
+            key: child.key,
+            coworker: coworkerName(child.coworkerId),
+            status: child.state,
+            artifactCount: child.artifactIds?.length ?? 0,
+        })),
+        review: fanout.reviewDecision ?? (fanout.state === "review_requested" || fanout.state === "reviewing" ? "pending" : undefined),
+        joinReady: fanout.state === "join_requested" || fanout.state === "joining",
+    };
+}
+
 function sanitizeCollaboration(value, teamIds, conversationIds) {
     const result = { schema: COLLABORATION_SCHEMA, runs: [], events: [] };
     if (!value || typeof value !== "object" || Array.isArray(value)) return result;
@@ -354,7 +436,9 @@ function sanitizeCollaboration(value, teamIds, conversationIds) {
             const decision = entry.decision && ["approved", "changes-requested"].includes(entry.decision) ? entry.decision : undefined;
             const revision = Number.isInteger(entry.revision) && entry.revision >= 0 && entry.revision <= MAX_PROTOCOL_REVISIONS ? entry.revision : undefined;
             const parentOperationId = entry.parentOperationId ? collaborationId(entry.parentOperationId, "parentOperationId", "operation") : undefined;
-            result.events.push({ eventId, runId, requestId, operationId, conversationId: entry.conversationId, type: entry.type, status: entry.status, ...(entry.actorId ? { actorId: safeId(entry.actorId, "actorId") } : {}), ...(entry.ownerId ? { ownerId: safeId(entry.ownerId, "ownerId") } : {}), ...(entry.targetCoworkerId ? { targetCoworkerId: safeId(entry.targetCoworkerId, "targetCoworkerId") } : {}), ...(entry.stage ? { stage: safeId(entry.stage, "stage") } : {}), ...(entry.messageId ? { messageId: safeId(entry.messageId, "messageId") } : {}), ...(Array.isArray(entry.artifactIds) ? { artifactIds: entry.artifactIds.slice(0, 12).map((id) => safeId(id, "artifactId")) } : {}), ...(protocolRequestId ? { protocolRequestId } : {}), ...(protocolKind ? { protocolKind } : {}), ...(protocolState ? { protocolState } : {}), ...(decision ? { decision } : {}), ...(revision !== undefined ? { revision } : {}), ...(parentOperationId ? { parentOperationId } : {}), ...(entry.reason ? { reason: safeLedgerText(entry.reason, "reason") } : {}), ...(entry.idempotencyKey ? { idempotencyKey: safeLedgerText(entry.idempotencyKey, "idempotencyKey", 160) } : {}), createdAt: entry.createdAt });
+            const fanoutId = entry.fanoutId ? collaborationId(entry.fanoutId, "fanoutId", "request") : undefined;
+            const childKey = entry.childKey ? safeId(entry.childKey, "childKey", /^[A-Za-z][A-Za-z0-9_-]{0,31}$/) : undefined;
+            result.events.push({ eventId, runId, requestId, operationId, conversationId: entry.conversationId, type: entry.type, status: entry.status, ...(entry.actorId ? { actorId: safeId(entry.actorId, "actorId") } : {}), ...(entry.ownerId ? { ownerId: safeId(entry.ownerId, "ownerId") } : {}), ...(entry.targetCoworkerId ? { targetCoworkerId: safeId(entry.targetCoworkerId, "targetCoworkerId") } : {}), ...(entry.stage ? { stage: safeId(entry.stage, "stage") } : {}), ...(entry.messageId ? { messageId: safeId(entry.messageId, "messageId") } : {}), ...(Array.isArray(entry.artifactIds) ? { artifactIds: entry.artifactIds.slice(0, 12).map((id) => safeId(id, "artifactId")) } : {}), ...(protocolRequestId ? { protocolRequestId } : {}), ...(protocolKind ? { protocolKind } : {}), ...(protocolState ? { protocolState } : {}), ...(decision ? { decision } : {}), ...(revision !== undefined ? { revision } : {}), ...(parentOperationId ? { parentOperationId } : {}), ...(fanoutId ? { fanoutId } : {}), ...(childKey ? { childKey } : {}), ...(entry.reason ? { reason: safeLedgerText(entry.reason, "reason") } : {}), ...(entry.idempotencyKey ? { idempotencyKey: safeLedgerText(entry.idempotencyKey, "idempotencyKey", 160) } : {}), createdAt: entry.createdAt });
         }
         catch {}
     }
@@ -558,6 +642,7 @@ function sanitizePersisted(value) {
                 }
                 : undefined;
             const activeProtocol = safeActiveProtocol(flow.activeProtocol);
+            const activeFanout = safeActiveFanout(flow.activeFanout);
             flows[teamId] = {
                 stage,
                 ...(Number.isInteger(flow.handoffIndex) && flow.handoffIndex >= 0 && flow.handoffIndex <= 16 ? { handoffIndex: flow.handoffIndex } : {}),
@@ -575,6 +660,7 @@ function sanitizePersisted(value) {
                 ...(typeof flow.attentionReason === "string" ? { attentionReason: safeLedgerText(flow.attentionReason, "attentionReason") } : {}),
                 ...(Array.isArray(flow.attentionCoworkerIds) ? { attentionCoworkerIds: flow.attentionCoworkerIds.slice(0, 8).filter((id) => typeof id === "string").map((id) => id.slice(0, 160)) } : {}),
                 ...(activeProtocol ? { activeProtocol } : {}),
+                ...(activeFanout ? { activeFanout } : {}),
                 ...(typeof flow.updatedAt === "string" ? { updatedAt: flow.updatedAt } : {}),
             };
         }
@@ -682,6 +768,17 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             "handoff.blocked": { kind: "attention", label: "Attention", status: "attention" },
             "run.stopped": { kind: "attention", label: "Attention", status: "stopped" },
             "run.redirected": { kind: "working", label: "Working", status: "working" },
+            "fanout.requested": { kind: "fanout", label: "Parallel work", status: "working" },
+            "fanout.child.started": { kind: "fanout-child", label: "Specialist working", status: "working" },
+            "fanout.child.submitted": { kind: "fanout-child", label: "Specialist submitted", status: "completed" },
+            "fanout.review.requested": { kind: "review-requested", label: "Review requested", status: "working" },
+            "fanout.review.started": { kind: "reviewing", label: "Reviewing", status: "working" },
+            "fanout.reviewed": event.decision === "approved"
+                ? { kind: "approved", label: "Approved", status: "completed" }
+                : { kind: "attention", label: "Changes requested", status: "attention" },
+            "fanout.join.requested": { kind: "joining", label: "Joining results", status: "working" },
+            "fanout.joined": { kind: "completed", label: "Completed", status: "completed" },
+            "fanout.blocked": { kind: "attention", label: "Attention", status: "attention" },
         }[event.type] ?? { kind: "activity", label: "Team activity", status: "working" };
         return {
             kind: productEvent.kind,
@@ -706,7 +803,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             .map(publicCollaborationEvent);
     }
 
-    function recordCollaborationEvent({ conversationId, type, status = "active", actorId, ownerId, targetCoworkerId, stage, messageId, artifactIds, reason, protocolRequestId, protocolKind, protocolState, revision, decision, parentOperationId, runId, requestId, operationId, operationToken, idempotencyKey, expectedVersion, flowPatch } = {}) {
+    function recordCollaborationEvent({ conversationId, type, status = "active", actorId, ownerId, targetCoworkerId, stage, messageId, artifactIds, reason, protocolRequestId, protocolKind, protocolState, revision, decision, parentOperationId, fanoutId, childKey, runId, requestId, operationId, operationToken, idempotencyKey, expectedVersion, flowPatch } = {}) {
         const context = teamContextForConversation(conversationId);
         if (!context) return undefined;
         if (!COLLABORATION_EVENT_TYPES.has(type)) throw new Error(`unknown collaboration event type: ${type}`);
@@ -775,6 +872,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             ...(revision !== undefined ? { revision: Number.isInteger(revision) && revision >= 0 && revision <= MAX_PROTOCOL_REVISIONS ? revision : (() => { throw new Error("protocol revision is invalid"); })() } : {}),
             ...(decision ? { decision: ["approved", "changes-requested"].includes(decision) ? decision : (() => { throw new Error("review decision is invalid"); })() } : {}),
             ...(parentOperationId ? { parentOperationId: collaborationId(parentOperationId, "parentOperationId", "operation") } : {}),
+            ...(fanoutId ? { fanoutId: collaborationId(fanoutId, "fanoutId", "request") } : {}),
+            ...(childKey ? { childKey: safeId(childKey, "childKey", /^[A-Za-z][A-Za-z0-9_-]{0,31}$/) } : {}),
             ...(reason ? { reason: safeLedgerText(reason, "reason") } : {}),
             ...(idempotencyKey ? { idempotencyKey: safeLedgerText(idempotencyKey, "idempotencyKey", 160) } : {}),
             createdAt: now(),
@@ -789,9 +888,17 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                 throw new Error("active protocol is invalid");
             nextFlow.activeProtocol = normalizedProtocol;
         }
+        if (Object.hasOwn(nextFlow, "activeFanout")) {
+            const normalizedFanout = safeActiveFanout(nextFlow.activeFanout);
+            if (nextFlow.activeFanout !== undefined && !normalizedFanout)
+                throw new Error("active fanout is invalid");
+            nextFlow.activeFanout = normalizedFanout;
+        }
         if (["run.stopped", "run.redirected", "handoff.blocked"].includes(type) && nextFlow.activeProtocol)
             nextFlow.activeProtocol = { ...nextFlow.activeProtocol, state: type === "run.stopped" ? "stopped" : type === "run.redirected" ? "redirected" : "blocked" };
-        const runStatus = type === "run.completed" ? "completed" : type === "run.stopped" ? "stopped" : ["work.failed", "handoff.blocked"].includes(type) ? "attention" : status === "redirected" ? "redirected" : undefined;
+        if (["run.stopped", "run.redirected"].includes(type) && nextFlow.activeFanout)
+            nextFlow.activeFanout = { ...nextFlow.activeFanout, state: type === "run.stopped" ? "stopped" : "redirected", updatedAt: event.createdAt };
+        const runStatus = ["run.completed", "fanout.joined"].includes(type) ? "completed" : type === "run.stopped" ? "stopped" : ["work.failed", "handoff.blocked", "fanout.blocked"].includes(type) ? "attention" : status === "redirected" ? "redirected" : undefined;
         if (runStatus) {
             run.status = runStatus;
             nextFlow.runStatus = runStatus;
@@ -803,7 +910,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         run.stage = nextFlow.stage ?? run.stage;
         run.version = nextFlow.version;
         run.updatedAt = event.createdAt;
-        if (["work.failed", "handoff.blocked"].includes(type)) {
+        if (["work.failed", "handoff.blocked", "fanout.blocked"].includes(type)) {
             nextFlow.runStatus = "attention";
             nextFlow.attentionReason = event.reason ?? "Team work needs your attention.";
             if (targetCoworkerId && !flow.attentionCoworkerIds?.includes(targetCoworkerId))
@@ -875,7 +982,255 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const flow = state.flows[context.team.id] ?? {};
         const run = runForConversation(conversationId);
         if (!run || !flow.runId) return undefined;
-        return { runId: run.runId, requestId: flow.requestId ?? run.requestId, operationId: flow.operationId ?? run.operationId, operationToken: flow.operationToken ?? run.operationToken, version: flow.version ?? 0, stage: flow.stage, ownerId: flow.ownerId, ...(flow.activeProtocol ? { activeProtocol: clone(flow.activeProtocol) } : {}) };
+        return { runId: run.runId, requestId: flow.requestId ?? run.requestId, operationId: flow.operationId ?? run.operationId, operationToken: flow.operationToken ?? run.operationToken, version: flow.version ?? 0, stage: flow.stage, ownerId: flow.ownerId, ...(flow.activeProtocol ? { activeProtocol: clone(flow.activeProtocol) } : {}), ...(flow.activeFanout ? { activeFanout: clone(flow.activeFanout) } : {}) };
+    }
+
+    function fanoutContextForConversation(conversationId) {
+        const context = collaborationContextForConversation(conversationId);
+        if (!context?.activeFanout) return undefined;
+        return context;
+    }
+
+    function requestFanout({ conversationId, ownerCoworkerId, sourceMessageId, reviewerCoworkerId, children = [], expectedVersion, expectedRunId, expectedRequestId, expectedOperationId, expectedOperationToken } = {}) {
+        const context = teamContextForConversation(conversationId);
+        if (!context) throw new Error("fanout conversation is not a managed team channel");
+        const flow = state.flows[context.team.id] ?? {};
+        const run = runForConversation(conversationId);
+        if (!run || flow.runStatus === "stopped") throw new Error("collaboration run is not active");
+        if (flow.ownerId !== ownerCoworkerId) throw new Error("only the current owner can start a fanout");
+        if (flow.activeFanout) {
+            if (flow.activeFanout.sourceMessageId === sourceMessageId) return clone(flow.activeFanout);
+            throw new Error("a fanout is already active");
+        }
+        if (!Array.isArray(children) || children.length < 2 || children.length > MAX_FANOUT_CHILDREN) throw new Error("fanout requires 2 to 4 children");
+        if (!context.team.coworkerIds.includes(ownerCoworkerId) || coworkerStore.get(ownerCoworkerId).state !== "active") throw new Error("fanout owner is not an active team member");
+        if (!context.team.coworkerIds.includes(reviewerCoworkerId) || reviewerCoworkerId === ownerCoworkerId || coworkerStore.get(reviewerCoworkerId).state !== "active") throw new Error("fanout reviewer is not an active independent team member");
+        const keys = new Set();
+        const targets = new Set();
+        const normalizedChildren = children.map((entry) => {
+            const key = safeId(entry.key, "fanout child key", /^[A-Za-z][A-Za-z0-9_-]{0,31}$/);
+            if (keys.has(key)) throw new Error("fanout child keys must be unique");
+            const coworkerId = safeId(entry.coworkerId, "fanout child coworkerId");
+            if (!context.team.coworkerIds.includes(coworkerId) || coworkerId === ownerCoworkerId || coworkerId === reviewerCoworkerId || coworkerStore.get(coworkerId).state !== "active") throw new Error("fanout child must be an active non-owner team member");
+            if (targets.has(coworkerId)) throw new Error("fanout child coworkers must be unique");
+            if (entry.requiresComputer === true && !(resolveCoworkerAppAccess?.(coworkerId)?.tools ?? []).includes("computer")) throw new Error("fanout child computer access is not assigned");
+            keys.add(key); targets.add(coworkerId);
+            return {
+                childId: idFactory("operation"),
+                key,
+                coworkerId,
+                task: safeLedgerText(entry.task, "fanout child task", 800) ?? "Bounded specialist task",
+                ...(entry.requiresComputer === true ? { requiresComputer: true } : {}),
+                workspaceKey: `fanout.${key}`,
+                state: "requested",
+                artifactIds: [],
+            };
+        });
+        if (expectedVersion !== undefined && expectedVersion !== (flow.version ?? 0)) throw new Error("fanout flow version is stale");
+        if (expectedRunId !== undefined && expectedRunId !== flow.runId) throw new Error("fanout run token is stale");
+        if (expectedRequestId !== undefined && expectedRequestId !== flow.requestId) throw new Error("fanout request token is stale");
+        if (expectedOperationId !== undefined && expectedOperationId !== flow.operationId) throw new Error("fanout operation token is stale");
+        if (expectedOperationToken !== undefined && expectedOperationToken !== flow.operationToken) throw new Error("fanout operation proof is stale");
+        const fanoutId = idFactory("request");
+        const activeFanout = {
+            fanoutId,
+            state: "requested",
+            ownerCoworkerId,
+            reviewerCoworkerId,
+            children: normalizedChildren,
+            sourceMessageId: safeId(sourceMessageId, "fanout sourceMessageId"),
+            revision: 0,
+            createdAt: now(),
+            updatedAt: now(),
+        };
+        recordCollaborationEvent({
+            conversationId,
+            type: "fanout.requested",
+            status: "active",
+            actorId: ownerCoworkerId,
+            ownerId: ownerCoworkerId,
+            targetCoworkerId: reviewerCoworkerId,
+            messageId: sourceMessageId,
+            fanoutId,
+            runId: flow.runId,
+            requestId: flow.requestId,
+            operationId: flow.operationId,
+            operationToken: flow.operationToken,
+            expectedVersion: expectedVersion ?? (flow.version ?? 0),
+            flowPatch: { activeFanout },
+            idempotencyKey: `fanout.requested:${sourceMessageId}`,
+        });
+        return clone(activeFanout);
+    }
+
+    function updateFanout(conversationId, mutate, event = {}) {
+        const context = teamContextForConversation(conversationId);
+        if (!context) throw new Error("fanout conversation is not a managed team channel");
+        const flow = state.flows[context.team.id] ?? {};
+        const fanout = safeActiveFanout(flow.activeFanout);
+        if (!fanout) throw new Error("fanout is not active");
+        const next = mutate(clone(fanout), flow, context.team);
+        const normalized = safeActiveFanout(next);
+        if (!normalized) throw new Error("fanout update is invalid");
+        if (event.type) {
+            recordCollaborationEvent({
+                conversationId,
+                type: event.type,
+                status: event.status ?? "active",
+                actorId: event.actorId,
+                ownerId: event.ownerId ?? normalized.ownerCoworkerId,
+                targetCoworkerId: event.targetCoworkerId,
+                messageId: event.messageId,
+                artifactIds: event.artifactIds,
+                reason: event.reason,
+                decision: event.decision,
+                fanoutId: normalized.fanoutId,
+                childKey: event.childKey,
+                runId: context.runId,
+                requestId: context.requestId,
+                operationId: context.operationId,
+                operationToken: context.operationToken,
+                expectedVersion: flow.version ?? 0,
+                flowPatch: { ...(event.flowPatch ?? {}), activeFanout: normalized },
+                idempotencyKey: event.idempotencyKey,
+            });
+            return clone(normalized);
+        }
+        state.flows[context.team.id] = { ...flow, activeFanout: normalized, version: (flow.version ?? 0) + 1, updatedAt: now() };
+        const run = runForConversation(conversationId);
+        if (run) { run.version = state.flows[context.team.id].version; run.updatedAt = state.flows[context.team.id].updatedAt; }
+        save();
+        return clone(normalized);
+    }
+
+    function bindFanoutMessage({ conversationId, kind, messageId, expectedFanoutId } = {}) {
+        const value = safeId(messageId, "fanout messageId");
+        return updateFanout(conversationId, (fanout) => {
+            if (expectedFanoutId && fanout.fanoutId !== expectedFanoutId) throw new Error("fanout identity is stale");
+            if (kind === "owner") {
+                if (fanout.ownerMessageId && fanout.ownerMessageId !== value) throw new Error("fanout owner message is already bound");
+                fanout.ownerMessageId = value;
+                fanout.children = fanout.children.map((child) => ({ ...child, messageId: value }));
+            }
+            else if (kind === "review") {
+                if (fanout.reviewMessageId && fanout.reviewMessageId !== value) throw new Error("fanout review message is already bound");
+                fanout.reviewMessageId = value;
+            }
+            else if (kind === "join") {
+                if (fanout.joinMessageId && fanout.joinMessageId !== value) throw new Error("fanout join message is already bound");
+                fanout.joinMessageId = value;
+            }
+            else throw new Error("fanout message kind is invalid");
+            return fanout;
+        });
+    }
+
+    function fanoutChildForDelivery({ conversationId, messageId, coworkerId } = {}) {
+        const context = fanoutContextForConversation(conversationId);
+        const child = context?.activeFanout?.children.find((entry) => entry.coworkerId === coworkerId && entry.messageId === messageId);
+        return child ? { ...context, fanout: clone(context.activeFanout), child: clone(child) } : undefined;
+    }
+
+    function fanoutReviewForDelivery({ conversationId, messageId, coworkerId } = {}) {
+        const context = fanoutContextForConversation(conversationId);
+        const fanout = context?.activeFanout;
+        if (!fanout || fanout.reviewerCoworkerId !== coworkerId || !["review_requested", "reviewing"].includes(fanout.state)) return undefined;
+        if (fanout.reviewMessageId && fanout.reviewMessageId !== messageId) return undefined;
+        return { ...context, fanout: clone(fanout), review: true };
+    }
+
+    function fanoutJoinForDelivery({ conversationId, messageId, coworkerId } = {}) {
+        const context = fanoutContextForConversation(conversationId);
+        const fanout = context?.activeFanout;
+        if (!fanout || fanout.ownerCoworkerId !== coworkerId || !["join_requested", "joining"].includes(fanout.state)) return undefined;
+        if (fanout.joinMessageId && fanout.joinMessageId !== messageId) return undefined;
+        return { ...context, fanout: clone(fanout), join: true };
+    }
+
+    function acceptFanoutChild({ conversationId, childKey, coworkerId, messageId, taskId, workspaceId } = {}) {
+        return updateFanout(conversationId, (fanout, flow, team) => {
+            const child = fanout.children.find((entry) => entry.key === childKey);
+            if (!child || child.coworkerId !== coworkerId || child.messageId !== messageId || (child.state !== "requested" && !(child.state === "running" && child.taskId === taskId))) throw new Error("fanout child acceptance is stale");
+            if (child.state === "running") return fanout;
+            if (!team.coworkerIds.includes(coworkerId) || coworkerStore.get(coworkerId).state !== "active") throw new Error("fanout child is not active");
+            if (workspaceId !== channelForConversation(conversationId)?.workspaceId || !services.workspacePath(workspaceId)) throw new Error("fanout child workspace is not trusted");
+            child.state = "running";
+            if (taskId) child.taskId = safeId(taskId, "fanout child taskId");
+            fanout.state = "running";
+            fanout.updatedAt = now();
+            return fanout;
+        }, { type: "fanout.child.started", actorId: coworkerId, ownerId: fanoutContextForConversation(conversationId)?.activeFanout?.ownerCoworkerId, targetCoworkerId: coworkerId, messageId, childKey, idempotencyKey: `fanout.child.started:${childKey}:${taskId}` });
+    }
+
+    function completeFanoutChild({ conversationId, childKey, coworkerId, taskId, artifactIds = [], resultText } = {}) {
+        return updateFanout(conversationId, (fanout) => {
+            const child = fanout.children.find((entry) => entry.key === childKey);
+            if (!child || child.coworkerId !== coworkerId || child.state !== "running" || child.taskId !== taskId) throw new Error("fanout child result is stale");
+            child.state = "completed";
+            child.artifactIds = Array.isArray(artifactIds) ? artifactIds.slice(0, 12).map((id) => safeId(id, "fanout artifactId")) : [];
+            child.resultText = safeLedgerText(resultText, "fanout child result", MAX_FANOUT_TEXT);
+            child.updatedAt = now();
+            fanout.updatedAt = now();
+            return fanout;
+        }, { type: "fanout.child.submitted", actorId: coworkerId, ownerId: fanoutContextForConversation(conversationId)?.activeFanout?.ownerCoworkerId, targetCoworkerId: coworkerId, childKey, artifactIds, idempotencyKey: `fanout.child.submitted:${childKey}:${taskId}` });
+    }
+
+    function requestFanoutReview({ conversationId } = {}) {
+        const fanout = fanoutContextForConversation(conversationId)?.activeFanout;
+        if (!fanout) throw new Error("fanout is not active");
+        if (!["running", "review_requested"].includes(fanout.state)) throw new Error("fanout is not ready for review");
+        if (fanout.children.some((child) => child.state !== "completed")) throw new Error("fanout children are not complete");
+        if (fanout.state === "review_requested") return clone(fanout);
+        return updateFanout(conversationId, (next) => { next.state = "review_requested"; next.updatedAt = now(); return next; }, { type: "fanout.review.requested", actorId: fanout.ownerCoworkerId, ownerId: fanout.ownerCoworkerId, targetCoworkerId: fanout.reviewerCoworkerId, idempotencyKey: `fanout.review.requested:${fanout.fanoutId}` });
+    }
+
+    function acceptFanoutReview({ conversationId, coworkerId, messageId } = {}) {
+        const fanout = fanoutReviewForDelivery({ conversationId, messageId, coworkerId })?.fanout;
+        if (!fanout || !["review_requested", "reviewing"].includes(fanout.state)) throw new Error("fanout review acceptance is stale");
+        if (fanout.state === "reviewing") return fanout;
+        return updateFanout(conversationId, (next) => { next.state = "reviewing"; next.updatedAt = now(); return next; }, { type: "fanout.review.started", actorId: coworkerId, ownerId: fanout.ownerCoworkerId, targetCoworkerId: coworkerId, messageId, idempotencyKey: `fanout.review.started:${fanout.fanoutId}` });
+    }
+
+    function completeFanoutReview({ conversationId, coworkerId, decision, resultText } = {}) {
+        const context = fanoutContextForConversation(conversationId);
+        if (!context?.activeFanout || context.activeFanout.reviewerCoworkerId !== coworkerId || context.activeFanout.state !== "reviewing") throw new Error("fanout review result is stale");
+        if (!["approved", "changes-requested"].includes(decision)) throw new Error("fanout review decision is invalid");
+        return updateFanout(conversationId, (fanout) => { fanout.reviewDecision = decision; fanout.reviewText = safeLedgerText(resultText, "fanout review", MAX_FANOUT_TEXT); fanout.state = decision === "approved" ? "join_requested" : "blocked"; fanout.updatedAt = now(); return fanout; }, { type: "fanout.reviewed", status: decision === "approved" ? "completed" : "attention", actorId: coworkerId, ownerId: context.activeFanout.reviewerCoworkerId, targetCoworkerId: coworkerId, decision, reason: decision === "approved" ? undefined : "The independent review requested changes.", idempotencyKey: `fanout.reviewed:${context.activeFanout.fanoutId}:${decision}` });
+    }
+
+    function acceptFanoutJoin({ conversationId, coworkerId, messageId } = {}) {
+        const context = fanoutJoinForDelivery({ conversationId, messageId, coworkerId });
+        if (!context?.activeFanout || context.activeFanout.ownerCoworkerId !== coworkerId || !["join_requested", "joining"].includes(context.activeFanout.state)) throw new Error("fanout join acceptance is stale");
+        if (context.activeFanout.state === "joining") return context.activeFanout;
+        return updateFanout(conversationId, (fanout) => { fanout.state = "joining"; fanout.updatedAt = now(); return fanout; }, { type: "fanout.join.requested", actorId: context.activeFanout.ownerCoworkerId, ownerId: context.activeFanout.ownerCoworkerId, targetCoworkerId: coworkerId, messageId, idempotencyKey: `fanout.join.requested:${context.activeFanout.fanoutId}` });
+    }
+
+    function completeFanoutJoin({ conversationId, coworkerId, taskId, artifactIds = [], expectedFanoutId } = {}) {
+        const context = fanoutContextForConversation(conversationId);
+        const fanout = context?.activeFanout;
+        if (!fanout || fanout.fanoutId !== expectedFanoutId || fanout.ownerCoworkerId !== coworkerId || fanout.state !== "joining" || fanout.children.some((child) => child.state !== "completed") || fanout.reviewDecision !== "approved") throw new Error("fanout join is stale or incomplete");
+        const event = recordCollaborationEvent({ conversationId, type: "fanout.joined", status: "completed", actorId: coworkerId, ownerId: coworkerId, artifactIds, fanoutId: fanout.fanoutId, messageId: fanout.joinMessageId, runId: context.runId, requestId: context.requestId, operationId: context.operationId, operationToken: context.operationToken, expectedVersion: context.version, flowPatch: { stage: "complete", ownerId: undefined, runStatus: "completed", activeFanout: undefined }, idempotencyKey: `fanout.joined:${fanout.fanoutId}` });
+        return { event: publicCollaborationEvent(event), completed: true, taskId };
+    }
+
+    function blockFanout({ conversationId, reason, coworkerId, childKey, taskId } = {}) {
+        const context = fanoutContextForConversation(conversationId);
+        if (!context?.activeFanout) return undefined;
+        const event = recordCollaborationEvent({ conversationId, type: "fanout.blocked", status: "attention", actorId: coworkerId ?? context.ownerId, ownerId: context.activeFanout.ownerCoworkerId, targetCoworkerId: childKey ? context.activeFanout.children.find((child) => child.key === childKey)?.coworkerId : context.activeFanout.reviewerCoworkerId, childKey, taskId, fanoutId: context.activeFanout.fanoutId, reason, runId: context.runId, requestId: context.requestId, operationId: context.operationId, operationToken: context.operationToken, expectedVersion: context.version, flowPatch: { activeFanout: { ...context.activeFanout, state: "blocked", updatedAt: now() }, runStatus: "attention", attentionReason: reason }, idempotencyKey: `fanout.blocked:${context.activeFanout.fanoutId}:${childKey ?? "run"}` });
+        return publicCollaborationEvent(event);
+    }
+
+    function fanoutWorkspaceForChild({ conversationId, childKey } = {}) {
+        const fanout = fanoutContextForConversation(conversationId)?.activeFanout;
+        const child = fanout?.children.find((entry) => entry.key === childKey);
+        if (!child) throw new Error("unknown fanout child");
+        return { workspaceId: channelForConversation(conversationId)?.workspaceId, workspaceKey: `${fanout.fanoutId}.${child.workspaceKey}` };
+    }
+
+    function fanoutJoinSummary(conversationId) {
+        const fanout = fanoutContextForConversation(conversationId)?.activeFanout;
+        if (!fanout) return undefined;
+        return { ownerCoworkerId: fanout.ownerCoworkerId, reviewerCoworkerId: fanout.reviewerCoworkerId, fanoutId: fanout.fanoutId, children: fanout.children.map((child) => ({ key: child.key, coworkerId: child.coworkerId, task: child.task, resultText: child.resultText ?? "Completed.", artifactIds: [...(child.artifactIds ?? [])] })) };
     }
 
     function pendingProtocolProof(conversationId) {
@@ -1143,6 +1498,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             ...(flow.attentionReason ? { attentionReason: flow.attentionReason } : {}),
             ...(conversation ? { activity: activityForConversation(conversation.id, { limit: 12 }) } : {}),
             ...(flow.activeProtocol ? { activeProtocol: publicActiveProtocol(flow.activeProtocol, coworkerName) } : {}),
+            ...(flow.activeFanout ? { activeFanout: publicActiveFanout(flow.activeFanout, coworkerName) } : {}),
             ...(flow.routingDecision ? { routingDecision: clone(flow.routingDecision) } : {}),
         };
     }
@@ -1625,7 +1981,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             stage: stageForIndex(ownerIndex, order),
             handoffIndex: ownerIndex,
             userMessageId: message.id,
-            ...(startsNewRun ? { runId: undefined, requestId: undefined, operationId: undefined, ownerId: undefined, runStatus: undefined, activeProtocol: undefined } : {}),
+            ...(startsNewRun ? { runId: undefined, requestId: undefined, operationId: undefined, ownerId: undefined, runStatus: undefined, activeProtocol: undefined, activeFanout: undefined } : {}),
             updatedAt,
         };
         delete state.flows[team.id].lastHandoffSourceId;
@@ -1846,6 +2202,22 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         setRuntimeHandoffPreflight,
         authorizeHandoffTarget,
         collaborationContextForConversation,
+        fanoutContextForConversation,
+        requestFanout,
+        bindFanoutMessage,
+        fanoutChildForDelivery,
+        fanoutReviewForDelivery,
+        fanoutJoinForDelivery,
+        acceptFanoutChild,
+        completeFanoutChild,
+        requestFanoutReview,
+        acceptFanoutReview,
+        completeFanoutReview,
+        acceptFanoutJoin,
+        completeFanoutJoin,
+        blockFanout,
+        fanoutWorkspaceForChild,
+        fanoutJoinSummary,
         activity({ conversationId, teamId, limit = 24 } = {}) {
             if (conversationId !== undefined) {
                 const context = teamContextForConversation(conversationId);

@@ -1,6 +1,9 @@
 const MARKER = "SOVEREIGN_HANDOFFS:";
 const REVIEW_MARKER = "SOVEREIGN_REVIEW:";
+const FANOUT_MARKER = "SOVEREIGN_FANOUT:";
 const MAX_HANDOFFS = 4;
+const MAX_FANOUT_CHILDREN = 4;
+const MAX_FANOUT_TASK = 800;
 
 function coworkerId(value) {
     return typeof value === "string" && /^coworker_[a-f0-9]{16}$/i.test(value) ? value : undefined;
@@ -52,7 +55,70 @@ export function extractHandoffManifest(providerText, allowedIds = []) {
 }
 
 export function reviewPromptInstruction() {
-    return "For a review protocol, append exactly one final line with only one JSON string: SOVEREIGN_REVIEW: \"approved\" or SOVEREIGN_REVIEW: \"changes-requested\". Do not use any other decision value.";
+    return "review: this is an independent review protocol. Append exactly one final line with only one JSON string: SOVEREIGN_REVIEW: \"approved\" or SOVEREIGN_REVIEW: \"changes-requested\". Do not use any other decision value.";
+}
+
+export function fanoutPromptInstruction(availableCoworkers) {
+    if (!Array.isArray(availableCoworkers) || availableCoworkers.length < 2)
+        return "";
+    const roster = availableCoworkers.map((entry) => `${entry.name} (${entry.id})`).join(", ");
+    return (
+        `For independent parallel work, choose at least two coworkers from this list: ${roster}. ` +
+        "Append exactly one final line only when parallel work is genuinely independent: " +
+        `${FANOUT_MARKER} {\"reviewerCoworkerId\":\"coworker_id\",\"children\":[{\"key\":\"short-key\",\"coworkerId\":\"coworker_id\",\"task\":\"bounded task\"}]}. ` +
+        "Use unique short keys, bounded tasks, and a reviewer who is not a child. Each child receives a private isolated work root."
+    );
+}
+
+export function extractFanoutManifest(providerText, allowedIds = []) {
+    const original = typeof providerText === "string" ? providerText : "";
+    const allowed = new Set(allowedIds);
+    const lines = original.replace(/\r\n/g, "\n").split("\n");
+    let markerIndex = -1;
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        if (!lines[index].trim()) continue;
+        if (lines[index].trimStart().startsWith(FANOUT_MARKER)) markerIndex = index;
+        break;
+    }
+    if (markerIndex < 0) return { text: original.trim(), children: [] };
+    const visible = [...lines.slice(0, markerIndex), ...lines.slice(markerIndex + 1)].join("\n").trim();
+    const invalid = () => ({ text: visible, children: [], invalidManifest: true });
+    const raw = lines[markerIndex].trim().slice(FANOUT_MARKER.length).trim();
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch { return invalid(); }
+    const reviewerCoworkerId = Array.isArray(parsed) ? undefined : parsed?.reviewerCoworkerId;
+    const children = Array.isArray(parsed) ? parsed : parsed?.children;
+    if (!Array.isArray(children) || children.length < 2 || children.length > MAX_FANOUT_CHILDREN)
+        return invalid();
+    if (reviewerCoworkerId !== undefined && (typeof reviewerCoworkerId !== "string" || !allowed.has(reviewerCoworkerId)))
+        return invalid();
+    const keys = new Set();
+    const normalized = [];
+    for (const child of children) {
+        if (!child || typeof child !== "object" || Array.isArray(child)) return invalid();
+        const key = child.key;
+        const coworkerId = child.coworkerId;
+        const task = child.task ?? child.boundedTask;
+        if (typeof key !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/i.test(key) || keys.has(key)) return invalid();
+        if (typeof coworkerId !== "string" || !allowed.has(coworkerId)) return invalid();
+        if (typeof task !== "string" || !task.trim() || task.length > MAX_FANOUT_TASK) return invalid();
+        if (child.requiresComputer !== undefined && typeof child.requiresComputer !== "boolean") return invalid();
+        if (child.workspace !== undefined && child.workspace !== "private") return invalid();
+        keys.add(key);
+        normalized.push({
+            key,
+            coworkerId,
+            task: task.trim(),
+            ...(child.requiresComputer === true ? { requiresComputer: true } : {}),
+            workspace: "private",
+        });
+    }
+    if (new Set(normalized.map((entry) => entry.coworkerId)).size !== normalized.length)
+        return invalid();
+    if (reviewerCoworkerId && normalized.some((entry) => entry.coworkerId === reviewerCoworkerId))
+        return invalid();
+    return { text: visible, reviewerCoworkerId, children: normalized };
 }
 
 export function extractReviewDecision(providerText) {

@@ -227,9 +227,10 @@ export async function runVerifySoftwareTeam({
         const messages = finished.conversation.messages;
         const [chiefId, codingLeadId, reviewerId] = team.coworkerIds;
         const senderOrder = messages.slice(-5).map((entry) => entry.senderId);
-        check("SOFTWARE_TEAM_HANDOFF_ORDER", senderOrder.join("|") === ["user", chiefId, codingLeadId, reviewerId, chiefId].join("|"), senderOrder);
+        check("SOFTWARE_TEAM_HANDOFF_ORDER", senderOrder.join("|") === [codingLeadId, reviewerId, codingLeadId, reviewerId, chiefId].join("|"), senderOrder);
         check("ONE_OWNER_USER_DELIVERY", Object.keys(messages[0]?.delivery ?? {}).join("|") === chiefId && Object.values(messages[0]?.delivery ?? {}).every((entry) => entry.status === "delivered"), messages[0]?.delivery);
-        check("REVIEWER_HANDOFF_AND_ARTIFACT", messages[3]?.senderId === reviewerId && Array.isArray(messages[3]?.artifactIds) && messages[3].artifactIds.length > 0, { artifactCount: messages[3]?.artifactIds?.length ?? 0 });
+        const reviewerArtifactMessage = [...messages].reverse().find((entry) => entry.senderId === reviewerId && Array.isArray(entry.artifactIds) && entry.artifactIds.length > 0);
+        check("REVIEWER_HANDOFF_AND_ARTIFACT", Boolean(reviewerArtifactMessage), { artifactCount: reviewerArtifactMessage?.artifactIds?.length ?? 0 });
         const artifacts = await renderer(`window.sovereignbot.artifacts.list(${JSON.stringify({ conversationId: channel.conversationId, limit: 20 })})`);
         check("ARTIFACT_RESULT_VISIBLE", artifacts?.artifacts?.length > 0 && !containsAny(artifacts, [dataDir, "storageRelativePath"]), { artifactCount: artifacts?.artifacts?.length ?? 0 });
         await waitFor("final result visible in Desktop", async () => {
@@ -247,9 +248,9 @@ export async function runVerifySoftwareTeam({
 
         const stageOwners = [
             firstHandoff.flow.currentOwner,
-            messages[2]?.senderId === codingLeadId ? "Coding Lead" : undefined,
-            messages[3]?.senderId === reviewerId ? "Reviewer" : undefined,
-            messages[4]?.senderId === chiefId ? "Chief of Staff" : undefined,
+            [...messages].reverse().find((entry) => entry.senderId === codingLeadId) ? "Coding Lead" : undefined,
+            [...messages].reverse().find((entry) => entry.senderId === reviewerId) ? "Reviewer" : undefined,
+            [...messages].reverse().find((entry) => entry.senderId === chiefId) ? "Chief of Staff" : undefined,
         ];
         check("OWNER_STATUS_AND_FINAL_SYNTHESIS", stageOwners[0]?.includes("Coding Lead") && stageOwners.slice(1).every(Boolean) && finished.flow.stage === "complete", stageOwners);
     }

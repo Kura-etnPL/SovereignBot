@@ -840,7 +840,11 @@ function renderDetails(conversation) {
   const activitySuffix = latestActivity?.targetCoworker && latestActivity.label?.toLowerCase().includes("handoff")
     ? ` · ${latestActivity.label} → ${latestActivity.targetCoworker}`
     : latestActivity?.label ? ` · ${latestActivity.label}` : "";
-  $("details-current-work").textContent = team?.flow?.currentOwner
+  const parallel = team?.flow?.activeFanout;
+  if (parallel?.children?.length) {
+    const done = parallel.children.filter((entry) => entry.status === "completed").length;
+    $("details-current-work").textContent = `${done}/${parallel.children.length} specialists complete · ${parallel.state === "reviewing" ? "Reviewing" : parallel.state === "join_requested" || parallel.state === "joining" ? "Joining results" : "Parallel work"}`;
+  } else $("details-current-work").textContent = team?.flow?.currentOwner
     ? `${team.flow.status === "needs-attention" ? "Attention" : team.flow.status === "active" ? "Active" : team.flow.status === "stopped" ? "Attention" : "Waiting"} · ${team.flow.currentOwner}${activitySuffix}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
 }

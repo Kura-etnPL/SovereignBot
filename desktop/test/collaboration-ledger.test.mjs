@@ -510,3 +510,51 @@ test("protocol revision cap enters attention without launching another worker", 
     }
     finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("controlled fanout runs independent children, required review, and original-owner join", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sovereign-fanout-v1-"));
+    try {
+        const coworkers = createCoworkerStore({ persistPath: join(root, "coworkers.json") });
+        const chief = coworkers.create({ name: "Chief", role: "Own the outcome" });
+        const research = coworkers.create({ name: "Research", role: "Research the bounded question" });
+        const coder = coworkers.create({ name: "Coder", role: "Implement the bounded change" });
+        const reviewer = coworkers.create({ name: "Reviewer", role: "Review independent results" });
+        const conversations = createConversationStore({ persistPath: join(root, "conversations.json"), coworkerStore: coworkers });
+        const services = createDesktopServices({ dataDir: root, dialog: {} });
+        const teams = createTeamService({ dataDir: root, coworkerStore: coworkers, conversationStore: conversations, services });
+        conversations.setTeamRouteResolver((conversation) => teams.currentOwnerForConversation(conversation.id));
+        const created = teams.createTeam({ title: "Parallel delivery", coworkerIds: [chief.id, research.id, coder.id, reviewer.id] });
+        const roster = buildProviderRoster({ discovery: { codex: { found: true, auth: { state: "signed-in" } }, claude: { found: true, auth: { state: "signed-in" } } }, settings: {}, coworkers: coworkers.list().coworkers });
+        const fanout = `SOVEREIGN_FANOUT: ${JSON.stringify({ reviewerCoworkerId: reviewer.id, children: [
+            { key: "research", coworkerId: research.id, task: "Find the bounded failure and report evidence." },
+            { key: "implement", coworkerId: coder.id, task: "Implement the bounded fix in the isolated root." },
+        ] })}`;
+        const runtime = controlledRuntime(roster, [
+            `Chief scoped parallel work.\n${fanout}`,
+            "Research completed independently.",
+            "Coder completed independently.",
+            'Review approved.\nSOVEREIGN_REVIEW: "approved"',
+            "Chief joined the approved specialist results.",
+        ]);
+        teams.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => ({ targetCoworkerId, agentId: coworkerAgentId(targetCoworkerId), workspaceId: workspaceId ?? teams.workspaceIdForConversation(conversationId) }));
+        const dispatcher = createCoworkerDispatcher({ dataDir: root, runtime, roster: () => roster, coworkerStore: coworkers, conversationStore: conversations, artifactStore: createArtifactStore({ dataDir: root }), services, teamFlow: teams });
+        const first = conversations.postUserMessage(created.conversation.id, { text: "Investigate and implement these independent parts, then join them." });
+        dispatcher.dispatchMessage(created.conversation.id, first.id);
+        for (let attempt = 0; attempt < 10; attempt += 1) await dispatcher.flush();
+        const view = conversations.get(created.conversation.id);
+        const flow = teams.get(created.team.id).flow;
+        assert.equal(runtime.tasks.length, 5, JSON.stringify({ tasks: runtime.tasks.map((task) => ({ mode: task.input?.fanoutMode, status: task.status, title: task.title })), flow: teams.get(created.team.id).flow, messages: conversations.get(created.conversation.id).messages.map((message) => ({ senderId: message.senderId, mentions: message.mentions, delivery: message.delivery, text: message.text.slice(0, 80) })) }));
+        assert.equal(runtime.tasks.filter((task) => task.input?.fanoutMode === "child").length, 2);
+        assert.equal(new Set(runtime.tasks.filter((task) => task.input?.fanoutMode === "child").map((task) => task.executionContext.cwd)).size, 2);
+        assert.equal(runtime.tasks.filter((task) => task.input?.fanoutMode === "review").length, 1);
+        assert.equal(runtime.tasks.filter((task) => task.input?.fanoutMode === "join").length, 1);
+        assert.equal(flow.status, "available", JSON.stringify({ flow, messages: view.messages.map((message) => ({ senderId: message.senderId, mentions: message.mentions, delivery: message.delivery, text: message.text.slice(0, 100) })) }));
+        assert.equal(flow.activeFanout, undefined);
+        assert.equal(view.messages.filter((message) => message.senderId !== "user").length, 7);
+        assert.ok(teams.activity({ conversationId: created.conversation.id }).events.some((event) => event.label === "Parallel work"));
+        assert.ok(teams.activity({ conversationId: created.conversation.id }).events.some((event) => event.label === "Approved"), JSON.stringify(teams.activity({ conversationId: created.conversation.id }).events));
+        assert.ok(teams.activity({ conversationId: created.conversation.id }).events.some((event) => event.label === "Completed"));
+        assert.doesNotMatch(JSON.stringify(flow), /(?:request_|operation_|workspaceKey|task_)/i);
+    }
+    finally { rmSync(root, { recursive: true, force: true }); }
+});

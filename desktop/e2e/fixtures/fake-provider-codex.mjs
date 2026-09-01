@@ -21,7 +21,7 @@ for await (const chunk of process.stdin)
 function phase() {
     if (/Propose an execution plan|REJECTED by the strict validator/.test(prompt))
         return "planning";
-    if (/^review:/m.test(prompt) || /candidateResult|previousReviewNotes/.test(prompt))
+    if (/SOVEREIGN_REVIEW:|^review:/m.test(prompt) || /candidateResult|previousReviewNotes/.test(prompt))
         return "review";
     if (/originalGoal|"outcome"|Synthesize/.test(prompt))
         return "synthesis";
@@ -76,9 +76,14 @@ if (kind === "planning") {
     text = `${"```json"}\n${JSON.stringify(PROPOSAL)}\n${"```"}`;
 }
 else if (kind === "review") {
-    text = /previousReviewNotes/.test(prompt)
-        ? JSON.stringify({ decision: "approve", notes: "fix verified" })
-        : JSON.stringify({ decision: "changes_requested", notes: "add tests" });
+    const artifactLine = process.env.FAKE_PROVIDER_TEAM_CANARY === "1"
+        ? `\nSOVEREIGN_ARTIFACTS: [{"path":"delivery-result.md","title":"Software delivery result"}]`
+        : "";
+    if (process.env.FAKE_PROVIDER_TEAM_CANARY === "1")
+        writeFileSync(join(cwd, "delivery-result.md"), "# Software delivery result\n\nDeterministic reviewer artifact.\n", "utf8");
+    text = resumed || /previousReviewNotes/.test(prompt)
+        ? `fix verified${artifactLine}\nSOVEREIGN_REVIEW: "approved"`
+        : `add tests${artifactLine}\nSOVEREIGN_REVIEW: "changes-requested"`;
 }
 else if (kind === "synthesis") {
     let goal = "";

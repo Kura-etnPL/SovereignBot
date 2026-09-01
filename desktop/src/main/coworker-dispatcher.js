@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 import { artifactPromptInstruction, extractArtifactManifest } from "./lib/artifact-manifest.js";
-import { extractHandoffManifest, extractReviewDecision, handoffPromptInstruction, reviewPromptInstruction } from "./lib/handoff-manifest.js";
+import { extractFanoutManifest, extractHandoffManifest, extractReviewDecision, fanoutPromptInstruction, handoffPromptInstruction, reviewPromptInstruction } from "./lib/handoff-manifest.js";
 import { coworkerAgentId, coworkerCapability } from "./provider-roster.js";
 
 const DISPATCH_SCHEMA = "sovereignbot.desktop.coworker-dispatch.v1";
@@ -143,6 +143,41 @@ export function createCoworkerDispatcher({
         return { workspaceId: `coworker:${coworker.id}`, cwd };
     }
 
+    function fanoutWorkspaceContext(conversationId, fanoutContext) {
+        const proof = teamFlow.fanoutWorkspaceForChild({ conversationId, childKey: fanoutContext.child.key });
+        const cwd = join(dataDir, "desktop-state", "coworker-workspaces", "fanout", fanoutContext.fanout.fanoutId, fanoutContext.child.workspaceKey);
+        mkdirSync(cwd, { recursive: true });
+        return { workspaceId: proof.workspaceId, cwd };
+    }
+
+    function fanoutPublishGate(conversationId, messageId, coworkerId, expected, mode) {
+        const current = conversationStore.get(conversationId).messages.find((entry) => entry.id === messageId);
+        if (current?.delivery?.[coworkerId]?.status !== "pending") return false;
+        const context = teamFlow?.fanoutContextForConversation?.(conversationId);
+        const fanout = context?.activeFanout;
+        if (!context || !fanout || fanout.fanoutId !== expected?.fanoutId || context.runId !== expected.runId) return false;
+        if (mode === "child") {
+            const child = fanout.children.find((entry) => entry.key === expected.childKey && entry.coworkerId === coworkerId);
+            return Boolean(child && child.taskId === expected.taskId && child.state === "running");
+        }
+        if (mode === "review") return fanout.reviewerCoworkerId === coworkerId && ["review_requested", "reviewing"].includes(fanout.state);
+        return fanout.ownerCoworkerId === coworkerId && ["join_requested", "joining"].includes(fanout.state);
+    }
+
+    function fanoutPrompt(fanoutMode, fanoutContext, conversationId) {
+        if (fanoutMode === "child")
+            return `This is independent fan-out child ${fanoutContext.child.key}. Execute only this bounded task: ${fanoutContext.child.task}. Use only your isolated private work root, do not hand off, and return the result without claiming completion of other children.`;
+        if (fanoutMode === "review") {
+            const summary = teamFlow.fanoutJoinSummary(conversationId);
+            return `This is the required independent review of parallel specialist results. Review the bounded child reports below and append the required review decision. Results: ${JSON.stringify(summary?.children ?? [])}`;
+        }
+        if (fanoutMode === "join") {
+            const summary = teamFlow.fanoutJoinSummary(conversationId);
+            return `This is the original owner's join step. Synthesize only after all independent children completed and the reviewer approved. Child reports: ${JSON.stringify(summary?.children ?? [])}. Publish a concise final result for the user.`;
+        }
+        return "";
+    }
+
     function handoffDepth(conversation, source) {
         let depth = 0;
         let cursor = source;
@@ -251,6 +286,14 @@ export function createCoworkerDispatcher({
         try { artifactStore.discardArtifacts(ids); } catch {}
     }
 
+    function closeInternalReply(conversationId, reply) {
+        for (const [recipientId, delivery] of Object.entries(reply?.delivery ?? {})) {
+            if (delivery?.status === "pending") {
+                try { conversationStore.markDelivery(conversationId, reply.id, recipientId, "delivered"); } catch {}
+            }
+        }
+    }
+
     async function executeDelivery(conversationId, messageId, coworkerId) {
         if (isConversationBlocked(conversationId))
             return { ok: false, stopped: true, reason: "conversation is blocked for takeover or cancellation" };
@@ -263,6 +306,11 @@ export function createCoworkerDispatcher({
             return { skipped: true, reason: "delivery-not-pending" };
 
         let stageContext = teamFlow?.collaborationContextForConversation?.(conversationId);
+        const fanoutChild = teamFlow?.fanoutChildForDelivery?.({ conversationId, messageId, coworkerId });
+        const fanoutReview = teamFlow?.fanoutReviewForDelivery?.({ conversationId, messageId, coworkerId });
+        const fanoutJoin = teamFlow?.fanoutJoinForDelivery?.({ conversationId, messageId, coworkerId });
+        const fanoutContext = fanoutChild ?? fanoutReview ?? fanoutJoin;
+        const fanoutMode = fanoutChild ? "child" : fanoutReview ? "review" : fanoutJoin ? "join" : undefined;
         const pendingProtocol = ["requested", "review_requested"].includes(stageContext?.activeProtocol?.state)
             ? stageContext.activeProtocol
             : undefined;
@@ -284,6 +332,12 @@ export function createCoworkerDispatcher({
                 });
             } catch {}
         };
+        const blockPendingFanout = async (reason) => {
+            if (!fanoutMode || !teamFlow?.blockFanout) return;
+            try {
+                teamFlow.blockFanout({ conversationId, reason, coworkerId, childKey: fanoutContext.child?.key, taskId: activeTasks.get(stateKey(conversationId, coworkerId)) });
+            } catch {}
+        };
         if (coworker.state !== "active") {
             if (pendingProtocol) {
                 await blockPendingProtocol("The designated coworker is not active.");
@@ -297,7 +351,7 @@ export function createCoworkerDispatcher({
         let context;
         try {
             ({ snapshot, binding } = requireBinding(coworkerId));
-            context = workspaceContext(coworker, conversation);
+            context = fanoutChild ? fanoutWorkspaceContext(conversationId, fanoutChild) : workspaceContext(coworker, conversation);
         }
         catch (error) {
             if (!pendingProtocol) throw error;
@@ -314,7 +368,7 @@ export function createCoworkerDispatcher({
             }
             throw new Error("coworker dispatch requires a ready supervisor/planner identity");
         }
-        const availableHandoffs = availableHandoffCoworkers(conversation, coworkerId, source);
+        const availableHandoffs = fanoutMode ? [] : availableHandoffCoworkers(conversation, coworkerId, source);
 
         const plan = await runtime.orchestrator.createPlan({
             title: `${coworker.name}: conversation turn`,
@@ -322,11 +376,21 @@ export function createCoworkerDispatcher({
             input: { conversationId, coworkerId },
         });
         const turn = state.turns[stateKey(conversationId, coworkerId)] ?? {};
-        let task = await runtime.orchestrator.delegateTrusted(plan.id, {
-            title: `Respond as ${coworker.name}`,
+        const stableFanoutTask = fanoutMode && typeof runtime.orchestrator.listTasks === "function"
+            ? (await runtime.orchestrator.listTasks()).find((entry) => entry.input?.fanoutId === fanoutContext.fanout.fanoutId && entry.input?.fanoutMode === fanoutMode && entry.input?.fanoutChildKey === fanoutContext.child?.key && entry.input?.messageId === source.id && !["failed", "cancelled"].includes(entry.status))
+            : undefined;
+        let task = stableFanoutTask ?? await runtime.orchestrator.delegateTrusted(plan.id, {
+            title: fanoutMode ? `${fanoutMode} for ${coworker.name}` : `Respond as ${coworker.name}`,
             requiredCapabilities: [coworkerCapability(coworkerId)],
             preferredAgentId: binding.agentId,
+            dependencyIds: [],
             input: {
+                ...(fanoutMode ? {
+                    fanoutId: fanoutContext.fanout.fanoutId,
+                    fanoutMode,
+                    ...(fanoutContext.child ? { fanoutChildKey: fanoutContext.child.key } : {}),
+                    messageId: source.id,
+                } : {}),
                 instruction: [
                     `You are ${coworker.name}.`,
                     `Role: ${coworker.role}`,
@@ -334,7 +398,9 @@ export function createCoworkerDispatcher({
                     "Respond to the newest message as this persistent coworker. Preserve continuity with the conversation, be action-oriented, and do not claim work you did not actually complete.",
                     artifactStore ? artifactPromptInstruction() : "",
                     handoffPromptInstruction(availableHandoffs),
-                    pendingProtocol?.kind === "review" ? reviewPromptInstruction() : "",
+                    !fanoutMode && !pendingProtocol ? fanoutPromptInstruction(availableHandoffs) : "",
+                    fanoutPrompt(fanoutMode, fanoutContext, conversationId),
+                    pendingProtocol?.kind === "review" || fanoutMode === "review" ? reviewPromptInstruction() : "",
                     pendingProtocol?.kind === "review" && pendingProtocol.candidateArtifactIds?.length
                         ? `Review candidate ArtifactStore IDs: ${pendingProtocol.candidateArtifactIds.join(", ")}. Use only these opaque IDs when referring to the candidate.`
                         : "",
@@ -345,10 +411,39 @@ export function createCoworkerDispatcher({
             },
         }, context, supervisorAgentId);
 
-        task = await bindContinuation(task, turn.lastTaskId, binding.agentId, binding.harnessKind, binding.accountNamespace, turn.accountNamespace);
+        if (!fanoutMode)
+            task = await bindContinuation(task, turn.lastTaskId, binding.agentId, binding.harnessKind, binding.accountNamespace, turn.accountNamespace);
         const activeKey = stateKey(conversationId, coworkerId);
         activeTasks.set(activeKey, task.id);
-        if (pendingProtocol) {
+        if (fanoutMode) {
+            const preflight = runtime.orchestrator.preflightTrustedTask;
+            const reusedCompletedTask = stableFanoutTask?.status === "completed";
+            if (!reusedCompletedTask && typeof preflight !== "function") {
+                await runtime.orchestrator.cancel(task.id, { reason: "trusted Governor preflight is unavailable", actor: "runtime" }).catch(() => {});
+                await blockPendingFanout("The trusted Governor preflight is unavailable.");
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "The trusted Governor preflight is unavailable.");
+                return { ok: false, taskId: task.id, attention: true, reason: "trusted Governor preflight is unavailable" };
+            }
+            const launch = reusedCompletedTask ? { allowed: true, agentId: binding.agentId, task } : await preflight.call(runtime.orchestrator, task.id);
+            if (!launch?.allowed) {
+                await blockPendingFanout(launch?.reason ?? "The trusted Governor rejected this fan-out child.");
+                if (launch?.task?.status === "queued") await runtime.orchestrator.cancel(task.id, { reason: launch?.reason ?? "trusted Governor preflight failed", actor: "runtime" }).catch(() => {});
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", launch?.reason ?? "trusted Governor preflight failed");
+                return { ok: false, taskId: task.id, attention: true, reason: launch?.reason ?? "trusted Governor preflight failed" };
+            }
+            try {
+                if (fanoutMode === "child") teamFlow.acceptFanoutChild({ conversationId, childKey: fanoutContext.child.key, coworkerId, messageId, taskId: task.id, workspaceId: context.workspaceId });
+                else if (fanoutMode === "review") teamFlow.acceptFanoutReview({ conversationId, coworkerId, messageId });
+                else teamFlow.acceptFanoutJoin({ conversationId, coworkerId, messageId });
+            }
+            catch (error) {
+                await runtime.orchestrator.cancel(task.id, { reason: "fan-out protocol acceptance failed", actor: "runtime" }).catch(() => {});
+                await blockPendingFanout("The fan-out protocol could not be accepted safely.");
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "The fan-out protocol could not be accepted safely.");
+                return { ok: false, taskId: task.id, attention: true, reason: String(error?.message ?? error) };
+            }
+        }
+        else if (pendingProtocol) {
             const preflight = runtime.orchestrator.preflightTrustedTask;
             if (typeof preflight !== "function") {
                 await runtime.orchestrator.cancel(task.id, { reason: "trusted Governor preflight is unavailable", actor: "runtime" }).catch(() => {});
@@ -374,7 +469,8 @@ export function createCoworkerDispatcher({
                 return { ok: false, taskId: task.id, attention: true, reason: String(error?.message ?? error) };
             }
         }
-        teamFlow?.claimStage?.({ conversationId, ownerId: coworkerId, messageId: source.id, ...(stageContext ? { ...stageContext, expectedVersion: stageContext.version } : {}) });
+        if (!fanoutMode)
+            teamFlow?.claimStage?.({ conversationId, ownerId: coworkerId, messageId: source.id, ...(stageContext ? { ...stageContext, expectedVersion: stageContext.version } : {}) });
         const executionContext = teamFlow?.collaborationContextForConversation?.(conversationId);
         if (isConversationBlocked(conversationId)) {
             await runtime.orchestrator.cancel(task.id, { reason: "conversation was blocked before provider execution", actor: "external-team-control" }).catch(() => {});
@@ -382,12 +478,16 @@ export function createCoworkerDispatcher({
         }
         await runtime.orchestrator.runUntilIdle();
         const finished = (await runtime.orchestrator.listTasks()).find((entry) => entry.id === task.id);
-        if (!publishGate(conversationId, messageId, coworkerId, executionContext))
+        const resultGate = fanoutMode
+            ? fanoutPublishGate(conversationId, messageId, coworkerId, { fanoutId: fanoutContext.fanout.fanoutId, childKey: fanoutContext.child?.key, taskId: task.id, runId: executionContext?.runId }, fanoutMode)
+            : publishGate(conversationId, messageId, coworkerId, executionContext);
+        if (!resultGate)
             return { ok: false, taskId: task.id, stopped: true, reason: "stale collaboration result was discarded" };
         if (finished?.status !== "completed") {
             const detail = "Coworker work did not complete.";
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail);
-            recordTeamEvent({ conversationId, type: "work.failed", status: "failed", actorId: coworkerId, ownerId: coworkerId, messageId, reason: detail });
+            if (fanoutMode) await blockPendingFanout(detail);
+            else recordTeamEvent({ conversationId, type: "work.failed", status: "failed", actorId: coworkerId, ownerId: coworkerId, messageId, reason: detail });
             state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
             save();
             return { ok: false, taskId: task.id, error: detail };
@@ -408,7 +508,7 @@ export function createCoworkerDispatcher({
             return { ok: false, taskId: task.id, error: "provider returned no text reply" };
         }
 
-        const reviewResult = pendingProtocol?.kind === "review"
+        const reviewResult = (pendingProtocol?.kind === "review" || fanoutMode === "review")
             ? extractReviewDecision(rawText)
             : { text: rawText };
         if (reviewResult.invalidDecision) {
@@ -419,7 +519,18 @@ export function createCoworkerDispatcher({
                 data: { conversationId, messageId },
             });
         }
-        const handoffResult = extractHandoffManifest(reviewResult.text, availableHandoffs.map((entry) => entry.id));
+        const fanoutResult = !fanoutMode && !pendingProtocol
+            ? extractFanoutManifest(reviewResult.text, availableHandoffs.map((entry) => entry.id))
+            : { text: reviewResult.text, children: [] };
+        if (fanoutResult.invalidManifest) {
+            await runtime.audit.append({
+                type: "coworker.fanout_manifest_rejected",
+                actor: coworkerAgentId(coworkerId),
+                subject: task.id,
+                data: { conversationId, messageId },
+            });
+        }
+        const handoffResult = extractHandoffManifest(fanoutResult.text, availableHandoffs.map((entry) => entry.id));
         if (handoffResult.invalidManifest) {
             await runtime.audit.append({
                 type: "coworker.handoff_manifest_rejected",
@@ -438,12 +549,113 @@ export function createCoworkerDispatcher({
             protocolContext: executionContext,
         });
         const createdArtifactIds = artifactResult.artifactIds;
-        if (!publishGate(conversationId, messageId, coworkerId, executionContext)) {
+        const ingestGate = fanoutMode
+            ? fanoutPublishGate(conversationId, messageId, coworkerId, { fanoutId: fanoutContext.fanout.fanoutId, childKey: fanoutContext.child?.key, taskId: task.id, runId: executionContext?.runId }, fanoutMode)
+            : publishGate(conversationId, messageId, coworkerId, executionContext);
+        if (!ingestGate) {
             discardArtifacts(createdArtifactIds);
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "stale collaboration result was discarded");
             return { ok: false, taskId: task.id, stopped: true, reason: "stale collaboration result was discarded" };
         }
         const visibleText = artifactResult.text || (artifactResult.artifactIds.length ? `Created ${artifactResult.artifactIds.length} artifact${artifactResult.artifactIds.length === 1 ? "" : "s"}.` : "Completed the requested work.");
+        if (fanoutResult.children.length) {
+            let requested;
+            try {
+                requested = teamFlow.requestFanout({
+                    conversationId,
+                    ownerCoworkerId: coworkerId,
+                    sourceMessageId: source.id,
+                    reviewerCoworkerId: fanoutResult.reviewerCoworkerId,
+                    children: fanoutResult.children,
+                    ...(executionContext ? { ...executionContext, expectedVersion: executionContext.version } : {}),
+                });
+            }
+            catch (error) {
+                discardArtifacts(createdArtifactIds);
+                throw error;
+            }
+            const childIds = requested.children.map((entry) => entry.coworkerId);
+            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, {
+                text: visibleText.slice(0, MAX_REPLY_TEXT),
+                replyTo: source.id,
+                mentions: childIds,
+            });
+            teamFlow.bindFanoutMessage({ conversationId, kind: "owner", messageId: reply.id, expectedFanoutId: requested.fanoutId });
+            conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
+            state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
+            save();
+            dispatchMessage(conversationId, reply.id);
+            return { ok: true, taskId: task.id, reply, artifacts: [], handoffs: childIds };
+        }
+        if (fanoutMode === "child") {
+            try {
+                teamFlow.completeFanoutChild({ conversationId, childKey: fanoutContext.child.key, coworkerId, taskId: task.id, artifactIds: artifactResult.artifactIds, resultText: visibleText });
+            }
+            catch (error) {
+                discardArtifacts(createdArtifactIds);
+                throw error;
+            }
+            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: visibleText.slice(0, MAX_REPLY_TEXT), replyTo: source.id });
+            closeInternalReply(conversationId, reply);
+            conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
+            state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
+            save();
+            const afterChild = teamFlow.fanoutContextForConversation?.(conversationId)?.activeFanout;
+            if (afterChild?.state === "running" && afterChild.children.every((entry) => entry.state === "completed")) {
+                teamFlow.requestFanoutReview({ conversationId });
+                const reviewMessage = conversationStore.postCoworkerMessage(conversationId, coworkerId, {
+                    text: "Parallel specialist results are ready for the required independent review.",
+                    replyTo: source.id,
+                    mentions: [afterChild.reviewerCoworkerId],
+                });
+                teamFlow.bindFanoutMessage({ conversationId, kind: "review", messageId: reviewMessage.id, expectedFanoutId: afterChild.fanoutId });
+                dispatchMessage(conversationId, reviewMessage.id);
+            }
+            return { ok: true, taskId: task.id, reply, artifacts: [], handoffs: [] };
+        }
+        if (fanoutMode === "review") {
+            if (!reviewResult.decision) {
+                discardArtifacts(createdArtifactIds);
+                await blockPendingFanout("The independent reviewer returned no valid decision.");
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "The independent reviewer returned no valid decision.");
+                return { ok: false, taskId: task.id, attention: true, reason: "The independent reviewer returned no valid decision." };
+            }
+            discardArtifacts(createdArtifactIds);
+            const reviewed = teamFlow.completeFanoutReview({ conversationId, coworkerId, decision: reviewResult.decision, resultText: reviewResult.text });
+            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: reviewResult.text || (reviewResult.decision === "approved" ? "Independent review approved." : "Independent review requested changes."), replyTo: source.id });
+            closeInternalReply(conversationId, reply);
+            conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
+            state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
+            save();
+            if (reviewed.state === "join_requested") {
+                const joinMessage = conversationStore.postCoworkerMessage(conversationId, coworkerId, {
+                    text: "Independent review approved; the original owner will now join the specialist results.",
+                    replyTo: source.id,
+                    mentions: [reviewed.ownerCoworkerId],
+                });
+                teamFlow.bindFanoutMessage({ conversationId, kind: "join", messageId: joinMessage.id, expectedFanoutId: reviewed.fanoutId });
+                dispatchMessage(conversationId, joinMessage.id);
+            }
+            return { ok: true, taskId: task.id, reply, artifacts: [], handoffs: [] };
+        }
+        if (fanoutMode === "join") {
+            const summary = teamFlow.fanoutJoinSummary(conversationId);
+            const publishArtifactIds = [...new Set([...(summary?.children ?? []).flatMap((entry) => entry.artifactIds ?? []), ...artifactResult.artifactIds])];
+            try {
+                teamFlow.completeFanoutJoin({ conversationId, coworkerId, taskId: task.id, artifactIds: publishArtifactIds, expectedFanoutId: fanoutContext.fanout.fanoutId });
+                artifactStore?.publishArtifacts?.(publishArtifactIds);
+            }
+            catch (error) {
+                discardArtifacts(createdArtifactIds);
+                throw error;
+            }
+            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: visibleText.slice(0, MAX_REPLY_TEXT), replyTo: source.id, ...(publishArtifactIds.length ? { artifactIds: publishArtifactIds } : {}) });
+            closeInternalReply(conversationId, reply);
+            conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
+            state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
+            save();
+            return { ok: true, taskId: task.id, reply, artifacts: publishArtifactIds, handoffs: [] };
+        }
         const protocol = executionContext?.activeProtocol;
         let resultContext = executionContext;
         if (protocol) {
@@ -606,7 +818,7 @@ export function createCoworkerDispatcher({
         const previous = chains.get(key) ?? Promise.resolve();
         const run = previous
             .then(() => executeDelivery(conversationId, messageId, coworkerId))
-            .catch(() => {
+            .catch((error) => {
                 const detail = "Coworker work could not start or complete.";
                 try { conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail); } catch {}
                 let ledgerFailure = false;
