@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 import { artifactPromptInstruction, extractArtifactManifest } from "./lib/artifact-manifest.js";
-import { extractHandoffManifest, handoffPromptInstruction } from "./lib/handoff-manifest.js";
+import { extractHandoffManifest, extractReviewDecision, handoffPromptInstruction, reviewPromptInstruction } from "./lib/handoff-manifest.js";
 import { coworkerAgentId, coworkerCapability } from "./provider-roster.js";
 
 const DISPATCH_SCHEMA = "sovereignbot.desktop.coworker-dispatch.v1";
@@ -101,7 +101,13 @@ export function createCoworkerDispatcher({
         if (current?.delivery?.[coworkerId]?.status !== "pending") return false;
         if (!expected || !teamFlow?.collaborationContextForConversation) return true;
         const context = teamFlow.collaborationContextForConversation(conversationId);
-        return Boolean(context && context.runId === expected.runId && context.ownerId === coworkerId && context.operationId === expected.operationId && context.operationToken === expected.operationToken);
+        if (!context || context.runId !== expected.runId || context.requestId !== expected.requestId || context.ownerId !== coworkerId || context.operationId !== expected.operationId || context.operationToken !== expected.operationToken || context.version < (expected.version ?? 0)) return false;
+        if (expected.activeProtocol) {
+            const protocol = context.activeProtocol;
+            if (!protocol || protocol.protocolRequestId !== expected.activeProtocol.protocolRequestId || protocol.revision !== expected.activeProtocol.revision) return false;
+            if (!["working", "reviewing", "submitted", "approved"].includes(protocol.state)) return false;
+        }
+        return true;
     }
 
     function requireBinding(coworkerId) {
@@ -186,7 +192,7 @@ export function createCoworkerDispatcher({
         return updated;
     }
 
-    async function ingestDeclaredArtifacts({ rawText, context, coworkerId, conversationId, sourceMessageId, taskId }) {
+    async function ingestDeclaredArtifacts({ rawText, context, coworkerId, conversationId, sourceMessageId, taskId, protocolContext }) {
         const parsed = extractArtifactManifest(rawText);
         if (parsed.invalidManifest) {
             await runtime.audit.append({
@@ -212,6 +218,13 @@ export function createCoworkerDispatcher({
                     conversationId,
                     sourceMessageId,
                     published: false,
+                    ...(protocolContext?.activeProtocol ? { protocolLineage: {
+                        runId: protocolContext.runId,
+                        requestId: protocolContext.requestId,
+                        operationId: protocolContext.operationId,
+                        protocolRequestId: protocolContext.activeProtocol.protocolRequestId,
+                        revision: protocolContext.activeProtocol.revision,
+                    } } : {}),
                 });
                 artifactIds.push(artifact.id);
                 await runtime.audit.append({
@@ -233,12 +246,15 @@ export function createCoworkerDispatcher({
         return { text: parsed.text, artifactIds };
     }
 
+    function discardArtifacts(ids) {
+        if (!ids?.length || !artifactStore?.discardArtifacts) return;
+        try { artifactStore.discardArtifacts(ids); } catch {}
+    }
+
     async function executeDelivery(conversationId, messageId, coworkerId) {
         if (isConversationBlocked(conversationId))
             return { ok: false, stopped: true, reason: "conversation is blocked for takeover or cancellation" };
         const coworker = coworkerStore.get(coworkerId);
-        if (coworker.state !== "active")
-            throw new Error(`${coworker.name} is not active`);
         const conversation = conversationStore.get(conversationId);
         const source = conversation.messages.find((entry) => entry.id === messageId);
         if (!source)
@@ -246,14 +262,58 @@ export function createCoworkerDispatcher({
         if (source.delivery?.[coworkerId]?.status !== "pending")
             return { skipped: true, reason: "delivery-not-pending" };
 
-        const { snapshot, binding } = requireBinding(coworkerId);
-        const context = workspaceContext(coworker, conversation);
-        const stageContext = teamFlow?.collaborationContextForConversation?.(conversationId);
-        teamFlow?.claimStage?.({ conversationId, ownerId: coworkerId, messageId: source.id, ...(stageContext ? { ...stageContext, expectedVersion: stageContext.version } : {}) });
-        const executionContext = teamFlow?.collaborationContextForConversation?.(conversationId);
+        let stageContext = teamFlow?.collaborationContextForConversation?.(conversationId);
+        const pendingProtocol = ["requested", "review_requested"].includes(stageContext?.activeProtocol?.state)
+            ? stageContext.activeProtocol
+            : undefined;
+        const blockPendingProtocol = async (reason) => {
+            if (!pendingProtocol || !teamFlow?.recordCollaborationEvent) return;
+            try {
+                recordTeamEvent({
+                    conversationId,
+                    type: "handoff.blocked",
+                    status: "attention",
+                    actorId: stageContext.ownerId ?? coworkerId,
+                    ownerId: stageContext.ownerId ?? coworkerId,
+                    targetCoworkerId: pendingProtocol.targetCoworkerId,
+                    messageId: source.id,
+                    reason,
+                    ...stageContext,
+                    expectedVersion: stageContext.version,
+                    idempotencyKey: "protocol.blocked:" + pendingProtocol.protocolRequestId,
+                });
+            } catch {}
+        };
+        if (coworker.state !== "active") {
+            if (pendingProtocol) {
+                await blockPendingProtocol("The designated coworker is not active.");
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "The designated coworker is not active.");
+                return { ok: false, attention: true, reason: "The designated coworker is not active." };
+            }
+            throw new Error(`${coworker.name} is not active`);
+        }
+        let snapshot;
+        let binding;
+        let context;
+        try {
+            ({ snapshot, binding } = requireBinding(coworkerId));
+            context = workspaceContext(coworker, conversation);
+        }
+        catch (error) {
+            if (!pendingProtocol) throw error;
+            await blockPendingProtocol("The designated coworker is not ready for this protocol.");
+            conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "The designated coworker is not ready for this protocol.");
+            return { ok: false, attention: true, reason: "The designated coworker is not ready for this protocol." };
+        }
         const supervisorAgentId = snapshot.roles?.planner;
-        if (!supervisorAgentId)
+        if (!supervisorAgentId) {
+            if (pendingProtocol) {
+                await blockPendingProtocol("The team supervisor is not ready for this protocol.");
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "The team supervisor is not ready for this protocol.");
+                return { ok: false, attention: true, reason: "The team supervisor is not ready for this protocol." };
+            }
             throw new Error("coworker dispatch requires a ready supervisor/planner identity");
+        }
         const availableHandoffs = availableHandoffCoworkers(conversation, coworkerId, source);
 
         const plan = await runtime.orchestrator.createPlan({
@@ -274,6 +334,10 @@ export function createCoworkerDispatcher({
                     "Respond to the newest message as this persistent coworker. Preserve continuity with the conversation, be action-oriented, and do not claim work you did not actually complete.",
                     artifactStore ? artifactPromptInstruction() : "",
                     handoffPromptInstruction(availableHandoffs),
+                    pendingProtocol?.kind === "review" ? reviewPromptInstruction() : "",
+                    pendingProtocol?.kind === "review" && pendingProtocol.candidateArtifactIds?.length
+                        ? `Review candidate ArtifactStore IDs: ${pendingProtocol.candidateArtifactIds.join(", ")}. Use only these opaque IDs when referring to the candidate.`
+                        : "",
                     artifactStore && availableHandoffs.length ? "If both files and a handoff are needed, put the SOVEREIGN_ARTIFACTS line first and the SOVEREIGN_HANDOFFS line last." : "",
                 ].filter(Boolean).join("\n"),
                 conversation: publicConversationContext(conversation, coworkerId),
@@ -284,6 +348,34 @@ export function createCoworkerDispatcher({
         task = await bindContinuation(task, turn.lastTaskId, binding.agentId, binding.harnessKind, binding.accountNamespace, turn.accountNamespace);
         const activeKey = stateKey(conversationId, coworkerId);
         activeTasks.set(activeKey, task.id);
+        if (pendingProtocol) {
+            const preflight = runtime.orchestrator.preflightTrustedTask;
+            if (typeof preflight !== "function") {
+                await runtime.orchestrator.cancel(task.id, { reason: "trusted Governor preflight is unavailable", actor: "runtime" }).catch(() => {});
+                await blockPendingProtocol("The trusted Governor preflight is unavailable.");
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "The trusted Governor preflight is unavailable.");
+                return { ok: false, taskId: task.id, attention: true, reason: "trusted Governor preflight is unavailable" };
+            }
+            const launch = await preflight.call(runtime.orchestrator, task.id);
+            if (!launch?.allowed) {
+                await blockPendingProtocol(launch?.reason ?? "The trusted Governor rejected this work.");
+                if (launch?.task?.status === "queued") await runtime.orchestrator.cancel(task.id, { reason: launch?.reason ?? "trusted Governor preflight failed", actor: "runtime" }).catch(() => {});
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", launch?.reason ?? "The trusted Governor rejected this work.");
+                return { ok: false, taskId: task.id, attention: true, reason: launch?.reason ?? "trusted Governor preflight failed" };
+            }
+            try {
+                const proof = teamFlow?.pendingProtocolProof?.(conversationId);
+                teamFlow.acceptProtocol({ conversationId, targetCoworkerId: coworkerId, proofId: proof?.proofId, messageId: source.id, ...stageContext, expectedVersion: stageContext.version });
+                stageContext = teamFlow.collaborationContextForConversation(conversationId);
+            } catch (error) {
+                await runtime.orchestrator.cancel(task.id, { reason: "protocol acceptance failed", actor: "runtime" }).catch(() => {});
+                await blockPendingProtocol("The protocol could not be accepted safely.");
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "The protocol could not be accepted safely.");
+                return { ok: false, taskId: task.id, attention: true, reason: String(error?.message ?? error) };
+            }
+        }
+        teamFlow?.claimStage?.({ conversationId, ownerId: coworkerId, messageId: source.id, ...(stageContext ? { ...stageContext, expectedVersion: stageContext.version } : {}) });
+        const executionContext = teamFlow?.collaborationContextForConversation?.(conversationId);
         if (isConversationBlocked(conversationId)) {
             await runtime.orchestrator.cancel(task.id, { reason: "conversation was blocked before provider execution", actor: "external-team-control" }).catch(() => {});
             return { ok: false, taskId: task.id, stopped: true, reason: "conversation is blocked for takeover or cancellation" };
@@ -316,7 +408,18 @@ export function createCoworkerDispatcher({
             return { ok: false, taskId: task.id, error: "provider returned no text reply" };
         }
 
-        const handoffResult = extractHandoffManifest(rawText, availableHandoffs.map((entry) => entry.id));
+        const reviewResult = pendingProtocol?.kind === "review"
+            ? extractReviewDecision(rawText)
+            : { text: rawText };
+        if (reviewResult.invalidDecision) {
+            await runtime.audit.append({
+                type: "coworker.review_decision_rejected",
+                actor: coworkerAgentId(coworkerId),
+                subject: task.id,
+                data: { conversationId, messageId },
+            });
+        }
+        const handoffResult = extractHandoffManifest(reviewResult.text, availableHandoffs.map((entry) => entry.id));
         if (handoffResult.invalidManifest) {
             await runtime.audit.append({
                 type: "coworker.handoff_manifest_rejected",
@@ -332,18 +435,65 @@ export function createCoworkerDispatcher({
             conversationId,
             sourceMessageId: source.id,
             taskId: task.id,
+            protocolContext: executionContext,
         });
+        const createdArtifactIds = artifactResult.artifactIds;
         if (!publishGate(conversationId, messageId, coworkerId, executionContext)) {
+            discardArtifacts(createdArtifactIds);
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "stale collaboration result was discarded");
             return { ok: false, taskId: task.id, stopped: true, reason: "stale collaboration result was discarded" };
         }
         const visibleText = artifactResult.text || (artifactResult.artifactIds.length ? `Created ${artifactResult.artifactIds.length} artifact${artifactResult.artifactIds.length === 1 ? "" : "s"}.` : "Completed the requested work.");
-        recordTeamEvent({ conversationId, type: "work.completed", status: "completed", actorId: coworkerId, ownerId: coworkerId, messageId: source.id, artifactIds: artifactResult.artifactIds, reason: "Result is ready for the next team step." });
-        const proposedTarget = teamFlow?.previewHandoff?.({
+        const protocol = executionContext?.activeProtocol;
+        let resultContext = executionContext;
+        if (protocol) {
+            try {
+                teamFlow.submitProtocolResult({ conversationId, coworkerId, messageId: source.id, artifactIds: artifactResult.artifactIds, ...executionContext, expectedVersion: executionContext.version, idempotencyKey: protocol.kind + ".result:" + source.id });
+            } catch (error) {
+                discardArtifacts(createdArtifactIds);
+                throw error;
+            }
+            resultContext = teamFlow.collaborationContextForConversation(conversationId);
+        }
+        else {
+            recordTeamEvent({ conversationId, type: "work.completed", status: "completed", actorId: coworkerId, ownerId: coworkerId, messageId: source.id, artifactIds: artifactResult.artifactIds, reason: "Result is ready for the next team step." });
+            resultContext = teamFlow?.collaborationContextForConversation?.(conversationId) ?? executionContext;
+        }
+        const isReview = protocol?.kind === "review";
+        const protocolArtifactIds = isReview ? (resultContext?.activeProtocol?.candidateArtifactIds ?? []) : [];
+        const publishArtifactIds = artifactResult.artifactIds.length ? artifactResult.artifactIds : protocolArtifactIds;
+        let reviewDecision;
+        let decisionContext = resultContext;
+        if (isReview) {
+            reviewDecision = reviewResult.decision;
+            if (!reviewDecision) {
+                discardArtifacts(createdArtifactIds);
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "review decision was not approved by the protocol");
+                recordTeamEvent({ conversationId, type: "work.failed", status: "attention", actorId: coworkerId, ownerId: coworkerId, messageId: source.id, artifactIds: artifactResult.artifactIds, reason: "The reviewer returned no valid decision." });
+                return { ok: false, taskId: task.id, attention: true, reason: "The reviewer returned no valid decision." };
+            }
+            try {
+                teamFlow.recordReviewDecision({ conversationId, coworkerId, messageId: source.id, decision: reviewDecision, artifactIds: publishArtifactIds, ...resultContext, expectedVersion: resultContext.version, idempotencyKey: "review.decision:" + protocol.protocolRequestId + ":" + protocol.revision + ":" + reviewDecision });
+            } catch (error) {
+                discardArtifacts(createdArtifactIds);
+                throw error;
+            }
+            decisionContext = teamFlow.collaborationContextForConversation(conversationId);
+            if (decisionContext.activeProtocol?.state === "blocked") {
+                discardArtifacts(createdArtifactIds);
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "review revision limit was reached");
+                return { ok: false, taskId: task.id, attention: true, reason: "The review revision limit was reached." };
+            }
+        }
+        const reviewRevisionTarget = isReview && reviewDecision === "changes-requested"
+            ? decisionContext.activeProtocol?.sourceCoworkerId
+            : undefined;
+        const handoffIds = reviewRevisionTarget ? [reviewRevisionTarget] : handoffResult.coworkerIds;
+        const proposedTarget = reviewRevisionTarget ?? teamFlow?.previewHandoff?.({
             conversation,
             coworkerId,
             source,
-            requestedCoworkerIds: handoffResult.coworkerIds,
+            requestedCoworkerIds: handoffIds,
         });
         let runtimeProof;
         let handoffBlocked = false;
@@ -380,16 +530,41 @@ export function createCoworkerDispatcher({
             : managedTeam
                 ? []
                 : handoffResult.coworkerIds.slice(0, 1);
-        if (!publishGate(conversationId, messageId, coworkerId, executionContext)) {
+        const targetIsReview = Boolean(!isReview && productHandoff && teamFlow?.isReviewerForConversation?.(conversationId, productHandoff));
+        const shouldPublishResult = isReview ? reviewDecision === "approved" : !targetIsReview;
+        const publishContext = decisionContext ?? resultContext ?? executionContext;
+        if (shouldPublishResult && !publishGate(conversationId, messageId, coworkerId, publishContext)) {
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", "stale collaboration result was discarded");
             return { ok: false, taskId: task.id, stopped: true, reason: "stale collaboration result was discarded" };
         }
-        artifactStore?.publishArtifacts?.(artifactResult.artifactIds);
+        if (shouldPublishResult) {
+            const lineage = publishContext?.activeProtocol ? {
+                runId: publishContext.runId,
+                requestId: publishContext.requestId,
+                operationId: publishContext.operationId,
+                protocolRequestId: publishContext.activeProtocol.protocolRequestId,
+                revision: publishContext.activeProtocol.revision,
+            } : undefined;
+            const protocolLineages = isReview && artifactStore?.protocolLineageFor
+                ? Object.fromEntries(publishArtifactIds.map((id) => [id, artifactStore.protocolLineageFor(id)]))
+                : undefined;
+            if (protocolLineages && Object.values(protocolLineages).some((entry) => !entry || entry.runId !== publishContext.runId || entry.revision !== publishContext.activeProtocol.revision)) {
+                discardArtifacts(createdArtifactIds);
+                throw new Error("protocol artifact lineage is stale");
+            }
+            try {
+                artifactStore?.publishArtifacts?.(publishArtifactIds, protocolLineages ? { protocolLineages } : lineage ? { protocolLineage: lineage } : undefined);
+            }
+            catch (error) {
+                discardArtifacts(createdArtifactIds);
+                throw error;
+            }
+        }
         const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, {
             text: visibleText.slice(0, MAX_REPLY_TEXT),
             replyTo: source.id,
             ...(nextCoworkerIds.length ? { mentions: nextCoworkerIds } : {}),
-            ...(artifactResult.artifactIds.length ? { artifactIds: artifactResult.artifactIds } : {}),
+            ...(shouldPublishResult && publishArtifactIds.length ? { artifactIds: publishArtifactIds } : {}),
         });
         if (!handoffBlocked && (productHandoff || managedTeam)) {
             const handoffContext = teamFlow?.collaborationContextForConversation?.(conversationId);
@@ -397,7 +572,7 @@ export function createCoworkerDispatcher({
                 conversation,
                 coworkerId,
                 source,
-                requestedCoworkerIds: handoffResult.coworkerIds,
+                requestedCoworkerIds: handoffIds,
                 replyText: artifactResult.text,
                 runtimeProof,
                 expectedTargetCoworkerId: productHandoff,
@@ -423,7 +598,7 @@ export function createCoworkerDispatcher({
             });
             dispatchMessage(conversationId, reply.id);
         }
-        return { ok: true, taskId: task.id, reply, artifacts: artifactResult.artifactIds, handoffs: nextCoworkerIds };
+        return { ok: true, taskId: task.id, reply, artifacts: publishArtifactIds, handoffs: nextCoworkerIds };
     }
 
     function scheduleDelivery(conversationId, messageId, coworkerId) {

@@ -18,8 +18,17 @@ const COLLABORATION_ID = /^(run|request|operation|event|token)_[a-f0-9]{16}$/i;
 const COLLABORATION_EVENT_TYPES = new Set([
     "run.started", "work.started", "handoff.requested", "work.completed", "run.completed",
     "work.failed", "handoff.blocked", "run.stopped", "run.redirected",
+    "handoff.accepted", "handoff.result", "review.requested", "review.accepted",
+    "review.submitted", "review.decision",
 ]);
 const COLLABORATION_STATUSES = new Set(["active", "completed", "failed", "attention", "stopped", "redirected"]);
+const PROTOCOL_KINDS = new Set(["handoff", "review"]);
+const PROTOCOL_STATES = new Set([
+    "requested", "accepted", "working", "submitted", "review_requested", "review_accepted",
+    "reviewing", "approved", "changes_requested", "completed", "blocked", "stopped", "redirected",
+]);
+const MAX_PROTOCOL_REVISIONS = 2;
+const PROTOCOL_REQUEST_EVENTS = new Set(["run.started", "handoff.requested", "review.requested"]);
 
 export const SOFTWARE_TEAM_PACK = Object.freeze({
     id: "software-team",
@@ -260,7 +269,53 @@ function safeLedgerText(value, label, max = 240) {
     // Product-facing reasons are intentionally path/session neutral.  The runtime
     // remains the authority for detailed diagnostics; the ledger stores only safe
     // collaboration context.
-    return text.replace(/[A-Za-z]:[\\/][^\s]+|(?:^|\s)\\\\[^\s]+/g, "[private detail]");
+    return text
+        .replace(/[A-Za-z]:[\\/][^\s]+|(?:^|\s)\\\\[^\s]+/g, "[private detail]")
+        .replace(/\b(?:run|request|operation|event|token|protocolRequest|runtime|audit|session)_[A-Za-z0-9._:-]+\b/gi, "[private detail]");
+}
+
+function safeActiveProtocol(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    try {
+        const protocolRequestId = collaborationId(value.protocolRequestId, "protocolRequestId", "request");
+        const kind = value.kind;
+        const protocolState = value.state;
+        if (!PROTOCOL_KINDS.has(kind) || !PROTOCOL_STATES.has(protocolState)) return undefined;
+        const sourceCoworkerId = safeId(value.sourceCoworkerId, "protocol sourceCoworkerId");
+        const targetCoworkerId = safeId(value.targetCoworkerId, "protocol targetCoworkerId");
+        const revision = Number.isInteger(value.revision) && value.revision >= 0 && value.revision <= MAX_PROTOCOL_REVISIONS
+            ? value.revision : 0;
+        const candidateArtifactIds = Array.isArray(value.candidateArtifactIds)
+            ? value.candidateArtifactIds.slice(0, 12).map((id) => safeId(id, "candidate artifactId"))
+            : [];
+        return {
+            protocolRequestId,
+            kind,
+            state: protocolState,
+            sourceCoworkerId,
+            targetCoworkerId,
+            ...(value.reviewerCoworkerId ? { reviewerCoworkerId: safeId(value.reviewerCoworkerId, "reviewerCoworkerId") } : {}),
+            revision,
+            candidateArtifactIds,
+        };
+    }
+    catch { return undefined; }
+}
+
+function publicActiveProtocol(value, coworkerName = (id) => id) {
+    const protocol = safeActiveProtocol(value);
+    if (!protocol) return undefined;
+    return {
+        kind: protocol.kind,
+        state: protocol.state,
+        revision: protocol.revision,
+        sourceCoworkerId: protocol.sourceCoworkerId,
+        sourceCoworker: coworkerName(protocol.sourceCoworkerId),
+        targetCoworkerId: protocol.targetCoworkerId,
+        targetCoworker: coworkerName(protocol.targetCoworkerId),
+        ...(protocol.reviewerCoworkerId ? { reviewerCoworkerId: protocol.reviewerCoworkerId, reviewerCoworker: coworkerName(protocol.reviewerCoworkerId) } : {}),
+        ...(protocol.candidateArtifactIds.length ? { artifactIds: [...protocol.candidateArtifactIds] } : {}),
+    };
 }
 
 function sanitizeCollaboration(value, teamIds, conversationIds) {
@@ -293,7 +348,13 @@ function sanitizeCollaboration(value, teamIds, conversationIds) {
             const operationId = collaborationId(entry.operationId, "operationId", "operation");
             if (!runIds.has(runId) || !conversationIds.has(entry.conversationId) || !COLLABORATION_EVENT_TYPES.has(entry.type)) continue;
             if (!COLLABORATION_STATUSES.has(entry.status) || typeof entry.createdAt !== "string") continue;
-            result.events.push({ eventId, runId, requestId, operationId, conversationId: entry.conversationId, type: entry.type, status: entry.status, ...(entry.actorId ? { actorId: safeId(entry.actorId, "actorId") } : {}), ...(entry.ownerId ? { ownerId: safeId(entry.ownerId, "ownerId") } : {}), ...(entry.targetCoworkerId ? { targetCoworkerId: safeId(entry.targetCoworkerId, "targetCoworkerId") } : {}), ...(entry.stage ? { stage: safeId(entry.stage, "stage") } : {}), ...(entry.messageId ? { messageId: safeId(entry.messageId, "messageId") } : {}), ...(Array.isArray(entry.artifactIds) ? { artifactIds: entry.artifactIds.slice(0, 12).map((id) => safeId(id, "artifactId")) } : {}), ...(entry.reason ? { reason: safeLedgerText(entry.reason, "reason") } : {}), ...(entry.idempotencyKey ? { idempotencyKey: safeLedgerText(entry.idempotencyKey, "idempotencyKey", 160) } : {}), createdAt: entry.createdAt });
+            const protocolRequestId = entry.protocolRequestId ? collaborationId(entry.protocolRequestId, "protocolRequestId", "request") : undefined;
+            const protocolKind = entry.protocolKind && PROTOCOL_KINDS.has(entry.protocolKind) ? entry.protocolKind : undefined;
+            const protocolState = entry.protocolState && PROTOCOL_STATES.has(entry.protocolState) ? entry.protocolState : undefined;
+            const decision = entry.decision && ["approved", "changes-requested"].includes(entry.decision) ? entry.decision : undefined;
+            const revision = Number.isInteger(entry.revision) && entry.revision >= 0 && entry.revision <= MAX_PROTOCOL_REVISIONS ? entry.revision : undefined;
+            const parentOperationId = entry.parentOperationId ? collaborationId(entry.parentOperationId, "parentOperationId", "operation") : undefined;
+            result.events.push({ eventId, runId, requestId, operationId, conversationId: entry.conversationId, type: entry.type, status: entry.status, ...(entry.actorId ? { actorId: safeId(entry.actorId, "actorId") } : {}), ...(entry.ownerId ? { ownerId: safeId(entry.ownerId, "ownerId") } : {}), ...(entry.targetCoworkerId ? { targetCoworkerId: safeId(entry.targetCoworkerId, "targetCoworkerId") } : {}), ...(entry.stage ? { stage: safeId(entry.stage, "stage") } : {}), ...(entry.messageId ? { messageId: safeId(entry.messageId, "messageId") } : {}), ...(Array.isArray(entry.artifactIds) ? { artifactIds: entry.artifactIds.slice(0, 12).map((id) => safeId(id, "artifactId")) } : {}), ...(protocolRequestId ? { protocolRequestId } : {}), ...(protocolKind ? { protocolKind } : {}), ...(protocolState ? { protocolState } : {}), ...(decision ? { decision } : {}), ...(revision !== undefined ? { revision } : {}), ...(parentOperationId ? { parentOperationId } : {}), ...(entry.reason ? { reason: safeLedgerText(entry.reason, "reason") } : {}), ...(entry.idempotencyKey ? { idempotencyKey: safeLedgerText(entry.idempotencyKey, "idempotencyKey", 160) } : {}), createdAt: entry.createdAt });
         }
         catch {}
     }
@@ -496,6 +557,7 @@ function sanitizePersisted(value) {
                     boundedTask: flow.routingDecision.boundedTask.slice(0, 1_000),
                 }
                 : undefined;
+            const activeProtocol = safeActiveProtocol(flow.activeProtocol);
             flows[teamId] = {
                 stage,
                 ...(Number.isInteger(flow.handoffIndex) && flow.handoffIndex >= 0 && flow.handoffIndex <= 16 ? { handoffIndex: flow.handoffIndex } : {}),
@@ -512,6 +574,7 @@ function sanitizePersisted(value) {
                 ...(COLLABORATION_STATUSES.has(flow.runStatus) ? { runStatus: flow.runStatus } : {}),
                 ...(typeof flow.attentionReason === "string" ? { attentionReason: safeLedgerText(flow.attentionReason, "attentionReason") } : {}),
                 ...(Array.isArray(flow.attentionCoworkerIds) ? { attentionCoworkerIds: flow.attentionCoworkerIds.slice(0, 8).filter((id) => typeof id === "string").map((id) => id.slice(0, 160)) } : {}),
+                ...(activeProtocol ? { activeProtocol } : {}),
                 ...(typeof flow.updatedAt === "string" ? { updatedAt: flow.updatedAt } : {}),
             };
         }
@@ -598,31 +661,37 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const ownerId = event.ownerId;
         const targetCoworkerId = event.targetCoworkerId;
         const productEvent = {
-            "run.started": { kind: "started", label: "Work started", status: "working" },
+            "run.started": { kind: "working", label: "Working", status: "working" },
             "work.started": { kind: "working", label: "Working", status: "working" },
-            "handoff.requested": { kind: "handoff", label: "Handoff", status: "working" },
-            "work.completed": { kind: "result", label: "Result ready", status: "completed" },
+            "handoff.requested": { kind: "handoff", label: "Handoff requested", status: "working" },
+            "handoff.accepted": { kind: "handoff-accepted", label: "Handoff accepted", status: "working" },
+            "handoff.result": { kind: "submitted", label: "Submitted", status: "completed" },
+            "review.requested": { kind: "review-requested", label: "Review requested", status: "working" },
+            "review.accepted": { kind: "reviewing", label: "Reviewing", status: "working" },
+            "review.submitted": { kind: "submitted", label: "Submitted", status: "completed" },
+            "review.decision": event.status === "attention"
+                ? { kind: "attention", label: "Attention", status: "attention" }
+                : event.decision === "approved"
+                    ? { kind: "approved", label: "Approved", status: "completed" }
+                    : event.decision === "changes-requested"
+                        ? { kind: "changes-requested", label: "Changes requested", status: "working" }
+                        : { kind: "reviewing", label: "Reviewing", status: "working" },
+            "work.completed": { kind: "submitted", label: "Submitted", status: "completed" },
             "run.completed": { kind: "completed", label: "Completed", status: "completed" },
-            "work.failed": { kind: "attention", label: "Needs attention", status: "attention" },
-            "handoff.blocked": { kind: "attention", label: "Needs attention", status: "attention" },
-            "run.stopped": { kind: "stopped", label: "Stopped", status: "stopped" },
-            "run.redirected": { kind: "redirected", label: "Redirected", status: "working" },
+            "work.failed": { kind: "attention", label: "Attention", status: "attention" },
+            "handoff.blocked": { kind: "attention", label: "Attention", status: "attention" },
+            "run.stopped": { kind: "attention", label: "Attention", status: "stopped" },
+            "run.redirected": { kind: "working", label: "Working", status: "working" },
         }[event.type] ?? { kind: "activity", label: "Team activity", status: "working" };
         return {
-            eventId: event.eventId,
-            runId: event.runId,
-            requestId: event.requestId,
-            operationId: event.operationId,
-            conversationId: event.conversationId,
             kind: productEvent.kind,
             label: productEvent.label,
             status: productEvent.status,
-            ...(event.actorId ? { actorId: event.actorId } : {}),
-            ...(ownerId ? { ownerId, owner: coworkerName(ownerId) } : {}),
-            ...(targetCoworkerId ? { targetCoworkerId, targetCoworker: coworkerName(targetCoworkerId) } : {}),
-            ...(event.stage ? { stage: event.stage } : {}),
-            ...(event.messageId ? { messageId: event.messageId } : {}),
+            ...(ownerId ? { owner: coworkerName(ownerId) } : {}),
+            ...(targetCoworkerId ? { targetCoworker: coworkerName(targetCoworkerId) } : {}),
             ...(event.artifactIds?.length ? { artifactIds: [...event.artifactIds] } : {}),
+            ...(event.revision !== undefined ? { revision: event.revision } : {}),
+            ...(event.decision ? { decision: event.decision } : {}),
             ...(event.reason ? { reason: event.reason } : {}),
             at: event.createdAt,
         };
@@ -637,7 +706,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             .map(publicCollaborationEvent);
     }
 
-    function recordCollaborationEvent({ conversationId, type, status = "active", actorId, ownerId, targetCoworkerId, stage, messageId, artifactIds, reason, runId, requestId, operationId, operationToken, idempotencyKey, expectedVersion, flowPatch } = {}) {
+    function recordCollaborationEvent({ conversationId, type, status = "active", actorId, ownerId, targetCoworkerId, stage, messageId, artifactIds, reason, protocolRequestId, protocolKind, protocolState, revision, decision, parentOperationId, runId, requestId, operationId, operationToken, idempotencyKey, expectedVersion, flowPatch } = {}) {
         const context = teamContextForConversation(conversationId);
         if (!context) return undefined;
         if (!COLLABORATION_EVENT_TYPES.has(type)) throw new Error(`unknown collaboration event type: ${type}`);
@@ -656,15 +725,36 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || expectedVersion !== (flow.version ?? 0)))
             throw new Error("collaboration flow version is stale");
         if (runId !== undefined && runId !== currentRunId && !(type === "run.started" && flowPatch?.runId === runId)) throw new Error("collaboration run token is stale");
-        if (requestId !== undefined && requestId !== flow.requestId && !(["run.started", "handoff.requested"].includes(type) && flowPatch?.requestId === requestId)) throw new Error("collaboration request token is stale");
-        if (operationId !== undefined && operationId !== flow.operationId && !(["run.started", "handoff.requested"].includes(type) && flowPatch?.operationId === operationId)) throw new Error("collaboration operation token is stale");
-        if (operationToken !== undefined && operationToken !== flow.operationToken && !(["run.started", "handoff.requested"].includes(type) && flowPatch?.operationToken === operationToken)) throw new Error("collaboration operation proof is stale");
+        if (requestId !== undefined && requestId !== flow.requestId && !(PROTOCOL_REQUEST_EVENTS.has(type) && flowPatch?.requestId === requestId)) throw new Error("collaboration request token is stale");
+        if (operationId !== undefined && operationId !== flow.operationId && !(PROTOCOL_REQUEST_EVENTS.has(type) && flowPatch?.operationId === operationId)) throw new Error("collaboration operation token is stale");
+        if (operationToken !== undefined && operationToken !== flow.operationToken && !(PROTOCOL_REQUEST_EVENTS.has(type) && flowPatch?.operationToken === operationToken)) throw new Error("collaboration operation proof is stale");
         for (const [id, label] of [[ownerId, "ownerId"], [targetCoworkerId, "targetCoworkerId"]]) {
             if (id !== undefined && !context.team.coworkerIds.includes(id))
                 throw new Error(`${label} must be a member of the team`);
         }
         if (actorId !== undefined && !["user", "system"].includes(actorId) && !context.team.coworkerIds.includes(actorId))
             throw new Error("actorId must be a team member or system actor");
+        const activeProtocol = flow.activeProtocol;
+        if (["handoff.accepted", "review.accepted"].includes(type)) {
+            const expectedAcceptanceState = type === "review.accepted" ? "review_accepted" : "accepted";
+            const requestedState = type === "review.accepted" ? "review_requested" : "requested";
+            if (!activeProtocol || activeProtocol.kind !== protocolKind || activeProtocol.state !== requestedState || actorId !== targetCoworkerId || ownerId !== targetCoworkerId || protocolState !== expectedAcceptanceState)
+                throw new Error("protocol acceptance is not authorized");
+        }
+        if (PROTOCOL_REQUEST_EVENTS.has(type) && type !== "run.started" && ["requested", "review_requested"].includes(protocolState)) {
+            const requestedProtocol = safeActiveProtocol(flowPatch?.activeProtocol);
+            if (!requestedProtocol || requestedProtocol.state !== protocolState || requestedProtocol.targetCoworkerId !== targetCoworkerId || (ownerId !== activeProtocol?.sourceCoworkerId && ownerId !== actorId))
+                throw new Error("protocol request is not authorized");
+        }
+        if (["handoff.result", "review.submitted"].includes(type)) {
+            const workingState = protocolKind === "review" ? "reviewing" : "working";
+            if (!activeProtocol || activeProtocol.kind !== protocolKind || activeProtocol.state !== workingState || actorId !== ownerId || ownerId !== activeProtocol.targetCoworkerId || protocolState !== "submitted")
+                throw new Error("protocol result is not authorized");
+        }
+        if (type === "review.decision") {
+            if (!activeProtocol || activeProtocol.kind !== "review" || activeProtocol.state !== "submitted" || actorId !== ownerId || ownerId !== activeProtocol.targetCoworkerId || !["approved", "changes-requested"].includes(decision))
+                throw new Error("review decision is not authorized");
+        }
         const event = {
             eventId: idFactory("event"),
             runId: run.runId,
@@ -679,6 +769,12 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             ...(stage ? { stage: safeId(stage, "stage") } : {}),
             ...(messageId ? { messageId: safeId(messageId, "messageId") } : {}),
             ...(Array.isArray(artifactIds) && artifactIds.length ? { artifactIds: artifactIds.slice(0, 12).map((id) => safeId(id, "artifactId")) } : {}),
+            ...(protocolRequestId ? { protocolRequestId: collaborationId(protocolRequestId, "protocolRequestId", "request") } : {}),
+            ...(protocolKind ? { protocolKind: PROTOCOL_KINDS.has(protocolKind) ? protocolKind : (() => { throw new Error("protocolKind is invalid"); })() } : {}),
+            ...(protocolState ? { protocolState: PROTOCOL_STATES.has(protocolState) ? protocolState : (() => { throw new Error("protocolState is invalid"); })() } : {}),
+            ...(revision !== undefined ? { revision: Number.isInteger(revision) && revision >= 0 && revision <= MAX_PROTOCOL_REVISIONS ? revision : (() => { throw new Error("protocol revision is invalid"); })() } : {}),
+            ...(decision ? { decision: ["approved", "changes-requested"].includes(decision) ? decision : (() => { throw new Error("review decision is invalid"); })() } : {}),
+            ...(parentOperationId ? { parentOperationId: collaborationId(parentOperationId, "parentOperationId", "operation") } : {}),
             ...(reason ? { reason: safeLedgerText(reason, "reason") } : {}),
             ...(idempotencyKey ? { idempotencyKey: safeLedgerText(idempotencyKey, "idempotencyKey", 160) } : {}),
             createdAt: now(),
@@ -687,6 +783,14 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         if (state.collaboration.events.length > MAX_COLLABORATION_EVENTS)
             state.collaboration.events.splice(0, state.collaboration.events.length - MAX_COLLABORATION_EVENTS);
         const nextFlow = { ...flow, ...(flowPatch ?? {}), version: (flow.version ?? 0) + 1 };
+        if (Object.hasOwn(nextFlow, "activeProtocol")) {
+            const normalizedProtocol = safeActiveProtocol(nextFlow.activeProtocol);
+            if (nextFlow.activeProtocol !== undefined && !normalizedProtocol)
+                throw new Error("active protocol is invalid");
+            nextFlow.activeProtocol = normalizedProtocol;
+        }
+        if (["run.stopped", "run.redirected", "handoff.blocked"].includes(type) && nextFlow.activeProtocol)
+            nextFlow.activeProtocol = { ...nextFlow.activeProtocol, state: type === "run.stopped" ? "stopped" : type === "run.redirected" ? "redirected" : "blocked" };
         const runStatus = type === "run.completed" ? "completed" : type === "run.stopped" ? "stopped" : ["work.failed", "handoff.blocked"].includes(type) ? "attention" : status === "redirected" ? "redirected" : undefined;
         if (runStatus) {
             run.status = runStatus;
@@ -755,8 +859,14 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const flow = state.flows[context.team.id] ?? {};
         const run = runForConversation(conversationId);
         if (!run || flow.runStatus === "stopped") throw new Error("collaboration run is not active");
+        const protocol = flow.activeProtocol;
+        if (["requested", "review_requested"].includes(protocol?.state)) throw new Error("protocol request must be accepted before work starts");
+        if (protocol && protocol.targetCoworkerId !== ownerId) throw new Error("protocol owner is not the designated target");
+        const nextProtocol = protocol && ["accepted", "review_accepted"].includes(protocol.state)
+            ? { ...protocol, state: protocol.kind === "review" ? "reviewing" : "working" }
+            : undefined;
         if (flow.ownerId && flow.ownerId !== ownerId) throw new Error(`stage owner is already claimed by ${flow.ownerId}`);
-        return publicCollaborationEvent(recordCollaborationEvent({ conversationId, type: "work.started", status: "active", actorId: ownerId, ownerId, stage: flow.stage, messageId, runId: expectedRunId ?? run.runId, requestId: expectedRequestId ?? run.requestId, operationId: expectedOperationId ?? run.operationId, operationToken: expectedOperationToken ?? run.operationToken, expectedVersion: expectedVersion ?? (flow.version ?? 0), flowPatch: { ownerId, runStatus: "active" }, idempotencyKey: idempotencyKey ?? `work.started:${messageId}:${ownerId}` }));
+        return publicCollaborationEvent(recordCollaborationEvent({ conversationId, type: "work.started", status: "active", actorId: ownerId, ownerId, stage: flow.stage, messageId, ...(protocol ? { protocolRequestId: protocol.protocolRequestId, protocolKind: protocol.kind, protocolState: protocol.kind === "review" ? "reviewing" : "working", revision: protocol.revision } : {}), runId: expectedRunId ?? run.runId, requestId: expectedRequestId ?? run.requestId, operationId: expectedOperationId ?? run.operationId, operationToken: expectedOperationToken ?? run.operationToken, expectedVersion: expectedVersion ?? (flow.version ?? 0), flowPatch: { ownerId, runStatus: "active", ...(nextProtocol ? { activeProtocol: nextProtocol } : {}) }, idempotencyKey: idempotencyKey ?? `work.started:${messageId}:${ownerId}` }));
     }
 
     function collaborationContextForConversation(conversationId) {
@@ -765,7 +875,172 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const flow = state.flows[context.team.id] ?? {};
         const run = runForConversation(conversationId);
         if (!run || !flow.runId) return undefined;
-        return { runId: run.runId, requestId: flow.requestId ?? run.requestId, operationId: flow.operationId ?? run.operationId, operationToken: flow.operationToken ?? run.operationToken, version: flow.version ?? 0, stage: flow.stage, ownerId: flow.ownerId };
+        return { runId: run.runId, requestId: flow.requestId ?? run.requestId, operationId: flow.operationId ?? run.operationId, operationToken: flow.operationToken ?? run.operationToken, version: flow.version ?? 0, stage: flow.stage, ownerId: flow.ownerId, ...(flow.activeProtocol ? { activeProtocol: clone(flow.activeProtocol) } : {}) };
+    }
+
+    function pendingProtocolProof(conversationId) {
+        const protocol = collaborationContextForConversation(conversationId)?.activeProtocol;
+        if (!protocol || !["requested", "review_requested"].includes(protocol.state)) return undefined;
+        for (const proof of runtimeProofs.values()) {
+            if (proof.conversationId === String(conversationId)
+                && proof.targetCoworkerId === protocol.targetCoworkerId
+                && proof.runId === collaborationContextForConversation(conversationId)?.runId
+                && proof.requestId === collaborationContextForConversation(conversationId)?.requestId
+                && proof.operationId === collaborationContextForConversation(conversationId)?.operationId
+                && proof.operationToken === collaborationContextForConversation(conversationId)?.operationToken
+                && proof.version === collaborationContextForConversation(conversationId)?.version)
+                return { proofId: proof.proofId, targetCoworkerId: proof.targetCoworkerId, agentId: proof.agentId, workspaceId: proof.workspaceId };
+        }
+        const context = collaborationContextForConversation(conversationId);
+        if (context && runtimeHandoffPreflight) {
+            try {
+                return authorizeHandoffTarget({
+                    conversationId,
+                    sourceCoworkerId: protocol.sourceCoworkerId,
+                    targetCoworkerId: protocol.targetCoworkerId,
+                    expectedVersion: context.version,
+                    expectedRunId: context.runId,
+                    expectedRequestId: context.requestId,
+                    expectedOperationId: context.operationId,
+                    expectedOperationToken: context.operationToken,
+                });
+            }
+            catch { return undefined; }
+        }
+        return undefined;
+    }
+
+    function acceptProtocol({ conversationId, targetCoworkerId, proofId, messageId, expectedVersion, expectedRunId, expectedRequestId, expectedOperationId, expectedOperationToken, idempotencyKey } = {}) {
+        if (idempotencyKey) {
+            const existing = state.collaboration.events.find((entry) => entry.conversationId === String(conversationId) && entry.idempotencyKey === idempotencyKey);
+            if (existing) return publicCollaborationEvent(existing);
+        }
+        const context = teamContextForConversation(conversationId);
+        if (!context) throw new Error("protocol conversation is not a managed team channel");
+        const flow = state.flows[context.team.id] ?? {};
+        const protocol = flow.activeProtocol;
+        const requestedState = protocol?.kind === "review" ? "review_requested" : "requested";
+        const acceptedState = protocol?.kind === "review" ? "review_accepted" : "accepted";
+        if (!protocol || protocol.state !== requestedState) throw new Error("protocol request is not awaiting acceptance");
+        if (protocol.targetCoworkerId !== targetCoworkerId) throw new Error("protocol target changed before acceptance");
+        if (!context.team.coworkerIds.includes(targetCoworkerId) || coworkerStore.get(targetCoworkerId).state !== "active")
+            throw new Error("protocol target is not an active team member");
+        const proof = proofId ? runtimeProofs.get(proofId) : undefined;
+        if (!proof || proof.conversationId !== String(conversationId) || proof.targetCoworkerId !== targetCoworkerId
+            || proof.runId !== flow.runId || proof.requestId !== flow.requestId || proof.operationId !== flow.operationId
+            || proof.operationToken !== flow.operationToken || proof.version !== (flow.version ?? 0))
+            throw new Error("trusted protocol acceptance proof is missing or stale");
+        if (expectedVersion !== undefined && expectedVersion !== flow.version) throw new Error("protocol acceptance version is stale");
+        if (expectedRunId !== undefined && expectedRunId !== flow.runId) throw new Error("protocol acceptance run token is stale");
+        if (expectedRequestId !== undefined && expectedRequestId !== flow.requestId) throw new Error("protocol acceptance request token is stale");
+        if (expectedOperationId !== undefined && expectedOperationId !== flow.operationId) throw new Error("protocol acceptance operation token is stale");
+        if (expectedOperationToken !== undefined && expectedOperationToken !== flow.operationToken) throw new Error("protocol acceptance proof is stale");
+        const eventType = protocol.kind === "review" ? "review.accepted" : "handoff.accepted";
+        const event = recordCollaborationEvent({
+            conversationId,
+            type: eventType,
+            status: "active",
+            actorId: targetCoworkerId,
+            ownerId: targetCoworkerId,
+            targetCoworkerId,
+            stage: flow.stage,
+            messageId,
+            protocolRequestId: protocol.protocolRequestId,
+            protocolKind: protocol.kind,
+            protocolState: acceptedState,
+            revision: protocol.revision,
+            runId: flow.runId,
+            requestId: flow.requestId,
+            operationId: flow.operationId,
+            operationToken: flow.operationToken,
+            expectedVersion: expectedVersion ?? flow.version ?? 0,
+            flowPatch: { ownerId: targetCoworkerId, runStatus: "active", activeProtocol: { ...protocol, state: acceptedState } },
+            idempotencyKey: idempotencyKey ?? `${eventType}:${protocol.protocolRequestId}`,
+        });
+        runtimeProofs.delete(proofId);
+        return publicCollaborationEvent(event);
+    }
+
+    function submitProtocolResult({ conversationId, coworkerId, messageId, artifactIds = [], expectedVersion, expectedRunId, expectedRequestId, expectedOperationId, expectedOperationToken, idempotencyKey } = {}) {
+        if (idempotencyKey) {
+            const existing = state.collaboration.events.find((entry) => entry.conversationId === String(conversationId) && entry.idempotencyKey === idempotencyKey);
+            if (existing) return publicCollaborationEvent(existing);
+        }
+        const context = teamContextForConversation(conversationId);
+        if (!context) throw new Error("protocol conversation is not a managed team channel");
+        const flow = state.flows[context.team.id] ?? {};
+        const protocol = flow.activeProtocol;
+        const workingState = protocol?.kind === "review" ? "reviewing" : "working";
+        if (!protocol || protocol.state !== workingState) throw new Error("protocol is not accepting a result");
+        if (flow.ownerId !== coworkerId || protocol.targetCoworkerId !== coworkerId) throw new Error("only the active protocol target can submit a result");
+        const eventType = protocol.kind === "review" ? "review.submitted" : "handoff.result";
+        return publicCollaborationEvent(recordCollaborationEvent({
+            conversationId,
+            type: eventType,
+            status: "completed",
+            actorId: coworkerId,
+            ownerId: coworkerId,
+            targetCoworkerId: coworkerId,
+            stage: flow.stage,
+            messageId,
+            artifactIds,
+            protocolRequestId: protocol.protocolRequestId,
+            protocolKind: protocol.kind,
+            protocolState: "submitted",
+            revision: protocol.revision,
+            runId: expectedRunId ?? flow.runId,
+            requestId: expectedRequestId ?? flow.requestId,
+            operationId: expectedOperationId ?? flow.operationId,
+            operationToken: expectedOperationToken ?? flow.operationToken,
+            expectedVersion: expectedVersion ?? flow.version ?? 0,
+            flowPatch: { runStatus: "active", activeProtocol: { ...protocol, state: "submitted", candidateArtifactIds: (artifactIds.length ? artifactIds : protocol.candidateArtifactIds).slice(0, 12) } },
+            idempotencyKey: idempotencyKey ?? `${eventType}:${messageId}`,
+        }));
+    }
+
+    function recordReviewDecision({ conversationId, coworkerId, messageId, decision, artifactIds = [], expectedVersion, expectedRunId, expectedRequestId, expectedOperationId, expectedOperationToken, idempotencyKey } = {}) {
+        if (idempotencyKey) {
+            const existing = state.collaboration.events.find((entry) => entry.conversationId === String(conversationId) && entry.idempotencyKey === idempotencyKey);
+            if (existing) return publicCollaborationEvent(existing);
+        }
+        if (!["approved", "changes-requested"].includes(decision)) throw new Error("review decision must be approved or changes-requested");
+        const context = teamContextForConversation(conversationId);
+        if (!context) throw new Error("review conversation is not a managed team channel");
+        const flow = state.flows[context.team.id] ?? {};
+        const protocol = flow.activeProtocol;
+        if (!protocol || protocol.kind !== "review" || protocol.state !== "submitted") throw new Error("review is not accepting a decision");
+        if (flow.ownerId !== coworkerId || protocol.targetCoworkerId !== coworkerId || protocol.sourceCoworkerId === coworkerId)
+            throw new Error("only the designated reviewer can decide");
+        const nextState = decision === "approved" ? "approved" : protocol.revision >= MAX_PROTOCOL_REVISIONS ? "blocked" : "changes_requested";
+        const limited = nextState === "blocked";
+        return publicCollaborationEvent(recordCollaborationEvent({
+            conversationId,
+            type: "review.decision",
+            status: limited ? "attention" : "active",
+            actorId: coworkerId,
+            ownerId: coworkerId,
+            targetCoworkerId: coworkerId,
+            stage: flow.stage,
+            messageId,
+            artifactIds: artifactIds.length ? artifactIds : protocol.candidateArtifactIds,
+            reason: limited ? "The review revision limit was reached." : undefined,
+            protocolRequestId: protocol.protocolRequestId,
+            protocolKind: "review",
+            protocolState: nextState,
+            revision: protocol.revision,
+            decision,
+            runId: expectedRunId ?? flow.runId,
+            requestId: expectedRequestId ?? flow.requestId,
+            operationId: expectedOperationId ?? flow.operationId,
+            operationToken: expectedOperationToken ?? flow.operationToken,
+            expectedVersion: expectedVersion ?? flow.version ?? 0,
+            flowPatch: {
+                runStatus: limited ? "attention" : "active",
+                ...(limited ? { attentionReason: "The review revision limit was reached." } : {}),
+                activeProtocol: { ...protocol, state: nextState, candidateArtifactIds: (artifactIds.length ? artifactIds : protocol.candidateArtifactIds).slice(0, 12) },
+            },
+            idempotencyKey: idempotencyKey ?? `review.decision:${protocol.protocolRequestId}:${protocol.revision}:${decision}`,
+        }));
     }
 
     function stopRun(conversationId, reason = "Work stopped by the user.", expected = {}) {
@@ -777,7 +1052,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const requestId = expected.expectedRequestId ?? expected.requestId ?? context?.requestId ?? run.requestId;
         const operationId = expected.expectedOperationId ?? expected.operationId ?? context?.operationId ?? run.operationId;
         const operationToken = expected.expectedOperationToken ?? expected.operationToken ?? context?.operationToken ?? run.operationToken;
-        return recordCollaborationEvent({ conversationId, type: "run.stopped", status: "stopped", actorId: "user", ownerId: run.ownerId, stage: run.stage, reason: "Work stopped by the user.", runId, requestId, operationId, operationToken, expectedVersion, idempotencyKey: `run.stopped:${runId}` });
+        return recordCollaborationEvent({ conversationId, type: "run.stopped", status: "stopped", actorId: "user", ownerId: run.ownerId, stage: run.stage, reason, runId, requestId, operationId, operationToken, expectedVersion, idempotencyKey: `run.stopped:${runId}` });
     }
 
     function setRuntimeHandoffPreflight(preflight) {
@@ -796,6 +1071,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         if (expectedOperationId !== undefined && expectedOperationId !== flow.operationId) throw new Error("handoff operation token is stale");
         if (expectedOperationToken !== undefined && expectedOperationToken !== flow.operationToken) throw new Error("handoff operation proof is stale");
         if (!context.team.coworkerIds.includes(sourceCoworkerId) || !context.team.coworkerIds.includes(targetCoworkerId)) throw new Error("handoff participants must be team members");
+        if (sourceCoworkerId === targetCoworkerId) throw new Error("protocol participants must be different");
         if (coworkerStore.get(targetCoworkerId).state !== "active") throw new Error("handoff target is not active");
         const runtime = runtimeHandoffPreflight({ conversationId: String(conversationId), sourceCoworkerId, targetCoworkerId, workspaceId: channelForConversation(conversationId)?.workspaceId });
         if (!runtime || runtime.targetCoworkerId !== targetCoworkerId || typeof runtime.agentId !== "string" || typeof runtime.workspaceId !== "string") throw new Error("trusted runtime handoff preflight was not accepted");
@@ -859,9 +1135,6 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return {
             stage: flow.stage,
             status,
-            ...(flow.runId ? { runId: flow.runId } : {}),
-            ...(flow.requestId ? { requestId: flow.requestId } : {}),
-            ...(flow.operationId ? { operationId: flow.operationId } : {}),
             currentOwnerId: effectiveOwnerId,
             currentOwner: effectiveOwnerId ? coworkerName(effectiveOwnerId) : undefined,
             pendingCoworkerIds: pending,
@@ -869,6 +1142,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             channelId: channel?.id,
             ...(flow.attentionReason ? { attentionReason: flow.attentionReason } : {}),
             ...(conversation ? { activity: activityForConversation(conversation.id, { limit: 12 }) } : {}),
+            ...(flow.activeProtocol ? { activeProtocol: publicActiveProtocol(flow.activeProtocol, coworkerName) } : {}),
             ...(flow.routingDecision ? { routingDecision: clone(flow.routingDecision) } : {}),
         };
     }
@@ -1351,7 +1625,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             stage: stageForIndex(ownerIndex, order),
             handoffIndex: ownerIndex,
             userMessageId: message.id,
-            ...(startsNewRun ? { runId: undefined, requestId: undefined, operationId: undefined, ownerId: undefined, runStatus: undefined } : {}),
+            ...(startsNewRun ? { runId: undefined, requestId: undefined, operationId: undefined, ownerId: undefined, runStatus: undefined, activeProtocol: undefined } : {}),
             updatedAt,
         };
         delete state.flows[team.id].lastHandoffSourceId;
@@ -1367,7 +1641,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         if (!channel) return undefined;
         const team = requireTeam(channel.teamId);
         const flow = state.flows[team.id] ?? { stage: "complete" };
-        if (source?.id && flow.lastHandoffSourceId === source.id)
+        const protocolRequestPending = !flow.activeProtocol || ["requested", "review_requested"].includes(flow.activeProtocol.state);
+        if (protocolRequestPending && source?.id && flow.lastHandoffSourceId === source.id && flow.ownerId === flow.lastHandoffTargetId)
             return { target: flow.lastHandoffTargetId, duplicate: true };
         const order = handoffOrder(team);
         const currentIndex = indexForFlow(flow, order);
@@ -1380,7 +1655,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                     : undefined;
                 const sourceIsTeamMember = source?.senderId && team.coworkerIds.includes(source.senderId);
                 const followsDeclaredPackSequence = team.packId !== "custom-team";
-                const dynamic = !requested && (source?.senderId === "user" || (!followsDeclaredPackSequence && sourceIsTeamMember))
+                const approvedReview = flow.activeProtocol?.kind === "review" && flow.activeProtocol.state === "approved";
+                const dynamic = !requested && !approvedReview && (source?.senderId === "user" || (!followsDeclaredPackSequence && sourceIsTeamMember))
                     ? selectSpecialist({ objective: source.text, currentCoworkerId: coworkerId, candidates: routingCandidates(conversation, coworkerId) })
                     : undefined;
                 target = requested ?? dynamic?.targetCoworkerId ?? order[currentIndex + 1];
@@ -1421,14 +1697,29 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         if (expectedRequestId !== undefined && expectedRequestId !== flow.requestId) throw new Error("handoff request token is stale");
         if (expectedOperationId !== undefined && expectedOperationId !== flow.operationId) throw new Error("handoff operation token is stale");
         if (expectedOperationToken !== undefined && expectedOperationToken !== flow.operationToken) throw new Error("handoff operation proof is stale");
-        if (acceptedProofId) runtimeProofs.delete(acceptedProofId);
         if (decision.terminal) {
-            recordCollaborationEvent({ conversationId: conversation.id, type: "run.completed", status: "completed", actorId: coworkerId, stage: "complete", runId: flow.runId, requestId: flow.requestId, operationId: flow.operationId, operationToken: flow.operationToken, expectedVersion: expectedVersion ?? (flow.version ?? 0), flowPatch: { stage: "complete", handoffIndex: undefined, ownerId: undefined, runStatus: "completed" }, idempotencyKey: `run.completed:${source?.id ?? flow.runId}` });
+            recordCollaborationEvent({ conversationId: conversation.id, type: "run.completed", status: "completed", actorId: coworkerId, stage: "complete", protocolRequestId: flow.activeProtocol?.protocolRequestId, protocolKind: flow.activeProtocol?.kind, protocolState: "completed", revision: flow.activeProtocol?.revision, runId: flow.runId, requestId: flow.requestId, operationId: flow.operationId, operationToken: flow.operationToken, expectedVersion: expectedVersion ?? (flow.version ?? 0), flowPatch: { stage: "complete", handoffIndex: undefined, ownerId: undefined, runStatus: "completed", activeProtocol: undefined }, idempotencyKey: `run.completed:${source?.id ?? flow.runId}` });
             return undefined;
         }
         const nextRequestId = idFactory("request");
         const nextOperationId = idFactory("operation");
         const nextOperationToken = idFactory("token");
+        const nextProtocolKind = decision.stage === "reviewer" ? "review" : "handoff";
+        const nextRevision = flow.activeProtocol?.state === "changes_requested"
+            ? (flow.activeProtocol.revision ?? 0) + 1
+            : (flow.activeProtocol?.revision ?? 0);
+        if (nextRevision > MAX_PROTOCOL_REVISIONS)
+            throw new Error("review revision limit was reached");
+        const nextProtocol = {
+            protocolRequestId: nextRequestId,
+            kind: nextProtocolKind,
+            state: nextProtocolKind === "review" ? "review_requested" : "requested",
+            sourceCoworkerId: coworkerId,
+            targetCoworkerId: target,
+            ...(nextProtocolKind === "review" ? { reviewerCoworkerId: target } : {}),
+            revision: nextRevision,
+            candidateArtifactIds: flow.activeProtocol?.candidateArtifactIds ?? [],
+        };
         const flowPatch = {
             handoffIndex: decision.nextIndex,
             stage: decision.stage,
@@ -1437,6 +1728,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             operationId: nextOperationId,
             operationToken: nextOperationToken,
             runStatus: "active",
+            activeProtocol: nextProtocol,
             attentionReason: undefined,
             attentionCoworkerIds: [],
             ...(decision.routingDecision ? { routingDecision: decision.routingDecision } : {}),
@@ -1446,7 +1738,12 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         if (source?.id) {
             // The source message is part of the transition's idempotency key.
         }
-        recordCollaborationEvent({ conversationId: conversation.id, type: "handoff.requested", status: "active", actorId: coworkerId, ownerId: coworkerId, targetCoworkerId: target, stage: decision.stage, messageId: source?.id, runId: flow.runId, requestId: nextRequestId, operationId: nextOperationId, operationToken: nextOperationToken, expectedVersion: expectedVersion ?? (flow.version ?? 0), flowPatch, idempotencyKey: `handoff.requested:${source?.id ?? "unknown"}:${target}` });
+        const requestType = nextProtocolKind === "review" ? "review.requested" : "handoff.requested";
+        recordCollaborationEvent({ conversationId: conversation.id, type: requestType, status: "active", actorId: coworkerId, ownerId: coworkerId, targetCoworkerId: target, stage: decision.stage, messageId: source?.id, protocolRequestId: nextRequestId, protocolKind: nextProtocolKind, protocolState: nextProtocol.state, revision: nextRevision, parentOperationId: flow.operationId, runId: flow.runId, requestId: nextRequestId, operationId: nextOperationId, operationToken: nextOperationToken, expectedVersion: expectedVersion ?? (flow.version ?? 0), flowPatch, idempotencyKey: `${requestType}:${source?.id ?? "unknown"}:${target}` });
+        if (acceptedProofId) {
+            const priorProof = runtimeProofs.get(acceptedProofId);
+            if (priorProof) runtimeProofs.set(acceptedProofId, { ...priorProof, requestId: nextRequestId, operationId: nextOperationId, operationToken: nextOperationToken, version: (flow.version ?? 0) + 1 });
+        }
         return target;
     }
 
@@ -1468,6 +1765,13 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
 
     function isManagedConversation(conversationId) {
         return Boolean(channelForConversation(conversationId));
+    }
+
+    function isReviewerForConversation(conversationId, coworkerId) {
+        const channel = channelForConversation(conversationId);
+        if (!channel) return false;
+        const team = requireTeam(channel.teamId);
+        return handoffOrder(team).at(-2) === coworkerId;
     }
 
     function isArchivedConversation(conversationId) {
@@ -1533,6 +1837,10 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         nextHandoff,
         previewHandoff,
         claimStage,
+        acceptProtocol,
+        pendingProtocolProof,
+        submitProtocolResult,
+        recordReviewDecision,
         stopRun,
         recordCollaborationEvent,
         setRuntimeHandoffPreflight,
@@ -1553,6 +1861,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         workspaceIdForConversation,
         currentOwnerForConversation,
         isManagedConversation,
+        isReviewerForConversation,
         isArchivedConversation,
         setCoworkerAppAccessResolver(resolver) {
             if (resolver !== undefined && typeof resolver !== "function") throw new Error("coworker app access resolver must be a function");

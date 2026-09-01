@@ -830,19 +830,18 @@ function renderDetails(conversation) {
       name.textContent = member.name;
       const status = document.createElement("small");
       status.className = "member-status";
-      status.textContent = attention.has(member.id) ? "Needs attention" : member.id === flow.currentOwnerId && flow.status === "active" ? "Active" : member.id === flow.currentOwnerId ? "Waiting" : "Available";
+      status.textContent = attention.has(member.id) ? "Attention" : member.id === flow.currentOwnerId && flow.status === "active" ? "Active" : member.id === flow.currentOwnerId ? "Waiting" : "Available";
       row.append(name, status);
       roster.append(row);
     }
   }
   const pending = pendingUserRecipients(conversation);
   const latestActivity = state.teamActivity?.events?.[0];
-  const activitySuffix = latestActivity?.kind === "handoff" && latestActivity.targetCoworker
-    ? ` · Handoff → ${latestActivity.targetCoworker}`
-    : latestActivity?.kind === "result" ? " · Result ready"
-      : latestActivity?.kind === "attention" ? " · Needs attention" : "";
+  const activitySuffix = latestActivity?.targetCoworker && latestActivity.label?.toLowerCase().includes("handoff")
+    ? ` · ${latestActivity.label} → ${latestActivity.targetCoworker}`
+    : latestActivity?.label ? ` · ${latestActivity.label}` : "";
   $("details-current-work").textContent = team?.flow?.currentOwner
-    ? `${team.flow.status === "needs-attention" ? "Needs attention" : team.flow.status === "active" ? "Active" : team.flow.status === "stopped" ? "Stopped" : "Waiting"} · ${team.flow.currentOwner}${activitySuffix}`
+    ? `${team.flow.status === "needs-attention" ? "Attention" : team.flow.status === "active" ? "Active" : team.flow.status === "stopped" ? "Attention" : "Waiting"} · ${team.flow.currentOwner}${activitySuffix}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
 }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractHandoffManifest, handoffPromptInstruction } from "../src/main/lib/handoff-manifest.js";
+import { extractHandoffManifest, extractReviewDecision, handoffPromptInstruction, reviewPromptInstruction } from "../src/main/lib/handoff-manifest.js";
 
 const a = "coworker_0000000000000001";
 const b = "coworker_0000000000000002";
@@ -26,4 +26,15 @@ test("handoff prompt names only the explicitly available coworkers", () => {
   assert.match(prompt, new RegExp(b));
   assert.match(prompt, /Coding Lead/);
   assert.doesNotMatch(prompt, new RegExp(a));
+});
+
+test("review decision manifest accepts only the two protocol decisions", () => {
+  const approved = extractReviewDecision(`Review complete.\nSOVEREIGN_REVIEW: "approved"`);
+  assert.equal(approved.text, "Review complete.");
+  assert.equal(approved.decision, "approved");
+  const rejected = extractReviewDecision(`Review complete.\nSOVEREIGN_REVIEW: "ship-it"`);
+  assert.equal(rejected.decision, undefined);
+  assert.equal(rejected.invalidDecision, true);
+  assert.match(reviewPromptInstruction(), /approved/);
+  assert.match(reviewPromptInstruction(), /changes-requested/);
 });

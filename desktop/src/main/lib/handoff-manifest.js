@@ -1,4 +1,5 @@
 const MARKER = "SOVEREIGN_HANDOFFS:";
+const REVIEW_MARKER = "SOVEREIGN_REVIEW:";
 const MAX_HANDOFFS = 4;
 
 function coworkerId(value) {
@@ -48,4 +49,29 @@ export function extractHandoffManifest(providerText, allowedIds = []) {
         if (!coworkerIds.includes(id)) coworkerIds.push(id);
     }
     return { text: visible, coworkerIds };
+}
+
+export function reviewPromptInstruction() {
+    return "For a review protocol, append exactly one final line with only one JSON string: SOVEREIGN_REVIEW: \"approved\" or SOVEREIGN_REVIEW: \"changes-requested\". Do not use any other decision value.";
+}
+
+export function extractReviewDecision(providerText) {
+    const original = typeof providerText === "string" ? providerText : "";
+    const lines = original.replace(/\r\n/g, "\n").split("\n");
+    let markerIndex = -1;
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        if (!lines[index].trim()) continue;
+        if (lines[index].trimStart().startsWith(REVIEW_MARKER)) markerIndex = index;
+        if (markerIndex >= 0) break;
+    }
+    if (markerIndex < 0) return { text: original.trim(), decision: undefined };
+    const visible = [...lines.slice(0, markerIndex), ...lines.slice(markerIndex + 1)].join("\n").trim();
+    const raw = lines[markerIndex].trim().slice(REVIEW_MARKER.length).trim();
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch { return { text: visible, decision: undefined, invalidDecision: true };
+    }
+    if (!["approved", "changes-requested"].includes(parsed))
+        return { text: visible, decision: undefined, invalidDecision: true };
+    return { text: visible, decision: parsed };
 }
