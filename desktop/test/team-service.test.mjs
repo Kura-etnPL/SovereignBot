@@ -101,6 +101,18 @@ test("declarative secondary Team Packs reuse the governed team path", () => {
             "research-team",
             "content-team",
             "operations-team",
+            "product-team",
+            "revenue-team",
+            "support-team",
+        ]);
+        assert.deepEqual(teams.list().packs.map((entry) => entry.category), [
+            "Software",
+            "Research",
+            "Content",
+            "Operations",
+            "Product",
+            "Sales",
+            "Support",
         ]);
         const installed = teams.installPack("research-team");
         assert.equal(installed.installed, true);
@@ -118,6 +130,30 @@ test("declarative secondary Team Packs reuse the governed team path", () => {
         assert.equal(commitHandoff(teams, { conversation: conversations.get(installed.team.channels[0].conversationId), coworkerId: installed.team.coworkerIds[0], source: userMessage }), installed.team.coworkerIds[1]);
         assert.equal(coworkers.list().coworkers.length, 3);
         assert.equal(JSON.stringify(teams.list()).includes("providerAccountId"), false);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("first-party Product, Revenue, and Support packs stay advisory and use the governed team path", () => {
+    const { root, teams } = fixture();
+    try {
+        for (const [packId, name, channelName, playbookName] of [
+            ["product-team", "Product Discovery Team", "Product Discovery", "Product Discovery"],
+            ["revenue-team", "Revenue Planning Team", "Revenue Planning", "Revenue Planning"],
+            ["support-team", "Customer Support Team", "Support Triage", "Support Triage"],
+        ]) {
+            const result = teams.installPack(packId);
+            assert.equal(result.installed, true);
+            assert.equal(result.team.name, name);
+            assert.equal(result.team.channels[0].name, channelName);
+            assert.equal(result.team.playbooks[0].name, playbookName);
+            assert.equal(result.team.coworkers.length, 3);
+            assert.equal(result.team.channels[0].coworkerIds.length, 3);
+            assert.equal(JSON.stringify(result.team).match(/capabilit|governedTools|credential|session|workspacePath|token/gi), null);
+        }
+        assert.equal(teams.list().teams.length, 3);
     }
     finally {
         rmSync(root, { recursive: true, force: true });

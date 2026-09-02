@@ -614,6 +614,18 @@
       card.append(title, text("Category", item.category), text("Contents", `${item.coworkerNames?.length ?? 0} coworkers · ${item.channelNames?.length ?? 0} channels · ${item.playbookNames?.length ?? 0} playbooks`), text("Status", item.installed ? "Installed" : "Available"));
       const actions = document.createElement("div"); actions.className = "detail-actions";
       if (!item.installed) actions.append(button("Install / 安装", async () => { await api.teams.installPack({ packId: item.id }); await refreshHost(); await refresh(); }, root));
+      actions.append(button("Preview / 预览", async () => {
+        const existing = card.querySelector(".team-pack-preview");
+        if (existing) { existing.remove(); return; }
+        const recipe = await api.teams.exportPackRecipe({ packId: item.id });
+        const panel = document.createElement("div"); panel.className = "team-pack-preview";
+        const heading = document.createElement("h4"); heading.textContent = "Composition / 组成"; panel.append(heading);
+        panel.append(text("Description", recipe.description));
+        for (const coworker of recipe.coworkers ?? []) panel.append(text("Coworker", `${coworker.name} — ${coworker.role}`));
+        for (const channel of recipe.channels ?? []) panel.append(text("Channel", `${channel.name} — ${channel.instructions}`));
+        for (const playbook of recipe.playbooks ?? []) panel.append(text("Playbook", `${playbook.name}: ${playbook.steps.join(" → ")}`));
+        card.insertBefore(panel, actions);
+      }, root));
       actions.append(button("Export / 导出", async () => { const team = cache.teams.find((entry) => entry.packId === item.id || entry.packId === `imported:${item.id}`); const recipe = item.custom ? await api.teams.exportPackRecipe({ packId: item.id }) : team ? await api.teams.exportPack({ teamId: team.id }) : await api.teams.exportPackRecipe({ packId: item.id }); await copy(recipe); }, root), button("Duplicate / 复制", async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); }, root));
       if (item.custom) actions.append(button("Edit recipe / 编辑配方", async () => { const current = await api.teams.exportPackRecipe({ packId: item.id }); const edited = readJson("Edit declarative Team Pack JSON", current); if (!edited) return; await api.teams.editPack({ packId: item.id, patch: { name: edited.name, description: edited.description, coworkers: edited.coworkers, channels: edited.channels, playbooks: edited.playbooks } }); await refresh(); }, root));
       card.append(actions); root.append(card);

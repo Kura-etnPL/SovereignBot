@@ -179,11 +179,56 @@ export const OPERATIONS_TEAM_PACK = createSimpleTeamPack({
     playbookDescription: "Chief scopes → Operations Lead executes → Reviewer checks → Chief reports.",
 });
 
+export const PRODUCT_TEAM_PACK = createSimpleTeamPack({
+    id: "product-team",
+    name: "Product Discovery Team",
+    description: "A product discovery team that frames user problems, shapes a decision-ready brief, reviews trade-offs, and reports next steps.",
+    specialistName: "Product Lead",
+    specialistRole: "Turn user needs and evidence into a bounded product decision.",
+    specialistInstructions: "Frame the user problem, distinguish evidence from assumptions, propose a concise product brief with acceptance criteria and trade-offs, and return a decision-ready draft for review. Do not promise implementation or access external systems.",
+    channelName: "Product Discovery",
+    channelInstructions: "Product Discovery: Chief frames the outcome, Product Lead shapes the problem brief and criteria, Reviewer checks assumptions and trade-offs, and Chief reports the decision path.",
+    playbookId: "product-discovery",
+    playbookName: "Product Discovery",
+    playbookDescription: "Chief frames → Product Lead shapes the brief → Reviewer checks trade-offs → Chief reports.",
+});
+
+export const REVENUE_TEAM_PACK = createSimpleTeamPack({
+    id: "revenue-team",
+    name: "Revenue Planning Team",
+    description: "A revenue planning team that organizes account context, evaluates commercial options, reviews assumptions, and reports a bounded plan.",
+    specialistName: "Revenue Lead",
+    specialistRole: "Turn supplied account and deal context into grounded commercial planning.",
+    specialistInstructions: "Use only the account or deal context supplied by the user, separate facts from assumptions, summarize qualification and forecast considerations, and draft a bounded next-step plan for review. Do not contact prospects, change CRM records, or make financial commitments.",
+    channelName: "Revenue Planning",
+    channelInstructions: "Revenue Planning: Chief frames the commercial question, Revenue Lead analyzes supplied context, Reviewer checks assumptions and risks, and Chief reports the planning recommendation.",
+    playbookId: "revenue-planning",
+    playbookName: "Revenue Planning",
+    playbookDescription: "Chief frames → Revenue Lead analyzes context → Reviewer checks assumptions → Chief reports.",
+});
+
+export const SUPPORT_TEAM_PACK = createSimpleTeamPack({
+    id: "support-team",
+    name: "Customer Support Team",
+    description: "A customer support team that triages supplied cases, drafts grounded replies, reviews risks, and recommends escalation.",
+    specialistName: "Support Lead",
+    specialistRole: "Turn supplied customer context into a safe triage and reply draft.",
+    specialistInstructions: "Triage only the customer case details supplied by the user, identify the issue and missing facts, draft a grounded reply with uncertainty called out, and recommend escalation when needed. Do not send messages, alter tickets, issue refunds, or invent customer data.",
+    channelName: "Support Triage",
+    channelInstructions: "Support Triage: Chief frames the case, Support Lead drafts triage and a grounded reply, Reviewer checks tone and risk, and Chief reports the recommended next step.",
+    playbookId: "support-triage",
+    playbookName: "Support Triage",
+    playbookDescription: "Chief frames → Support Lead triages and drafts → Reviewer checks risk → Chief reports.",
+});
+
 export const TEAM_PACKS = Object.freeze([
     SOFTWARE_TEAM_PACK,
     RESEARCH_TEAM_PACK,
     CONTENT_TEAM_PACK,
     OPERATIONS_TEAM_PACK,
+    PRODUCT_TEAM_PACK,
+    REVENUE_TEAM_PACK,
+    SUPPORT_TEAM_PACK,
 ]);
 
 const TEAM_PACK_BY_ID = new Map(TEAM_PACKS.map((pack) => [pack.id, pack]));
@@ -192,6 +237,9 @@ const TEAM_PACK_CATEGORY = new Map([
     ["research-team", "Research"],
     ["content-team", "Content"],
     ["operations-team", "Operations"],
+    ["product-team", "Product"],
+    ["revenue-team", "Sales"],
+    ["support-team", "Support"],
 ]);
 
 export const CHANNEL_TEMPLATES = Object.freeze([

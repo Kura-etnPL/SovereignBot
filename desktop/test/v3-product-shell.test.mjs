@@ -143,11 +143,21 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         /item\.state === "active"/,
         /detail: \{ skillId: item\.id \}/,
         /teams\.duplicatePack/,
+        /teams\.exportPackRecipe/,
+        /Preview \/ 预览/,
         /openProductChannelEditor/,
         /team-pack-page-import/,
     ]) assert.match(productHubs, expression);
     assert.doesNotMatch(productHubs, /innerHTML\s*=/);
     assert.doesNotMatch(productHubs, /eval\s*\(/);
+});
+
+test("Team Pack gallery includes differentiated first-party categories and safe composition preview", () => {
+    for (const category of ["Product", "Sales", "Support"]) assert.match(html, new RegExp(`value="${category}"`), category);
+    assert.match(html, /Product, Sales, and Support/);
+    assert.match(productHubs, /team-pack-preview/);
+    assert.match(productHubs, /Composition \/ 组成/);
+    assert.doesNotMatch(productHubs, /innerHTML\s*=/);
 });
 
 test("This PC is a status-first Coworker surface with safe detail entry points", () => {
