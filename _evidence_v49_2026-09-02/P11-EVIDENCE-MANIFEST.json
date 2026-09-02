@@ -1,0 +1,36 @@
+{
+  "schema": "sovereignbot.local-acceptance-manifest.v1",
+  "phase": "V4.3-P11",
+  "date": "2026-09-02",
+  "branch": "codex/v4-review-directed-handoff-protocol",
+  "sourceCommit": "6d0af84f26f6e2d393194f3d48272df9d3c2f248",
+  "acceptance": {
+    "command": "node scripts/verify-p11-team-packs.mjs",
+    "gate": "verify-p11-team-packs",
+    "result": "PASS",
+    "checksPassed": 17,
+    "checksTotal": 17,
+    "rawJson": "verify-p11-team-packs.json",
+    "rawLog": "verify-p11-team-packs.log",
+    "scenario": "fresh gallery discover/search/filter/preview/install of first-party Product, Sales, and Support packs; durable Team composition and restart projections verified."
+  },
+  "localChecks": {
+    "desktopSyntaxFiles": 167,
+    "desktopFullTestsPassed": 253,
+    "desktopFullTestsFailed": 0,
+    "teamPackFocusedTestsPassed": 22,
+    "secretScan": "clean",
+    "diffCheck": "pass"
+  },
+  "boundaries": {
+    "networkUsed": false,
+    "dependenciesInstalled": false,
+    "providerOrOAuthUsed": false,
+    "externalAppsOrConnectorsAdded": false,
+    "cloudSyncOrSharingAdded": false,
+    "schedulerOrExecutionAuthorityAdded": false,
+    "destructiveRetentionOrDeletionAdded": false,
+    "localRcSigned": false,
+    "publishEligible": false
+  }
+}
