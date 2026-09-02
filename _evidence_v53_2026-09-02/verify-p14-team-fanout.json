@@ -1,0 +1,550 @@
+{
+  "at": "2026-09-02T16:02:49.549Z",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "preload exposes parallel Team action and normal Team Channel surface": true,
+    "Team Channel renders two bounded Specialist rows and an independent reviewer selector": true,
+    "duplicate Specialist target is rejected by the normal-user parallel flow": true,
+    "reviewer conflict is rejected by the normal-user parallel flow": true,
+    "non-roster Specialist is rejected by the normal-user parallel flow": true,
+    "inactive Specialist is rejected without durable mutation": true,
+    "forged ownerId is rejected before the parallel handler": true,
+    "forged providerAccountId is rejected before the parallel handler": true,
+    "forged capability is rejected before the parallel handler": true,
+    "forged token is rejected before the parallel handler": true,
+    "forged workspacePath is rejected before the parallel handler": true,
+    "forged sessionId is rejected before the parallel handler": true,
+    "renderer submits only conversationId, bounded children, reviewer, and reason": true,
+    "controlled parallel request has two active children and no active legacy handoff": true,
+    "only the two selected Specialists are woken": true,
+    "active fanout shows progress and disables new handoff/fanout actions": true,
+    "active public projection exposes bounded work without execution authority": true,
+    "duplicate active fanout is rejected and leaves one protocol": true,
+    "each Specialist completes through the existing dispatcher and isolated private root": true,
+    "review is delivered only to the designated independent reviewer": true,
+    "review progress exposes completed child count without internals": true,
+    "review-only wake remains restricted to the designated reviewer": true,
+    "approved review creates exactly one original-owner join": true,
+    "reviewer is not promoted to final owner": true,
+    "final completion returns to the original owner and clears active fanout": true,
+    "child artifacts are published only at final join and project safely": true,
+    "all four dispatcher tasks complete with no provider execution": true,
+    "final public summary is safe and bounded": true,
+    "restart preserves completed original-owner result, artifacts, and no active fanout": true,
+    "restart renderer projection remains authority-free": true
+  },
+  "teamId": "team_ee88264341d883e0",
+  "channelId": "channel_0e169113aeb2d742",
+  "ownerCoworkerId": "coworker_4a72df0d29f39fc5",
+  "reviewerCoworkerId": "coworker_b31b08e72da34497",
+  "childCoworkerIds": [
+    "coworker_10a9e0379fa42839",
+    "coworker_9c80a1e4a896316c"
+  ],
+  "requestStats": {
+    "total": 6,
+    "targets": [
+      {
+        "reviewerCoworkerId": "coworker_b31b08e72da34497",
+        "childCount": 2
+      },
+      {
+        "reviewerCoworkerId": "coworker_10a9e0379fa42839",
+        "childCount": 2
+      },
+      {
+        "reviewerCoworkerId": "coworker_b31b08e72da34497",
+        "childCount": 2
+      },
+      {
+        "reviewerCoworkerId": "coworker_b31b08e72da34497",
+        "childCount": 2
+      },
+      {
+        "reviewerCoworkerId": "coworker_b31b08e72da34497",
+        "childCount": 2
+      },
+      {
+        "reviewerCoworkerId": "coworker_b31b08e72da34497",
+        "childCount": 2
+      }
+    ]
+  },
+  "snapshot": {
+    "team": {
+      "id": "team_ee88264341d883e0",
+      "packId": "custom-team",
+      "name": "P14 Parallel Team",
+      "coworkerIds": [
+        "coworker_4a72df0d29f39fc5",
+        "coworker_10a9e0379fa42839",
+        "coworker_9c80a1e4a896316c",
+        "coworker_b31b08e72da34497"
+      ],
+      "coworkers": [
+        {
+          "id": "coworker_4a72df0d29f39fc5",
+          "name": "P14 Chief"
+        },
+        {
+          "id": "coworker_10a9e0379fa42839",
+          "name": "P14 Research Specialist"
+        },
+        {
+          "id": "coworker_9c80a1e4a896316c",
+          "name": "P14 Build Specialist"
+        },
+        {
+          "id": "coworker_b31b08e72da34497",
+          "name": "P14 Quality Reviewer"
+        }
+      ],
+      "channelIds": [
+        "channel_0e169113aeb2d742"
+      ],
+      "channels": [
+        {
+          "id": "channel_0e169113aeb2d742",
+          "teamId": "team_ee88264341d883e0",
+          "kind": "project",
+          "name": "Project Channel",
+          "instructions": "Bounded team collaboration: one owner at a time, explicit handoffs, and a visible result.",
+          "coworkerIds": [
+            "coworker_4a72df0d29f39fc5",
+            "coworker_10a9e0379fa42839",
+            "coworker_9c80a1e4a896316c",
+            "coworker_b31b08e72da34497"
+          ],
+          "workspaceId": "ws_47b36d13fb8b408d",
+          "conversationId": "conv_97e61b9c68832215",
+          "playbookId": "team-collaboration",
+          "archived": false,
+          "createdAt": "2026-09-02T16:02:46.388Z",
+          "updatedAt": "2026-09-02T16:02:46.388Z"
+        }
+      ],
+      "sharedWorkspaceId": "ws_47b36d13fb8b408d",
+      "sharedWorkspaceLabel": "P14 Parallel Team project",
+      "privateWorkspaceLabel": "Private workspace",
+      "playbooks": [
+        {
+          "id": "team-collaboration",
+          "name": "Team Collaboration",
+          "description": "The current owner delegates bounded work to the next teammate and returns the result to the user.",
+          "steps": [
+            "owner",
+            "teammate",
+            "owner"
+          ]
+        }
+      ],
+      "flow": {
+        "stage": "complete",
+        "status": "available",
+        "pendingCoworkerIds": [],
+        "attentionCoworkerIds": [],
+        "channelId": "channel_0e169113aeb2d742",
+        "activity": [
+          {
+            "kind": "completed",
+            "label": "Completed",
+            "status": "completed",
+            "owner": "P14 Chief",
+            "artifactIds": [
+              "artifact_bb77deb2aa3fcd8d",
+              "artifact_f82a5ebb02205fe0"
+            ],
+            "at": "2026-09-02T16:02:48.556Z"
+          },
+          {
+            "kind": "joining",
+            "label": "Joining results",
+            "status": "working",
+            "owner": "P14 Chief",
+            "targetCoworker": "P14 Chief",
+            "at": "2026-09-02T16:02:48.550Z"
+          },
+          {
+            "kind": "approved",
+            "label": "Approved",
+            "status": "completed",
+            "owner": "P14 Quality Reviewer",
+            "targetCoworker": "P14 Quality Reviewer",
+            "decision": "approved",
+            "at": "2026-09-02T16:02:48.544Z"
+          },
+          {
+            "kind": "reviewing",
+            "label": "Reviewing",
+            "status": "working",
+            "owner": "P14 Chief",
+            "targetCoworker": "P14 Quality Reviewer",
+            "at": "2026-09-02T16:02:47.697Z"
+          },
+          {
+            "kind": "review-requested",
+            "label": "Review requested",
+            "status": "working",
+            "owner": "P14 Chief",
+            "targetCoworker": "P14 Quality Reviewer",
+            "at": "2026-09-02T16:02:47.692Z"
+          },
+          {
+            "kind": "fanout-child",
+            "label": "Specialist submitted",
+            "status": "completed",
+            "owner": "P14 Chief",
+            "targetCoworker": "P14 Build Specialist",
+            "artifactIds": [
+              "artifact_f82a5ebb02205fe0"
+            ],
+            "at": "2026-09-02T16:02:47.687Z"
+          },
+          {
+            "kind": "fanout-child",
+            "label": "Specialist submitted",
+            "status": "completed",
+            "owner": "P14 Chief",
+            "targetCoworker": "P14 Research Specialist",
+            "artifactIds": [
+              "artifact_bb77deb2aa3fcd8d"
+            ],
+            "at": "2026-09-02T16:02:47.682Z"
+          },
+          {
+            "kind": "fanout-child",
+            "label": "Specialist working",
+            "status": "working",
+            "owner": "P14 Chief",
+            "targetCoworker": "P14 Build Specialist",
+            "at": "2026-09-02T16:02:47.656Z"
+          },
+          {
+            "kind": "fanout-child",
+            "label": "Specialist working",
+            "status": "working",
+            "owner": "P14 Chief",
+            "targetCoworker": "P14 Research Specialist",
+            "at": "2026-09-02T16:02:47.655Z"
+          },
+          {
+            "kind": "fanout",
+            "label": "Parallel work",
+            "status": "working",
+            "owner": "P14 Chief",
+            "targetCoworker": "P14 Quality Reviewer",
+            "at": "2026-09-02T16:02:47.648Z"
+          },
+          {
+            "kind": "working",
+            "label": "Working",
+            "status": "working",
+            "owner": "P14 Chief",
+            "at": "2026-09-02T16:02:46.392Z"
+          }
+        ]
+      },
+      "createdAt": "2026-09-02T16:02:46.388Z",
+      "updatedAt": "2026-09-02T16:02:46.391Z"
+    },
+    "conversation": {
+      "id": "conv_97e61b9c68832215",
+      "kind": "team",
+      "title": "P14 Parallel Team",
+      "participants": [
+        "user",
+        "coworker_4a72df0d29f39fc5",
+        "coworker_10a9e0379fa42839",
+        "coworker_9c80a1e4a896316c",
+        "coworker_b31b08e72da34497"
+      ],
+      "leadCoworkerId": "coworker_4a72df0d29f39fc5",
+      "createdAt": "2026-09-02T16:02:46.388Z",
+      "updatedAt": "2026-09-02T16:02:48.559Z",
+      "messageCount": 8,
+      "lastMessage": {
+        "id": "msg_876d38e9900ecd6b",
+        "senderId": "coworker_4a72df0d29f39fc5",
+        "textPreview": "Original owner joined the approved specialist results.",
+        "createdAt": "2026-09-02T16:02:48.558Z"
+      },
+      "messages": [
+        {
+          "id": "msg_2a50c48b396d2639",
+          "senderId": "user",
+          "text": "Start the bounded parallel Team task.",
+          "mentions": [],
+          "artifactIds": [],
+          "delivery": {
+            "coworker_4a72df0d29f39fc5": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T16:02:47.651Z"
+            }
+          },
+          "createdAt": "2026-09-02T16:02:46.390Z"
+        },
+        {
+          "id": "msg_0ca421c7545cd798",
+          "senderId": "coworker_4a72df0d29f39fc5",
+          "text": "Parallel specialists requested.\nReason: Two independent Specialists should complete the bounded work before required review.",
+          "mentions": [
+            "coworker_10a9e0379fa42839",
+            "coworker_9c80a1e4a896316c"
+          ],
+          "artifactIds": [],
+          "replyTo": "msg_2a50c48b396d2639",
+          "delivery": {
+            "coworker_10a9e0379fa42839": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T16:02:47.685Z"
+            },
+            "coworker_9c80a1e4a896316c": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T16:02:47.689Z"
+            }
+          },
+          "createdAt": "2026-09-02T16:02:47.649Z"
+        },
+        {
+          "id": "msg_f77ae36e05a247c9",
+          "senderId": "coworker_10a9e0379fa42839",
+          "text": "Completed specialist-1 bounded work.",
+          "mentions": [],
+          "artifactIds": [],
+          "replyTo": "msg_0ca421c7545cd798",
+          "delivery": {
+            "coworker_4a72df0d29f39fc5": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T16:02:47.684Z"
+            }
+          },
+          "createdAt": "2026-09-02T16:02:47.683Z"
+        },
+        {
+          "id": "msg_7882c6ca6778204d",
+          "senderId": "coworker_9c80a1e4a896316c",
+          "text": "Completed specialist-2 bounded work.",
+          "mentions": [],
+          "artifactIds": [],
+          "replyTo": "msg_0ca421c7545cd798",
+          "delivery": {
+            "coworker_4a72df0d29f39fc5": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T16:02:47.689Z"
+            }
+          },
+          "createdAt": "2026-09-02T16:02:47.688Z"
+        },
+        {
+          "id": "msg_4d0f782972565aab",
+          "senderId": "coworker_9c80a1e4a896316c",
+          "text": "Parallel specialist results are ready for the required independent review.",
+          "mentions": [
+            "coworker_b31b08e72da34497"
+          ],
+          "artifactIds": [],
+          "replyTo": "msg_0ca421c7545cd798",
+          "delivery": {
+            "coworker_b31b08e72da34497": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T16:02:48.547Z"
+            }
+          },
+          "createdAt": "2026-09-02T16:02:47.694Z"
+        },
+        {
+          "id": "msg_e5664999575041a8",
+          "senderId": "coworker_b31b08e72da34497",
+          "text": "Independent reviewer approved the bounded specialist results.",
+          "mentions": [],
+          "artifactIds": [],
+          "replyTo": "msg_4d0f782972565aab",
+          "delivery": {
+            "coworker_4a72df0d29f39fc5": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T16:02:48.546Z"
+            }
+          },
+          "createdAt": "2026-09-02T16:02:48.546Z"
+        },
+        {
+          "id": "msg_761bc45721532436",
+          "senderId": "coworker_b31b08e72da34497",
+          "text": "Independent review approved; the original owner will now join the specialist results.",
+          "mentions": [
+            "coworker_4a72df0d29f39fc5"
+          ],
+          "artifactIds": [],
+          "replyTo": "msg_4d0f782972565aab",
+          "delivery": {
+            "coworker_4a72df0d29f39fc5": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T16:02:48.559Z"
+            }
+          },
+          "createdAt": "2026-09-02T16:02:48.548Z"
+        },
+        {
+          "id": "msg_876d38e9900ecd6b",
+          "senderId": "coworker_4a72df0d29f39fc5",
+          "text": "Original owner joined the approved specialist results.",
+          "mentions": [],
+          "artifactIds": [
+            "artifact_bb77deb2aa3fcd8d",
+            "artifact_f82a5ebb02205fe0"
+          ],
+          "replyTo": "msg_761bc45721532436",
+          "voiceEligible": true,
+          "delivery": {
+            "coworker_10a9e0379fa42839": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T16:02:48.558Z"
+            }
+          },
+          "createdAt": "2026-09-02T16:02:48.558Z"
+        }
+      ]
+    },
+    "activity": {
+      "schema": "sovereignbot.desktop.collaboration.v1",
+      "conversationId": "conv_97e61b9c68832215",
+      "teamId": "team_ee88264341d883e0",
+      "events": [
+        {
+          "kind": "completed",
+          "label": "Completed",
+          "status": "completed",
+          "owner": "P14 Chief",
+          "artifactIds": [
+            "artifact_bb77deb2aa3fcd8d",
+            "artifact_f82a5ebb02205fe0"
+          ],
+          "at": "2026-09-02T16:02:48.556Z"
+        },
+        {
+          "kind": "joining",
+          "label": "Joining results",
+          "status": "working",
+          "owner": "P14 Chief",
+          "targetCoworker": "P14 Chief",
+          "at": "2026-09-02T16:02:48.550Z"
+        },
+        {
+          "kind": "approved",
+          "label": "Approved",
+          "status": "completed",
+          "owner": "P14 Quality Reviewer",
+          "targetCoworker": "P14 Quality Reviewer",
+          "decision": "approved",
+          "at": "2026-09-02T16:02:48.544Z"
+        },
+        {
+          "kind": "reviewing",
+          "label": "Reviewing",
+          "status": "working",
+          "owner": "P14 Chief",
+          "targetCoworker": "P14 Quality Reviewer",
+          "at": "2026-09-02T16:02:47.697Z"
+        },
+        {
+          "kind": "review-requested",
+          "label": "Review requested",
+          "status": "working",
+          "owner": "P14 Chief",
+          "targetCoworker": "P14 Quality Reviewer",
+          "at": "2026-09-02T16:02:47.692Z"
+        },
+        {
+          "kind": "fanout-child",
+          "label": "Specialist submitted",
+          "status": "completed",
+          "owner": "P14 Chief",
+          "targetCoworker": "P14 Build Specialist",
+          "artifactIds": [
+            "artifact_f82a5ebb02205fe0"
+          ],
+          "at": "2026-09-02T16:02:47.687Z"
+        },
+        {
+          "kind": "fanout-child",
+          "label": "Specialist submitted",
+          "status": "completed",
+          "owner": "P14 Chief",
+          "targetCoworker": "P14 Research Specialist",
+          "artifactIds": [
+            "artifact_bb77deb2aa3fcd8d"
+          ],
+          "at": "2026-09-02T16:02:47.682Z"
+        },
+        {
+          "kind": "fanout-child",
+          "label": "Specialist working",
+          "status": "working",
+          "owner": "P14 Chief",
+          "targetCoworker": "P14 Build Specialist",
+          "at": "2026-09-02T16:02:47.656Z"
+        },
+        {
+          "kind": "fanout-child",
+          "label": "Specialist working",
+          "status": "working",
+          "owner": "P14 Chief",
+          "targetCoworker": "P14 Research Specialist",
+          "at": "2026-09-02T16:02:47.655Z"
+        },
+        {
+          "kind": "fanout",
+          "label": "Parallel work",
+          "status": "working",
+          "owner": "P14 Chief",
+          "targetCoworker": "P14 Quality Reviewer",
+          "at": "2026-09-02T16:02:47.648Z"
+        },
+        {
+          "kind": "working",
+          "label": "Working",
+          "status": "working",
+          "owner": "P14 Chief",
+          "at": "2026-09-02T16:02:46.392Z"
+        }
+      ]
+    },
+    "artifacts": {
+      "schema": "sovereignbot.desktop.artifacts.v1",
+      "artifacts": [
+        {
+          "id": "artifact_f82a5ebb02205fe0",
+          "title": "specialist-2 isolated report",
+          "fileName": "specialist-2.md",
+          "mimeType": "text/markdown",
+          "size": 36,
+          "sha256": "9b48e19861e6ad1c4c6df1b536d046a16dc486336623d4d280bcdbf900687970",
+          "sourceKind": "coworker",
+          "workspaceId": "ws_47b36d13fb8b408d",
+          "createdByCoworkerId": "coworker_9c80a1e4a896316c",
+          "conversationId": "conv_97e61b9c68832215",
+          "sourceMessageId": "msg_0ca421c7545cd798",
+          "artifactFamilyId": "artifact_f82a5ebb02205fe0",
+          "version": 1,
+          "createdAt": "2026-09-02T16:02:47.681Z"
+        },
+        {
+          "id": "artifact_bb77deb2aa3fcd8d",
+          "title": "specialist-1 isolated report",
+          "fileName": "specialist-1.md",
+          "mimeType": "text/markdown",
+          "size": 36,
+          "sha256": "8fd6e92d4bff3db1f84986bb197bf023ff086026993b6ba44a2527526409993f",
+          "sourceKind": "coworker",
+          "workspaceId": "ws_47b36d13fb8b408d",
+          "createdByCoworkerId": "coworker_10a9e0379fa42839",
+          "conversationId": "conv_97e61b9c68832215",
+          "sourceMessageId": "msg_0ca421c7545cd798",
+          "artifactFamilyId": "artifact_bb77deb2aa3fcd8d",
+          "version": 1,
+          "createdAt": "2026-09-02T16:02:47.678Z"
+        }
+      ]
+    }
+  }
+}

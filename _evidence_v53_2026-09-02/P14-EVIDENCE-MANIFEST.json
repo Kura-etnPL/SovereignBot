@@ -1,0 +1,45 @@
+{
+  "schema": "sovereignbot.acceptance-evidence.v1",
+  "milestone": "V4.3 P14 governed parallel specialists",
+  "executedAt": "2026-09-02T16:02:49.549Z",
+  "branch": "codex/v4-review-directed-handoff-protocol",
+  "sourceCommit": "48b59331d32941bfc307c882edf9c03cab7367ef",
+  "evidenceOnlyCommit": true,
+  "providerExecution": "none — controlled local runtime stub only",
+  "networkAccess": false,
+  "electronGate": {
+    "command": "npm run verify:p14-team-fanout",
+    "passed": 31,
+    "failed": 0,
+    "window": "hidden",
+    "ipcPath": "renderer -> preload -> validated IPC -> TeamService -> existing dispatcher"
+  },
+  "repositoryChecks": {
+    "testPassed": 257,
+    "testFailed": 0,
+    "syntaxFiles": 176,
+    "secretScan": "clean",
+    "diffCheck": "clean"
+  },
+  "artifacts": [
+    {
+      "path": "verify-p14-team-fanout.json",
+      "sha256": "4EA5EA743A02430DC2DBD729E0D61BE6563C8FE7D4C23F6192A7A5329372B97E"
+    },
+    {
+      "path": "verify-p14-team-fanout.log",
+      "sha256": "CF588DB486DB772CAFE5BE426DCEC3E6E522B1AA93B78B17EA185C65E12C9E52"
+    },
+    {
+      "path": "../docs/acceptance/V4.3-P14-DESKTOP-PARALLEL-SPECIALISTS-ACCEPTANCE-2026-09-02.md",
+      "sha256": "C81AC2E2EF4DD9601E31013646B9C5E98E407C1F989041606A6C9B2718E984BC"
+    }
+  ],
+  "boundaries": [
+    "local Electron only",
+    "no real Provider execution",
+    "no network or remote service",
+    "no OAuth or account login",
+    "no cross-platform or cloud claim"
+  ]
+}
