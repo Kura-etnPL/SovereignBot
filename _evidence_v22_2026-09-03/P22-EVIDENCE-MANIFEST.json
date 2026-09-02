@@ -1,0 +1,33 @@
+{
+  "schema": "sovereignbot.local.acceptance-evidence.v1",
+  "milestone": "P22 Playbook Library",
+  "recordedAt": "2026-09-03",
+  "branch": "codex/v4-review-directed-handoff-protocol",
+  "sourceCommit": "a35e8d0",
+  "publishEligible": false,
+  "scope": "isolated local hidden Electron renderer/preload/main-process path",
+  "commands": {
+    "hiddenElectron": "npm run verify:p22-playbooks",
+    "desktopCheck": "npm run check",
+    "focusedTests": "node --test test/playbook-file-io.test.mjs test/product-surfaces.test.mjs test/v3-ipc-schema.test.mjs test/v3-product-shell.test.mjs",
+    "desktopTests": "npm test",
+    "rootTests": "npm test",
+    "secretScan": "npm run secret-scan"
+  },
+  "results": {
+    "hiddenElectron": "11/11 pass",
+    "desktopCheck": "syntax ok: 199 files",
+    "focusedTests": "31 pass, 0 fail",
+    "desktopTests": "282 pass, 1 skip, 0 fail",
+    "rootTests": "232 pass, 2 skip, 0 fail",
+    "secretScan": "clean"
+  },
+  "artifacts": [
+    "verify-p22-playbooks.json",
+    "verify-p22-playbooks.log"
+  ],
+  "limitations": [
+    "Local unsigned evidence only.",
+    "No provider, network, OAuth, browser-account, packaged-build, deployment, or publish action was performed."
+  ]
+}
