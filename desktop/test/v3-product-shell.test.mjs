@@ -137,6 +137,15 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         "team-pack-editor-add-coworker",
         "team-pack-editor-add-channel",
         "team-pack-editor-add-playbook",
+        "playbook-dialog",
+        "playbook-form",
+        "playbook-editor-steps",
+        "playbook-editor-stages",
+        "playbook-editor-reviews",
+        "playbook-editor-add-step",
+        "playbook-editor-add-stage",
+        "playbook-editor-add-review",
+        "playbook-file-result",
     ]) assert.match(html, new RegExp(`id="${id}"`), id);
     for (const expression of [
         /playbooks\.duplicate/,
@@ -144,7 +153,6 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         /playbookSemanticPlan/,
         /reviewPoints/,
         /Recommended Skills/,
-        /Optional semantic plan JSON/,
         /artifacts\.hub/,
         /History \/ 历史/,
         /Go to conversation \/ 前往会话/,
@@ -164,9 +172,17 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         /openPackEditor/,
         /team-pack-editor-form/,
         /teams\.editPack/,
+        /playbook-editor-name/,
+        /playbook-editor-stages/,
+        /playbooks\.exportViaDialog/,
+        /playbooks\.importViaDialog/,
+        /open-playbook-editor/,
     ]) assert.match(productHubs, expression);
     assert.doesNotMatch(productHubs, /window\.prompt\("Channel/);
     assert.doesNotMatch(productHubs, /Edit declarative Team Pack JSON/);
+    assert.doesNotMatch(productHubs, /Paste Playbook JSON/);
+    assert.doesNotMatch(productHubs, /Semantic plan JSON/);
+    assert.doesNotMatch(productHubs, /window\.prompt\("Playbook/);
     assert.doesNotMatch(productHubs, /innerHTML\s*=/);
     assert.doesNotMatch(productHubs, /eval\s*\(/);
 });

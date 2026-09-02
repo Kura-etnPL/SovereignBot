@@ -6,6 +6,7 @@ import { installAppProtocolHandler, registerAppSchemePrivileged } from "./protoc
 import { createMainWindow, appOrigin } from "./window.js";
 import { bindIpcChannels } from "./ipc.js";
 import { exportTeamPackViaDialog, importTeamPackViaDialog } from "./team-pack-file-io.js";
+import { exportPlaybookViaDialog, importPlaybookViaDialog } from "./playbook-file-io.js";
 import { createOperatorBridge } from "./operator-bridge.js";
 import { startRuntimeHost } from "./runtime-host.js";
 import { createDesktopServices } from "./services.js";
@@ -725,6 +726,15 @@ async function main() {
                 "playbook:duplicate": ({ playbookId }) => productSurfaces.duplicatePlaybook(playbookId),
                 "playbook:export": ({ playbookId }) => productSurfaces.exportPlaybook(playbookId),
                 "playbook:import": ({ playbook }) => productSurfaces.importPlaybook(playbook),
+                "playbook:importViaDialog": async () => {
+                    return importPlaybookViaDialog({ parentWindow: win, dialog, importPlaybook: (playbook) => productSurfaces.importPlaybook(playbook) });
+                },
+                "playbook:exportViaDialog": ({ playbookId }) => exportPlaybookViaDialog({
+                    parentWindow: win,
+                    dialog,
+                    targetName: playbookId,
+                    resolvePlaybook: () => productSurfaces.exportPlaybook(playbookId),
+                }),
                 "playbook:assign": ({ playbookId, teamId, channelId }) => productSurfaces.assignPlaybook(playbookId, { teamId, channelId }),
                 "team:createChannelFromTemplate": ({ teamId, templateId }) => teamService.createChannelFromTemplate(teamId, templateId),
                 "channel:list": ({ teamId, includeArchived }) => teamService.listChannels({ teamId, includeArchived }),

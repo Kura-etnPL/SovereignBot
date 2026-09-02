@@ -384,6 +384,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .team-pack-editor-step { display: flex; gap: 7px; align-items: center; }
 .team-pack-editor-step select { flex: 1; }
 @media (max-width: 640px) { .team-pack-editor-grid { grid-template-columns: 1fr; } .team-pack-editor-heading { flex-direction: column; } }
+.playbook-editor-section { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.playbook-editor-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.playbook-editor-heading h3 { margin: 0 0 4px; font-size: 13px; }
+.playbook-editor-heading p { margin: 0; color: var(--text-3); font-size: 11px; line-height: 1.45; }
+.playbook-editor-list { display: flex; flex-direction: column; gap: 10px; }
+.playbook-editor-row { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-2); }
+.playbook-editor-row > .detail-actions { justify-content: flex-end; }
+.playbook-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.playbook-editor-grid textarea { min-height: 64px; resize: vertical; }
+@media (max-width: 640px) { .playbook-editor-grid { grid-template-columns: 1fr; } .playbook-editor-heading { flex-direction: column; } }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 5px; }
 .quick-role-row { display: grid; gap: 7px; }
 .quick-role-row > div { display: flex; flex-wrap: wrap; gap: 6px; }

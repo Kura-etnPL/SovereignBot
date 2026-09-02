@@ -186,6 +186,13 @@ test("playbook transfer is declarative and rejects runtime state", () => {
     );
 });
 
+test("native Playbook file channels accept only bounded dialog payloads", () => {
+    assert.deepEqual(validateV3IpcRequest("playbook:importViaDialog", {}), {});
+    assert.deepEqual(validateV3IpcRequest("playbook:exportViaDialog", { playbookId: "delivery" }), { playbookId: "delivery" });
+    assert.throws(() => validateV3IpcRequest("playbook:importViaDialog", { path: "E:/private/delivery.json" }), /request payload must be empty/);
+    assert.throws(() => validateV3IpcRequest("playbook:exportViaDialog", { playbookId: "delivery", sessionId: "secret" }), /payload\.sessionId/);
+});
+
 test("channel template creation accepts only a bounded team/template selection", () => {
     const payload = {
         teamId: "team_1111111111111111",

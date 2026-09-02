@@ -152,7 +152,13 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
         playbooks: Array.isArray(loaded.playbooks) ? loaded.playbooks : [],
         packRecipes: Array.isArray(loaded.packRecipes) ? loaded.packRecipes : [],
     } : { playbooks: [], packRecipes: [] };
-    state.playbooks = state.playbooks.filter((entry) => { try { normalizePlaybook(entry); return typeof entry.createdAt === "string" && typeof entry.updatedAt === "string"; } catch { return false; } }).slice(-MAX_PLAYBOOKS);
+    state.playbooks = state.playbooks.filter((entry) => {
+        try {
+            const { state: entryState, createdAt, updatedAt, ...definition } = entry;
+            normalizePlaybook(definition);
+            return ["active", "archived"].includes(entryState) && typeof createdAt === "string" && typeof updatedAt === "string";
+        } catch { return false; }
+    }).slice(-MAX_PLAYBOOKS);
     state.packRecipes = state.packRecipes.filter((entry) => { try { normalizePack(entry.recipe); return true; } catch { return false; } }).slice(-MAX_PACK_RECIPES);
     // Existing TeamService playbooks are first-class library entries too.  Seed only
     // missing projections; the embedded TeamService definitions remain authoritative

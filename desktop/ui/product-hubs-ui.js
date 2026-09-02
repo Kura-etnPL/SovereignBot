@@ -17,19 +17,19 @@
       const h = document.createElement("h3"); h.textContent = item.name; card.append(h);
       card.append(line("Description", item.description), line("Steps", item.steps.join(" → ")), line("Assigned teams", item.assignedTeams.map((x) => x.name).join(", ") || "None"), line("Assigned channels", item.assignedChannels.map((x) => x.name).join(", ") || "None"), line("Updated", item.updatedAt));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Export / 导出", () => copy(api.playbooks.export({ playbookId: item.id }))));
+      actions.append(button("Export / 导出", async () => { const result = await api.playbooks.exportViaDialog({ playbookId: item.id }); const status = $("playbook-file-result"); if (status) status.textContent = result.canceled ? "Export canceled." : "Exported " + result.fileName + "."; }));
       actions.append(button("Create Routine / 创建例行", () => document.dispatchEvent(new CustomEvent("sovereignbot:create-routine-from-source", { detail: { name: `Routine · ${item.name}`, instruction: item.description || item.steps.join("; "), teamId: item.assignedTeams[0]?.id } }))));
       actions.append(button("Duplicate / 复制", async () => { await api.playbooks.duplicate({ playbookId: item.id }); await refresh(); }));
       actions.append(button(item.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (item.state === "archived" ? api.playbooks.restore : api.playbooks.archive)({ playbookId: item.id }); await refresh(); }));
-      actions.append(button("Edit / 编辑", async () => { const name = window.prompt("Playbook name / 工作方法名称", item.name); if (!name) return; const description = window.prompt("Description / 描述", item.description) ?? item.description; const rawSteps = window.prompt("Steps, comma separated / 步骤（逗号分隔）", item.steps.join(",")); if (rawSteps === null) return; const steps = rawSteps.split(",").map((step) => step.trim()).filter(Boolean); try { await api.playbooks.update({ playbookId: item.id, patch: { name, description, steps } }); await refresh(); } catch (e) { error(root, e); } }));
+      actions.append(button("Edit / 编辑", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-playbook-editor", { detail: { item } }))));
       const teamSelect = document.createElement("select"); for (const team of teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = `Team: ${team.name}`; teamSelect.append(option); }
       const channelSelect = document.createElement("select"); for (const team of teams) for (const channel of team.channels ?? []) { const option = document.createElement("option"); option.value = channel.id; option.textContent = `Channel: ${channel.name}`; channelSelect.append(option); }
-      if (teams.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.playbooks.assign({ playbookId: item.id, teamId: teamSelect.value }); await refresh(); }));
-      if (channelSelect.options.length) actions.append(channelSelect, button("Assign Channel / 分配频道", async () => { await api.playbooks.assign({ playbookId: item.id, channelId: channelSelect.value }); await refresh(); }));
+      if (item.state !== "archived" && teams.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.playbooks.assign({ playbookId: item.id, teamId: teamSelect.value }); await refresh(); }));
+      if (item.state !== "archived" && channelSelect.options.length) actions.append(channelSelect, button("Assign Channel / 分配频道", async () => { await api.playbooks.assign({ playbookId: item.id, channelId: channelSelect.value }); await refresh(); }));
       card.append(actions); root.append(card);
     }
     if (!items.length) { const p = document.createElement("p"); p.textContent = "No playbooks yet. Create the first team method."; root.append(p); }
-    root.append(button("Import / 导入", async () => { const raw = window.prompt("Paste Playbook JSON"); if (!raw) return; await api.playbooks.import({ playbook: JSON.parse(raw) }); await refresh(); }));
+    root.append(button("Import / 导入", async () => { const result = await api.playbooks.importViaDialog({}); const status = $("playbook-file-result"); if (result.canceled) { if (status) status.textContent = "Import canceled."; return; } await refresh(); if (status) status.textContent = "Imported " + result.fileName + "."; }));
   }
   function renderArtifacts(items) {
     const root = $("product-artifacts"); clear(root);
@@ -322,7 +322,7 @@
     connectedApps.apps = healthApps;
     renderPlaybooks(playbooks.playbooks ?? [], teams.teams ?? []); renderArtifacts(artifacts.artifacts ?? []); renderHistory(history.history ?? [], coworkers.coworkers ?? []); renderChannels(channels.channels ?? [], teams.teams ?? [], conversations.conversations ?? [], teams.channelTemplates ?? []); renderActivityFeed(teams.teams ?? [], coworkers.coworkers ?? [], conversations.conversations ?? []); renderSkills(skills.skills ?? []); renderConnectedApps(connectedApps.apps ?? [], teams.teams ?? [], coworkers.coworkers ?? [], projects.projects ?? []); renderPacks(teams.packs ?? []);
   }
-  async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description") ?? ""; const rawSteps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; await api.playbooks.create({ playbook: { name, description, steps: rawSteps.split(",").map((x) => x.trim()).filter(Boolean) } }); await refresh(); }
+  async function createPlaybook() { document.dispatchEvent(new CustomEvent("sovereignbot:open-playbook-editor")); }
   function setup() {
     const artifactRoot = $("product-artifacts");
     const heading = artifactRoot?.parentElement?.querySelector(".card-heading");
@@ -340,7 +340,7 @@
     if (channelFilter && ![...channelFilter.options].some((option) => option.value === "unread")) { const option = document.createElement("option"); option.value = "unread"; option.textContent = "Unread / 未读"; channelFilter.insertBefore(option, channelFilter.options[channelFilter.options.length - 1] ?? null); }
     $("nav-product-hubs")?.addEventListener("click", async () => { switchView("product-hubs"); try { await refresh(); } catch (e) { error($("product-playbooks"), e); } }); $("product-hubs-refresh")?.addEventListener("click", () => void refresh()); $("artifact-hub-filter")?.addEventListener("change", () => void refresh()); $("product-channel-filter")?.addEventListener("change", () => void refresh()); $("product-channel-switch")?.addEventListener("change", (event) => { if (event.target.value && typeof openConversation === "function") void openConversation(event.target.value); }); $("playbook-create")?.addEventListener("click", () => void createPlaybook());
   }
-  window.addEventListener("DOMContentLoaded", setup);
+  setup();
   window.addEventListener("DOMContentLoaded", () => {
     const root = $("product-packs");
     const heading = root?.parentElement?.querySelector(".card-heading");
@@ -592,30 +592,106 @@
     card.append(details);
   }
 
+  let editingPlaybook;
+  const playbookEditorClone = (value) => structuredClone(value);
+  const playbookEditorId = (prefix) => prefix + "-" + String(globalThis.crypto?.randomUUID?.() || (Date.now() + "-" + Math.random())).replace(/[^A-Za-z0-9]/g, "").slice(0, 16);
+  const playbookEditorError = (message = "") => { const node = $("playbook-form-error"); if (node) { node.textContent = message; node.classList.toggle("hidden", !message); } };
+  const playbookEditorField = (label, value, className, { textarea = false, maxLength = 0 } = {}) => { const wrapper = document.createElement("label"); wrapper.className = "setting-field"; const caption = document.createElement("span"); caption.textContent = label; wrapper.append(caption); const field = document.createElement(textarea ? "textarea" : "input"); field.className = className; field.value = value ?? ""; if (maxLength) field.maxLength = maxLength; wrapper.append(field); return wrapper; };
+  const playbookEditorButton = (label, handler) => { const node = document.createElement("button"); node.type = "button"; node.className = "quiet-action"; node.textContent = label; node.addEventListener("click", () => void handler()); return node; };
+  const playbookEditorOriginal = (list, id) => list.find((entry) => entry.id === id) ?? {};
+  const playbookEditorList = (value) => String(value ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
+
+  function readPlaybookEditor() {
+    if (!editingPlaybook) throw new Error("Playbook editor is not open.");
+    const playbook = playbookEditorClone(editingPlaybook);
+    playbook.name = $("playbook-editor-name")?.value.trim() ?? "";
+    playbook.description = $("playbook-editor-description")?.value.trim() ?? "";
+    playbook.expectedOutput = $("playbook-editor-output")?.value.trim() ?? "";
+    playbook.recommendedCoworkerRoles = playbookEditorList($("playbook-editor-roles")?.value);
+    playbook.recommendedSkillIds = playbookEditorList($("playbook-editor-skills")?.value);
+    playbook.steps = [...(document.querySelectorAll("#playbook-editor-steps .playbook-editor-step-value") ?? [])].map((field) => field.value.trim()).filter(Boolean);
+    playbook.stages = [...(document.querySelector("#playbook-editor-stages")?.children ?? [])].map((row) => {
+      const original = playbookEditorOriginal(playbook.stages ?? [], row.dataset.id);
+      const next = { ...original, id: row.dataset.id, name: row.querySelector(".playbook-editor-stage-name")?.value.trim() ?? "", instructions: row.querySelector(".playbook-editor-stage-instructions")?.value.trim() ?? "" };
+      const output = row.querySelector(".playbook-editor-stage-output")?.value.trim() ?? ""; const role = row.querySelector(".playbook-editor-stage-role")?.value.trim() ?? ""; const skills = playbookEditorList(row.querySelector(".playbook-editor-stage-skills")?.value);
+      if (output) next.expectedOutput = output; else delete next.expectedOutput;
+      if (role) next.recommendedCoworkerRole = role; else delete next.recommendedCoworkerRole;
+      if (skills.length) next.recommendedSkillIds = skills; else delete next.recommendedSkillIds;
+      return next;
+    });
+    playbook.reviewPoints = [...(document.querySelector("#playbook-editor-reviews")?.children ?? [])].map((row) => {
+      const original = playbookEditorOriginal(playbook.reviewPoints ?? [], row.dataset.id);
+      const next = { ...original, id: row.dataset.id, name: row.querySelector(".playbook-editor-review-name")?.value.trim() ?? "", instructions: row.querySelector(".playbook-editor-review-instructions")?.value.trim() ?? "" };
+      const role = row.querySelector(".playbook-editor-review-role")?.value.trim() ?? ""; const skills = playbookEditorList(row.querySelector(".playbook-editor-review-skills")?.value);
+      if (role) next.recommendedCoworkerRole = role; else delete next.recommendedCoworkerRole;
+      if (skills.length) next.recommendedSkillIds = skills; else delete next.recommendedSkillIds;
+      return next;
+    });
+    if (!playbook.expectedOutput) delete playbook.expectedOutput;
+    if (!playbook.recommendedCoworkerRoles.length) delete playbook.recommendedCoworkerRoles;
+    if (!playbook.recommendedSkillIds.length) delete playbook.recommendedSkillIds;
+    return playbook;
+  }
+
+  function movePlaybookEditorEntry(collection, index, delta) {
+    const next = readPlaybookEditor(); const list = next[collection] ?? []; const target = index + delta; if (target < 0 || target >= list.length) return;
+    [list[index], list[target]] = [list[target], list[index]]; next[collection] = list; renderPlaybookEditor(next);
+  }
+
+  function renderPlaybookEditor(playbook) {
+    editingPlaybook = playbookEditorClone(playbook);
+    $("playbook-editor-id").value = editingPlaybook.id ?? "";
+    $("playbook-editor-title").textContent = editingPlaybook.id ? "Edit playbook / 编辑工作方法" : "New playbook / 新建工作方法";
+    $("playbook-editor-name").value = editingPlaybook.name ?? "";
+    $("playbook-editor-description").value = editingPlaybook.description ?? "";
+    $("playbook-editor-output").value = editingPlaybook.expectedOutput ?? "";
+    $("playbook-editor-roles").value = (editingPlaybook.recommendedCoworkerRoles ?? []).join(", ");
+    $("playbook-editor-skills").value = (editingPlaybook.recommendedSkillIds ?? []).join(", ");
+    playbookEditorError();
+    const stepsRoot = $("playbook-editor-steps"); clear(stepsRoot);
+    for (const [index, step] of (editingPlaybook.steps ?? []).entries()) {
+      const row = document.createElement("div"); row.className = "playbook-editor-row playbook-editor-step-row";
+      row.append(playbookEditorField("Step " + (index + 1) + " / 步骤", step, "playbook-editor-step-value", { maxLength: 128 }));
+      const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(playbookEditorButton("↑", () => movePlaybookEditorEntry("steps", index, -1)), playbookEditorButton("↓", () => movePlaybookEditorEntry("steps", index, 1)), playbookEditorButton("Remove / 删除", () => { const next = readPlaybookEditor(); next.steps.splice(index, 1); renderPlaybookEditor(next); })); row.append(actions); stepsRoot.append(row);
+    }
+    const stagesRoot = $("playbook-editor-stages"); clear(stagesRoot);
+    for (const [index, stage] of (editingPlaybook.stages ?? []).entries()) {
+      const row = document.createElement("article"); row.className = "playbook-editor-row"; row.dataset.id = stage.id;
+      const heading = document.createElement("div"); heading.className = "playbook-editor-heading"; const title = document.createElement("strong"); title.textContent = stage.name || "Stage"; const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(playbookEditorButton("↑", () => movePlaybookEditorEntry("stages", index, -1)), playbookEditorButton("↓", () => movePlaybookEditorEntry("stages", index, 1)), playbookEditorButton("Remove / 删除", () => { const next = readPlaybookEditor(); next.stages.splice(index, 1); renderPlaybookEditor(next); })); heading.append(title, actions); row.append(heading);
+      const grid = document.createElement("div"); grid.className = "playbook-editor-grid"; grid.append(playbookEditorField("Name / 名称", stage.name, "playbook-editor-stage-name", { maxLength: 120 }), playbookEditorField("Expected output / 阶段产出", stage.expectedOutput, "playbook-editor-stage-output", { maxLength: 500 }), playbookEditorField("Recommended role / 推荐角色", stage.recommendedCoworkerRole, "playbook-editor-stage-role", { maxLength: 120 }), playbookEditorField("Recommended Skills / 推荐技能", (stage.recommendedSkillIds ?? []).join(", "), "playbook-editor-stage-skills", { maxLength: 1000 })); row.append(grid, playbookEditorField("Instructions / 指引", stage.instructions, "playbook-editor-stage-instructions", { textarea: true, maxLength: 2000 })); stagesRoot.append(row);
+    }
+    const reviewsRoot = $("playbook-editor-reviews"); clear(reviewsRoot);
+    for (const [index, point] of (editingPlaybook.reviewPoints ?? []).entries()) {
+      const row = document.createElement("article"); row.className = "playbook-editor-row"; row.dataset.id = point.id;
+      const heading = document.createElement("div"); heading.className = "playbook-editor-heading"; const title = document.createElement("strong"); title.textContent = point.name || "Review point"; const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(playbookEditorButton("↑", () => movePlaybookEditorEntry("reviewPoints", index, -1)), playbookEditorButton("↓", () => movePlaybookEditorEntry("reviewPoints", index, 1)), playbookEditorButton("Remove / 删除", () => { const next = readPlaybookEditor(); next.reviewPoints.splice(index, 1); renderPlaybookEditor(next); })); heading.append(title, actions); row.append(heading);
+      const grid = document.createElement("div"); grid.className = "playbook-editor-grid"; grid.append(playbookEditorField("Name / 名称", point.name, "playbook-editor-review-name", { maxLength: 120 }), playbookEditorField("Recommended role / 推荐角色", point.recommendedCoworkerRole, "playbook-editor-review-role", { maxLength: 120 }), playbookEditorField("Recommended Skills / 推荐技能", (point.recommendedSkillIds ?? []).join(", "), "playbook-editor-review-skills", { maxLength: 1000 })); row.append(grid, playbookEditorField("Instructions / 复核指引", point.instructions, "playbook-editor-review-instructions", { textarea: true, maxLength: 2000 })); reviewsRoot.append(row);
+    }
+    $("playbook-dialog")?.showModal?.();
+    $("playbook-editor-name")?.focus();
+  }
+
+  function newPlaybook() { renderPlaybookEditor({ name: "", description: "", steps: ["chief"], stages: [], reviewPoints: [] }); }
+  async function editPlaybook(item) { renderPlaybookEditor(await api.playbooks.export({ playbookId: item.id })); }
+  async function exportPlaybookToFile(item) { const result = await api.playbooks.exportViaDialog({ playbookId: item.id }); const status = $("playbook-file-result"); if (status) status.textContent = result.canceled ? "Export canceled." : "Exported " + result.fileName + "."; }
+  async function importPlaybookFromFile() { const result = await api.playbooks.importViaDialog({}); const status = $("playbook-file-result"); if (result.canceled) { if (status) status.textContent = "Import canceled."; return; } await refresh(); if (status) status.textContent = "Imported " + result.fileName + "."; }
+
   function playbooks(items) {
     const root = pageRoots.playbooks; if (!root) return; clear(root);
     for (const item of items) {
-      const card = document.createElement("article"); card.className = "settings-card";
+      const card = document.createElement("article"); card.className = "settings-card"; card.dataset.playbookId = item.id;
       const title = document.createElement("h3"); title.textContent = item.name;
       card.append(title, text("Description", item.description), text("Steps", item.steps.join(" → ")), text("Teams", item.assignedTeams.map((entry) => entry.name).join(", ") || "None"), text("Channels", item.assignedChannels.map((entry) => entry.name).join(", ") || "None"), text("State", item.state), text("Updated", item.updatedAt)); appendPlaybookPlan(card, item);
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Export / 导出", () => api.playbooks.export({ playbookId: item.id }).then(copy), root), button("Duplicate / 复制", async () => { await api.playbooks.duplicate({ playbookId: item.id }); await refresh(); }, root), button(item.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (item.state === "archived" ? api.playbooks.restore : api.playbooks.archive)({ playbookId: item.id }); await refresh(); }, root), button("Edit / 编辑", async () => {
-        const name = window.prompt("Playbook name", item.name); if (!name) return;
-        const description = window.prompt("Description", item.description); if (description === null) return;
-        const steps = window.prompt("Steps, comma separated", item.steps.join(",")); if (steps === null) return;
-        const plan = readJson("Semantic plan JSON (stages, reviewPoints, expectedOutput, recommended roles/Skills)", playbookSemanticPlan(item)); if (plan === undefined) return;
-        await api.playbooks.update({ playbookId: item.id, patch: { name, description, steps: steps.split(",").map((entry) => entry.trim()).filter(Boolean), ...plan } }); await refresh();
-      }, root));
+      actions.append(button("Export / 导出", () => exportPlaybookToFile(item), root), button("Duplicate / 复制", async () => { await api.playbooks.duplicate({ playbookId: item.id }); await refresh(); }, root), button(item.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (item.state === "archived" ? api.playbooks.restore : api.playbooks.archive)({ playbookId: item.id }); await refresh(); }, root), button("Edit / 编辑", () => editPlaybook(item), root));
       const teamSelect = select("Team for playbook " + item.name);
-      for (const team of cache.teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = `Team: ${team.name}`; teamSelect.append(option); }
-      if (teamSelect.options.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.playbooks.assign({ playbookId: item.id, teamId: teamSelect.value }); await refresh(); }, root));
+      for (const team of cache.teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = "Team: " + team.name; teamSelect.append(option); }
       const channelSelect = select("Channel for playbook " + item.name);
-      for (const team of cache.teams) for (const channel of team.channels ?? []) { const option = document.createElement("option"); option.value = channel.id; option.textContent = `Channel: ${team.name} / ${channel.name}`; channelSelect.append(option); }
-      if (channelSelect.options.length) actions.append(channelSelect, button("Assign Channel / 分配频道", async () => { await api.playbooks.assign({ playbookId: item.id, channelId: channelSelect.value }); await refresh(); }, root));
+      for (const team of cache.teams) for (const channel of team.channels ?? []) { const option = document.createElement("option"); option.value = channel.id; option.textContent = "Channel: " + team.name + " / " + channel.name; channelSelect.append(option); }
+      if (item.state !== "archived" && teamSelect.options.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.playbooks.assign({ playbookId: item.id, teamId: teamSelect.value }); await refresh(); }, root));
+      if (item.state !== "archived" && channelSelect.options.length) actions.append(channelSelect, button("Assign Channel / 分配频道", async () => { await api.playbooks.assign({ playbookId: item.id, channelId: channelSelect.value }); await refresh(); }, root));
       card.append(actions); root.append(card);
     }
     if (!items.length) root.append(text("Playbooks", "No methods yet. Create the first human-readable method."));
-    root.append(button("Import / 导入", async () => { const playbook = readJson("Paste Playbook JSON"); if (playbook) { await api.playbooks.import({ playbook }); await refresh(); } }, root));
   }
 
   function artifacts(items) {
@@ -827,7 +903,7 @@
     if (typeof window.openProductChannelEditor !== "function") throw new Error("Channel editor is unavailable.");
     return window.openProductChannelEditor({ teamId, channelId });
   }
-  async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description", "") ?? ""; const steps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; const plan = readJson("Optional semantic plan JSON (stages, reviewPoints, expectedOutput, recommended roles/Skills)", {}); if (plan === undefined) return; await api.playbooks.create({ playbook: { name, description, steps: steps.split(",").map((entry) => entry.trim()).filter(Boolean), ...plan } }); await refresh(); }
+  async function createPlaybook() { newPlaybook(); }
   async function createSkill() { const name = window.prompt("Skill name"); if (!name) return; const description = window.prompt("Description", "") ?? ""; const instructions = window.prompt("Instructions"); if (!instructions) return; await api.skills.create({ skill: { name, description, instructions } }); await refresh(); }
   async function exportPackToFile(item) {
     const team = cache.teams.find((entry) => entry.packId === item.id || entry.packId === `imported:${item.id}`);
@@ -866,7 +942,22 @@
   function setup() {
     for (const [id, view] of navViews) $(id)?.addEventListener("click", () => { if (view === "product-hubs") { for (const [navId, target] of navViews) $(navId)?.classList.toggle("active", target === view); } else nav(view); });
     $("playbook-page-create")?.addEventListener("click", () => void createPlaybook().catch((reason) => showError(pageRoots.playbooks, reason)));
-    $("playbook-page-import")?.addEventListener("click", () => void (async () => { const playbook = readJson("Paste Playbook JSON"); if (playbook) { await api.playbooks.import({ playbook }); await refresh(); } })().catch((reason) => showError(pageRoots.playbooks, reason)));
+    $("playbook-page-import")?.addEventListener("click", () => void importPlaybookFromFile().catch((reason) => showError(pageRoots.playbooks, reason)));
+    $("playbook-editor-add-step")?.addEventListener("click", () => { try { const next = readPlaybookEditor(); next.steps.push(next.steps[next.steps.length - 1] || "chief"); renderPlaybookEditor(next); } catch (reason) { playbookEditorError(String(reason?.message ?? reason)); } });
+    $("playbook-editor-add-stage")?.addEventListener("click", () => { try { const next = readPlaybookEditor(); next.stages.push({ id: playbookEditorId("stage"), name: "New stage", instructions: "" }); renderPlaybookEditor(next); } catch (reason) { playbookEditorError(String(reason?.message ?? reason)); } });
+    $("playbook-editor-add-review")?.addEventListener("click", () => { try { const next = readPlaybookEditor(); next.reviewPoints.push({ id: playbookEditorId("review"), name: "New review point", instructions: "" }); renderPlaybookEditor(next); } catch (reason) { playbookEditorError(String(reason?.message ?? reason)); } });
+    $("playbook-form")?.addEventListener("submit", (event) => void (async () => {
+      event.preventDefault();
+      playbookEditorError();
+      const playbook = readPlaybookEditor();
+      const patch = { name: playbook.name, description: playbook.description, steps: playbook.steps, stages: playbook.stages, reviewPoints: playbook.reviewPoints, ...(playbook.expectedOutput !== undefined ? { expectedOutput: playbook.expectedOutput } : {}), ...(playbook.recommendedCoworkerRoles !== undefined ? { recommendedCoworkerRoles: playbook.recommendedCoworkerRoles } : {}), ...(playbook.recommendedSkillIds !== undefined ? { recommendedSkillIds: playbook.recommendedSkillIds } : {}) };
+      if (playbook.id) await api.playbooks.update({ playbookId: playbook.id, patch });
+      else await api.playbooks.create({ playbook: patch });
+      $("playbook-dialog")?.close?.();
+      editingPlaybook = undefined;
+      await refresh();
+    })().catch((reason) => playbookEditorError(String(reason?.message ?? reason).slice(0, 240))));
+    document.addEventListener("sovereignbot:open-playbook-editor", (event) => { if (event.detail?.item) void editPlaybook(event.detail.item).catch((reason) => showError(pageRoots.playbooks, reason)); else newPlaybook(); });
     $("skill-page-create")?.addEventListener("click", () => void createSkill().catch((reason) => showError(pageRoots.skills, reason)));
     $("skill-page-import")?.addEventListener("click", () => void (async () => { const skill = readJson("Paste safe Skill JSON"); if (skill) { await api.skills.import({ skill }); await refresh(); } })().catch((reason) => showError(pageRoots.skills, reason)));
     $("team-pack-page-import")?.addEventListener("click", () => void importPack().catch((reason) => showError(pageRoots.packs, reason)));
@@ -911,5 +1002,5 @@
     document.addEventListener("sovereignbot:open-computer-history", () => nav("computer-history"));
     window.refreshIndependentProductPages = refresh;
   }
-  window.addEventListener("DOMContentLoaded", setup);
+  setup();
 })();

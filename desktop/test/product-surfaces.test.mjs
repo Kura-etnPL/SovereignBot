@@ -57,8 +57,9 @@ test("product surfaces provide safe playbook, artifact, computer, and pack proje
 
 test("semantic Playbooks stay ordered, declarative, assignable, and transferable", () => {
   const { team, teamService } = fixture();
+  const dataDir = mkdtempSync(join(tmpdir(), "sovereign-semantic-playbook-"));
   const service = createProductSurfaceService({
-    dataDir: mkdtempSync(join(tmpdir(), "sovereign-semantic-playbook-")), teamService,
+    dataDir, teamService,
     coworkerStore: { get: (id) => ({ id, name: "Coworker" }) },
     artifactStore: { list: () => ({ artifacts: [] }) },
     runtime: { audit: { readAll: async () => [] } },
@@ -87,6 +88,14 @@ test("semantic Playbooks stay ordered, declarative, assignable, and transferable
   assert.deepEqual(updated.reviewPoints, []);
   assert.deepEqual(teamService.get(team.id).playbooks.find((entry) => entry.id === created.id).reviewPoints, []);
   assert.throws(() => service.importPlaybook({ ...service.exportPlaybook(created.id), id: "unsafe-import", workspacePath: "E:/private" }), /field is not allowed/);
+  const restarted = createProductSurfaceService({
+    dataDir, teamService,
+    coworkerStore: { get: (id) => ({ id, name: "Coworker" }) },
+    artifactStore: { list: () => ({ artifacts: [] }) },
+    runtime: { audit: { readAll: async () => [] } },
+    now: () => "2026-09-01T00:00:03.000Z",
+  });
+  assert.equal(restarted.listPlaybooks({ includeArchived: true }).playbooks.some((entry) => entry.id === "discovery-import"), true);
 });
 
 test("skill transfer is declarative and duplicate starts unassigned", () => {
