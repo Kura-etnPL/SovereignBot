@@ -1,0 +1,33 @@
+{
+  "schema": "sovereignbot.local-acceptance-manifest.v1",
+  "phase": "V4.3-P10",
+  "date": "2026-09-02",
+  "branch": "codex/v4-review-directed-handoff-protocol",
+  "sourceCommit": "61017421fc3ccc02fc31ffe91571ad432d9c726a",
+  "acceptance": {
+    "command": "node scripts/verify-v47-artifact-lineage.mjs",
+    "gate": "verify-v47-artifact-lineage",
+    "result": "PASS",
+    "checksPassed": 14,
+    "checksTotal": 14,
+    "rawJson": "verify-v47-artifact-lineage.json",
+    "rawLog": "verify-v47-artifact-lineage.log"
+  },
+  "localChecks": {
+    "desktopSyntaxFiles": 164,
+    "desktopFullTestsPassed": 251,
+    "desktopFullTestsFailed": 0,
+    "artifactFocusedTestsPassed": 10,
+    "secretScan": "clean",
+    "diffCheck": "pass"
+  },
+  "boundaries": {
+    "networkUsed": false,
+    "dependenciesInstalled": false,
+    "providerOrOAuthUsed": false,
+    "cloudSyncOrSharingAdded": false,
+    "destructiveRetentionOrDeletionAdded": false,
+    "localRcSigned": false,
+    "publishEligible": false
+  }
+}
