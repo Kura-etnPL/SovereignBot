@@ -760,6 +760,7 @@
       void createRoutineFromSkill(event.detail?.skillId);
     });
     document.addEventListener("sovereignbot:create-routine-from-source", (event) => { void createRoutineFromSource(event.detail); });
+    document.addEventListener("sovereignbot:navigate-routines", () => { ensureRoutineSurface(); showRoutinesView(); });
     for (const b of document.querySelectorAll("[data-close-dialog]")) b.addEventListener("click", () => $(b.dataset.closeDialog)?.close());
   }
 

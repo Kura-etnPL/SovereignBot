@@ -191,11 +191,13 @@ const NOTIFICATION_CATEGORIES_SET = new Set([
     "all", "attention", "routine-completed", "trigger-fired", "coworker-finished", "channel-unread",
 ]);
 
+const NOTIFICATION_OPAQUE_ID_PATTERN = /^notif_[a-f0-9]{16}$/;
+
 function notificationId(value, label = "id") {
-    if (typeof value !== "string" || !/^[A-Za-z0-9][\w:.-]{0,199}$/.test(value)) {
+    if (typeof value !== "string" || !NOTIFICATION_OPAQUE_ID_PATTERN.test(value.trim())) {
         throw new Error(`${label} must be a valid notification identifier`);
     }
-    return value;
+    return value.trim();
 }
 
 function validateNotificationRequest(channel, payload) {

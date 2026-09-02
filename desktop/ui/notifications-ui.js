@@ -5,6 +5,7 @@
   const t = (key, fallback) => globalThis.SovereignI18n?.t(key) ?? fallback ?? key;
   let currentVisibleIds = [];
   let pollTimer;
+  let refreshGeneration = 0;
 
   const CATEGORY_LABELS = Object.freeze({
     "attention": "Attention / 需关注",
@@ -88,7 +89,14 @@
     const target = source.target;
     if (target === "attention") {
       $("nav-attention")?.click();
-    } else if (target === "routines" || target === "work") {
+    } else if (target === "routines") {
+      const navRoutines = $("nav-routines");
+      if (navRoutines) {
+        navRoutines.click();
+      } else {
+        document.dispatchEvent(new CustomEvent("sovereignbot:navigate-routines"));
+      }
+    } else if (target === "work") {
       $("nav-work")?.click();
     } else if (target === "triggers") {
       $("nav-triggers")?.click();
@@ -99,9 +107,10 @@
       const convButton = document.querySelector("#conversation-list [data-conversation-id=\"" + CSS.escape(convId) + "\"]");
       if (convButton) {
         convButton.click();
-      } else if (typeof window.openConversationSafe === "function") {
-        window.openConversationSafe(convId);
       }
+      document.dispatchEvent(new CustomEvent("sovereignbot:navigate-conversation", {
+        detail: { conversationId: convId }
+      }));
     }
   }
 
@@ -193,12 +202,20 @@
 
     // Safe Source Navigation Button
     if (item.source && item.source.target && NAV_TARGET_LABELS[item.source.target]) {
-      const navBtn = document.createElement("button");
-      navBtn.type = "button";
-      navBtn.className = "hero-action";
-      navBtn.textContent = NAV_TARGET_LABELS[item.source.target];
-      navBtn.addEventListener("click", () => navigateToSource(item.source));
-      actionsRow.append(navBtn);
+      let valid = true;
+      if (item.source.target === "conversation" && !item.source.conversationId) valid = false;
+      if (item.source.target === "routines" && !item.source.routineId) valid = false;
+      if (item.source.target === "triggers" && !item.source.triggerId) valid = false;
+      if (item.source.target === "work" && !item.source.jobId) valid = false;
+      if (item.source.target === "artifacts" && !item.source.artifactId) valid = false;
+      if (valid) {
+        const navBtn = document.createElement("button");
+        navBtn.type = "button";
+        navBtn.className = "hero-action";
+        navBtn.textContent = NAV_TARGET_LABELS[item.source.target];
+        navBtn.addEventListener("click", () => navigateToSource(item.source));
+        actionsRow.append(navBtn);
+      }
     }
 
     card.append(actionsRow);
@@ -207,6 +224,7 @@
 
   async function refresh() {
     if (!window.sovereignbot?.notifications?.list) return;
+    const generation = ++refreshGeneration;
     setError("");
     const listEl = $("notifications-list");
     const catSelect = $("notifications-category-filter");
@@ -223,6 +241,9 @@
     try {
       setStatus("Loading notifications… / 正在加载通知…");
       const res = await window.sovereignbot.notifications.list(params);
+      if (generation !== refreshGeneration) {
+        return;
+      }
       setStatus("");
       if (!res) return;
 

@@ -2626,6 +2626,12 @@ function bindEvents() {
     if (btn) btn.click(); else document.getElementById("details-panel")?.classList.toggle("hidden");
   });
   window.sovereignbot?.onToggleActivity?.(async () => { const d = $("activity-drawer"); const hidden = d.classList.contains("hidden"); if (hidden) { show(d); await refreshActivity(); } else hide(d); });
+  document.addEventListener("sovereignbot:navigate-conversation", (event) => {
+    const conversationId = event?.detail?.conversationId;
+    if (typeof conversationId === "string" && conversationId.trim()) {
+      void openConversation(conversationId.trim());
+    }
+  });
 }
 
 async function bootstrap() {
