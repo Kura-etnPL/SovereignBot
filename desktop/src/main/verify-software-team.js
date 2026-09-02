@@ -387,6 +387,31 @@ export async function runVerifySoftwareTeam({
         const quickSwitchValue = await renderer(`(()=>{ const select=document.getElementById('product-channel-switch-page'); const option=[...select.options].find((entry)=>entry.textContent.includes('P0 Work Room Updated')); if (!option) return undefined; select.value=option.value; select.dispatchEvent(new Event('change',{bubbles:true})); return option.value; })()`);
         await waitFor("channel quick switch", async () => await renderer(`document.getElementById('conversation-title')?.textContent === "P0 Work Room Updated"`), 15_000);
         check("P0_CHANNEL_UNREAD_AND_QUICK_SWITCH", Boolean(quickSwitchValue), { conversationId: quickSwitchValue });
+        await renderer("(()=>{ const filter=document.getElementById('product-channel-filter-page'); if (filter) { filter.value='active'; filter.dispatchEvent(new Event('change',{bubbles:true})); } return true; })()");
+        await renderer("document.getElementById('product-channel-create-page')?.click(); true");
+        await waitFor("product channel create dialog", async () => await renderer("document.getElementById('channel-dialog')?.open === true"), 5_000);
+        const editorDefaults = await renderer("(()=>({ workspace: document.getElementById('channel-workspace')?.value, playbook: document.getElementById('channel-playbook')?.value, kinds: [...(document.getElementById('channel-kind')?.options ?? [])].map((entry)=>entry.value) }))()");
+        const productChannelName = "P0 Product Channel";
+        await renderer(`(()=>{ const set=(id,value)=>{ const element=document.getElementById(id); element.value=value; element.dispatchEvent(new Event('change',{bubbles:true})); }; set('channel-name', ${JSON.stringify(productChannelName)}); set('channel-kind', 'work'); set('channel-instructions', 'Product page editor create proof.'); set('channel-workspace', ${JSON.stringify(team.sharedWorkspaceId)}); set('channel-playbook', 'software-delivery'); document.getElementById('channel-form')?.requestSubmit(); return true; })()`);
+        await waitFor("product channel dialog close", async () => await renderer("!document.getElementById('channel-dialog')?.open"), 5_000);
+        await renderer("(async()=>{ await window.refreshIndependentProductPages?.(); return true; })()");
+        const productChannelPageState = await renderer(`(()=>({ names: [...document.querySelectorAll('#product-channels-page article h3')].map((entry)=>entry.textContent), page: document.getElementById('product-channels-page')?.innerText ?? '' }))()`);
+        if (!productChannelPageState.names.includes(productChannelName)) throw new Error(`product channel create did not reach page: ${JSON.stringify(productChannelPageState)}`);
+        await renderer(`(()=>{ const card=[...document.querySelectorAll('#product-channels-page article')].find((entry)=>entry.querySelector('h3')?.textContent === ${JSON.stringify(productChannelName)}); [...(card?.querySelectorAll('button') ?? [])].find((button)=>button.textContent.includes('Edit'))?.click(); return Boolean(card); })()`);
+        await waitFor("product channel edit dialog", async () => await renderer("document.getElementById('channel-dialog')?.open === true && document.getElementById('channel-dialog-eyebrow')?.textContent.includes('EDIT')"), 5_000);
+        const productChannelEditedName = "P0 Product Channel Updated";
+        await renderer(`(()=>{ const set=(id,value)=>{ const element=document.getElementById(id); element.value=value; element.dispatchEvent(new Event('change',{bubbles:true})); }; set('channel-name', ${JSON.stringify(productChannelEditedName)}); set('channel-kind', 'personal'); set('channel-instructions', 'Product page editor edit proof.'); document.getElementById('channel-form')?.requestSubmit(); return true; })()`);
+        await waitFor("product channel edited", async () => await renderer(`!document.getElementById('channel-dialog')?.open && document.getElementById('product-channels-page')?.innerText.includes(${JSON.stringify(productChannelEditedName)})`), 15_000);
+        const productChannelCatalog = await renderer(`window.sovereignbot.channels.list({ teamId: ${JSON.stringify(team.id)}, includeArchived: true })`);
+        const productChannel = productChannelCatalog.channels?.find((entry) => entry.name === productChannelEditedName);
+        check("P0_CHANNEL_PRODUCT_EDITOR_ROUNDTRIP", Boolean(productChannel?.id && productChannel.kind === "personal" && productChannel.instructions === "Product page editor edit proof."
+            && productChannel.workspaceId === team.sharedWorkspaceId && productChannel.playbookId === "software-delivery"
+            && editorDefaults.kinds.includes("work") && editorDefaults.workspace === team.sharedWorkspaceId && editorDefaults.playbook === "software-delivery"), {
+            channelId: productChannel?.id,
+            kind: productChannel?.kind,
+            workspaceId: productChannel?.workspaceId,
+            playbookId: productChannel?.playbookId,
+        });
         await renderer("document.getElementById('nav-artifacts')?.click(); true");
         await waitFor("artifact page after source navigation", async () => await renderer("!document.getElementById('view-artifacts')?.classList.contains('hidden')"), 15_000);
         const artifactButtons = await renderer("[...document.querySelectorAll('#product-artifacts-page button')].map((button)=>button.textContent)");

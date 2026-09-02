@@ -26,6 +26,8 @@ const state = {
   editingCoworkerId: undefined,
   editingCoworkerSnapshot: undefined,
   editingChannelId: undefined,
+  editingChannelTeamId: undefined,
+  channelEditorReturnView: undefined,
   pollTimer: undefined,
   conversationSignature: undefined,
   inlineAttentionFor: undefined,
@@ -1487,6 +1489,7 @@ async function addChannelFromTemplate() {
 
 function populateChannelDialog(channel, team) {
   state.editingChannelId = channel?.id;
+  state.editingChannelTeamId = team?.id;
   $("channel-dialog-eyebrow").textContent = channel ? "EDIT CHANNEL / 编辑频道" : "NEW CHANNEL / 新建频道";
   $("channel-dialog-title").textContent = channel ? "Shape this channel" : "Create a channel";
   $("channel-save").textContent = channel ? "Save changes / 保存修改" : "Create channel / 创建频道";
@@ -1517,18 +1520,37 @@ function populateChannelDialog(channel, team) {
 
 function openNewChannelDialog() {
   const team = teamForConversation(state.selectedConversationId);
-  if (team) populateChannelDialog(undefined, team);
+  if (team) {
+    state.channelEditorReturnView = undefined;
+    populateChannelDialog(undefined, team);
+  }
 }
 
 function openEditChannelDialog() {
   const team = teamForConversation(state.selectedConversationId);
   const channel = team?.channels?.find((entry) => entry.conversationId === state.selectedConversationId);
-  if (team && channel) populateChannelDialog(channel, team);
+  if (team && channel) {
+    state.channelEditorReturnView = undefined;
+    populateChannelDialog(channel, team);
+  }
 }
+
+window.openProductChannelEditor = async ({ teamId, channelId } = {}) => {
+  if (!state.teams.some((entry) => entry.id === teamId)) await refreshTeams();
+  const team = state.teams.find((entry) => entry.id === teamId);
+  const channel = team?.channels?.find((entry) => entry.id === channelId);
+  if (!team) throw new Error("Choose a team first.");
+  if (channelId && !channel) throw new Error("Channel is no longer available.");
+  if (!state.workspaces?.workspaces?.length) await refreshSettingsData();
+  state.channelEditorReturnView = "channels";
+  populateChannelDialog(channel, team);
+};
 
 async function saveChannel(event) {
   event.preventDefault();
-  const team = teamForConversation(state.selectedConversationId);
+  const team = state.editingChannelTeamId
+    ? state.teams.find((entry) => entry.id === state.editingChannelTeamId)
+    : teamForConversation(state.selectedConversationId);
   const error = $("channel-form-error");
   hide(error);
   if (!team) return;
@@ -1545,7 +1567,13 @@ async function saveChannel(event) {
       : await window.sovereignbot.channels.create({ teamId: team.id, ...payload });
     $("channel-dialog")?.close();
     await Promise.all([refreshConversations(), refreshTeams()]);
-    if (result?.channel?.conversationId) await openConversation(result.channel.conversationId);
+    const returnView = state.channelEditorReturnView;
+    state.channelEditorReturnView = undefined;
+    state.editingChannelTeamId = undefined;
+    if (returnView) {
+      await window.refreshIndependentProductPages?.();
+      switchView(returnView);
+    } else if (result?.channel?.conversationId) await openConversation(result.channel.conversationId);
   } catch (caught) {
     error.textContent = text(caught?.message || caught).replace(/^.*Error: /, "");
     show(error);

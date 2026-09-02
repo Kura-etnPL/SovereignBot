@@ -152,6 +152,7 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         /openProductChannelEditor/,
         /team-pack-page-import/,
     ]) assert.match(productHubs, expression);
+    assert.doesNotMatch(productHubs, /window\.prompt\("Channel/);
     assert.doesNotMatch(productHubs, /innerHTML\s*=/);
     assert.doesNotMatch(productHubs, /eval\s*\(/);
 });
