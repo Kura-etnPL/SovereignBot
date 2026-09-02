@@ -57,7 +57,7 @@ function memoryTarget(value, { withMemoryId = false, withPatch = false, withPinn
     const input = objectPayload(value);
     exact(input, allowed);
     if (!["coworker", "team", "project"].includes(input.scope)) throw new Error("memory scope is invalid");
-    const result = { scope: input.scope, ownerId: identifier(input.ownerId, `${input.scope}Id`) };
+    const result = { scope: input.scope, ownerId: input.scope === "project" ? projectId(input.ownerId) : identifier(input.ownerId, `${input.scope}Id`) };
     if (withMemoryId) result.memoryId = identifier(input.memoryId, "memoryId");
     if (withPatch) {
         const patch = objectPayload(input.patch);
@@ -100,16 +100,17 @@ function thisPcTarget(value, { list = false } = {}) {
     if (list && input.limit !== undefined) out.limit = positiveInteger(input.limit, "limit", 1, 50);
     return out;
 }
-const SEARCH_TYPES = new Set(["conversations", "channels", "coworkers", "projects", "artifacts", "skills", "playbooks", "routines"]);
+const SEARCH_TYPES = new Set(["conversations", "channels", "coworkers", "projects", "artifacts", "skills", "playbooks", "routines", "memory", "jobs", "history"]);
 const PALETTE_IDS = new Set(["new-coworker", "new-team", "new-channel", "run-routine", "teach-skill", "open-computer", "search"]);
 function searchTarget(value) {
     if (value === undefined || value === null) return { query: "", types: [...SEARCH_TYPES], limit: 50 };
     const input = objectPayload(value);
-    exact(input, new Set(["query", "types", "projectId", "limit"]));
+    exact(input, new Set(["query", "types", "projectId", "limit", "status"]));
     const query = input.query === undefined ? "" : string(input.query, "query", 300);
     if (input.types !== undefined && (!Array.isArray(input.types) || input.types.length > SEARCH_TYPES.size || input.types.some((entry) => typeof entry !== "string" || !SEARCH_TYPES.has(entry)))) throw new Error("search types are invalid");
     const types = input.types === undefined ? [...SEARCH_TYPES] : [...new Set(input.types)];
-    return { query, types, ...(input.projectId === undefined ? {} : { projectId: projectId(input.projectId) }), limit: input.limit === undefined ? 50 : positiveInteger(input.limit, "limit", 1, 100) };
+    if (input.status !== undefined && !["active", "archived", "all"].includes(input.status)) throw new Error("search status is invalid");
+    return { query, types, ...(input.projectId === undefined ? {} : { projectId: projectId(input.projectId) }), ...(input.status === undefined ? {} : { status: input.status }), limit: input.limit === undefined ? 50 : positiveInteger(input.limit, "limit", 1, 100) };
 }
 function paletteArgs(value, allowed, label) { const input = objectPayload(value ?? {}); exact(input, allowed); return input; }
 function paletteTarget(value) {
@@ -301,6 +302,9 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "memory:delete": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true })),
     "memory:pin": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true, withPinned: true })),
     "memory:sourceTrace": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true })),
+    "memory:listSuggestions": spec(1024, empty),
+    "memory:approveSuggestion": spec(2048, (payload) => { const value = objectPayload(payload); exact(value, new Set(["suggestionId"])); return { suggestionId: identifier(value.suggestionId, "suggestionId") }; }),
+    "memory:rejectSuggestion": spec(2048, (payload) => { const value = objectPayload(payload); exact(value, new Set(["suggestionId"])); return { suggestionId: identifier(value.suggestionId, "suggestionId") }; }),
     "project:list": spec(2048, (payload) => projectTarget(payload, { list: true })),
     "project:get": spec(1024, (payload) => projectTarget(payload)),
     "project:create": spec(2048, (payload) => projectTarget(payload, { create: true })),

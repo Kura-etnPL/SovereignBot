@@ -9,6 +9,7 @@ const app = read("../ui/app.js");
 const voice = read("../ui/voice-controller.js");
 const productHubs = read("../ui/product-hubs-ui.js");
 const appsCatalog = read("../ui/apps-catalog-ui.js");
+const memoryUi = read("../ui/memory-ui.js");
 const css = read("../ui/style.css");
 
 test("V3 default shell is coworker-first rather than Goal/Control-Center-first", () => {
@@ -88,6 +89,14 @@ test("Apps Catalog is an independent user surface with honest lifecycle review",
     assert.match(appsCatalog, /Review before connecting/);
     assert.doesNotMatch(appsCatalog, /providerToken|sessionId|rawPath|workspacePath|adapter|transport|credential/);
     assert.match(css, /\.apps-catalog-card/);
+});
+
+test("Memory is a first-class scoped surface with safe source actions", () => {
+    for (const id of ["nav-memory", "view-memory", "memory-scope", "memory-owner", "memory-state", "memory-search", "memory-list", "memory-suggestions"]) assert.match(html, new RegExp(`id="${id}"`), id);
+    for (const expression of [/memory\.list/, /memory\.update/, /memory\.forget/, /memory\.delete/, /memory\.pin/, /memory\.sourceTrace/, /approveSuggestion/, /rejectSuggestion/, /sovereignbot:open-memory/]) assert.match(memoryUi, expression);
+    assert.match(app, /project\?\.projectId/);
+    assert.doesNotMatch(app, /const projectId = team\?\.id/);
+    assert.doesNotMatch(memoryUi, /workspacePath|providerToken|sessionId|rawPath/);
 });
 
 test("Worker Nodes copy matches the authenticated pairing surface", () => {

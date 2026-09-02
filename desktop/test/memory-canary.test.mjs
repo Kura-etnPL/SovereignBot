@@ -18,13 +18,17 @@ function harness(root) {
         { id: "team_a", name: "Alpha Team", coworkerIds: ["coworker_a", "coworker_b"], channels: [{ id: "channel_a", name: "Project", kind: "project", conversationId: "conv_a", workspaceId: "workspace_a" }] },
         { id: "team_b", name: "Beta Team", coworkerIds: ["coworker_b"], channels: [] },
     ];
+    const projects = {
+        project_aaaaaaaaaaaaaaaa: { projectId: "project_aaaaaaaaaaaaaaaa", workspaceId: "workspace_a", state: "active" },
+        project_bbbbbbbbbbbbbbbb: { projectId: "project_bbbbbbbbbbbbbbbb", workspaceId: "workspace_b", state: "active" },
+    };
     const coworkerStore = { get(id) { const value = coworkers.find((entry) => entry.id === id); if (!value) throw new Error(`unknown coworker: ${id}`); return value; }, list() { return { coworkers }; } };
     const teamService = { get(id) { const value = teams.find((entry) => entry.id === id); if (!value) throw new Error(`unknown team: ${id}`); return value; }, list() { return { teams }; } };
     const conversationStore = { get(id) { if (id !== conversation.id) throw new Error(`unknown conversation: ${id}`); return structuredClone(conversation); }, list() { return { conversations: [{ id: conversation.id }] }; } };
     const artifactStore = { get(id) { if (id !== "artifact_a") throw new Error(`unknown artifact: ${id}`); return { id, title: "Release Notes", conversationId: conversation.id }; } };
     const jobs = { getJob(id) { if (id !== "job_a") throw new Error(`unknown job: ${id}`); return { id, title: "Completed release job", status: "completed", ownerCoworkerId: "coworker_a", conversationId: conversation.id }; } };
     const services = { workspacePath(id) { return id === "workspace_a" ? join(root, "workspace-a") : undefined; } };
-    const make = (store = memory) => createMemoryService({ runtime: { memory: store }, services, coworkerStore, teamService, conversationStore, artifactStore, getJobs: () => jobs });
+    const make = (store = memory) => createMemoryService({ runtime: { memory: store }, services, coworkerStore, teamService, conversationStore, artifactStore, getJobs: () => jobs, projectResolver: (id) => projects[id] });
     return { memory, make };
 }
 
@@ -34,6 +38,9 @@ test("Memory production canary separates suggestion approval, three scopes, prov
         const { memory, make } = harness(root);
         const service = make();
         assert.deepEqual(validateV3IpcRequest("memory:list", { scope: "coworker", ownerId: "coworker_a", query: "release", limit: 10 }), { scope: "coworker", ownerId: "coworker_a", query: "release", limit: 10, includeForgotten: false });
+        assert.throws(() => validateV3IpcRequest("memory:list", { scope: "project", ownerId: "team_a" }), /Project identifier/);
+        assert.deepEqual(validateV3IpcRequest("memory:listSuggestions", {}), {});
+        assert.deepEqual(validateV3IpcRequest("memory:approveSuggestion", { suggestionId: "suggestion_aaaaaaaaaaaaaaaa" }), { suggestionId: "suggestion_aaaaaaaaaaaaaaaa" });
         assert.throws(() => validateV3IpcRequest("memory:update", { scope: "team", ownerId: "team_a", memoryId: "memory_a", patch: { content: "x", scope: "coworker" } }), /unexpected|authority|scope/);
         assert.throws(() => validateV3IpcRequest("memory:list", { scope: "team", ownerId: "team_a", budget: 1 }), /unexpected|budget/);
         await assert.rejects(() => service.suggest({ scope: "coworker", ownerId: "coworker_a", draft: { title: "Injected", content: "bad", scope: "team", approved: true }, source: { type: "conversation", sourceId: "conv_a" } }), /draft field is not allowed/);
@@ -41,13 +48,15 @@ test("Memory production canary separates suggestion approval, three scopes, prov
         const suggestions = await Promise.all([
             create("coworker", "coworker_a", "Private memory"),
             create("team", "team_a", "Shared memory"),
-            create("project", "team_a", "Project memory"),
+            create("project", "project_aaaaaaaaaaaaaaaa", "Project memory"),
         ]);
         assert.equal((await service.list({ scope: "coworker", ownerId: "coworker_a" })).memories.length, 0);
+        assert.equal((await service.listSuggestions()).suggestions.length, 3);
         await Promise.all(suggestions.map((entry) => service.approveSuggestion(entry.suggestionId)));
+        assert.equal((await service.listSuggestions()).suggestions.length, 0);
         assert.equal((await service.list({ scope: "coworker", ownerId: "coworker_a" })).memories[0].title, "Private memory");
         assert.equal((await service.list({ scope: "team", ownerId: "team_a" })).memories[0].title, "Shared memory");
-        assert.equal((await service.list({ scope: "project", ownerId: "team_a" })).memories[0].title, "Project memory");
+        assert.equal((await service.list({ scope: "project", ownerId: "project_aaaaaaaaaaaaaaaa" })).memories[0].title, "Project memory");
         const privateMemory = (await service.list({ scope: "coworker", ownerId: "coworker_a" })).memories[0];
         const sharedMemory = (await service.list({ scope: "team", ownerId: "team_a" })).memories[0];
         await assert.rejects(() => service.get({ scope: "coworker", ownerId: "coworker_b", memoryId: privateMemory?.id ?? "missing" }), /outside|not found/);
@@ -55,7 +64,10 @@ test("Memory production canary separates suggestion approval, three scopes, prov
 
         const updated = await service.update({ scope: "coworker", ownerId: "coworker_a", memoryId: privateMemory.id, patch: { title: "Edited memory", content: "Edited content", tags: ["edited"] } });
         assert.equal(updated.title, "Edited memory");
-        assert.deepEqual(await service.sourceTrace({ scope: "coworker", ownerId: "coworker_a", memoryId: privateMemory.id }), { type: "conversation", label: "Project Room" });
+        const trace = await service.sourceTrace({ scope: "coworker", ownerId: "coworker_a", memoryId: privateMemory.id });
+        assert.equal(trace.type, "conversation");
+        assert.equal(trace.label, "Project Room");
+        assert.deepEqual(trace.navigation, { view: "conversation", conversationId: "conv_a" });
         await service.pin({ scope: "coworker", ownerId: "coworker_a", memoryId: privateMemory.id, pinned: true });
         assert.equal((await service.get({ scope: "coworker", ownerId: "coworker_a", memoryId: privateMemory.id })).pinned, true);
         await service.forget({ scope: "coworker", ownerId: "coworker_a", memoryId: privateMemory.id });
@@ -63,7 +75,7 @@ test("Memory production canary separates suggestion approval, three scopes, prov
         assert.equal((await service.list({ scope: "coworker", ownerId: "coworker_a", includeForgotten: true })).memories[0].state, "forgotten");
         await service.delete({ scope: "team", ownerId: "team_a", memoryId: (await service.list({ scope: "team", ownerId: "team_a" })).memories[0].id });
 
-        const artifactSuggestion = await service.suggestFromArtifact({ scope: "project", ownerId: "team_a", draft: { title: "Artifact fact", content: "From artifact" }, source: { type: "artifact", sourceId: "artifact_a" } });
+        const artifactSuggestion = await service.suggestFromArtifact({ scope: "project", ownerId: "project_aaaaaaaaaaaaaaaa", draft: { title: "Artifact fact", content: "From artifact" }, source: { type: "artifact", sourceId: "artifact_a" } });
         await service.approveSuggestion(artifactSuggestion.suggestionId);
         const jobSuggestion = await service.suggestFromJob({ scope: "coworker", ownerId: "coworker_a", draft: { title: "Job fact", content: "From completed job" }, source: { type: "job", sourceId: "job_a" } });
         await service.approveSuggestion(jobSuggestion.suggestionId);
@@ -77,7 +89,7 @@ test("Memory production canary separates suggestion approval, three scopes, prov
         const restarted = make(new MemoryStore(join(root, "memory.jsonl")));
         assert.equal((await restarted.list({ scope: "coworker", ownerId: "coworker_a" })).memories.length, 1);
         assert.equal((await restarted.list({ scope: "team", ownerId: "team_a" })).memories.length, 2);
-        assert.equal((await restarted.list({ scope: "project", ownerId: "team_a" })).memories.length, 2);
+        assert.equal((await restarted.list({ scope: "project", ownerId: "project_aaaaaaaaaaaaaaaa" })).memories.length, 2);
     } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

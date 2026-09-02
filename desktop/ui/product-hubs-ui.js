@@ -445,17 +445,27 @@
       const status = document.createElement("p"); status.textContent = `${project.state === "archived" ? "Archived / 已归档" : "Active / 活跃"} · ${project.available ? "Available / 可用" : "Unavailable / 不可用"}`;
       const counts = document.createElement("p"); counts.className = "project-counts"; counts.textContent = Object.entries(project.counts ?? {}).map(([key, value]) => `${key}: ${value}`).join(" · ");
       const contents = document.createElement("p"); contents.textContent = (project.teams ?? []).map((team) => `${team.name} (${team.channels?.length ?? 0} channels)`).join(" · ") || "No Teams yet / 暂无团队";
+      const memory = document.createElement("p"); memory.className = "project-memory-summary"; memory.textContent = project.memory?.length ? `Memory / 记忆: ${project.memory.map((entry) => entry.title).join(" · ")}` : "Memory / 记忆: none yet";
       const actions = document.createElement("div"); actions.className = "detail-actions";
       actions.append(button("Open / 打开", async () => { await api.projects.open({ projectId: project.projectId }); const conversationId = project.teams?.[0]?.channels?.[0]?.conversationId; if (conversationId && typeof openConversation === "function") openConversation(conversationId); await refresh(); }));
       actions.append(button(project.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (project.state === "archived" ? api.projects.restore : api.projects.archive)({ projectId: project.projectId }); await refresh(); }));
       actions.append(button("Export / 导出", async () => copy(await api.projects.export({ projectId: project.projectId }))));
       actions.append(button("Backup / 备份", async () => { await api.projects.backup({ projectId: project.projectId }); setResult("Portable Project backup created / 可移植项目备份已创建"); }));
-      card.append(title, status, counts, contents, actions); root.append(card);
+      actions.append(button("Memory / 记忆", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId } }))));
+      card.append(title, status, counts, contents, memory, actions); root.append(card);
     }
     if (!projects.length) { const empty = document.createElement("p"); empty.textContent = "No Projects yet / 暂无项目"; root.append(empty); }
   }
   async function refresh() { ensureView(); try { const result = await api.projects.list({ includeArchived: true, limit: 50 }); render(result.projects ?? []); } catch (reason) { error(reason); } }
   window.addEventListener("DOMContentLoaded", () => { ensureView(); void refresh(); });
+  document.addEventListener("sovereignbot:open-project", async (event) => {
+    ensureView();
+    if (typeof switchView === "function") switchView("projects");
+    await refresh();
+    const projectId = event.detail?.projectId;
+    const switcher = $("project-switcher");
+    if (switcher && projectId && [...switcher.options].some((option) => option.value === projectId)) switcher.value = projectId;
+  });
 })();
 
 // Independent product pages. The original Product Hubs overview remains a
@@ -649,6 +659,7 @@
     for (const id of ["artifact-hub-filter-page", "artifact-hub-type-page", "computer-history-filter-page", "product-channel-filter-page"]) $(id)?.addEventListener("change", () => void refresh());
     $("product-channel-switch-page")?.addEventListener("change", (event) => openConversationSafe(event.target.value));
     api.onNavigate?.((target) => { if (navViews.has("nav-" + target) || ["product-hubs", "playbooks", "artifacts", "computer-history", "skills", "team-packs", "channels"].includes(target)) nav(target); });
+    document.addEventListener("sovereignbot:open-artifact", (event) => { if (event.detail?.artifactId) nav("artifacts"); });
     window.refreshIndependentProductPages = refresh;
   }
   window.addEventListener("DOMContentLoaded", setup);

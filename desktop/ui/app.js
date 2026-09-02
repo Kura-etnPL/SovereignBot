@@ -5,6 +5,7 @@ const state = {
   coworkers: [],
   conversations: [],
   teams: [],
+  projects: [],
   teamActivity: { events: [] },
   teamPacks: [],
   channelTemplates: [],
@@ -405,6 +406,17 @@ async function refreshTeams() {
   renderConnectedApps();
   renderTeamPackActions();
   renderSidebar();
+}
+
+async function refreshProjects() {
+  try {
+    const result = await window.sovereignbot.projects.list({ includeArchived: true, limit: 100 });
+    state.projects = result?.projects ?? [];
+  } catch (error) {
+    state.projects = state.projects ?? [];
+    const target = $("provider-action-result");
+    if (target && error) target.textContent = String(error?.message ?? error).slice(0, 200);
+  }
 }
 
 async function refreshRoster() {
@@ -898,6 +910,7 @@ function renderDetails(conversation) {
 }
 
 function memoryTarget(scope, ownerId) { return { scope, ownerId, limit: 20 }; }
+function memoryScopeTarget(scope, ownerId) { return { scope, ownerId }; }
 
 async function renderMemorySection(sectionId, listId, scope, ownerId) {
   const section = $(sectionId);
@@ -926,16 +939,16 @@ async function renderMemorySection(sectionId, listId, scope, ownerId) {
       const actions = document.createElement("div");
       actions.className = "detail-actions";
       const action = (label, handler) => { const button = document.createElement("button"); button.type = "button"; button.className = "quiet-action"; button.textContent = label; button.addEventListener("click", handler); actions.append(button); };
-      action(memory.pinned ? "Unpin" : "Pin", async () => { await window.sovereignbot.memory.pin({ ...memoryTarget(scope, ownerId), memoryId: memory.id, pinned: !memory.pinned }); await renderMemorySection(sectionId, listId, scope, ownerId); });
+      action(memory.pinned ? "Unpin" : "Pin", async () => { await window.sovereignbot.memory.pin({ ...memoryScopeTarget(scope, ownerId), memoryId: memory.id, pinned: !memory.pinned }); await renderMemorySection(sectionId, listId, scope, ownerId); });
       action("Edit", async () => {
         const next = window.prompt("Edit memory content", memory.content);
         if (next === null) return;
-        await window.sovereignbot.memory.update({ ...memoryTarget(scope, ownerId), memoryId: memory.id, patch: { title: memory.title, content: next, tags: memory.tags } });
+        await window.sovereignbot.memory.update({ ...memoryScopeTarget(scope, ownerId), memoryId: memory.id, patch: { title: memory.title, content: next, tags: memory.tags } });
         await renderMemorySection(sectionId, listId, scope, ownerId);
       });
-      action("Forget", async () => { await window.sovereignbot.memory.forget({ ...memoryTarget(scope, ownerId), memoryId: memory.id }); await renderMemorySection(sectionId, listId, scope, ownerId); });
-      action("Delete", async () => { if (!window.confirm("Delete this memory?")) return; await window.sovereignbot.memory.delete({ ...memoryTarget(scope, ownerId), memoryId: memory.id }); await renderMemorySection(sectionId, listId, scope, ownerId); });
-      action("Source", async () => { const trace = await window.sovereignbot.memory.sourceTrace({ ...memoryTarget(scope, ownerId), memoryId: memory.id }); source.textContent = `Source: ${trace?.label ?? "Unavailable"}`; });
+      action("Forget", async () => { await window.sovereignbot.memory.forget({ ...memoryScopeTarget(scope, ownerId), memoryId: memory.id }); await renderMemorySection(sectionId, listId, scope, ownerId); });
+      action("Delete", async () => { if (!window.confirm("Delete this memory?")) return; await window.sovereignbot.memory.delete({ ...memoryScopeTarget(scope, ownerId), memoryId: memory.id }); await renderMemorySection(sectionId, listId, scope, ownerId); });
+      action("Source", async () => { const trace = await window.sovereignbot.memory.sourceTrace({ ...memoryScopeTarget(scope, ownerId), memoryId: memory.id }); source.textContent = `Source: ${trace?.label ?? "Unavailable"}`; if (trace?.navigation?.conversationId && typeof openConversation === "function") openConversation(trace.navigation.conversationId); });
       row.append(title, content, source, actions);
       root.append(row);
     }
@@ -950,7 +963,9 @@ async function renderMemorySections(conversation, team) {
   const members = participantCoworkers(conversation);
   const coworkerId = conversation?.kind === "direct" ? members[0]?.id : undefined;
   const channel = team?.channels?.find((entry) => entry.conversationId === conversation?.id);
-  const projectId = team?.id ?? channel?.workspaceId;
+  if (team && !state.projects.length) await refreshProjects();
+  const project = team && state.projects.find((entry) => entry.teams?.some((candidate) => candidate.id === team.id) || entry.teams?.some((candidate) => candidate.channels?.some((candidateChannel) => candidateChannel.id === channel?.id)));
+  const projectId = project?.projectId;
   for (const [sectionId, listId, scope, ownerId] of [
     ["details-coworker-memory", "details-coworker-memory-list", "coworker", coworkerId],
     ["details-team-memory", "details-team-memory-list", "team", team?.id],
@@ -2113,7 +2128,7 @@ async function bootstrap() {
     return;
   }
 
-  const results = await Promise.allSettled([refreshCoworkers(), refreshConversations(), refreshTeams(), refreshRoster(), refreshSettingsData()]);
+  const results = await Promise.allSettled([refreshCoworkers(), refreshConversations(), refreshTeams(), refreshProjects(), refreshRoster(), refreshSettingsData()]);
   const rejected = results.filter((entry) => entry.status === "rejected");
   if (rejected.length) {
     const first = rejected[0]?.reason;

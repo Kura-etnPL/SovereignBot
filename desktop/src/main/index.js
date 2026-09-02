@@ -237,6 +237,7 @@ async function main() {
             if (!host?.runtime?.computer?.listComputers) throw new Error("Computer lease state is unavailable");
             return host.runtime.computer.listComputers();
         },
+        onChanged: () => search?.invalidate(),
     });
     connectedApps.setProjectScopeResolver((id) => projectService.resolveScope(id));
 
@@ -266,6 +267,7 @@ async function main() {
     let coworkerDispatcher;
     let teachOnce;
     let palette;
+    let search;
     let externalTeamControl;
     const memoryService = createMemoryService({
         runtime: host.runtime,
@@ -277,6 +279,7 @@ async function main() {
         artifactStore,
         getJobs: () => jobs,
         projectResolver: (projectId) => projectService.resolveProject(projectId),
+        onChanged: () => search?.invalidate(),
     });
     projectService.setMemoryService(memoryService);
     const productSurfaces = createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime: host.runtime, getRuntime: () => host.runtime });
@@ -288,7 +291,7 @@ async function main() {
         getRuntime: () => host.runtime,
         getBinding: (coworkerId) => host.rosterSummary()?.coworkerBindings?.[coworkerId],
     });
-    const search = createSearchService({
+    search = createSearchService({
         teamService,
         conversationStore,
         coworkerStore,
@@ -297,6 +300,9 @@ async function main() {
         skillStore,
         productSurfaces,
         getRoutines: () => routines?.list(),
+        memoryService,
+        getJobs: () => jobs,
+        getHistory: (payload) => productSurfaces.computerHistory(payload),
     });
     teamService.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => {
         const binding = host.rosterSummary()?.coworkerBindings?.[targetCoworkerId];
@@ -546,9 +552,7 @@ async function main() {
     }
 
     function bindHandlers() {
-        bindIpcChannels({
-            win,
-            handlers: {
+        const handlers = {
                 "app:handshake": async () => ({ ok: true, version: desktopVersion(), platform: process.platform, locale: app.getLocale(), language: services.getSettings().language, externalTeamControl: externalTeamControl?.status?.() }),
                 ...bridge.handlers,
                 "firstrun:getStatus": () => firstRun.getStatus(),
@@ -777,6 +781,9 @@ async function main() {
                 "memory:delete": (payload) => memoryService.delete(payload),
                 "memory:pin": (payload) => memoryService.pin(payload),
                 "memory:sourceTrace": (payload) => memoryService.sourceTrace(payload),
+                "memory:listSuggestions": () => memoryService.listSuggestions(),
+                "memory:approveSuggestion": ({ suggestionId }) => memoryService.approveSuggestion(suggestionId),
+                "memory:rejectSuggestion": ({ suggestionId }) => memoryService.rejectSuggestion(suggestionId),
                 "artifact:attachViaDialog": ({ conversationId }) => pickConversationAttachments({ win, dialog, artifactStore, conversationId }),
                 "artifact:reveal": ({ artifactId }) => {
                     const managedPath = artifactStore.managedPath(artifactId);
@@ -850,8 +857,24 @@ async function main() {
                 "externalController:pairingComplete": ({ offer, response, scopes, teamIds, projectIds, expiresAt } = {}) => externalControllerStore.completePairing(offer, response, { scopes, teamIds, projectIds, ...(expiresAt === undefined ? {} : { expiresAt }) }),
                 "externalController:revoke": ({ deviceId }) => externalControllerStore.revoke(deviceId),
                 "externalController:rotate": ({ deviceId }) => externalControllerStore.rotate(deviceId),
-            },
-        });
+        };
+        const searchMutationChannels = new Set([
+            "conversation:createDirect", "conversation:createTeam", "conversation:send", "conversation:redirect",
+            "artifact:attachViaDialog", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
+            "team:installPack", "team:importPack", "team:importPlaybook", "team:createChannelFromTemplate",
+            "playbook:create", "playbook:update", "playbook:archive", "playbook:restore", "playbook:duplicate", "playbook:import", "playbook:assign",
+            "channel:create", "channel:update", "channel:archive", "channel:restore",
+            "skill:create", "skill:update", "skill:archive", "skill:restore", "skill:assign", "skill:import",
+            "routine:create", "routine:archive", "routine:restore", "routine:setEnabled", "routine:remove", "routine:runNow", "routine:retry",
+            "eventTrigger:create", "eventTrigger:setEnabled", "eventTrigger:remove",
+            "goal:submit", "goal:cancel", "team:computerTask", "job:submit", "job:cancel", "job:pause", "job:resume", "job:approve", "job:dismiss",
+        ]);
+        for (const channel of searchMutationChannels) {
+            const handler = handlers[channel];
+            if (!handler) continue;
+            handlers[channel] = async (...args) => { const result = await handler(...args); search?.invalidate(); return result; };
+        }
+        bindIpcChannels({ win, handlers });
     }
 
     const start = async () => {

@@ -31,7 +31,7 @@ function publicName(value) { return portableText(value, MAX_NAME); }
 export function createProjectService({
     dataDir, services, teamService, coworkerStore, artifactStore, skillStore, connectedApps,
     getRoutines = () => undefined, getEventTriggers = () => undefined, getJobs = () => undefined,
-    getComputers = () => undefined, now = () => Date.now(), makeId = projectId,
+    getComputers = () => undefined, now = () => Date.now(), makeId = projectId, onChanged = () => {},
 } = {}) {
     if (!dataDir || !services?.workspacePath || !teamService?.list || !coworkerStore?.list)
         throw new Error("project service requires trusted workspace and product services");
@@ -70,6 +70,7 @@ export function createProjectService({
         return candidates;
     }
     function save() { saveJsonState(persistPath, { schema: PROJECTS_SCHEMA, projects }); }
+    function notifyChanged() { try { onChanged(); } catch {} }
     function ensureMigration() {
         let changed = false;
         const existing = new Set(projects.map((entry) => entry.workspaceId));
@@ -128,7 +129,7 @@ export function createProjectService({
             coworkers: [...a.coworkerIds].map((id) => { const coworker = coworkerStore.get(id); return { id, name: coworker.name }; }),
             counts: { teams: a.projectTeams.length, channels: a.channels.length, coworkers: a.coworkerIds.size, files: a.artifacts.length, artifacts: a.artifacts.length, skills: a.skills.length, playbooks: a.projectTeams.reduce((n, team) => n + (team.playbooks?.length ?? 0), 0), routines: a.projectRoutines.length, triggers: a.projectTriggers.length, memory: memories.length, connectedApps: a.apps.length },
             connectedApps: a.apps.map((app) => ({ id: app.id, name: app.name })),
-            memory: memories.map((entry) => ({ id: entry.id, title: entry.title, content: entry.content, tags: entry.tags, state: entry.state, pinned: entry.pinned })),
+            memory: memories.map((entry) => ({ id: entry.id, title: entry.title, content: entry.content, tags: entry.tags, state: entry.state, pinned: entry.pinned, source: entry.source })),
         };
     }
     async function portable(project) {
@@ -180,7 +181,7 @@ export function createProjectService({
             return { schema: PROJECTS_SCHEMA, projects: await Promise.all(result.map(publicProject)) };
         },
         async get(projectId) { return publicProject(requireProject(validId(projectId))); },
-        async open(projectId) { const project = requireProject(validId(projectId)); if (project.state === "archived") throw new Error("archived Project must be restored before opening"); project.lastOpenedAt = stamp(now); project.updatedAt = project.lastOpenedAt; save(); return publicProject(project); },
+        async open(projectId) { const project = requireProject(validId(projectId)); if (project.state === "archived") throw new Error("archived Project must be restored before opening"); project.lastOpenedAt = stamp(now); project.updatedAt = project.lastOpenedAt; save(); notifyChanged(); return publicProject(project); },
         async create(input = {}) {
             if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Project create payload must be an object");
             if (Object.keys(input).some((key) => key !== "name")) throw new Error("Project creation accepts only name; workspace authority is main-process-owned");
@@ -191,16 +192,16 @@ export function createProjectService({
             const createdAt = stamp(now);
             const project = { projectId: makeId(), name, workspaceId, state: "active", createdAt, updatedAt: createdAt };
             if (!PROJECT_ID.test(project.projectId) || projects.some((entry) => entry.projectId === project.projectId)) throw new Error("Project id factory returned an invalid or duplicate id");
-            projects.push(project); save(); return publicProject(project);
+            projects.push(project); save(); notifyChanged(); return publicProject(project);
         },
         async archive(projectId) {
             const project = requireProject(validId(projectId));
             if (project.state === "archived") return publicProject(project);
             const blockers = await activeBlockers(project);
             if (blockers.length) throw new Error(`Project cannot be archived safely: ${blockers.join("; ")}`);
-            project.state = "archived"; project.updatedAt = stamp(now); save(); return publicProject(project);
+            project.state = "archived"; project.updatedAt = stamp(now); save(); notifyChanged(); return publicProject(project);
         },
-        async restore(projectId) { const project = requireProject(validId(projectId)); project.state = "active"; project.updatedAt = stamp(now); save(); return publicProject(project); },
+        async restore(projectId) { const project = requireProject(validId(projectId)); project.state = "active"; project.updatedAt = stamp(now); save(); notifyChanged(); return publicProject(project); },
         async export(projectId) { return portable(requireProject(validId(projectId))); },
         async backup(projectId) {
             const project = requireProject(validId(projectId));

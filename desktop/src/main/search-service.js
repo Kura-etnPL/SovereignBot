@@ -1,5 +1,6 @@
 const SEARCH_SCHEMA = "sovereignbot.desktop.search.v1";
-const TYPES = new Set(["conversations", "channels", "coworkers", "projects", "artifacts", "skills", "playbooks", "routines"]);
+const TYPES = new Set(["conversations", "channels", "coworkers", "projects", "artifacts", "skills", "playbooks", "routines", "memory", "jobs", "history"]);
+const STATUSES = new Set(["active", "archived", "all"]);
 const MAX_QUERY = 300;
 const MAX_LIMIT = 100;
 
@@ -22,14 +23,19 @@ function normalizeTypes(value) {
     if (!Array.isArray(value) || value.length > TYPES.size || value.some((entry) => typeof entry !== "string" || !TYPES.has(entry))) throw new Error("search types are invalid");
     return [...new Set(value)];
 }
+function normalizeStatus(value) {
+    if (value === undefined || value === null) return "active";
+    if (typeof value !== "string" || !STATUSES.has(value)) throw new Error("search status is invalid");
+    return value;
+}
 function tokens(query) { return query.toLocaleLowerCase().split(/\s+/).filter(Boolean).slice(0, 12); }
-function scoreFor(record, query, extra = "") {
-    const haystack = [record.title, record.subtitle, extra].join(" ").toLocaleLowerCase();
+function scoreFor(record, query) {
+    const haystack = [record.title, record.subtitle, record.searchText].join(" ").toLocaleLowerCase();
     if (!query) return 0;
     let score = 0;
     for (const token of tokens(query)) {
         if (!haystack.includes(token)) return -1;
-        score += haystack === token ? 100 : record.title.toLocaleLowerCase().startsWith(token) ? 50 : 20;
+        score += record.title.toLocaleLowerCase().startsWith(token) ? 50 : haystack === token ? 100 : 20;
     }
     return score;
 }
@@ -40,52 +46,48 @@ function add(map, id, projectId) {
 }
 function onlyProject(ids) { return ids?.size === 1 ? [...ids][0] : undefined; }
 
-export function createSearchService({ teamService, conversationStore, coworkerStore, projectService, artifactStore, skillStore, productSurfaces, getRoutines } = {}) {
+export function createSearchService({ teamService, conversationStore, coworkerStore, projectService, artifactStore, skillStore, productSurfaces, getRoutines, memoryService, getJobs, getHistory } = {}) {
     if (!teamService?.list || !conversationStore?.list || !coworkerStore?.list || !projectService?.list || !projectService?.resolveScope) throw new Error("search service requires product stores and Project scope");
 
-    async function query(input = {}) {
-        if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("search request must be an object");
-        const queryText = normalizeQuery(input.query);
-        const selectedTypes = new Set(normalizeTypes(input.types));
-        const limit = input.limit === undefined ? 50 : input.limit;
-        if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) throw new Error(`search limit must be 1-${MAX_LIMIT}`);
-        if (Object.hasOwn(input, "projectId") && input.projectId !== undefined && input.projectId !== null && typeof input.projectId !== "string") throw new Error("projectId must be a Project identifier");
+    let index;
+    let indexPromise;
+    let generation = 0;
 
+    function invalidate() {
+        generation += 1;
+        index = undefined;
+        indexPromise = undefined;
+    }
+
+    async function buildIndex() {
         const projects = (await projectService.list({ includeArchived: true, limit: 100 })).projects ?? [];
-        const activeProjects = projects.filter((project) => project.state === "active" && project.available !== false);
-        const requestedProject = input.projectId ? activeProjects.find((project) => project.projectId === input.projectId) : undefined;
-        if (input.projectId && !requestedProject) return { schema: SEARCH_SCHEMA, query: queryText, results: [] };
-        const scopeProjectId = requestedProject?.projectId;
-        const teamProjects = new Map(), channelProjects = new Map(), conversationProjects = new Map(), coworkerProjects = new Map(), artifactProjects = new Map(), skillProjects = new Map(), playbookProjects = new Map(), routineProjects = new Map();
-        const archivedOnly = { teams: new Set(), channels: new Set(), conversations: new Set(), coworkers: new Set(), artifacts: new Set(), skills: new Set(), playbooks: new Set(), routines: new Set() };
+        const projectById = new Map(projects.map((project) => [project.projectId, project]));
         const projectWorkspace = new Map();
-        let unavailableProjectScope = false;
+        const teamProjects = new Map();
+        const channelProjects = new Map();
+        const conversationProjects = new Map();
+        const coworkerProjects = new Map();
+
         for (const project of projects) {
-            const active = project.state === "active" && project.available !== false;
-            const target = active ? null : archivedOnly;
             let scope;
-            try { scope = projectService.resolveScope(project.projectId); projectWorkspace.set(project.projectId, scope.workspaceId); } catch {
-                unavailableProjectScope = true;
-                for (const team of project.teams ?? []) {
-                    archivedOnly.teams.add(team.id);
-                    for (const channel of team.channels ?? []) { archivedOnly.channels.add(channel.id); if (channel.conversationId) archivedOnly.conversations.add(channel.conversationId); }
-                }
-                for (const coworker of project.coworkers ?? []) archivedOnly.coworkers.add(coworker.id);
-                continue;
+            try {
+                scope = projectService.resolveScope(project.projectId);
+            } catch {
+                scope = {
+                    workspaceId: undefined,
+                    teamIds: (project.teams ?? []).map((team) => team.id),
+                    channelIds: (project.teams ?? []).flatMap((team) => (team.channels ?? []).map((channel) => channel.id)),
+                    conversationIds: (project.teams ?? []).flatMap((team) => (team.channels ?? []).map((channel) => channel.conversationId).filter(Boolean)),
+                    coworkerIds: (project.coworkers ?? []).map((coworker) => coworker.id),
+                };
             }
-            for (const teamId of scope.teamIds) {
-                if (target) target.teams.add(teamId); else add(teamProjects, teamId, project.projectId);
-            }
-            for (const channelId of scope.channelIds) {
-                if (target) target.channels.add(channelId); else add(channelProjects, channelId, project.projectId);
-            }
-            for (const conversationId of scope.conversationIds) {
-                if (target) target.conversations.add(conversationId); else add(conversationProjects, conversationId, project.projectId);
-            }
-            for (const coworkerId of scope.coworkerIds) {
-                if (target) target.coworkers.add(coworkerId); else add(coworkerProjects, coworkerId, project.projectId);
-            }
+            projectWorkspace.set(project.projectId, scope.workspaceId);
+            for (const id of scope.teamIds ?? []) add(teamProjects, id, project.projectId);
+            for (const id of scope.channelIds ?? []) add(channelProjects, id, project.projectId);
+            for (const id of scope.conversationIds ?? []) add(conversationProjects, id, project.projectId);
+            for (const id of scope.coworkerIds ?? []) add(coworkerProjects, id, project.projectId);
         }
+
         const teams = teamService.list({ includeArchived: true })?.teams ?? [];
         const channels = teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         const conversations = conversationStore.list().conversations ?? [];
@@ -94,49 +96,119 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         const skills = skillStore?.list ? (skillStore.list({ includeArchived: true }).skills ?? []) : [];
         const playbooks = productSurfaces?.listPlaybooks ? (productSurfaces.listPlaybooks({ includeArchived: true }).playbooks ?? []) : [];
         const routines = getRoutines?.()?.routines ?? [];
-        if (unavailableProjectScope) for (const routine of routines) archivedOnly.routines.add(routine.id);
-        for (const artifact of artifacts) for (const project of conversationProjects.get(artifact.conversationId) ?? []) add(artifactProjects, artifact.id, project);
-        for (const skill of skills) for (const project of activeProjects) {
+        const jobs = getJobs?.()?.listJobs?.().jobs ?? [];
+        let history = [];
+        try { history = (await getHistory?.({ limit: 500 }))?.history ?? []; } catch {}
+        const artifactProjects = new Map();
+        const skillProjects = new Map();
+        const playbookProjects = new Map();
+        const routineProjects = new Map();
+        const jobProjects = new Map();
+        const historyProjects = new Map();
+        for (const artifact of artifacts) for (const projectId of conversationProjects.get(artifact.conversationId) ?? []) add(artifactProjects, artifact.id, projectId);
+        for (const skill of skills) for (const project of projects) {
             if ((skill.assignedTeamIds ?? []).some((id) => teamProjects.get(id)?.has(project.projectId)) || (skill.assignedCoworkerIds ?? []).some((id) => coworkerProjects.get(id)?.has(project.projectId))) add(skillProjects, skill.id, project.projectId);
         }
-        for (const playbook of playbooks) for (const project of activeProjects) {
+        for (const playbook of playbooks) for (const project of projects) {
             if ((playbook.assignedTeams ?? []).some((entry) => teamProjects.get(entry.id)?.has(project.projectId)) || (playbook.assignedChannels ?? []).some((entry) => channelProjects.get(entry.id)?.has(project.projectId))) add(playbookProjects, playbook.id, project.projectId);
         }
-        for (const skill of skills) for (const project of projects.filter((entry) => entry.state !== "active")) {
-            if ((skill.assignedTeamIds ?? []).some((id) => archivedOnly.teams.has(id)) || (skill.assignedCoworkerIds ?? []).some((id) => archivedOnly.coworkers.has(id))) archivedOnly.skills.add(skill.id);
-        }
-        for (const playbook of playbooks) for (const project of projects.filter((entry) => entry.state !== "active")) {
-            if ((playbook.assignedTeams ?? []).some((entry) => archivedOnly.teams.has(entry.id)) || (playbook.assignedChannels ?? []).some((entry) => archivedOnly.channels.has(entry.id))) archivedOnly.playbooks.add(playbook.id);
-        }
-        for (const artifact of artifacts) if (archivedOnly.conversations.has(artifact.conversationId)) archivedOnly.artifacts.add(artifact.id);
-        for (const routine of routines) for (const project of activeProjects) {
-            if (routine.workspaceId && projectWorkspace.get(project.projectId) === routine.workspaceId) add(routineProjects, routine.id, project.projectId);
-        }
-        for (const routine of routines) for (const project of projects.filter((entry) => entry.state !== "active")) {
-            if (routine.workspaceId && projectWorkspace.get(project.projectId) === routine.workspaceId) archivedOnly.routines.add(routine.id);
-        }
-        const result = [];
-        const emit = (type, entry, title, subtitle, projectIds, updatedAt, navigation = {}, searchText = "") => {
-            if (!selectedTypes.has(type) || entry?.state === "archived" || entry?.archived === true || archivedOnly[type]?.has(entry.id ?? entry.projectId)) return;
-            const ids = projectIds ?? new Set();
-            if (scopeProjectId && !ids.has(scopeProjectId)) return;
-            const projectId = onlyProject(ids) ?? scopeProjectId;
-            const record = { type, id: entry.id ?? entry.projectId, title: safeText(title, 180), subtitle: safeText(subtitle, 240), ...(projectId ? { projectId } : {}), updatedAt: safeText(updatedAt, 64), navigation: clone(navigation) };
-            const score = scoreFor(record, queryText, safeText(searchText, 2_000));
-            if (score >= 0) result.push({ ...record, score });
+        for (const routine of routines) for (const project of projects) if (routine.workspaceId && projectWorkspace.get(project.projectId) === routine.workspaceId) add(routineProjects, routine.id, project.projectId);
+        for (const job of jobs) for (const project of projects) if ((job.workspaceId && projectWorkspace.get(project.projectId) === job.workspaceId) || (job.conversationId && conversationProjects.get(job.conversationId)?.has(project.projectId))) add(jobProjects, job.id, project.projectId);
+        for (const entry of history) for (const projectId of coworkerProjects.get(entry.coworkerId) ?? []) add(historyProjects, entry.id, projectId);
+
+        const records = [];
+        const statusFor = (entry, projectIds) => {
+            if (entry?.state === "archived" || entry?.archived === true) return "archived";
+            if (projectIds?.size && ![...projectIds].some((id) => projectById.get(id)?.state === "active" && projectById.get(id)?.available !== false)) return "archived";
+            return "active";
         };
-        for (const project of activeProjects) emit("projects", project, project.name, "Project", new Set([project.projectId]), project.updatedAt, { view: "projects", projectId: project.projectId });
-        for (const channel of channels) emit("channels", channel, channel.name, `${channel.teamName} · Channel`, channelProjects.get(channel.id), channel.updatedAt, { view: "channels", channelId: channel.id, conversationId: channel.conversationId });
+        const emit = (type, entry, title, subtitle, projectIds, updatedAt, navigation = {}, searchText = "", explicitStatus) => {
+            const status = explicitStatus ?? statusFor(entry, projectIds);
+            const ids = projectIds ?? new Set();
+            const projectId = onlyProject(ids);
+            records.push({
+                type,
+                id: entry.id ?? entry.projectId,
+                title: safeText(title, 180),
+                subtitle: safeText(subtitle, 240),
+                ...(projectId ? { projectId } : {}),
+                projectIds: [...ids],
+                status,
+                updatedAt: safeText(updatedAt, 64),
+                navigation: clone(navigation),
+                searchText: safeText(searchText, 20_000),
+            });
+        };
+        for (const project of projects) emit("projects", project, project.name, "Project", new Set([project.projectId]), project.updatedAt, { view: "projects", projectId: project.projectId }, project.name, project.state === "active" && project.available !== false ? "active" : "archived");
+        for (const channel of channels) emit("channels", channel, channel.name, `${channel.teamName} · Channel`, channelProjects.get(channel.id), channel.updatedAt, { view: "channels", channelId: channel.id, conversationId: channel.conversationId }, channel.instructions);
         for (const conversation of conversations) emit("conversations", conversation, conversation.title, conversation.kind === "direct" ? "Conversation" : `${conversation.messageCount ?? 0} messages`, conversationProjects.get(conversation.id), conversation.updatedAt, { view: "conversation", conversationId: conversation.id }, conversation.lastMessage?.textPreview);
         for (const coworker of coworkers) emit("coworkers", coworker, coworker.name, coworker.role, coworkerProjects.get(coworker.id), coworker.updatedAt, { view: "conversation", coworkerId: coworker.id }, coworker.role);
         for (const artifact of artifacts) emit("artifacts", artifact, artifact.title, artifact.fileName, artifactProjects.get(artifact.id), artifact.createdAt, { view: "artifacts", artifactId: artifact.id, conversationId: artifact.conversationId }, artifact.fileName);
         for (const skill of skills) emit("skills", skill, skill.name, skill.description, skillProjects.get(skill.id), skill.updatedAt, { view: "skills", skillId: skill.id }, skill.description);
         for (const playbook of playbooks) emit("playbooks", playbook, playbook.name, playbook.description, playbookProjects.get(playbook.id), playbook.updatedAt, { view: "playbooks", playbookId: playbook.id }, playbook.description);
         for (const routine of routines) emit("routines", routine, routine.name, routine.enabled ? "Enabled routine" : "Disabled routine", routineProjects.get(routine.id), routine.updatedAt, { view: "routines", routineId: routine.id }, routine.instruction);
-        result.sort((a, b) => b.score - a.score || String(b.updatedAt).localeCompare(String(a.updatedAt)) || String(a.title).localeCompare(String(b.title)));
-        return { schema: SEARCH_SCHEMA, query: queryText, results: result.slice(0, limit) };
+        for (const job of jobs) {
+            const safeJob = { id: job.id, title: job.title, status: job.status, updatedAt: job.updatedAt ?? job.createdAt };
+            emit("jobs", safeJob, job.title, `${job.status} · Job`, jobProjects.get(job.id), safeJob.updatedAt, { view: "work", jobId: job.id }, `${job.objective ?? ""} ${job.outcomeSummary ?? ""} ${job.status ?? ""}`);
+        }
+        for (const entry of history) emit("history", entry, entry.activity ?? entry.eventType, `${entry.source ?? "audit"} · Computer History`, historyProjects.get(entry.id), entry.timestamp, { view: "computer-history" }, `${entry.summary ?? ""} ${entry.app ?? ""} ${entry.site ?? ""}`);
+
+        if (memoryService?.indexRecords) {
+            for (const memory of await memoryService.indexRecords()) {
+                const projectIds = memory.scope === "project" ? new Set([memory.ownerId]) : memory.scope === "team" ? teamProjects.get(memory.ownerId) : coworkerProjects.get(memory.ownerId);
+                emit("memory", memory, memory.title, `${memory.scope} memory · ${memory.source?.label ?? "Source unavailable"}`, projectIds, memory.updatedAt, {
+                    view: "memory",
+                    memoryId: memory.id,
+                    scope: memory.scope,
+                    ownerId: memory.ownerId,
+                    ...(onlyProject(projectIds) ? { projectId: onlyProject(projectIds) } : {}),
+                }, `${memory.content} ${(memory.tags ?? []).join(" ")} ${memory.source?.label ?? ""}`, memory.state === "active" ? undefined : "archived");
+            }
+        }
+        return { records, projects, indexedAt: new Date().toISOString() };
     }
-    return { schema: SEARCH_SCHEMA, query };
+
+    async function getIndex() {
+        if (index) return index;
+        if (!indexPromise) {
+            const startedGeneration = generation;
+            indexPromise = buildIndex().then((value) => {
+                if (generation !== startedGeneration) { indexPromise = undefined; return getIndex(); }
+                index = value;
+                indexPromise = undefined;
+                return value;
+            }).catch((error) => { indexPromise = undefined; throw error; });
+        }
+        return indexPromise;
+    }
+
+    async function query(input = {}) {
+        if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("search request must be an object");
+        const queryText = normalizeQuery(input.query);
+        const selectedTypes = new Set(normalizeTypes(input.types));
+        const status = normalizeStatus(input.status);
+        const limit = input.limit === undefined ? 50 : input.limit;
+        if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) throw new Error(`search limit must be 1-${MAX_LIMIT}`);
+        if (Object.hasOwn(input, "projectId") && input.projectId !== undefined && input.projectId !== null && typeof input.projectId !== "string") throw new Error("projectId must be a Project identifier");
+        const built = await getIndex();
+        const requestedProject = input.projectId ? built.projects.find((project) => project.projectId === input.projectId) : undefined;
+        if (input.projectId && (!requestedProject || (requestedProject.state !== "active" && status === "active"))) return { schema: SEARCH_SCHEMA, query: queryText, status, results: [] };
+        const scopeProjectId = requestedProject?.projectId;
+        const { records, indexedAt } = built;
+        const result = [];
+        for (const record of records) {
+            if (!selectedTypes.has(record.type) || (status !== "all" && record.status !== status)) continue;
+            if (scopeProjectId && !record.projectIds.includes(scopeProjectId)) continue;
+            const score = scoreFor(record, queryText);
+            if (score < 0) continue;
+            const { searchText: _searchText, projectIds: _projectIds, ...publicRecord } = record;
+            if (scopeProjectId && !publicRecord.projectId) publicRecord.projectId = scopeProjectId;
+            result.push({ ...publicRecord, score, action: "open" });
+        }
+        result.sort((a, b) => b.score - a.score || String(b.updatedAt).localeCompare(String(a.updatedAt)) || String(a.title).localeCompare(String(b.title)));
+        return { schema: SEARCH_SCHEMA, query: queryText, status, indexedAt, results: result.slice(0, limit) };
+    }
+    return { schema: SEARCH_SCHEMA, query, invalidate, refresh: async () => { invalidate(); const built = await getIndex(); return { schema: SEARCH_SCHEMA, indexedAt: built.indexedAt, count: built.records.length }; } };
 }
 
-export { SEARCH_SCHEMA, TYPES as SEARCH_TYPES };
+export { SEARCH_SCHEMA, TYPES as SEARCH_TYPES, STATUSES as SEARCH_STATUSES };

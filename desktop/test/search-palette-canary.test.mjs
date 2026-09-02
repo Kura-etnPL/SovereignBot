@@ -22,6 +22,8 @@ const playbookA = "playbook_aaaaaaaaaaaaaaaa";
 const playbookB = "playbook_bbbbbbbbbbbbbbbb";
 const routineA = "routine_aaaaaaaaaaaaaaaa";
 const routineB = "routine_bbbbbbbbbbbbbbbb";
+const jobA = "job_aaaaaaaaaaaaaaaa";
+const historyA = "history_aaaaaaaaaaaaaaaa";
 
 function fixture() {
     const projects = [
@@ -38,7 +40,11 @@ function fixture() {
     const skills = [{ id: skillA, name: "Alpha Skill", description: "Alpha method", state: "active", assignedTeamIds: [teamA], assignedCoworkerIds: [], updatedAt: "2026-09-02T00:00:02.000Z" }, { id: skillB, name: "Beta Skill", description: "Beta method", state: "active", assignedTeamIds: [teamB], assignedCoworkerIds: [], updatedAt: "2026-09-02T00:00:01.000Z" }];
     const playbooks = [{ id: playbookA, name: "Alpha Playbook", description: "Alpha method", state: "active", assignedTeams: [{ id: teamA }], assignedChannels: [], updatedAt: "2026-09-02T00:00:02.000Z" }, { id: playbookB, name: "Beta Playbook", description: "Beta method", state: "active", assignedTeams: [{ id: teamB }], assignedChannels: [], updatedAt: "2026-09-02T00:00:01.000Z" }];
     const routines = [{ id: routineA, name: "Alpha Routine", enabled: true, coworkerId: coworkerA, workspaceId: "ws_alpha", updatedAt: "2026-09-02T00:00:02.000Z" }, { id: routineB, name: "Beta Routine", enabled: false, coworkerId: coworkerB, workspaceId: "ws_beta", updatedAt: "2026-09-02T00:00:01.000Z" }];
-    const projectsApi = { list: async () => ({ projects }), resolveProject: (id) => ({ workspaceId: id === projectA ? "ws_alpha" : "ws_beta" }), resolveScope: (id) => id === projectA ? { projectId: id, workspaceId: "ws_alpha", teamIds: [teamA], channelIds: [channelA], conversationIds: [conversationA], coworkerIds: [coworkerA] } : { projectId: id, workspaceId: "ws_beta", teamIds: [teamB], channelIds: [channelB], conversationIds: [conversationB], coworkerIds: [coworkerB] } };
+    const jobs = [{ id: jobA, title: "Alpha release job", objective: "Review Alpha release", status: "completed", conversationId: conversationA, updatedAt: "2026-09-02T00:00:02.000Z" }];
+    const history = [{ id: historyA, activity: "Alpha snapshot", eventType: "computer.snapshot", source: "computer", summary: "Alpha workspace snapshot", coworkerId: coworkerA, timestamp: "2026-09-02T00:00:02.000Z", status: "completed" }];
+    const memoryRows = [{ id: "mem_aaaaaaaaaaaaaaaa", title: "Alpha durable memory", content: "Alpha release checklist", tags: ["release"], scope: "project", ownerId: projectA, state: "active", updatedAt: "2026-09-02T00:00:03.000Z", source: { type: "conversation", label: "Alpha Conversation", navigation: { view: "conversation", conversationId: conversationA } } }];
+    let projectListCalls = 0;
+    const projectsApi = { list: async () => { projectListCalls += 1; return { projects }; }, resolveProject: (id) => ({ workspaceId: id === projectA ? "ws_alpha" : "ws_beta" }), resolveScope: (id) => id === projectA ? { projectId: id, workspaceId: "ws_alpha", teamIds: [teamA], channelIds: [channelA], conversationIds: [conversationA], coworkerIds: [coworkerA] } : { projectId: id, workspaceId: "ws_beta", teamIds: [teamB], channelIds: [channelB], conversationIds: [conversationB], coworkerIds: [coworkerB] } };
     const service = createSearchService({
         projectService: projectsApi,
         teamService: { list: () => ({ teams }) },
@@ -48,12 +54,15 @@ function fixture() {
         skillStore: { list: () => ({ skills }) },
         productSurfaces: { listPlaybooks: () => ({ playbooks }) },
         getRoutines: () => ({ routines }),
+        memoryService: { indexRecords: async () => memoryRows },
+        getJobs: () => ({ listJobs: () => ({ jobs }) }),
+        getHistory: async () => ({ history }),
     });
-    return { service, projectsApi, routines };
+    return { service, projectsApi, routines, memoryRows, getProjectListCalls: () => projectListCalls };
 }
 
 test("global search is bounded, typed, recent/relevant, and Project scoped", async () => {
-    const { service } = fixture();
+    const { service, getProjectListCalls, memoryRows } = fixture();
     const result = await service.query({ query: "Alpha", limit: 100 });
     assert.ok(result.results.some((entry) => entry.type === "projects" && entry.id === projectA));
     assert.ok(result.results.some((entry) => entry.type === "channels" && entry.id === channelA));
@@ -62,14 +71,28 @@ test("global search is bounded, typed, recent/relevant, and Project scoped", asy
     assert.ok(result.results.some((entry) => entry.type === "skills" && entry.id === skillA));
     assert.ok(result.results.some((entry) => entry.type === "playbooks" && entry.id === playbookA));
     assert.ok(result.results.some((entry) => entry.type === "routines" && entry.id === routineA));
+    assert.ok(result.results.some((entry) => entry.type === "jobs" && entry.id === jobA));
+    assert.ok(result.results.some((entry) => entry.type === "history" && entry.id === historyA));
+    const memory = result.results.find((entry) => entry.type === "memory" && entry.id === "mem_aaaaaaaaaaaaaaaa");
+    assert.ok(memory);
+    assert.deepEqual(memory.navigation, { view: "memory", memoryId: "mem_aaaaaaaaaaaaaaaa", scope: "project", ownerId: projectA, projectId: projectA });
+    assert.equal(memory.action, "open");
     assert.ok(result.results.every((entry) => !["path", "cwd", "session", "provider", "account", "authority"].some((term) => JSON.stringify(entry).toLowerCase().includes(term))));
     const scoped = await service.query({ query: "Beta", projectId: projectA, limit: 100 });
     assert.deepEqual(scoped.results, []);
     const archived = await service.query({ query: "Archived", limit: 100 });
     assert.deepEqual(archived.results, []);
+    const archivedVisible = await service.query({ query: "Archived", status: "archived", limit: 100 });
+    assert.ok(archivedVisible.results.some((entry) => entry.type === "projects"));
     const typed = await service.query({ query: "Alpha", types: ["skills"] });
     assert.ok(typed.results.every((entry) => entry.type === "skills"));
     assert.ok(result.results[0].score >= result.results.at(-1).score);
+    await service.query({ query: "Alpha", limit: 1 });
+    assert.equal(getProjectListCalls(), 1);
+    memoryRows.push({ id: "mem_bbbbbbbbbbbbbbbb", title: "Beta durable memory", content: "Beta review note", tags: ["review"], scope: "project", ownerId: projectB, state: "active", updatedAt: "2026-09-02T00:00:04.000Z", source: { type: "fact", label: "Approved durable fact" } });
+    assert.equal((await service.query({ query: "Beta", types: ["memory"], limit: 100 })).results.length, 0);
+    service.invalidate();
+    assert.equal((await service.query({ query: "Beta", types: ["memory"], limit: 100 })).results[0].id, "mem_bbbbbbbbbbbbbbbb");
 });
 
 test("search treats path, URL, and shell-looking input as data and never exposes it", async () => {
@@ -105,7 +128,7 @@ test("palette exposes only seven fixed actions and delegates to trusted callback
 });
 
 test("Search and Palette IPC schemas reject authority and unknown fields", () => {
-    assert.deepEqual(validateV3IpcRequest("search:query", { query: "alpha", types: ["projects"], limit: 10 }), { query: "alpha", types: ["projects"], limit: 10 });
+    assert.deepEqual(validateV3IpcRequest("search:query", { query: "alpha", types: ["memory"], status: "archived", limit: 10 }), { query: "alpha", types: ["memory"], status: "archived", limit: 10 });
     assert.throws(() => validateV3IpcRequest("search:query", { query: "x", cwd: "E:\\private" }), /unexpected request field|not accepted/);
     assert.throws(() => validateV3IpcRequest("palette:execute", { paletteId: "run-routine", args: { routineId: routineA }, command: "whoami" }), /not accepted|unexpected request field/);
     assert.throws(() => validateV3IpcRequest("palette:execute", { paletteId: "open-computer", args: { coworkerId: coworkerA, agentId: "forged" } }), /unexpected request field/);
