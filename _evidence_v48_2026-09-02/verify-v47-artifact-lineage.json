@@ -1,0 +1,418 @@
+{
+  "at": "2026-09-02T13:39:24.897Z",
+  "checks": {
+    "gate window stays hidden": true,
+    "renderer exposes the bounded artifact lifecycle": true,
+    "revised-version picker is main-process-owned and cancel-safe": true,
+    "history IPC exposes the revised version lineage": true,
+    "initial public artifact projection is path and authority free": true,
+    "Files & Artifacts page renders inspect, selectable history, revise, and restore actions": true,
+    "Hub History action exposes selectable v1 and v2 restore rows": true,
+    "Selecting v1 restores A as v3 while retaining v1 and revised v2": true,
+    "restored public projection preserves Conversation and Coworker lineage": true,
+    "restored public artifact projection is path and authority free": true,
+    "same-store metadata records an append-only A→B→A family": true,
+    "source managed bytes remain unchanged": true,
+    "same hidden renderer after service restart reloads all three versions": true,
+    "restart preserves source Conversation, Project workspace, and Coworker lineage": true,
+    "restart public projections remain path and authority free": true
+  },
+  "sourceId": "artifact_8d41d529e562cfe6",
+  "revisedId": "artifact_7f72168dc75199d4",
+  "restoredId": "artifact_d605902ed8a59e1c",
+  "firstHistory": {
+    "artifacts": [
+      {
+        "id": "artifact_7f72168dc75199d4",
+        "title": "P10 release report",
+        "fileName": "revision.md",
+        "mimeType": "text/markdown",
+        "size": 17,
+        "createdAt": "2026-09-02T13:39:21.161Z",
+        "version": 2,
+        "artifactFamilyId": "artifact_8d41d529e562cfe6",
+        "parentArtifactId": "artifact_8d41d529e562cfe6",
+        "creator": {
+          "id": "coworker_e5197ece3c7571a9",
+          "name": "Chief of Staff"
+        },
+        "coworkerId": "coworker_e5197ece3c7571a9",
+        "conversationId": "conv_e959b68b293121d0"
+      },
+      {
+        "id": "artifact_8d41d529e562cfe6",
+        "title": "P10 release report",
+        "fileName": "release.md",
+        "mimeType": "text/markdown",
+        "size": 17,
+        "createdAt": "2026-09-02T13:39:21.156Z",
+        "version": 1,
+        "artifactFamilyId": "artifact_8d41d529e562cfe6",
+        "creator": {
+          "id": "coworker_e5197ece3c7571a9",
+          "name": "Chief of Staff"
+        },
+        "coworkerId": "coworker_e5197ece3c7571a9",
+        "conversationId": "conv_e959b68b293121d0"
+      }
+    ]
+  },
+  "afterRestore": {
+    "list": {
+      "schema": "sovereignbot.desktop.artifacts.v1",
+      "artifacts": [
+        {
+          "id": "artifact_d605902ed8a59e1c",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "sha256": "b9940dc3bf45f1e82396a2d0bd33b71702c7eb5b45901849dacf98967c942fba",
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "version": 3,
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "sourceKind": "coworker",
+          "workspaceId": "workspace_p10",
+          "createdByCoworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "createdAt": "2026-09-02T13:39:23.210Z"
+        },
+        {
+          "id": "artifact_7f72168dc75199d4",
+          "title": "P10 release report",
+          "fileName": "revision.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "sha256": "92249cd3a369428770c889d7dc98b3733556dc5a3a1e57c0b14afc8c35ff176c",
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "version": 2,
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "sourceKind": "user",
+          "workspaceId": "workspace_p10",
+          "createdByCoworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "createdAt": "2026-09-02T13:39:21.161Z"
+        },
+        {
+          "id": "artifact_8d41d529e562cfe6",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "sha256": "b9940dc3bf45f1e82396a2d0bd33b71702c7eb5b45901849dacf98967c942fba",
+          "sourceKind": "coworker",
+          "workspaceId": "workspace_p10",
+          "createdByCoworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "version": 1,
+          "createdAt": "2026-09-02T13:39:21.156Z"
+        }
+      ]
+    },
+    "history": {
+      "artifacts": [
+        {
+          "id": "artifact_d605902ed8a59e1c",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "createdAt": "2026-09-02T13:39:23.210Z",
+          "version": 3,
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "creator": {
+            "id": "coworker_e5197ece3c7571a9",
+            "name": "Chief of Staff"
+          },
+          "coworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0"
+        },
+        {
+          "id": "artifact_7f72168dc75199d4",
+          "title": "P10 release report",
+          "fileName": "revision.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "createdAt": "2026-09-02T13:39:21.161Z",
+          "version": 2,
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "creator": {
+            "id": "coworker_e5197ece3c7571a9",
+            "name": "Chief of Staff"
+          },
+          "coworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0"
+        },
+        {
+          "id": "artifact_8d41d529e562cfe6",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "createdAt": "2026-09-02T13:39:21.156Z",
+          "version": 1,
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "creator": {
+            "id": "coworker_e5197ece3c7571a9",
+            "name": "Chief of Staff"
+          },
+          "coworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0"
+        }
+      ]
+    },
+    "previews": {
+      "source": {
+        "artifact": {
+          "id": "artifact_8d41d529e562cfe6",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "sha256": "b9940dc3bf45f1e82396a2d0bd33b71702c7eb5b45901849dacf98967c942fba",
+          "sourceKind": "coworker",
+          "workspaceId": "workspace_p10",
+          "createdByCoworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "version": 1,
+          "createdAt": "2026-09-02T13:39:21.156Z"
+        },
+        "preview": "# P10 revision A\n",
+        "truncated": false
+      },
+      "revised": {
+        "artifact": {
+          "id": "artifact_7f72168dc75199d4",
+          "title": "P10 release report",
+          "fileName": "revision.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "sha256": "92249cd3a369428770c889d7dc98b3733556dc5a3a1e57c0b14afc8c35ff176c",
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "version": 2,
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "sourceKind": "user",
+          "workspaceId": "workspace_p10",
+          "createdByCoworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "createdAt": "2026-09-02T13:39:21.161Z"
+        },
+        "preview": "# P10 revision B\n",
+        "truncated": false
+      }
+    },
+    "page": {
+      "cards": [
+        "P10 release report\nType: text/markdownVersion: v3Creator: Chief of StaffTeam: —Channel: —Created: 2026-09-02T13:39:23.210ZHistory: restored · 2026-09-02T13:39:23.210ZStatus: available\nPreview / 预览\nOpen / 打开\nReveal / 显示\nHistory / 历史\nRestore as new version / 恢复为新版本\nRevise with local file / 选择文件生成修订版\nGo to conversation / 前往会话"
+      ]
+    }
+  },
+  "restartProjection": {
+    "list": {
+      "schema": "sovereignbot.desktop.artifacts.v1",
+      "artifacts": [
+        {
+          "id": "artifact_d605902ed8a59e1c",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "sha256": "b9940dc3bf45f1e82396a2d0bd33b71702c7eb5b45901849dacf98967c942fba",
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "version": 3,
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "sourceKind": "coworker",
+          "workspaceId": "workspace_p10",
+          "createdByCoworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "createdAt": "2026-09-02T13:39:23.210Z"
+        },
+        {
+          "id": "artifact_7f72168dc75199d4",
+          "title": "P10 release report",
+          "fileName": "revision.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "sha256": "92249cd3a369428770c889d7dc98b3733556dc5a3a1e57c0b14afc8c35ff176c",
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "version": 2,
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "sourceKind": "user",
+          "workspaceId": "workspace_p10",
+          "createdByCoworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "createdAt": "2026-09-02T13:39:21.161Z"
+        },
+        {
+          "id": "artifact_8d41d529e562cfe6",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "sha256": "b9940dc3bf45f1e82396a2d0bd33b71702c7eb5b45901849dacf98967c942fba",
+          "sourceKind": "coworker",
+          "workspaceId": "workspace_p10",
+          "createdByCoworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "version": 1,
+          "createdAt": "2026-09-02T13:39:21.156Z"
+        }
+      ]
+    },
+    "history": {
+      "artifacts": [
+        {
+          "id": "artifact_d605902ed8a59e1c",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "createdAt": "2026-09-02T13:39:23.210Z",
+          "version": 3,
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "creator": {
+            "id": "coworker_e5197ece3c7571a9",
+            "name": "Chief of Staff"
+          },
+          "coworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0"
+        },
+        {
+          "id": "artifact_7f72168dc75199d4",
+          "title": "P10 release report",
+          "fileName": "revision.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "createdAt": "2026-09-02T13:39:21.161Z",
+          "version": 2,
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "creator": {
+            "id": "coworker_e5197ece3c7571a9",
+            "name": "Chief of Staff"
+          },
+          "coworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0"
+        },
+        {
+          "id": "artifact_8d41d529e562cfe6",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "createdAt": "2026-09-02T13:39:21.156Z",
+          "version": 1,
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "creator": {
+            "id": "coworker_e5197ece3c7571a9",
+            "name": "Chief of Staff"
+          },
+          "coworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0"
+        }
+      ]
+    },
+    "hub": {
+      "artifacts": [
+        {
+          "id": "artifact_d605902ed8a59e1c",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "createdAt": "2026-09-02T13:39:23.210Z",
+          "version": 3,
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "creator": {
+            "id": "coworker_e5197ece3c7571a9",
+            "name": "Chief of Staff"
+          },
+          "coworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "history": [
+            {
+              "event": "restored",
+              "timestamp": "2026-09-02T13:39:23.210Z",
+              "version": 3,
+              "artifactId": "artifact_d605902ed8a59e1c",
+              "parentArtifactId": "artifact_8d41d529e562cfe6",
+              "creator": {
+                "id": "coworker_e5197ece3c7571a9",
+                "name": "Chief of Staff"
+              }
+            }
+          ],
+          "status": "available"
+        }
+      ]
+    },
+    "previews": {
+      "source": {
+        "artifact": {
+          "id": "artifact_8d41d529e562cfe6",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "sha256": "b9940dc3bf45f1e82396a2d0bd33b71702c7eb5b45901849dacf98967c942fba",
+          "sourceKind": "coworker",
+          "workspaceId": "workspace_p10",
+          "createdByCoworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "version": 1,
+          "createdAt": "2026-09-02T13:39:21.156Z"
+        },
+        "preview": "# P10 revision A\n",
+        "truncated": false
+      },
+      "revised": {
+        "artifact": {
+          "id": "artifact_7f72168dc75199d4",
+          "title": "P10 release report",
+          "fileName": "revision.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "sha256": "92249cd3a369428770c889d7dc98b3733556dc5a3a1e57c0b14afc8c35ff176c",
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "version": 2,
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "sourceKind": "user",
+          "workspaceId": "workspace_p10",
+          "createdByCoworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "createdAt": "2026-09-02T13:39:21.161Z"
+        },
+        "preview": "# P10 revision B\n",
+        "truncated": false
+      },
+      "restored": {
+        "artifact": {
+          "id": "artifact_d605902ed8a59e1c",
+          "title": "P10 release report",
+          "fileName": "release.md",
+          "mimeType": "text/markdown",
+          "size": 17,
+          "sha256": "b9940dc3bf45f1e82396a2d0bd33b71702c7eb5b45901849dacf98967c942fba",
+          "artifactFamilyId": "artifact_8d41d529e562cfe6",
+          "version": 3,
+          "parentArtifactId": "artifact_8d41d529e562cfe6",
+          "sourceKind": "coworker",
+          "workspaceId": "workspace_p10",
+          "createdByCoworkerId": "coworker_e5197ece3c7571a9",
+          "conversationId": "conv_e959b68b293121d0",
+          "createdAt": "2026-09-02T13:39:23.210Z"
+        },
+        "preview": "# P10 revision A\n",
+        "truncated": false
+      }
+    }
+  }
+}
