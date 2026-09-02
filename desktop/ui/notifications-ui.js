@@ -103,14 +103,12 @@
     } else if (target === "artifacts") {
       $("nav-artifacts")?.click();
     } else if (target === "conversation" && source.conversationId) {
-      const convId = String(source.conversationId);
-      const convButton = document.querySelector("#conversation-list [data-conversation-id=\"" + CSS.escape(convId) + "\"]");
-      if (convButton) {
-        convButton.click();
+      const convId = String(source.conversationId).trim();
+      if (convId) {
+        document.dispatchEvent(new CustomEvent("sovereignbot:navigate-conversation", {
+          detail: { conversationId: convId }
+        }));
       }
-      document.dispatchEvent(new CustomEvent("sovereignbot:navigate-conversation", {
-        detail: { conversationId: convId }
-      }));
     }
   }
 
@@ -275,6 +273,7 @@
         }
       }
     } catch (err) {
+      if (generation !== refreshGeneration) return;
       setStatus("");
       setError(err.message || String(err));
     }

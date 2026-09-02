@@ -170,9 +170,17 @@ export async function runVerifyP17NotificationCenter({ app }) {
   try {
     fixture = makeFixture(dataDir);
 
-    // Create a real coworker and conversation for safe conversation navigation test
+    // Create a real coworker and team so conversation belongs to a legitimate team channel
     const testCoworker = fixture.coworkerStore.create({ name: "Alpha", role: "Review Specialist", instructions: "Review accurately" });
-    const testConversation = fixture.conversationStore.createDirect(testCoworker.id);
+    const testReviewer = fixture.coworkerStore.create({ name: "Beta", role: "Security Reviewer", instructions: "Review securely" });
+    const { team: testTeam, conversation: testConversation } = fixture.teamService.createTeam({
+      title: "Alpha Team",
+      coworkerIds: [testCoworker.id, testReviewer.id],
+    });
+    const testConversationId = testConversation.id;
+    fixture.conversationStore.postCoworkerMessage(testConversationId, testCoworker.id, {
+      text: "Security review completed by Reviewer",
+    });
 
     // Seed notifications across all 5 allowlisted categories plus canary
     fixture.notifications.notify({
@@ -204,7 +212,7 @@ export async function runVerifyP17NotificationCenter({ app }) {
       key: "job:job_cowork_4:completed",
       title: "Coworker finished",
       body: "Security review completed by Reviewer",
-      source: { target: "conversation", conversationId: testConversation.id },
+      source: { target: "conversation", conversationId: testConversationId },
     });
 
     fixture.notifications.notify({
@@ -215,12 +223,12 @@ export async function runVerifyP17NotificationCenter({ app }) {
       source: null,
     });
 
-    // Seed redaction canary notification
+    // Seed redaction canary notification with generic auth token, cookie, and path in key and body
     fixture.notifications.notify({
       category: "attention",
-      key: "job:canary:redaction",
+      key: "canary:C:\\Users\\SecretAdmin\\secret.pem:arbitraryToken999",
       title: "Secret path C:\\Users\\SecretAdmin\\secret.pem",
-      body: "Authorization Bearer sk-tokensecret12345678901234567890 and \\\\intranet\\pass.txt",
+      body: "Authorization: Bearer arbitrarySecretValue123 and Cookie: auth_session=arbitraryCookieValue789 and \\\\intranet\\pass.txt",
       source: { target: "attention", jobId: "job_canary" },
     });
 
@@ -315,7 +323,7 @@ export async function runVerifyP17NotificationCenter({ app }) {
       JSON.stringify({ noPathInCopy, mentionsChannelLimitation })
     );
 
-    // Redaction canary check: neither DOM nor disk contains raw path/secret
+    // Redaction canary check: neither DOM nor disk contains raw path/secret or credential tails
     const canaryCard = await invoke(
       win,
       "async()=>{" +
@@ -324,16 +332,26 @@ export async function runVerifyP17NotificationCenter({ app }) {
           "hasRedactedPath: text.includes('[REDACTED_PATH]')," +
           "hasRedactedToken: text.includes('[REDACTED_TOKEN]')," +
           "leaksSecretAdmin: text.includes('SecretAdmin')," +
-          "leaksTokenSecret: text.includes('sk-tokensecret')" +
+          "leaksArbitrarySecret: text.includes('arbitrarySecretValue123')," +
+          "leaksArbitraryCookie: text.includes('arbitraryCookieValue789')," +
+          "leaksArbitraryToken: text.includes('arbitraryToken999')" +
         "};" +
       "}"
     );
     const diskJson = readFileSync(join(dataDir, "desktop-state", "notifications.json"), "utf8");
-    const diskClean = !diskJson.includes("SecretAdmin") && !diskJson.includes("sk-tokensecret") && diskJson.includes("[REDACTED_PATH]");
+    const diskClean = !diskJson.includes("SecretAdmin") &&
+      !diskJson.includes("arbitrarySecretValue123") &&
+      !diskJson.includes("arbitraryCookieValue789") &&
+      !diskJson.includes("arbitraryToken999") &&
+      diskJson.includes("[REDACTED_PATH]");
+    const diskKeysAreDigests = JSON.parse(diskJson).events.every(e => /^k_[a-f0-9]{32}$/.test(e.key));
     check(
-      "redaction canary enforces secret, token, and path redaction at service boundary",
-      canaryCard.hasRedactedPath && canaryCard.hasRedactedToken && !canaryCard.leaksSecretAdmin && !canaryCard.leaksTokenSecret && diskClean,
-      JSON.stringify({ canaryCard, diskClean })
+      "redaction canary enforces secret, token, and path redaction at service boundary without credential tails or key leaks",
+      canaryCard.hasRedactedPath && canaryCard.hasRedactedToken &&
+      !canaryCard.leaksSecretAdmin && !canaryCard.leaksArbitrarySecret &&
+      !canaryCard.leaksArbitraryCookie && !canaryCard.leaksArbitraryToken &&
+      diskClean && diskKeysAreDigests,
+      JSON.stringify({ canaryCard, diskClean, diskKeysAreDigests })
     );
 
     // Category filter test: filter by 'routine-completed'
@@ -389,17 +407,22 @@ export async function runVerifyP17NotificationCenter({ app }) {
       return await invoke(win, "async()=>document.getElementById('view-notifications')?.classList.contains('hidden')===false");
     });
 
-    // Safe source navigation test: Conversation source navigates to Conversation view
+    // Safe source navigation test: Conversation source navigates to Conversation view and verifies content & selection
     const convNavClicked = await invoke(win, "async()=>{const navButtons=[...document.querySelectorAll('#notifications-list .hero-action')]; const convBtn=navButtons.find(b=>b.textContent.includes('Conversation')); if(convBtn){ convBtn.click(); return true; } return false;}");
     await sleep(400);
     const convNavState = await invoke(
       win,
-      "async()=>({convVisible:document.getElementById('view-conversation')?.classList.contains('hidden')===false,notifHidden:document.getElementById('view-notifications')?.classList.contains('hidden')===true})"
+      "async()=>({" +
+        "convVisible: document.getElementById('view-conversation')?.classList.contains('hidden') === false," +
+        "notifHidden: document.getElementById('view-notifications')?.classList.contains('hidden') === true," +
+        "headerTitle: document.getElementById('conversation-title')?.textContent || ''," +
+        "messagesText: document.getElementById('conversation-messages')?.textContent || ''" +
+      "})"
     );
     check(
-      "conversation source navigation button opens Conversation surface safely",
-      convNavClicked && convNavState.convVisible && convNavState.notifHidden,
-      JSON.stringify(convNavState)
+      "conversation source navigation button opens intended Conversation identity and content safely",
+      convNavClicked && convNavState.convVisible && convNavState.notifHidden && convNavState.messagesText.includes("Security review completed by Reviewer"),
+      JSON.stringify({ convVisible: convNavState.convVisible, headerTitle: convNavState.headerTitle, hasExpectedMessage: convNavState.messagesText.includes("Security review completed by Reviewer") })
     );
 
     // Return to Notification Center
@@ -407,6 +430,58 @@ export async function runVerifyP17NotificationCenter({ app }) {
     await waitFor("back in notifications after conversation", async () => {
       return await invoke(win, "async()=>document.getElementById('view-notifications')?.classList.contains('hidden')===false");
     });
+
+    // Regression check for stale refresh generation guard: verifies stale success and stale failure are discarded
+    const staleGuardResult = await invoke(win, "async () => {" +
+      "const listEl = document.getElementById('notifications-list');" +
+      "const errEl = document.getElementById('notifications-error');" +
+      "const refreshBtn = document.getElementById('notifications-refresh');" +
+      "const origList = window.sovereignbot.notifications.list;" +
+      "let resolveSlowSuccess;" +
+      "const slowSuccessPromise = new Promise((resolve) => { resolveSlowSuccess = resolve; });" +
+      "let callCount = 0;" +
+      "window.sovereignbot.notifications.list = async (params) => {" +
+        "callCount++;" +
+        "if (callCount === 1) return await slowSuccessPromise;" +
+        "return await origList(params);" +
+      "};" +
+      "refreshBtn?.click();" +
+      "await new Promise(r => setTimeout(r, 20));" +
+      "refreshBtn?.click();" +
+      "await new Promise(r => setTimeout(r, 60));" +
+      "resolveSlowSuccess({" +
+        "notifications: [{ id: 'notif_stale000000000', category: 'attention', title: 'STALE_SUCCESS_OVERWRITE', body: '', createdAt: new Date().toISOString(), read: false, readAt: null, source: null }]," +
+        "totalCount: 1," +
+        "unreadCount: 1" +
+      "});" +
+      "await new Promise(r => setTimeout(r, 60));" +
+      "const leakedStaleSuccess = (listEl?.textContent || '').includes('STALE_SUCCESS_OVERWRITE');" +
+      "callCount = 0;" +
+      "let rejectSlowFailure;" +
+      "const slowFailurePromise = new Promise((_, reject) => { rejectSlowFailure = reject; });" +
+      "window.sovereignbot.notifications.list = async (params) => {" +
+        "callCount++;" +
+        "if (callCount === 1) return await slowFailurePromise;" +
+        "return await origList(params);" +
+      "};" +
+      "refreshBtn?.click();" +
+      "await new Promise(r => setTimeout(r, 20));" +
+      "refreshBtn?.click();" +
+      "await new Promise(r => setTimeout(r, 60));" +
+      "rejectSlowFailure(new Error('STALE_FAILURE_OVERWRITE'));" +
+      "await new Promise(r => setTimeout(r, 60));" +
+      "const leakedStaleFailure = (errEl?.textContent || '').includes('STALE_FAILURE_OVERWRITE');" +
+      "window.sovereignbot.notifications.list = origList;" +
+      "return {" +
+        "staleSuccessDiscarded: !leakedStaleSuccess," +
+        "staleFailureDiscarded: !leakedStaleFailure" +
+      "};" +
+    "}");
+    check(
+      "refresh generation guard discards stale async success and failure responses",
+      staleGuardResult.staleSuccessDiscarded && staleGuardResult.staleFailureDiscarded,
+      JSON.stringify(staleGuardResult)
+    );
 
     // Mark single card read via card action button
     await invoke(win, "async()=>{const firstCardBtn=document.querySelector('#notifications-list .notification-card .quiet-action'); firstCardBtn?.click(); return true;}");

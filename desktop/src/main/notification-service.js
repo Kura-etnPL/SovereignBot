@@ -64,8 +64,14 @@ function redactSensitive(text) {
     s = s.replace(/\\\\[^\s"'<>]+/g, "[REDACTED_PATH]");
     // Redact Unix absolute paths in common system/user directories
     s = s.replace(/(?:^|[\s"'])(\/(?:Users|home|var|etc|usr|tmp|opt|private|root)\/[^\s"'<>]*)/g, (match, p1) => match.replace(p1, "[REDACTED_PATH]"));
-    // Redact Authorization / Bearer / Basic / Cookie headers and tokens
-    s = s.replace(/(?:Bearer|Authorization|Basic|Cookie)[:\s]+\s*[^\s\r\n;,]+/gi, "[REDACTED_TOKEN]");
+    // Redact Authorization Bearer headers and standalone Bearer tokens without leaving credential tails
+    s = s.replace(/(?:Authorization[:\s]+)?Bearer\s+[^\s\r\n;,]+/gi, "[REDACTED_TOKEN]");
+    // Redact Authorization Basic headers and standalone Basic tokens
+    s = s.replace(/(?:Authorization[:\s]+)?Basic\s+[^\s\r\n;,]+/gi, "[REDACTED_TOKEN]");
+    // Redact generic Authorization: headers
+    s = s.replace(/Authorization:\s*[^\s\r\n;,]+/gi, "[REDACTED_TOKEN]");
+    // Redact Cookie headers
+    s = s.replace(/Cookie[:\s]+[^\s\r\n;,]+(?:;\s*[^\s\r\n;,]+)*/gi, "[REDACTED_TOKEN]");
     // Redact known token prefixes
     s = s.replace(/\b(?:sk-[a-zA-Z0-9_-]{20,}|ghp_[a-zA-Z0-9]{20,}|gho_[a-zA-Z0-9]{20,}|glpat-[a-zA-Z0-9_-]{20,}|xox[baprs]-[a-zA-Z0-9_-]{20,})\b/g, "[REDACTED_TOKEN]");
     // Redact key-value secret pairs
@@ -90,6 +96,16 @@ function generateOpaqueId() {
 
 function opaqueIdForLegacyKey(key) {
     return `notif_${createHash("sha256").update(String(key)).digest("hex").slice(0, 16)}`;
+}
+
+// Persist a stable digest identity rather than raw key semantics to prevent
+// leaking secrets or absolute paths through dedupe keys.
+function digestKey(key) {
+    if (typeof key !== "string") return "";
+    const cleanKey = clean(key, 180);
+    if (!cleanKey) return "";
+    if (/^k_[a-f0-9]{32}$/.test(cleanKey)) return cleanKey;
+    return `k_${createHash("sha256").update(cleanKey).digest("hex").slice(0, 32)}`;
 }
 
 function defaultTitle(category) {
@@ -122,6 +138,7 @@ function normalizeLoadedEntry(entry, existingIds = null) {
     if (!NOTIFICATION_CATEGORIES.includes(entry.category)) return null;
     const safeKey = clean(entry.key, 180);
     if (!safeKey) return null;
+    const dedupeKey = digestKey(safeKey);
     const createdAt = safeIsoDate(entry.createdAt || entry.at, new Date().toISOString());
     let id = (entry.id && typeof entry.id === "string" && /^notif_[a-f0-9]{16}$/.test(entry.id))
         ? entry.id
@@ -135,7 +152,7 @@ function normalizeLoadedEntry(entry, existingIds = null) {
     }
     return {
         id,
-        key: safeKey,
+        key: dedupeKey,
         category: entry.category,
         title: cleanAndRedact(entry.title || defaultTitle(entry.category), 120),
         body: cleanAndRedact(entry.body || "", 400),
@@ -186,7 +203,8 @@ export function createNotificationService({ dataDir, getSettings, NotificationCl
         if (!NOTIFICATION_CATEGORIES.includes(category)) throw new Error(`unsupported notification category: ${category}`);
         const safeKey = clean(key, 180);
         if (!safeKey) return { shown: false, deduplicated: false };
-        if (seen.has(safeKey)) return { shown: false, deduplicated: true };
+        const dedupeKey = digestKey(safeKey);
+        if (seen.has(dedupeKey)) return { shown: false, deduplicated: true };
 
         const createdAt = new Date().toISOString();
         const safeTitle = cleanAndRedact(title || defaultTitle(category), 120);
@@ -199,7 +217,7 @@ export function createNotificationService({ dataDir, getSettings, NotificationCl
 
         const event = {
             id,
-            key: safeKey,
+            key: dedupeKey,
             category,
             title: safeTitle,
             body: safeBody,
@@ -210,7 +228,7 @@ export function createNotificationService({ dataDir, getSettings, NotificationCl
             dismissed: false,
             source: sanitizeSource(source),
         };
-        seen.set(safeKey, event);
+        seen.set(dedupeKey, event);
         persist();
 
         // Popup delivery is gated by OS/user settings, but the inbox event is safely preserved.

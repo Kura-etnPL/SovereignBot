@@ -452,49 +452,73 @@ test("redaction canaries: secrets, tokens, cookies, and absolute paths are redac
 
     notifications.notify({
       category: "attention",
-      key: "attn:redact:1",
+      key: "attn:redact:C:\\Users\\SecretAdmin\\file.txt:arbitraryToken999",
       title: "File at C:\\Users\\SecretAdmin\\vault\\key.pem",
-      body: "Check UNC \\\\server\\vault\\pass.txt and Authorization: Bearer sk-secret12345678901234567890 and Cookie: session_token=supersecret123",
+      body: "Check UNC \\\\server\\vault\\pass.txt and Authorization: Bearer arbitrarySecretValue123 and Cookie: auth_session=arbitraryCookieValue789",
     });
 
     notifications.notify({
       category: "coworker-finished",
       key: "coworker:redact:2",
-      title: "Task in /home/deployer/.ssh/id_ed25519",
-      body: "Worker returned api_key: gh_token_secret_123456789012345",
+      title: "Task in /home/deployer/.ssh/id_ed25519 with Authorization Bearer arbitrarySecretValue456",
+      body: "Worker returned Authorization: Basic dXNlcjpwYXNz and api_key: gh_token_secret_123456789012345",
     });
 
-    // 1. Check popup args: FakeNotification received redacted text
+    // 1. Check popup args: FakeNotification received redacted text without credential tails
     assert.equal(FakeNotification.shown.length, 2);
     const popup1 = FakeNotification.shown[0];
     assert.ok(!popup1.title.includes("SecretAdmin"));
     assert.ok(popup1.title.includes("[REDACTED_PATH]"));
     assert.ok(!popup1.body.includes("server\\vault"));
-    assert.ok(!popup1.body.includes("sk-secret"));
-    assert.ok(!popup1.body.includes("supersecret"));
+    assert.ok(!popup1.body.includes("arbitrarySecretValue123"));
+    assert.ok(!popup1.body.includes("arbitraryCookieValue789"));
     assert.ok(popup1.body.includes("[REDACTED_PATH]"));
     assert.ok(popup1.body.includes("[REDACTED_TOKEN]"));
 
     const popup2 = FakeNotification.shown[1];
     assert.ok(!popup2.title.includes("/home/deployer"));
+    assert.ok(!popup2.title.includes("arbitrarySecretValue456"));
     assert.ok(popup2.title.includes("[REDACTED_PATH]"));
+    assert.ok(popup2.title.includes("[REDACTED_TOKEN]"));
+    assert.ok(!popup2.body.includes("dXNlcjpwYXNz"));
     assert.ok(!popup2.body.includes("gh_token_secret"));
     assert.ok(popup2.body.includes("[REDACTED_SECRET]"));
 
-    // 2. Check public list projection
+    // 2. Check public list projection: no keys, no raw credentials, no credential tails
     const list = notifications.list().notifications;
     const item1 = list.find((e) => e.title.includes("[REDACTED_PATH]"));
     assert.ok(!item1.title.includes("C:\\"));
     assert.ok(!item1.body.includes("Bearer"));
-    assert.ok(!item1.body.includes("session_token"));
+    assert.ok(!item1.body.includes("arbitrarySecretValue123"));
+    assert.ok(!item1.body.includes("arbitraryCookieValue789"));
+    assert.equal(item1.key, undefined);
 
-    // 3. Check persisted JSON on disk
+    // 3. Check persisted JSON on disk: no secret paths/tokens in content OR in dedupe keys
     const disk = JSON.parse(await readFile(join(root, "desktop-state", "notifications.json"), "utf8"));
     const diskStr = JSON.stringify(disk);
     assert.ok(!diskStr.includes("SecretAdmin"));
     assert.ok(!diskStr.includes("/home/deployer"));
-    assert.ok(!diskStr.includes("sk-secret"));
-    assert.ok(!diskStr.includes("supersecret"));
+    assert.ok(!diskStr.includes("arbitraryToken999"));
+    assert.ok(!diskStr.includes("arbitrarySecretValue123"));
+    assert.ok(!diskStr.includes("arbitrarySecretValue456"));
+    assert.ok(!diskStr.includes("dXNlcjpwYXNz"));
+    assert.ok(!diskStr.includes("arbitraryCookieValue789"));
+    assert.ok(disk.events.every((e) => /^k_[a-f0-9]{32}$/.test(e.key)));
+
+    // 4. Check restart deduplication with digest key
+    const restarted = createNotificationService({
+      dataDir: root,
+      getSettings: () => ({ notifications: true }),
+      NotificationClass: FakeNotification,
+    });
+    const dupRes = restarted.notify({
+      category: "attention",
+      key: "attn:redact:C:\\Users\\SecretAdmin\\file.txt:arbitraryToken999",
+      title: "Another attempt",
+      body: "Should deduplicate",
+    });
+    assert.equal(dupRes.deduplicated, true);
+    assert.equal(dupRes.shown, false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
