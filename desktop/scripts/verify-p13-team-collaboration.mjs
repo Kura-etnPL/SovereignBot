@@ -18,7 +18,7 @@ console.error(`[verify-p13] spawning hidden Team collaboration gate (timeout ${T
 const child = spawn(electronExe, [`--user-data-dir=${join(tempRoot, "electron-user-data")}`, "src/main/verify-p13-team-collaboration-entry.js"], {
     cwd: DESKTOP_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, SOVEREIGNBOT_V51_TEMP_ROOT: tempRoot },
+    env: { ...process.env, SOVEREIGNBOT_V52_TEMP_ROOT: tempRoot },
     shell: false,
     windowsHide: true,
 });
