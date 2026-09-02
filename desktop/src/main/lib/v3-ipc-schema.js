@@ -437,6 +437,8 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "team:installPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["packId"])); return { packId: identifier(value.packId, "packId") }; }),
     "team:exportPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId"])); return { teamId: identifier(value.teamId, "teamId") }; }),
     "team:importPack": spec(64 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["pack"])); return { pack: teamPackShape(value.pack) }; }),
+    "team:importPackViaDialog": spec(1024, empty),
+    "team:exportPackViaDialog": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId", "packId"])); const hasTeam = value.teamId !== undefined; const hasPack = value.packId !== undefined; if (hasTeam === hasPack) throw new Error("provide exactly one of teamId or packId"); return hasTeam ? { teamId: identifier(value.teamId, "teamId") } : { packId: identifier(value.packId, "packId") }; }),
     "team:exportPlaybook": spec(2048, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId", "playbookId"])); return { teamId: identifier(value.teamId, "teamId"), playbookId: identifier(value.playbookId, "playbookId") }; }),
     "team:importPlaybook": spec(8 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId", "playbook"])); return { teamId: identifier(value.teamId, "teamId"), playbook: teamPlaybookShape(value.playbook) }; }),
     "team:duplicatePack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["packId"])); return { packId: identifier(value.packId, "packId") }; }),

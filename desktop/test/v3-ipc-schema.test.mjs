@@ -8,7 +8,7 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     const expected = [
         "coworker:list", "coworker:get", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
         "conversation:list", "conversation:get", "conversation:createDirect", "conversation:createTeam", "conversation:send",
-        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:exportPlaybook", "team:importPlaybook", "team:createChannelFromTemplate", "team:requestParallel", "channel:list", "channel:get", "channel:create", "channel:update", "channel:archive", "channel:restore",
+        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:importPackViaDialog", "team:exportPackViaDialog", "team:exportPlaybook", "team:importPlaybook", "team:createChannelFromTemplate", "team:requestParallel", "channel:list", "channel:get", "channel:create", "channel:update", "channel:archive", "channel:restore",
         "connectedApps:list", "connectedApps:search", "connectedApps:review", "connectedApps:assign", "connectedApps:connect", "connectedApps:disconnect", "connectedApps:disable", "connectedApps:health",
     ];
     for (const channel of expected)
@@ -132,6 +132,11 @@ test("team pack transfer is declarative and rejects provider/account or workspac
     };
     assert.deepEqual(validateV3IpcRequest("team:importPack", { pack }), { pack });
     assert.deepEqual(validateV3IpcRequest("team:exportPack", { teamId: "team_1111111111111111" }), { teamId: "team_1111111111111111" });
+    assert.deepEqual(validateV3IpcRequest("team:importPackViaDialog", {}), {});
+    assert.deepEqual(validateV3IpcRequest("team:exportPackViaDialog", { teamId: "team_1111111111111111" }), { teamId: "team_1111111111111111" });
+    assert.deepEqual(validateV3IpcRequest("team:exportPackViaDialog", { packId: "demo-pack" }), { packId: "demo-pack" });
+    assert.throws(() => validateV3IpcRequest("team:exportPackViaDialog", {}), /exactly one/);
+    assert.throws(() => validateV3IpcRequest("team:exportPackViaDialog", { teamId: "team_1111111111111111", packId: "demo-pack" }), /exactly one/);
     assert.throws(
         () => validateV3IpcRequest("team:importPack", { pack: { ...pack, coworkers: pack.coworkers.map((entry, index) => index ? entry : { ...entry, modelBinding: { ...entry.modelBinding, providerAccountId: "account" } }) } }),
         /unexpected request field: providerAccountId/,

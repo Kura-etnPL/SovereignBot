@@ -5,6 +5,7 @@ import { desktopVersion } from "./lib/desktop-version.js";
 import { installAppProtocolHandler, registerAppSchemePrivileged } from "./protocol.js";
 import { createMainWindow, appOrigin } from "./window.js";
 import { bindIpcChannels } from "./ipc.js";
+import { exportTeamPackViaDialog, importTeamPackViaDialog } from "./team-pack-file-io.js";
 import { createOperatorBridge } from "./operator-bridge.js";
 import { startRuntimeHost } from "./runtime-host.js";
 import { createDesktopServices } from "./services.js";
@@ -700,6 +701,17 @@ async function main() {
                     const refresh = await refreshCoworkerRuntime();
                     return { ...result, refresh };
                 },
+                "team:importPackViaDialog": async () => {
+                    const result = await importTeamPackViaDialog({ parentWindow: win, dialog, importPack: (pack) => teamService.importPack(pack) });
+                    if (result.canceled) return result;
+                    return { ...result, refresh: await refreshCoworkerRuntime() };
+                },
+                "team:exportPackViaDialog": ({ teamId, packId }) => exportTeamPackViaDialog({
+                    parentWindow: win,
+                    dialog,
+                    targetName: packId ?? teamId,
+                    resolvePack: () => teamId ? teamService.exportPack(teamId) : productSurfaces.exportPack(packId),
+                }),
                 "team:duplicatePack": ({ packId }) => productSurfaces.duplicatePack(packId),
                 "team:exportPackRecipe": ({ packId }) => productSurfaces.exportPack(packId),
                 "team:editPack": ({ packId, patch }) => productSurfaces.editPack(packId, patch),

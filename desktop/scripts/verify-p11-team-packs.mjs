@@ -13,13 +13,15 @@ if (!existsSync(electronExe)) {
   process.exit(2);
 }
 
-const tempRoot = mkdtempSync(join(tmpdir(), "sovereign-p11-"));
+const configuredTempRoot = process.env.SOVEREIGNBOT_TEAM_PACK_TEMP_ROOT;
+if (configuredTempRoot) mkdirSync(configuredTempRoot, { recursive: true });
+const tempRoot = mkdtempSync(join(configuredTempRoot ?? tmpdir(), "sovereign-p11-"));
 mkdirSync(join(tempRoot, "electron-user-data"), { recursive: true });
 console.error(`[verify-p11] spawning hidden Team Pack gate (timeout ${TIMEOUT_MS / 1000}s)`);
 const child = spawn(electronExe, [`--user-data-dir=${join(tempRoot, "electron-user-data")}`, "src/main/verify-p11-team-packs-entry.js"], {
   cwd: DESKTOP_ROOT,
   stdio: ["ignore", "pipe", "pipe"],
-  env: { ...process.env, SOVEREIGNBOT_V49_TEMP_ROOT: tempRoot },
+    env: { ...process.env, SOVEREIGNBOT_V49_TEMP_ROOT: tempRoot, SOVEREIGNBOT_TEAM_PACK_TEMP_ROOT: tempRoot, SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR: join(DESKTOP_ROOT, "..", "_evidence_v20_2026-09-03") },
   shell: false,
   windowsHide: true,
 });

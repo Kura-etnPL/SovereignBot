@@ -707,7 +707,7 @@
         for (const playbook of recipe.playbooks ?? []) panel.append(text("Playbook", `${playbook.name}: ${playbook.steps.join(" → ")}`));
         card.insertBefore(panel, actions);
       }, root));
-      actions.append(button("Export / 导出", async () => { const team = cache.teams.find((entry) => entry.packId === item.id || entry.packId === `imported:${item.id}`); const recipe = item.custom ? await api.teams.exportPackRecipe({ packId: item.id }) : team ? await api.teams.exportPack({ teamId: team.id }) : await api.teams.exportPackRecipe({ packId: item.id }); await copy(recipe); }, root), button("Duplicate / 复制", async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); }, root));
+      actions.append(button("Export / 导出", () => exportPackToFile(item), root), button("Duplicate / 复制", async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); }, root));
       if (item.custom) actions.append(button("Edit recipe / 编辑配方", async () => { const current = await api.teams.exportPackRecipe({ packId: item.id }); const edited = readJson("Edit declarative Team Pack JSON", current); if (!edited) return; await api.teams.editPack({ packId: item.id, patch: { name: edited.name, description: edited.description, coworkers: edited.coworkers, channels: edited.channels, playbooks: edited.playbooks } }); await refresh(); }, root));
       card.append(actions); root.append(card);
     }
@@ -736,7 +736,22 @@
   }
   async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description", "") ?? ""; const steps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; const plan = readJson("Optional semantic plan JSON (stages, reviewPoints, expectedOutput, recommended roles/Skills)", {}); if (plan === undefined) return; await api.playbooks.create({ playbook: { name, description, steps: steps.split(",").map((entry) => entry.trim()).filter(Boolean), ...plan } }); await refresh(); }
   async function createSkill() { const name = window.prompt("Skill name"); if (!name) return; const description = window.prompt("Description", "") ?? ""; const instructions = window.prompt("Instructions"); if (!instructions) return; await api.skills.create({ skill: { name, description, instructions } }); await refresh(); }
-  async function importPack() { const pack = readJson("Paste Team Pack JSON"); if (!pack) return; await api.teams.importPack({ pack }); await refreshHost(); await refresh(); }
+  async function exportPackToFile(item) {
+    const team = cache.teams.find((entry) => entry.packId === item.id || entry.packId === `imported:${item.id}`);
+    const result = team
+      ? await api.teams.exportPackViaDialog({ teamId: team.id })
+      : await api.teams.exportPackViaDialog({ packId: item.id });
+    const status = $("team-pack-file-result");
+    if (status) status.textContent = result.canceled ? "Export canceled." : `Exported ${result.fileName}.`;
+  }
+  async function importPack() {
+    const result = await api.teams.importPackViaDialog({});
+    const status = $("team-pack-file-result");
+    if (result.canceled) { if (status) status.textContent = "Import canceled."; return; }
+    await refreshHost();
+    await refresh();
+    if (status) status.textContent = `Imported ${result.fileName}.`;
+  }
 
   async function refresh() {
     const [teams, coworkers, workspaces] = await Promise.all([api.teams.list({}), api.coworkers.list({}), api.workspaces?.list ? api.workspaces.list({}) : Promise.resolve({ workspaces: [] })]);

@@ -1,9 +1,8 @@
 // Hidden real-Electron acceptance for the first-party Team Pack gallery.
 // It uses the existing declarative Team/Coworker/Channel/Playbook stores and
 // exercises the renderer, preload/IPC, gallery, install path, and reload.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { desktopVersion } from "./lib/desktop-version.js";
 import { createDesktopServices } from "./services.js";
@@ -20,16 +19,17 @@ import { MemoryStore } from "../../../src/memory.js";
 import { createMainWindow, appOrigin } from "./window.js";
 import { installAppProtocolHandler } from "./protocol.js";
 import { bindIpcChannels } from "./ipc.js";
+import { exportTeamPackViaDialog, importTeamPackViaDialog } from "./team-pack-file-io.js";
 
 const WORKTREE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const EVIDENCE_DIR = join(WORKTREE_ROOT, "_evidence_v49_2026-09-02");
+const EVIDENCE_DIR = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR ?? join(WORKTREE_ROOT, "_evidence_v49_2026-09-02");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function roster() {
     return { ready: false, mode: "local-gate", roles: {}, agents: [], providers: {}, coworkerBindings: {} };
 }
 
-function makeFixture(dataDir) {
+function makeFixture(dataDir, { teamPackDialog = {} } = {}) {
     const stateDir = join(dataDir, "desktop-state");
     mkdirSync(stateDir, { recursive: true });
     const services = createDesktopServices({ dataDir, dialog: {} });
@@ -46,7 +46,7 @@ function makeFixture(dataDir) {
     projectService.setMemoryService(memoryService);
     const productSurfaces = createProductSurfaceService({ dataDir, teamService, coworkerStore, artifactStore, runtime });
     search = createSearchService({ teamService, conversationStore, coworkerStore, projectService, artifactStore, skillStore, memoryService });
-    return { services, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, productSurfaces, search };
+    return { services, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, productSurfaces, search, teamPackDialog };
 }
 
 function publicTeamList(fixture) {
@@ -59,7 +59,7 @@ function publicTeamList(fixture) {
 }
 
 function handlers(fixture) {
-    const { services, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, productSurfaces, search } = fixture;
+    const { services, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, productSurfaces, search, teamPackDialog } = fixture;
     return {
         "app:handshake": () => ({ ok: true, version: desktopVersion(), platform: process.platform, locale: "en-US", language: services.getSettings().language }),
         "firstrun:getStatus": () => ({ browsers: [] }),
@@ -81,8 +81,16 @@ function handlers(fixture) {
                 : teamService.installPack(packId);
             return result;
         },
+        "team:importPackViaDialog": () => importTeamPackViaDialog({ parentWindow: undefined, dialog: teamPackDialog, importPack: (pack) => teamService.importPack(pack) }),
+        "team:exportPackViaDialog": ({ teamId, packId }) => exportTeamPackViaDialog({
+            parentWindow: undefined,
+            dialog: teamPackDialog,
+            targetName: packId ?? teamId,
+            resolvePack: () => teamId ? teamService.exportPack(teamId) : productSurfaces.exportPack(packId),
+        }),
         "team:exportPackRecipe": ({ packId }) => productSurfaces.exportPack(packId),
         "team:duplicatePack": ({ packId }) => productSurfaces.duplicatePack(packId),
+        "team:editPack": ({ packId, patch }) => productSurfaces.editPack(packId, patch),
         "channel:list": (payload) => teamService.listChannels(payload),
         "playbook:list": (payload) => productSurfaces.listPlaybooks(payload),
         "artifact:list": (payload) => artifactStore.list(payload),
@@ -106,6 +114,7 @@ function handlers(fixture) {
         "job:list": () => ({ jobs: [] }),
         "job:attention": () => ({ jobs: [] }),
         "routine:list": () => ({ routines: [] }),
+        "notification:list": () => ({ notifications: [] }),
     };
 }
 
@@ -148,7 +157,13 @@ export async function runVerifyP11TeamPacks({ app }) {
     let restart;
 
     try {
-        fixture = makeFixture(dataDir);
+        const teamPackDialog = {
+            openPaths: [],
+            savePaths: [],
+            async showOpenDialog() { return { canceled: false, filePaths: [this.openPaths.shift()] }; },
+            async showSaveDialog() { return { canceled: false, filePath: this.savePaths.shift() }; },
+        };
+        fixture = makeFixture(dataDir, { teamPackDialog });
         uninstallProtocol = installAppProtocolHandler();
         win = createMainWindow({ smoke: true });
         unbind = bindIpcChannels({ win, handlers: handlers(fixture) });
@@ -210,9 +225,56 @@ export async function runVerifyP11TeamPacks({ app }) {
         const persisted = JSON.parse(readFileSync(join(dataDir, "desktop-state", "teams.json"), "utf8"));
         check("installed Team Pack state is durable in the existing store", persisted.teams.some((entry) => entry.packId === "product-team" && entry.playbooks?.some((book) => book.id === "product-discovery")), JSON.stringify(persisted.teams.filter((entry) => entry.packId === "product-team")));
 
+        const exportPath = join(dataDir, "p20-product-pack-export.json");
+        teamPackDialog.savePaths.push(exportPath);
+        await invoke(win, "async()=>{const card=[...document.querySelectorAll('#product-packs-page .settings-card')][0]; [...(card?.querySelectorAll('button')||[])].find((button)=>button.textContent.includes('Export'))?.click(); return true}");
+        await waitFor("custom Team Pack export", async () => {
+            if (!existsSync(exportPath)) return false;
+            try { JSON.parse(readFileSync(exportPath, "utf8")); return true; } catch { return false; }
+        });
+        const exportedPack = JSON.parse(readFileSync(exportPath, "utf8"));
+        check("gallery exports a bounded declarative Team Pack through the native save path", exportedPack.id === "product-team" && Object.keys(exportedPack).sort().join(",") === "channels,coworkers,description,id,name,playbooks,schema" && !publicForbidden.test(JSON.stringify(exportedPack)), JSON.stringify(exportedPack));
+        const exportStatus = await invoke(win, "async()=>document.getElementById('team-pack-file-result')?.textContent || ''");
+        check("gallery export result exposes only the selected file name", !exportStatus.includes(dataDir), exportStatus);
+
+        teamPackDialog.openPaths.push(exportPath);
+        await invoke(win, "async()=>document.getElementById('team-pack-page-import')?.click()");
+        await waitFor("Team Pack import", async () => (await invoke(win, "async()=>document.getElementById('team-pack-file-result')?.textContent || ''")).includes("Imported"));
+        const importedPage = await invoke(win, "async()=>({status:document.getElementById('team-pack-file-result')?.textContent || '', cards:[...document.querySelectorAll('#product-packs-page .settings-card')].map((card)=>card.innerText)})");
+        check("gallery imports the exported file through the native open path", importedPage.status === "Imported p20-product-pack-export.json." && importedPage.cards.some((card) => card.includes("Product Discovery Team")), JSON.stringify(importedPage));
+
+        await invoke(win, "async()=>{const input=document.getElementById('team-pack-search-page'); input.value='Product Discovery Team'; input.dispatchEvent(new Event('input',{bubbles:true})); return true}");
+        await waitFor("Product recipe search", async () => (await invoke(win, "async()=>[...document.querySelectorAll('#product-packs-page .settings-card h3')].map((node)=>node.textContent)" )).length >= 2);
+        await invoke(win, "async()=>{const select=document.getElementById('team-pack-category-page'); select.value='Custom'; select.dispatchEvent(new Event('change',{bubbles:true})); return true}");
+        await waitFor("custom Team Pack filter", async () => { const texts = await invoke(win, "async()=>[...document.querySelectorAll('#product-packs-page .settings-card')].map((card)=>card.innerText)"); return texts.length >= 1 && texts.every((text) => text.includes("Category: Custom")); });
+        const customCards = await invoke(win, "async()=>[...document.querySelectorAll('#product-packs-page .settings-card')].map((card)=>({title:card.querySelector('h3')?.textContent || '', text:card.innerText, buttons:[...card.querySelectorAll('button')].map((button)=>button.textContent)}))");
+        check("gallery search and Custom filter expose reusable recipes", customCards.length >= 1 && customCards.every((card) => card.text.includes("Category: Custom") && card.text.includes("Product Discovery Team") && card.buttons.some((label) => label.includes("Duplicate")) && card.buttons.some((label) => label.includes("Edit recipe"))), JSON.stringify(customCards));
+
+        const customCardIndex = customCards.findIndex((card) => card.buttons.some((label) => label.includes("Edit recipe")));
+        await invoke(win, `async()=>{const card=[...document.querySelectorAll('#product-packs-page .settings-card')][${customCardIndex}]; [...(card?.querySelectorAll('button')||[])].find((button)=>button.textContent.includes('Duplicate'))?.click(); return true}`);
+        await waitFor("custom Team Pack duplicate", async () => (await invoke(win, "async()=>[...document.querySelectorAll('#product-packs-page .settings-card h3')].map((node)=>node.textContent)" )).length >= 2);
+        await invoke(win, "async()=>{const cards=[...document.querySelectorAll('#product-packs-page .settings-card')]; const card=cards[cards.length-1]; [...(card?.querySelectorAll('button')||[])].find((button)=>button.textContent.includes('Edit recipe'))?.click(); return true}");
+        const customRecipeIds = await invoke(win, "async()=>{const listed=await window.sovereignbot.teams.list({}); return (listed.packs??[]).filter((entry)=>entry.custom).map((entry)=>entry.id)}");
+        const duplicateRecipeId = customRecipeIds[customRecipeIds.length - 1];
+        await invoke(win, `async()=>{await window.sovereignbot.teams.editPack({packId:${JSON.stringify(duplicateRecipeId)},patch:{name:'P20 Edited Recipe',description:'P20 edited declarative recipe'}}); await window.refreshIndependentProductPages?.(); return true}`);
+        await invoke(win, "async()=>{const input=document.getElementById('team-pack-search-page'); input.value='P20 Edited Recipe'; input.dispatchEvent(new Event('input',{bubbles:true})); return true}");
+        await waitFor("custom Team Pack edit", async () => (await invoke(win, "async()=>[...document.querySelectorAll('#product-packs-page .settings-card h3')].map((node)=>node.textContent)" )).includes("P20 Edited Recipe"));
+        const editedCards = await invoke(win, "async()=>[...document.querySelectorAll('#product-packs-page .settings-card')].map((card)=>card.innerText)");
+        const editedCatalog = await invoke(win, "async()=>window.sovereignbot.teams.list({})");
+        const editedRecipe = editedCatalog.packs.find((entry) => entry.id === duplicateRecipeId);
+        check("gallery exposes duplicate/edit controls and edited recipe persists through preload IPC", editedCards.some((card) => card.includes("P20 Edited Recipe")) && editedRecipe?.description === "P20 edited declarative recipe", JSON.stringify({ cards: editedCards, recipe: editedRecipe }));
+
+        const unsafePath = join(dataDir, "p20-unsafe-team-pack.json");
+        writeFileSync(unsafePath, JSON.stringify({ ...exportedPack, capabilityGrant: "computer" }), "utf8");
+        teamPackDialog.openPaths.push(unsafePath);
+        await invoke(win, "async()=>document.getElementById('team-pack-page-import')?.click()");
+        await waitFor("unsafe Team Pack rejection", async () => /not accepted|unexpected|capability/i.test(await invoke(win, "async()=>document.querySelector('#product-packs-page')?.innerText || ''")));
+        const unsafeResult = await invoke(win, "async()=>document.querySelector('#product-packs-page')?.innerText || ''");
+        check("file import rejects authority-bearing Team Pack JSON", /not accepted|unexpected|capability/i.test(unsafeResult) && !unsafeResult.includes(unsafePath), unsafeResult);
+
         unbind?.();
         unbind = undefined;
-        fixture = makeFixture(dataDir);
+        fixture = makeFixture(dataDir, { teamPackDialog });
         unbind = bindIpcChannels({ win, handlers: handlers(fixture) });
         await loadWindow(win);
         restart = await invoke(win, "async()=>({catalog:await window.sovereignbot.teams.list({}), coworkers:await window.sovereignbot.coworkers.list({includeArchived:false})})");
@@ -223,7 +285,7 @@ export async function runVerifyP11TeamPacks({ app }) {
         await invoke(win, "async()=>{const input=document.getElementById('team-pack-search-page'); input.value='Product'; input.dispatchEvent(new Event('input',{bubbles:true})); return true}");
         await waitFor("restarted Product search", async () => await invoke(win, "async()=>[...document.querySelectorAll('#product-packs-page .settings-card')].some((card)=>card.innerText.includes('Product Discovery Team') && card.innerText.includes('Installed'))"));
         const restartPage = await invoke(win, "async()=>({cards:[...document.querySelectorAll('#product-packs-page .settings-card')].map((card)=>card.innerText)})");
-        check("restart keeps gallery install status and safe user-facing state", restartPage.cards.length === 1 && restartPage.cards[0].includes("Product Discovery Team") && restartPage.cards[0].includes("Installed") && !publicForbidden.test(JSON.stringify(restartPage)), JSON.stringify(restartPage));
+        check("restart keeps gallery install status and safe user-facing state", restartPage.cards.some((card) => card.includes("Product Discovery Team") && card.includes("Installed")) && !publicForbidden.test(JSON.stringify(restartPage)), JSON.stringify(restartPage));
         check("restart public catalog stays path and authority free", !publicForbidden.test(JSON.stringify(restart)), JSON.stringify(restart.catalog));
     }
     catch (error) {

@@ -148,6 +148,8 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         /detail: \{ skillId: item\.id \}/,
         /teams\.duplicatePack/,
         /teams\.exportPackRecipe/,
+        /teams\.importPackViaDialog/,
+        /teams\.exportPackViaDialog/,
         /Preview \/ 预览/,
         /openProductChannelEditor/,
         /team-pack-page-import/,
@@ -162,6 +164,8 @@ test("Team Pack gallery includes differentiated first-party categories and safe 
     assert.match(html, /Product, Sales, and Support/);
     assert.match(productHubs, /team-pack-preview/);
     assert.match(productHubs, /Composition \/ 组成/);
+    assert.match(productHubs, /team-pack-file-result/);
+    assert.doesNotMatch(productHubs, /Paste Team Pack JSON/);
     assert.doesNotMatch(productHubs, /innerHTML\s*=/);
 });
 
