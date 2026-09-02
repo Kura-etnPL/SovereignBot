@@ -297,6 +297,10 @@ export function createMemoryService({ runtime, getRuntime, services, coworkerSto
         suggestFromArtifact: suggestImpl,
         suggestFromJob: suggestImpl,
         suggestCorrection: (input) => suggestImpl({ ...input, source: { type: "correction", sourceId: input.messageId } }),
-        putFact: async ({ scope, ownerId, draft, label = "Approved durable fact" } = {}) => writeApproved(requireTarget(scope, ownerId), draft, { type: "fact", label }, false),
+        putFact: async ({ scope, ownerId, draft, label = "Approved durable fact" } = {}) => {
+            const target = requireTarget(scope, ownerId);
+            if (target.kind === "project" && resolveProject(target.ownerId)?.state !== "active") throw new Error("archived Project memory is read-only; restore the Project first");
+            return writeApproved(target, draft, { type: "fact", label }, false);
+        },
     };
 }

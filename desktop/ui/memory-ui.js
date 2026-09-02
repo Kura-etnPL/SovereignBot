@@ -6,6 +6,7 @@
   const $ = (id) => document.getElementById(id);
   let selectedMemoryId;
   let pendingOwnerId;
+  let refreshSequence = 0;
   let owners = { coworker: [], team: [], project: [] };
   const text = (value) => String(value ?? "");
   const errorText = (reason) => text(reason?.message ?? reason).replace(/^.*Error: /, "").slice(0, 240);
@@ -14,6 +15,42 @@
   const selected = (id) => $(id)?.value || "";
   const scopeTarget = () => ({ scope: selected("memory-scope"), ownerId: selected("memory-owner") });
   const listTarget = () => ({ ...scopeTarget(), limit: 100, ...(selected("memory-state") === "all" ? { includeForgotten: true } : {}) });
+  const canAddProjectFact = () => selected("memory-scope") === "project" && owners.project.some((entry) => entry.value === selected("memory-owner") && entry.state === "active");
+  function syncAddFactButton() {
+    const node = $("memory-add-fact");
+    if (!node) return;
+    const enabled = canAddProjectFact();
+    node.disabled = !enabled;
+    node.classList.toggle("hidden", !enabled);
+  }
+  function openFactDialog() {
+    if (!canAddProjectFact()) { setResult("Choose an active Project first / 请先选择一个活跃项目"); return; }
+    const dialog = $("memory-fact-dialog");
+    if (!dialog?.showModal) return;
+    $("memory-fact-form")?.reset();
+    $("memory-fact-form-error")?.classList.add("hidden");
+    dialog.showModal();
+    $("memory-fact-title")?.focus();
+  }
+  async function saveFact(event) {
+    event.preventDefault();
+    if (!canAddProjectFact()) { $("memory-fact-form-error").textContent = "Choose an active Project first / 请先选择一个活跃项目"; $("memory-fact-form-error").classList.remove("hidden"); return; }
+    const title = text($("memory-fact-title")?.value).trim();
+    const content = text($("memory-fact-content")?.value).trim();
+    const tags = text($("memory-fact-tags")?.value).split(",").map((entry) => entry.trim()).filter(Boolean);
+    const error = $("memory-fact-form-error");
+    if (!title || !content) { if (error) { error.textContent = "Title and content are required / 标题和内容不能为空"; error.classList.remove("hidden"); } return; }
+    if (tags.length > 16) { if (error) { error.textContent = "Use at most 16 tags / 最多使用 16 个标签"; error.classList.remove("hidden"); } return; }
+    try {
+      const fact = await api.memory.putFact({ scope: "project", ownerId: selected("memory-owner"), draft: { key: title, title, content, ...(tags.length ? { tags } : {}) }, label: "User-added Project fact" });
+      $("memory-fact-dialog")?.close();
+      selectedMemoryId = fact?.id;
+      setResult("Approved Project fact saved / 项目事实已保存");
+      await refresh();
+    } catch (reason) {
+      if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }
+    }
+  }
   function activate() {
     if (typeof switchView === "function") switchView("memory");
     document.querySelectorAll(".utility-nav").forEach((node) => node.classList.toggle("active", node.id === "nav-memory"));
@@ -27,7 +64,7 @@
     owners = {
       coworker: (coworkers.coworkers ?? []).map((entry) => ({ value: entry.id, label: `${entry.name} · ${entry.state}` })),
       team: (teams.teams ?? []).map((entry) => ({ value: entry.id, label: entry.name })),
-      project: (projects.projects ?? []).map((entry) => ({ value: entry.projectId, label: `${entry.name} · ${entry.state}` })),
+      project: (projects.projects ?? []).map((entry) => ({ value: entry.projectId, label: `${entry.name} · ${entry.state}`, state: entry.state })),
     };
   }
   function renderOwnerOptions() {
@@ -42,6 +79,7 @@
     else if ([...node.options].some((option) => option.value === current)) node.value = current;
     else if (options[0]) node.value = options[0].value;
     pendingOwnerId = undefined;
+    syncAddFactButton();
   }
   function sourceAction(memory, sourceNode) {
     return button("Source / 来源", async () => {
@@ -88,33 +126,44 @@
     if (!suggestions.length) { const empty = document.createElement("p"); empty.textContent = "No pending suggestions / 暂无待审建议"; root.append(empty); }
   }
   async function refresh() {
+    const sequence = ++refreshSequence;
     try {
       await loadOwners();
+      if (sequence !== refreshSequence) return;
       renderOwnerOptions();
       const request = listTarget();
       if (!request.ownerId) { renderMemories([]); setResult("Choose a scope owner / 请选择归属"); } else {
         const result = await api.memory.list({ ...request, ...(selected("memory-search") ? { query: selected("memory-search") } : {}) });
+        if (sequence !== refreshSequence) return;
         renderMemories(result.memories ?? []);
         setResult(`${result.memories?.length ?? 0} memories · rebuilt locally / 条记忆 · 已在本地重建`);
       }
-      renderSuggestions((await api.memory.listSuggestions()).suggestions ?? []);
+      const suggestions = await api.memory.listSuggestions();
+      if (sequence === refreshSequence) renderSuggestions(suggestions.suggestions ?? []);
     } catch (reason) { setResult(errorText(reason)); }
   }
+  function handleOpenMemory(event) {
+    const detail = event.detail ?? {};
+    if (["coworker", "team", "project"].includes(detail.scope)) $("memory-scope").value = detail.scope;
+    pendingOwnerId = detail.ownerId;
+    selectedMemoryId = detail.memoryId;
+    const addFact = detail.addFact === true;
+    activate();
+    void refresh().then(() => { if (addFact) openFactDialog(); });
+  }
+  // Install the cross-surface deep link immediately. Product pages can be
+  // created asynchronously, so this must not depend on a later DOMContentLoaded
+  // callback winning a race with a Project card click.
+  document.addEventListener("sovereignbot:open-memory", handleOpenMemory);
   window.addEventListener("DOMContentLoaded", () => {
     $("nav-memory")?.addEventListener("click", () => { activate(); void refresh(); });
-    $("memory-scope")?.addEventListener("change", () => { renderOwnerOptions(); void refresh(); });
-    $("memory-owner")?.addEventListener("change", () => void refresh());
+    $("memory-scope")?.addEventListener("change", () => { renderOwnerOptions(); syncAddFactButton(); void refresh(); });
+    $("memory-owner")?.addEventListener("change", () => { syncAddFactButton(); void refresh(); });
     $("memory-state")?.addEventListener("change", () => void refresh());
     $("memory-search")?.addEventListener("input", () => void refresh());
     $("memory-refresh")?.addEventListener("click", () => void refresh());
-    document.addEventListener("sovereignbot:open-memory", (event) => {
-      const detail = event.detail ?? {};
-      if (["coworker", "team", "project"].includes(detail.scope)) $("memory-scope").value = detail.scope;
-      pendingOwnerId = detail.ownerId;
-      selectedMemoryId = detail.memoryId;
-      activate();
-      void refresh();
-    });
+    $("memory-add-fact")?.addEventListener("click", openFactDialog);
+    $("memory-fact-form")?.addEventListener("submit", (event) => void saveFact(event));
     void refresh();
   });
 })();

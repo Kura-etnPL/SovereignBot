@@ -77,6 +77,28 @@ function memoryTarget(value, { withMemoryId = false, withPatch = false, withPinn
     }
     return result;
 }
+function memoryFactTarget(value) {
+    const input = objectPayload(value);
+    exact(input, new Set(["scope", "ownerId", "draft", "label"]));
+    if (input.scope !== "project") throw new Error("approved facts can only be added to Project memory");
+    const draft = objectPayload(input.draft);
+    exact(draft, new Set(["key", "title", "content", "tags"]));
+    const normalized = {};
+    if (draft.key !== undefined) normalized.key = string(draft.key, "memory key", 200, true);
+    if (draft.title !== undefined) normalized.title = string(draft.title, "memory title", 180, true);
+    normalized.content = string(draft.content, "memory content", 20_000, true);
+    if (!normalized.key && !normalized.title) throw new Error("memory title or key is required");
+    if (draft.tags !== undefined) {
+        if (!Array.isArray(draft.tags) || draft.tags.length > 16) throw new Error("memory tags must contain at most 16 entries");
+        normalized.tags = [...new Set(draft.tags.map((entry) => string(entry, "memory tag", 80, true)))];
+    }
+    return {
+        scope: "project",
+        ownerId: projectId(input.ownerId),
+        draft: normalized,
+        ...(input.label === undefined ? {} : { label: string(input.label, "memory source label", 180, true) }),
+    };
+}
 function projectId(value) { if (typeof value !== "string" || !/^project_[a-f0-9]{16}$/i.test(value)) throw new Error("projectId must be a Project identifier"); return value; }
 function projectTarget(value, { list = false, create = false } = {}) {
     if (list) {
@@ -296,6 +318,7 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "coworker:archive": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),
     "coworker:restore": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),
     "memory:list": spec(4096, (payload) => memoryTarget(payload)),
+    "memory:putFact": spec(24 * 1024, (payload) => memoryFactTarget(payload)),
     "memory:get": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true })),
     "memory:update": spec(24 * 1024, (payload) => memoryTarget(payload, { withMemoryId: true, withPatch: true })),
     "memory:forget": spec(2048, (payload) => memoryTarget(payload, { withMemoryId: true })),

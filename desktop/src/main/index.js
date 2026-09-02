@@ -775,6 +775,7 @@ async function main() {
                     return { coworker: updated, refresh: await refreshCoworkerRuntime() };
                 },
                 "memory:list": (payload) => memoryService.list(payload),
+                "memory:putFact": (payload) => memoryService.putFact(payload),
                 "memory:get": (payload) => memoryService.get(payload),
                 "memory:update": (payload) => memoryService.update(payload),
                 "memory:forget": (payload) => memoryService.forget(payload),

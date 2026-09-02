@@ -87,7 +87,10 @@ test("global search is bounded, typed, recent/relevant, and Project scoped", asy
     const typed = await service.query({ query: "Alpha", types: ["skills"] });
     assert.ok(typed.results.every((entry) => entry.type === "skills"));
     assert.ok(result.results[0].score >= result.results.at(-1).score);
-    await service.query({ query: "Alpha", limit: 1 });
+    const paged = await service.query({ query: "Alpha", limit: 1 });
+    assert.equal(paged.results.length, 1);
+    assert.equal(paged.total, result.results.length);
+    assert.equal(paged.hasMore, true);
     assert.equal(getProjectListCalls(), 1);
     memoryRows.push({ id: "mem_bbbbbbbbbbbbbbbb", title: "Beta durable memory", content: "Beta review note", tags: ["review"], scope: "project", ownerId: projectB, state: "active", updatedAt: "2026-09-02T00:00:04.000Z", source: { type: "fact", label: "Approved durable fact" } });
     assert.equal((await service.query({ query: "Beta", types: ["memory"], limit: 100 })).results.length, 0);

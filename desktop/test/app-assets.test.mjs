@@ -38,7 +38,7 @@ test("isAppUrl accepts only the app scheme+host", () => {
 });
 
 test("app protocol allowlists every product UI script referenced by the shell", () => {
-  for (const asset of ["product-hubs-ui.js", "teach-ui.js"]) {
+  for (const asset of ["product-hubs-ui.js", "memory-ui.js", "teach-ui.js"]) {
     assert.deepEqual(resolveAppAsset(`sovereignbot://app/${asset}`), {
       ok: true,
       pathname: `/${asset}`,

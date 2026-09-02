@@ -29,15 +29,18 @@ function harness(root) {
     const jobs = { getJob(id) { if (id !== "job_a") throw new Error(`unknown job: ${id}`); return { id, title: "Completed release job", status: "completed", ownerCoworkerId: "coworker_a", conversationId: conversation.id }; } };
     const services = { workspacePath(id) { return id === "workspace_a" ? join(root, "workspace-a") : undefined; } };
     const make = (store = memory) => createMemoryService({ runtime: { memory: store }, services, coworkerStore, teamService, conversationStore, artifactStore, getJobs: () => jobs, projectResolver: (id) => projects[id] });
-    return { memory, make };
+    return { memory, make, projects };
 }
 
 test("Memory production canary separates suggestion approval, three scopes, provenance, lifecycle, and restart", async () => {
     const root = mkdtempSync(join(tmpdir(), "sb-memory-canary-"));
     try {
-        const { memory, make } = harness(root);
+        const { memory, make, projects } = harness(root);
         const service = make();
         assert.deepEqual(validateV3IpcRequest("memory:list", { scope: "coworker", ownerId: "coworker_a", query: "release", limit: 10 }), { scope: "coworker", ownerId: "coworker_a", query: "release", limit: 10, includeForgotten: false });
+        assert.deepEqual(validateV3IpcRequest("memory:putFact", { scope: "project", ownerId: "project_aaaaaaaaaaaaaaaa", draft: { title: "Operator fact", content: "Keep the release checklist", tags: ["release", "checklist"] } }), { scope: "project", ownerId: "project_aaaaaaaaaaaaaaaa", draft: { title: "Operator fact", content: "Keep the release checklist", tags: ["release", "checklist"] } });
+        assert.throws(() => validateV3IpcRequest("memory:putFact", { scope: "team", ownerId: "team_a", draft: { title: "No", content: "No" } }), /Project memory/);
+        assert.throws(() => validateV3IpcRequest("memory:putFact", { scope: "project", ownerId: "project_aaaaaaaaaaaaaaaa", draft: { title: "No", content: "No", approved: true } }), /not accepted|unexpected/);
         assert.throws(() => validateV3IpcRequest("memory:list", { scope: "project", ownerId: "team_a" }), /Project identifier/);
         assert.deepEqual(validateV3IpcRequest("memory:listSuggestions", {}), {});
         assert.deepEqual(validateV3IpcRequest("memory:approveSuggestion", { suggestionId: "suggestion_aaaaaaaaaaaaaaaa" }), { suggestionId: "suggestion_aaaaaaaaaaaaaaaa" });
@@ -83,13 +86,19 @@ test("Memory production canary separates suggestion approval, three scopes, prov
         await service.approveSuggestion(correctionSuggestion.suggestionId);
         const fact = await service.putFact({ scope: "team", ownerId: "team_a", draft: { title: "Durable fact", content: "Approved by operator" } });
         assert.equal(fact.source.type, "fact");
+        const projectFact = await service.putFact({ scope: "project", ownerId: "project_aaaaaaaaaaaaaaaa", draft: { title: "Project operator fact", content: "Approved in Project Memory", tags: ["operator"] } });
+        assert.equal(projectFact.scope, "project");
+        assert.equal(projectFact.source.type, "fact");
+        projects.project_aaaaaaaaaaaaaaaa.state = "archived";
+        await assert.rejects(() => service.putFact({ scope: "project", ownerId: "project_aaaaaaaaaaaaaaaa", draft: { title: "Blocked", content: "Archived Projects are read-only" } }), /read-only/);
+        projects.project_aaaaaaaaaaaaaaaa.state = "active";
         const persistedText = JSON.stringify(await memory.search({ query: "artifact fact" }));
         assert.equal(persistedText.includes("workspace_a"), false);
 
         const restarted = make(new MemoryStore(join(root, "memory.jsonl")));
         assert.equal((await restarted.list({ scope: "coworker", ownerId: "coworker_a" })).memories.length, 1);
         assert.equal((await restarted.list({ scope: "team", ownerId: "team_a" })).memories.length, 2);
-        assert.equal((await restarted.list({ scope: "project", ownerId: "project_aaaaaaaaaaaaaaaa" })).memories.length, 2);
+        assert.equal((await restarted.list({ scope: "project", ownerId: "project_aaaaaaaaaaaaaaaa" })).memories.length, 3);
     } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

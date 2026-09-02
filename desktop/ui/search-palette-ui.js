@@ -10,6 +10,7 @@
   let searchTypes = new Set(["conversations", "channels", "coworkers", "projects", "artifacts", "skills", "playbooks", "routines", "memory", "jobs", "history"]);
   let projectId;
   let status = "active";
+  let refreshSequence = 0;
   const close = () => { if (overlay) overlay.classList.add("hidden"); input?.blur(); opener?.focus?.(); opener = undefined; };
   const setStatus = (value) => { const status = $("palette-status"); if (status) status.textContent = value ?? ""; };
   function ensureOverlay() {
@@ -54,9 +55,10 @@
     if (commandId === "teach-skill") { close(); const button = document.querySelector("#details-teach-section button"); if (button) return button.click(); setStatus("Open a coworker conversation to start Teach Skill / 请先打开同事会话再开始教学"); return; }
   }
   async function refresh() {
+    const sequence = ++refreshSequence;
     ensureOverlay(); results.textContent = ""; selected = 0; const value = input.value.trim();
-    if (mode === "commands" && !value) { commandList = (await api.palette.list()).commands ?? []; for (const command of commandList) addResult(COMMAND_LABELS.get(command.id) ?? command.id, command.risk === "governed" ? "Governed action / 受 Governor 约束" : command.risk === "read-only" ? "Read only / 只读" : "Product action / 产品动作", () => void runPaletteCommand(command.id)); paintSelection(); return; }
-    mode = "search"; const response = await api.search.query({ query: value, types: [...searchTypes], ...(projectId ? { projectId } : {}), status, limit: 50 }); for (const item of response.results ?? []) addResult(item.title, `${item.type} · ${item.subtitle} · ${item.status}`, () => navigate(item)); if (!response.results?.length) results.append(make("p", "setting-feedback", "No matching visible results / 没有匹配的可见结果")); paintSelection();
+    if (mode === "commands" && !value) { const response = await api.palette.list(); if (sequence !== refreshSequence) return; commandList = response.commands ?? []; for (const command of commandList) addResult(COMMAND_LABELS.get(command.id) ?? command.id, command.risk === "governed" ? "Governed action / 受 Governor 约束" : command.risk === "read-only" ? "Read only / 只读" : "Product action / 产品动作", () => void runPaletteCommand(command.id)); paintSelection(); return; }
+    mode = "search"; const response = await api.search.query({ query: value, types: [...searchTypes], ...(projectId ? { projectId } : {}), status, limit: 50 }); if (sequence !== refreshSequence) return; for (const item of response.results ?? []) addResult(item.title, `${item.type} · ${item.subtitle} · ${item.status}`, () => navigate(item)); if (!response.results?.length) { results.append(make("p", "setting-feedback", "No matching visible results / 没有匹配的可见结果")); setStatus(""); } else { setStatus(`${response.total ?? response.results.length} result${(response.total ?? response.results.length) === 1 ? "" : "s"}${response.hasMore ? " · refine filters to see more / 可继续缩小筛选" : ""}`); } paintSelection();
   }
   async function open() { ensureOverlay(); opener = document.activeElement; overlay.classList.remove("hidden"); mode = "commands"; input.value = ""; await loadProjects(); await refresh(); input.focus(); }
   function installButton() { const button = make("button", "quiet-action", "⌘K Search / 搜索"); button.id = "open-command-palette"; button.type = "button"; button.setAttribute("aria-label", "Open search and command palette"); button.addEventListener("click", () => void open()); document.querySelector(".sidebar-top")?.append(button); }

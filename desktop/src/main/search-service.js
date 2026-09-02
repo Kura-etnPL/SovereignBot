@@ -192,7 +192,7 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         if (Object.hasOwn(input, "projectId") && input.projectId !== undefined && input.projectId !== null && typeof input.projectId !== "string") throw new Error("projectId must be a Project identifier");
         const built = await getIndex();
         const requestedProject = input.projectId ? built.projects.find((project) => project.projectId === input.projectId) : undefined;
-        if (input.projectId && (!requestedProject || (requestedProject.state !== "active" && status === "active"))) return { schema: SEARCH_SCHEMA, query: queryText, status, results: [] };
+        if (input.projectId && (!requestedProject || (requestedProject.state !== "active" && status === "active"))) return { schema: SEARCH_SCHEMA, query: queryText, status, indexedAt: built.indexedAt, total: 0, hasMore: false, results: [] };
         const scopeProjectId = requestedProject?.projectId;
         const { records, indexedAt } = built;
         const result = [];
@@ -206,7 +206,7 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
             result.push({ ...publicRecord, score, action: "open" });
         }
         result.sort((a, b) => b.score - a.score || String(b.updatedAt).localeCompare(String(a.updatedAt)) || String(a.title).localeCompare(String(b.title)));
-        return { schema: SEARCH_SCHEMA, query: queryText, status, indexedAt, results: result.slice(0, limit) };
+        return { schema: SEARCH_SCHEMA, query: queryText, status, indexedAt, total: result.length, hasMore: result.length > limit, results: result.slice(0, limit) };
     }
     return { schema: SEARCH_SCHEMA, query, invalidate, refresh: async () => { invalidate(); const built = await getIndex(); return { schema: SEARCH_SCHEMA, indexedAt: built.indexedAt, count: built.records.length }; } };
 }

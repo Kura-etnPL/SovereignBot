@@ -452,6 +452,7 @@
       actions.append(button("Export / 导出", async () => copy(await api.projects.export({ projectId: project.projectId }))));
       actions.append(button("Backup / 备份", async () => { await api.projects.backup({ projectId: project.projectId }); setResult("Portable Project backup created / 可移植项目备份已创建"); }));
       actions.append(button("Memory / 记忆", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId } }))));
+      actions.append(button("Add fact / 添加事实", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId, addFact: true } }))));
       card.append(title, status, counts, contents, memory, actions); root.append(card);
     }
     if (!projects.length) { const empty = document.createElement("p"); empty.textContent = "No Projects yet / 暂无项目"; root.append(empty); }
