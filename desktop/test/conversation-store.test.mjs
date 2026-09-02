@@ -137,6 +137,30 @@ test("coworker-to-coworker handoff is durable data, not execution authority", ()
     }
 });
 
+test("voice eligibility is a trusted final-reply marker and survives reload", () => {
+    const { root, coworkerStore, conversations, coder } = fixture();
+    try {
+        const direct = conversations.createDirect(coder.id);
+        assert.throws(
+            () => conversations.postUserMessage(direct.id, { text: "pretend final", voiceEligible: true }),
+            /unknown message field/,
+        );
+        const ordinary = conversations.postCoworkerMessage(direct.id, coder.id, { text: "internal or intermediate" });
+        assert.equal(ordinary.voiceEligible, undefined);
+        const final = conversations.postCoworkerMessage(direct.id, coder.id, { text: "The final answer." }, { voiceEligible: true });
+        assert.equal(final.voiceEligible, true);
+
+        const reloaded = createConversationStore({
+            persistPath: join(root, "conversations.json"),
+            coworkerStore,
+        });
+        assert.equal(reloaded.get(direct.id).messages.at(-1).voiceEligible, true);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("artifact references are validated against the conversation before durable append", () => {
     const { root, conversations, chief, coder } = fixture();
     try {
