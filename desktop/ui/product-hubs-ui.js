@@ -424,9 +424,10 @@
   function navigateCanonical(kind, entry) {
     if (kind === "channels" && entry.conversationId && typeof openConversation === "function") { void openConversation(entry.conversationId); return; }
     if (kind === "memory") { document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: state.selectedProjectId, memoryId: entry.id } })); return; }
-    const target = kind === "triggers" ? $("nav-triggers") : kind === "apps" ? $("nav-apps") : kind === "files" || kind === "artifacts" ? $("nav-artifacts") : kind === "skills" ? $("nav-skills") : kind === "playbooks" ? $("nav-playbooks") : kind === "routines" ? $("nav-routines") : kind === "coworkers" ? $("nav-settings") : $("nav-work");
-    if (target) target.click(); else if (typeof switchView === "function") switchView(kind === "coworkers" ? "settings" : kind === "triggers" ? "triggers" : "work");
-    setResult(`${kind} canonical surface opened / 已打开${kind}标准页面`);
+    const target = kind === "triggers" ? $("nav-triggers") : kind === "connectedApps" ? $("nav-apps") : kind === "files" || kind === "artifacts" ? $("nav-artifacts") : kind === "skills" ? $("nav-skills") : kind === "playbooks" ? $("nav-playbooks") : kind === "routines" ? $("nav-routines") : kind === "coworkers" ? $("nav-settings") : $("nav-work");
+    if (target) target.click(); else if (typeof switchView === "function") switchView(kind === "coworkers" ? "settings" : kind === "connectedApps" ? "apps" : kind === "triggers" ? "triggers" : "work");
+    const surfaceLabels = { triggers: "Triggers / 触发器", connectedApps: "Connected Apps / 已连接应用", files: "Files / 文件", artifacts: "Artifacts / 成果", skills: "Skills / 技能", playbooks: "Playbooks / 工作方法", routines: "Routines / 例行任务", coworkers: "Coworkers / 同事", teams: "Teams / 团队" };
+    setResult(`${surfaceLabels[kind] ?? kind} canonical surface opened / 已打开标准页面`);
   }
   function renderContentSection(root, kind, label, section) {
     const card = element("section"); card.className = "project-content-section";
@@ -443,7 +444,8 @@
       copy.append(name, meta); row.append(copy);
       const actions = element("div"); actions.className = "detail-actions";
       const canNavigate = kind !== "teams" || entry.navigation;
-      actions.append(button(kind === "channels" ? "Open Channel / 打开频道" : kind === "memory" ? "Open Memory / 打开记忆" : `Open ${label} / 打开${label}`, () => navigateCanonical(kind, entry), { disabled: !canNavigate }));
+      const actionLabels = { teams: "Open Team / 打开团队", channels: "Open Channel / 打开频道", coworkers: "Open Coworker / 打开同事", files: "Open File / 打开文件", artifacts: "Open Artifact / 打开成果", skills: "Open Skill / 打开技能", playbooks: "Open Playbook / 打开工作方法", routines: "Open Routine / 打开例行任务", triggers: "Open Trigger / 打开触发器", memory: "Open Memory / 打开记忆", connectedApps: "Open Connected Apps / 打开已连接应用" };
+      actions.append(button(actionLabels[kind] ?? `Open ${label}`, () => navigateCanonical(kind, entry), { disabled: !canNavigate }));
       if ((kind === "files" || kind === "artifacts") && entry.conversationId) actions.append(button("Source conversation / 来源会话", () => { if (typeof openConversation === "function") void openConversation(entry.conversationId); }));
       row.append(actions); list.append(row);
     }

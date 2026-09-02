@@ -8,6 +8,8 @@ const ACTIVE_JOBS = new Set(["queued", "working", "waiting"]);
 const MAX_NAME = 120;
 const MAX_CONTENT_ITEMS = 50;
 const MAX_ARTIFACTS_PER_CONVERSATION = 500;
+const SAFE_MEMORY_SOURCE_TYPES = new Set(["conversation", "artifact", "job", "correction", "fact"]);
+const SAFE_NAVIGATION_KEYS = new Set(["view", "scope", "ownerId", "projectId", "teamId", "channelId", "coworkerId", "conversationId", "artifactId", "skillId", "playbookId", "routineId", "triggerId", "jobId", "memoryId", "appId"]);
 
 function clone(value) { return structuredClone(value); }
 function stamp(now) { return new Date(now()).toISOString(); }
@@ -138,6 +140,12 @@ export function createProjectService({
     function safeCoworkerMap() {
         return new Map((coworkerStore.list({ includeArchived: true })?.coworkers ?? []).map((entry) => [entry.id, entry]));
     }
+    function safeNavigation(value) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+        const output = {};
+        for (const key of SAFE_NAVIGATION_KEYS) if (typeof value[key] === "string" && value[key].length > 0 && value[key].length <= 160) output[key] = portableText(value[key], 160);
+        return Object.keys(output).length ? output : undefined;
+    }
     function safeArtifact(entry) {
         return {
             id: entry.id, title: publicName(entry.title), fileName: publicName(entry.fileName), mimeType: publicName(entry.mimeType, 120), size: entry.size,
@@ -148,10 +156,12 @@ export function createProjectService({
     }
     function safeMemory(entry) {
         const source = entry.source && typeof entry.source === "object" ? entry.source : undefined;
+        const sourceId = typeof source?.sourceId === "string" && /^[A-Za-z0-9][\w:.-]{0,159}$/.test(source.sourceId) ? source.sourceId : undefined;
+        const sourceNavigation = safeNavigation(source?.navigation);
         return {
             id: entry.id, title: publicName(entry.title, 180), content: portableText(entry.content, 20_000), tags: [...(entry.tags ?? [])].map((tag) => portableText(tag, 80)),
             state: entry.state ?? "active", pinned: entry.pinned === true, createdAt: entry.createdAt, updatedAt: entry.updatedAt,
-            ...(source ? { source: { type: source.type, ...(source.sourceId ? { sourceId: source.sourceId } : {}), ...(source.label ? { label: portableText(source.label, 180) } : {}), ...(source.navigation ? { navigation: clone(source.navigation) } : {}) } } : {}),
+            ...(source ? { source: { type: SAFE_MEMORY_SOURCE_TYPES.has(source.type) ? source.type : "fact", ...(sourceId ? { sourceId } : {}), ...(source.label ? { label: portableText(source.label, 180) } : {}), ...(sourceNavigation ? { navigation: sourceNavigation } : {}) } } : {}),
             navigation: { view: "memory", scope: "project", memoryId: entry.id },
         };
     }
@@ -176,7 +186,7 @@ export function createProjectService({
         const projectChannels = a.channels.map((channel) => ({ id: channel.id, teamId: channel.teamId, name: publicName(channel.name), state: channel.archived === true ? "archived" : "active", summary: `Channel in ${publicName(a.projectTeams.find((team) => team.id === channel.teamId)?.name ?? "Team")}`, conversationId: channel.conversationId, navigation: { view: "conversation", conversationId: channel.conversationId } }));
         const teamItems = a.projectTeams.map((team) => {
             const channels = projectChannels.filter((channel) => channel.teamId === team.id);
-            return { id: team.id, name: publicName(team.name), state: team.state === "archived" ? "archived" : "active", status: team.flow?.status ?? "available", summary: `${channels.length} channel${channels.length === 1 ? "" : "s"}`, navigation: { view: "work", teamId: team.id }, channels };
+            return { id: team.id, name: publicName(team.name), state: team.state === "archived" ? "archived" : "active", status: team.flow?.status ?? "available", summary: `${channels.length} channel${channels.length === 1 ? "" : "s"}`, navigation: { view: "work", teamId: team.id }, channels: channels.slice(0, MAX_CONTENT_ITEMS) };
         });
         const coworkerItems = [...a.coworkerIds].map((id) => {
             const coworker = coworkers.get(id);
@@ -216,24 +226,27 @@ export function createProjectService({
             summary: `${counts.teams} Teams · ${counts.channels} Channels · ${counts.coworkers} Coworkers`,
             contents,
             counts: { ...counts, files: contents.files.total, artifacts: contents.artifacts.total },
-            teams: teamItems.map(({ id, name, channels }) => ({ id, name, channels: channels.map(({ id, name, conversationId }) => ({ id, name, conversationId })) })),
-            coworkers: coworkerItems.map(({ id, name }) => ({ id, name })),
-            connectedApps: appItems.map(({ id, name }) => ({ id, name })),
-            memory: memoryItems,
+            teams: teamItems.slice(0, MAX_CONTENT_ITEMS).map(({ id, name, channels }) => ({ id, name, channels: channels.slice(0, MAX_CONTENT_ITEMS).map(({ id, name, conversationId }) => ({ id, name, conversationId })) })),
+            coworkers: coworkerItems.slice(0, MAX_CONTENT_ITEMS).map(({ id, name }) => ({ id, name })),
+            connectedApps: appItems.slice(0, MAX_CONTENT_ITEMS).map(({ id, name }) => ({ id, name })),
+            memory: memoryItems.slice(0, MAX_CONTENT_ITEMS),
         };
     }
     async function portable(project) {
         const view = await publicProject(project);
+        const a = association(project);
+        const memories = await memoryRows(project);
+        const coworkers = safeCoworkerMap();
         return {
             schema: "sovereignbot.project-export.v1",
             exportedAt: stamp(now),
             project: {
                 name: publicName(view.name), state: view.state, createdAt: view.createdAt, updatedAt: view.updatedAt,
                 counts: clone(view.counts),
-                teams: view.teams.map((team) => ({ name: publicName(team.name), channels: team.channels.map((channel) => ({ name: publicName(channel.name) })) })),
-                coworkers: view.coworkers.map((entry) => ({ name: publicName(entry.name) })),
-                connectedApps: view.connectedApps.map((entry) => ({ name: publicName(entry.name) })),
-                memory: view.memory.map((entry) => ({ title: publicName(entry.title), content: portableText(entry.content), tags: [...(entry.tags ?? [])].map((tag) => portableText(tag, 80)), pinned: entry.pinned === true })),
+                teams: a.projectTeams.map((team) => ({ name: publicName(team.name), channels: a.channels.filter((channel) => channel.teamId === team.id).map((channel) => ({ name: publicName(channel.name) })) })),
+                coworkers: [...a.coworkerIds].map((id) => ({ name: publicName(coworkers.get(id)?.name ?? "Unavailable Coworker") })),
+                connectedApps: a.apps.map((entry) => ({ name: publicName(entry.name) })),
+                memory: memories.map((entry) => ({ title: publicName(entry.title), content: portableText(entry.content), tags: [...(entry.tags ?? [])].map((tag) => portableText(tag, 80)), pinned: entry.pinned === true })),
             },
         };
     }

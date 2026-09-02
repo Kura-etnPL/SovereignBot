@@ -6,6 +6,14 @@ import test from "node:test";
 import { createProjectService } from "../src/main/project-service.js";
 import { validateV3IpcRequest } from "../src/main/lib/v3-ipc-schema.js";
 
+function arrayLengths(value, path = "root", result = []) {
+    if (Array.isArray(value)) {
+        result.push({ path, length: value.length });
+        value.forEach((entry, index) => arrayLengths(entry, `${path}[${index}]`, result));
+    } else if (value && typeof value === "object") for (const [key, entry] of Object.entries(value)) arrayLengths(entry, `${path}.${key}`, result);
+    return result;
+}
+
 test("Project command-center projection is grouped, bounded, scoped, and unavailable-safe", async () => {
     const root = mkdtempSync(join(tmpdir(), "sb-project-command-center-"));
     const paths = new Map();
@@ -53,6 +61,35 @@ test("Project command-center projection is grouped, bounded, scoped, and unavail
         assert.equal(alpha.contents.channels.items[0].navigation.view, "conversation");
         assert.equal(alpha.contents.memory.items.length, 0);
         assert.equal(beta.contents.teams.items[0].name, "Beta Team");
+
+        for (let index = 0; index < 60; index += 1) {
+            teams.push({ id: `team_alpha_extra_${index}`, name: `Alpha Extra Team ${index}`, sharedWorkspaceId: "workspace_a", coworkerIds: [], playbooks: [], flow: { status: "available" }, channels: Array.from({ length: 60 }, (_, channelIndex) => ({ id: `channel_alpha_extra_${index}_${channelIndex}`, name: `Alpha Extra Channel ${index}-${channelIndex}`, conversationId: `conv_alpha_extra_${index}_${channelIndex}`, workspaceId: "workspace_a" })) });
+            coworkers.push({ id: `coworker_alpha_extra_${index}`, name: `Alpha Extra Coworker ${index}`, state: "active", workspaceIds: ["workspace_a"] });
+        }
+        connectedApps.listForScope = () => ({ apps: Array.from({ length: 60 }, (_, index) => ({ id: `app-alpha-extra-${index}`, name: `Alpha Extra App ${index}`, description: "bounded local app", status: "connected", assignedTeamIds: [teams[0].id], assignedCoworkerIds: [] })) });
+        projectService.setMemoryService({ list: async () => ({ memories: Array.from({ length: 60 }, (_, index) => ({ id: `memory_alpha_extra_${index}`, title: `Alpha Extra Memory ${index}`, content: "bounded memory", tags: [], state: "active", pinned: false, createdAt: "2026-09-03T00:00:00.000Z", updatedAt: "2026-09-03T00:00:00.000Z", source: { type: "conversation", sourceId: "conv_0000000000000001", label: "C:\\private\\token.txt token=must-not-leak", navigation: { view: "conversation", conversationId: "conv_0000000000000001", path: "C:\\private", token: "must-not-leak", provider: "forged-provider", nested: { capability: "forged" } } } })) }) });
+        const saturated = await projectService.get(projects[0]);
+        assert.ok(saturated.contents.teams.total > 50);
+        assert.equal(saturated.contents.teams.items.length, 50);
+        assert.equal(saturated.teams.length, 50);
+        assert.ok(saturated.teams.every((team) => team.channels.length <= 50));
+        assert.equal(saturated.coworkers.length, 50);
+        assert.equal(saturated.connectedApps.length, 50);
+        assert.equal(saturated.memory.length, 50);
+        assert.ok(arrayLengths(saturated).every(({ length }) => length <= 50));
+        assert.equal(saturated.contents.memory.items[0].source.navigation.path, undefined);
+        assert.equal(saturated.contents.memory.items[0].source.navigation.token, undefined);
+        assert.equal(saturated.contents.memory.items[0].source.navigation.provider, undefined);
+        assert.deepEqual(saturated.contents.memory.items[0].source.navigation, { view: "conversation", conversationId: "conv_0000000000000001" });
+        assert.equal(JSON.stringify(saturated).includes("must-not-leak"), false);
+        assert.equal(JSON.stringify(saturated).includes("forged-provider"), false);
+        assert.equal(JSON.stringify(saturated).includes('"provider"'), false);
+        const exported = await projectService.export(projects[0]);
+        assert.equal(exported.project.teams.length, 61);
+        assert.equal(exported.project.teams.find((team) => team.name === "Alpha Extra Team 0").channels.length, 60);
+        assert.equal(exported.project.coworkers.length, 61);
+        assert.equal(exported.project.connectedApps.length, 60);
+        assert.equal(exported.project.memory.length, 60);
 
         paths.delete("workspace_a");
         const unavailable = await projectService.get(projects[0]);
