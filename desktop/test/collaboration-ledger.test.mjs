@@ -109,6 +109,96 @@ test("handoff runtime preflight can fail closed without transferring the owner",
     finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("directed collaboration selects any active teammate, wakes only that teammate, and survives restart", () => {
+    const { root, coworkers, conversations, teams, services } = fixture();
+    try {
+        const chief = coworkers.create({ name: "Chief", role: "Coordinate work" });
+        const researcher = coworkers.create({ name: "Research Specialist", role: "Research" });
+        const builder = coworkers.create({ name: "Build Specialist", role: "Build" });
+        const reviewer = coworkers.create({ name: "Quality Specialist", role: "Review" });
+        const outside = coworkers.create({ name: "Outside", role: "Other" });
+        const created = teams.createTeam({ title: "Directed collaboration", coworkerIds: [chief.id, researcher.id, builder.id, reviewer.id] });
+        teams.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => ({ targetCoworkerId, agentId: `agent-${targetCoworkerId}`, workspaceId: workspaceId ?? teams.workspaceIdForConversation(conversationId) }));
+        const first = conversations.postUserMessage(created.conversation.id, { text: "Start the bounded delivery." });
+        teams.onMessageQueued({ conversation: conversations.get(created.conversation.id), message: first });
+
+        const requested = teams.requestCollaboration({
+            conversationId: created.conversation.id,
+            targetCoworkerId: builder.id,
+            handoffType: "handoff",
+            boundedTask: "Inspect the implementation and report the smallest safe change.",
+            reason: "The build specialist owns this bounded slice.",
+        });
+        const flow = teams.get(created.team.id).flow;
+        assert.equal(requested.targetCoworkerId, builder.id);
+        assert.equal(flow.currentOwnerId, builder.id);
+        assert.equal(flow.activeProtocol.kind, "handoff");
+        assert.equal(flow.activeProtocol.targetCoworkerId, builder.id);
+        assert.equal(flow.activeProtocol.boundedTask, "Inspect the implementation and report the smallest safe change.");
+        assert.equal(requested.message.senderId, chief.id);
+        assert.deepEqual(requested.message.mentions, [builder.id]);
+        assert.deepEqual(Object.keys(requested.message.delivery), [builder.id]);
+        assert.equal(requested.message.delivery[builder.id].status, "pending");
+        const activity = teams.activity({ conversationId: created.conversation.id }).events;
+        assert.equal(activity[0].label, "Handoff requested");
+        assert.equal(activity[0].targetCoworker, "Build Specialist");
+        assert.equal(Object.keys(activity[0]).some((key) => /(?:event|run|request|operation|token|protocol|workspace|agent)/i.test(key)), false);
+        assert.throws(() => teams.requestCollaboration({ conversationId: created.conversation.id, targetCoworkerId: reviewer.id, handoffType: "review", boundedTask: "Review again", reason: "Duplicate request" }), /already active/);
+        assert.throws(() => teams.requestCollaboration({ conversationId: created.conversation.id, targetCoworkerId: builder.id, handoffType: "handoff", boundedTask: "Return", reason: "Self" }), /differ/);
+        assert.throws(() => teams.requestCollaboration({ conversationId: created.conversation.id, targetCoworkerId: outside.id, handoffType: "handoff", boundedTask: "Outside", reason: "Not rostered" }), /team member/);
+
+        const restartedConversations = createConversationStore({ persistPath: join(root, "conversations.json"), coworkerStore: coworkers });
+        const restartedTeams = createTeamService({ dataDir: root, coworkerStore: coworkers, conversationStore: restartedConversations, services });
+        const restarted = restartedTeams.get(created.team.id).flow;
+        assert.equal(restarted.currentOwnerId, builder.id);
+        assert.equal(restarted.activeProtocol.targetCoworkerId, builder.id);
+        assert.equal(restarted.activeProtocol.boundedTask, "Inspect the implementation and report the smallest safe change.");
+        assert.equal(restartedConversations.get(created.conversation.id).messages.at(-1).delivery[builder.id].status, "pending");
+    }
+    finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("directed review can follow a handoff and return ownership to the source teammate", () => {
+    const { root, coworkers, conversations, teams } = fixture();
+    try {
+        const chief = coworkers.create({ name: "Chief", role: "Coordinate" });
+        const builder = coworkers.create({ name: "Builder", role: "Build" });
+        const reviewer = coworkers.create({ name: "Quality", role: "Review" });
+        const created = teams.createTeam({ title: "Review path", coworkerIds: [chief.id, builder.id, reviewer.id] });
+        teams.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => ({ targetCoworkerId, agentId: `agent-${targetCoworkerId}`, workspaceId: workspaceId ?? teams.workspaceIdForConversation(conversationId) }));
+        const first = conversations.postUserMessage(created.conversation.id, { text: "Start the review path." });
+        teams.onMessageQueued({ conversation: conversations.get(created.conversation.id), message: first });
+
+        const handoff = teams.requestCollaboration({ conversationId: created.conversation.id, targetCoworkerId: builder.id, handoffType: "handoff", boundedTask: "Build the bounded change.", reason: "Builder owns implementation." });
+        let context = teams.collaborationContextForConversation(created.conversation.id);
+        teams.acceptProtocol({ conversationId: created.conversation.id, targetCoworkerId: builder.id, proofId: teams.pendingProtocolProof(created.conversation.id).proofId, messageId: handoff.message.id, ...context, expectedVersion: context.version });
+        context = teams.collaborationContextForConversation(created.conversation.id);
+        teams.claimStage({ conversationId: created.conversation.id, ownerId: builder.id, messageId: handoff.message.id, ...context, expectedVersion: context.version });
+        context = teams.collaborationContextForConversation(created.conversation.id);
+        teams.submitProtocolResult({ conversationId: created.conversation.id, coworkerId: builder.id, messageId: handoff.message.id, ...context, expectedVersion: context.version });
+
+        const review = teams.requestCollaboration({ conversationId: created.conversation.id, targetCoworkerId: reviewer.id, handoffType: "review", boundedTask: "Review the bounded change.", reason: "Quality needs to validate the result." });
+        assert.equal(teams.get(created.team.id).flow.currentOwnerId, reviewer.id);
+        assert.equal(teams.get(created.team.id).flow.activeProtocol.kind, "review");
+        assert.deepEqual(Object.keys(review.message.delivery), [reviewer.id]);
+        context = teams.collaborationContextForConversation(created.conversation.id);
+        teams.acceptProtocol({ conversationId: created.conversation.id, targetCoworkerId: reviewer.id, proofId: teams.pendingProtocolProof(created.conversation.id).proofId, messageId: review.message.id, ...context, expectedVersion: context.version });
+        context = teams.collaborationContextForConversation(created.conversation.id);
+        teams.claimStage({ conversationId: created.conversation.id, ownerId: reviewer.id, messageId: review.message.id, ...context, expectedVersion: context.version });
+        context = teams.collaborationContextForConversation(created.conversation.id);
+        teams.submitProtocolResult({ conversationId: created.conversation.id, coworkerId: reviewer.id, messageId: review.message.id, ...context, expectedVersion: context.version });
+        context = teams.collaborationContextForConversation(created.conversation.id);
+        teams.recordReviewDecision({ conversationId: created.conversation.id, coworkerId: reviewer.id, messageId: review.message.id, decision: "approved", ...context, expectedVersion: context.version });
+
+        const returned = teams.requestCollaboration({ conversationId: created.conversation.id, targetCoworkerId: builder.id, handoffType: "handoff", boundedTask: "Continue from the approved review.", reason: "Return ownership to the implementation teammate." });
+        assert.equal(returned.message.senderId, reviewer.id);
+        assert.equal(teams.get(created.team.id).flow.currentOwnerId, builder.id);
+        assert.equal(teams.get(created.team.id).flow.activeProtocol.kind, "handoff");
+        assert.equal(teams.activity({ conversationId: created.conversation.id }).events.filter((entry) => entry.label === "Review requested").length, 1);
+    }
+    finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("stop and restart create distinct runs and do not wake the stopped run", () => {
     const { root, coworkers, conversations, teams, services } = fixture();
     try {

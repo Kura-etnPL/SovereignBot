@@ -818,6 +818,62 @@ async function sendMessage(event) {
   }
 }
 
+function renderCollaborationControls(conversation, team) {
+  const section = $("details-collaboration");
+  const targetSelect = $("collaboration-target");
+  const submit = $("collaboration-submit");
+  if (!section || !targetSelect || !submit) return;
+  const flow = team?.flow ?? {};
+  const owner = flow.currentOwnerId ? coworkerById(flow.currentOwnerId) : undefined;
+  const members = participantCoworkers(conversation);
+  const targets = members.filter((entry) => entry.id !== flow.currentOwnerId && entry.state === "active");
+  section.classList.toggle("hidden", conversation.kind !== "team" || !team || !owner);
+  const previous = targetSelect.value;
+  targetSelect.textContent = "";
+  for (const coworker of targets) {
+    const option = document.createElement("option");
+    option.value = coworker.id;
+    option.textContent = coworker.name;
+    targetSelect.append(option);
+  }
+  if (targets.some((entry) => entry.id === previous)) targetSelect.value = previous;
+  const protocol = flow.activeProtocol;
+  const waitingForProtocol = ["requested", "review_requested", "accepted", "review_accepted", "working", "reviewing"].includes(protocol?.state)
+    || (protocol?.kind === "review" && protocol.state === "submitted");
+  submit.disabled = !owner || !targets.length || waitingForProtocol;
+  submit.textContent = $("collaboration-type")?.value === "review" ? "Ask for review / 请求审阅" : "Send to teammate / 发给同事";
+  submit.title = waitingForProtocol ? "Finish the current collaboration first" : "Send a bounded task to the selected teammate";
+}
+
+async function submitCollaborationRequest() {
+  const conversation = state.selectedConversation;
+  const targetCoworkerId = $("collaboration-target")?.value;
+  const handoffType = $("collaboration-type")?.value;
+  const boundedTask = $("collaboration-task")?.value.trim();
+  const reason = $("collaboration-reason")?.value.trim();
+  const errorTarget = $("collaboration-form-error");
+  const submit = $("collaboration-submit");
+  if (!conversation || conversation.kind !== "team") return;
+  hide(errorTarget);
+  if (!targetCoworkerId || !boundedTask || !reason) {
+    errorTarget.textContent = "Choose a teammate and provide both a bounded task and a reason.";
+    show(errorTarget);
+    return;
+  }
+  submit.disabled = true;
+  try {
+    await window.sovereignbot.teams.requestCollaboration({ conversationId: conversation.id, targetCoworkerId, handoffType, reason, boundedTask });
+    $("collaboration-task").value = "";
+    $("collaboration-reason").value = "";
+    await refreshConversation(true);
+  } catch (error) {
+    errorTarget.textContent = text(error?.message || error).replace(/^.*Error: /, "");
+    show(errorTarget);
+  } finally {
+    if (state.selectedConversation) renderCollaborationControls(state.selectedConversation, teamForConversation(state.selectedConversation.id));
+  }
+}
+
 function renderDetails(conversation) {
   const membersEl = $("details-members");
   clearNode(membersEl);
@@ -914,6 +970,7 @@ function renderDetails(conversation) {
   } else $("details-current-work").textContent = team?.flow?.currentOwner
     ? `${team.flow.status === "needs-attention" ? "Attention" : team.flow.status === "active" ? "Active" : team.flow.status === "stopped" ? "Attention" : "Waiting"} · ${team.flow.currentOwner}${activitySuffix}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
+  renderCollaborationControls(conversation, team);
   void renderMemorySections(conversation, team);
 }
 
@@ -2052,6 +2109,11 @@ function bindEvents() {
   }
 
   $("composer-form").addEventListener("submit", sendMessage);
+  $("collaboration-submit")?.addEventListener("click", submitCollaborationRequest);
+  $("collaboration-type")?.addEventListener("change", () => {
+    const button = $("collaboration-submit");
+    if (button) button.textContent = $("collaboration-type").value === "review" ? "Ask for review / 请求审阅" : "Send to teammate / 发给同事";
+  });
   $("composer-input").addEventListener("input", autoSizeComposer);
   $("composer-input").addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {

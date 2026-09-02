@@ -396,6 +396,18 @@ export const V3_IPC_CHANNELS = Object.freeze({
         return { title: string(value.title, "title", 120), coworkerIds, ...(leadCoworkerId ? { leadCoworkerId } : {}) };
     }),
     "team:list": spec(1024, empty),
+    "team:requestCollaboration": spec(8192, (payload) => {
+        const value = objectPayload(payload);
+        exact(value, new Set(["conversationId", "targetCoworkerId", "handoffType", "reason", "boundedTask"]));
+        if (!["handoff", "review"].includes(value.handoffType)) throw new Error("handoffType must be handoff or review");
+        return {
+            conversationId: identifier(value.conversationId, "conversationId"),
+            targetCoworkerId: identifier(value.targetCoworkerId, "targetCoworkerId"),
+            handoffType: value.handoffType,
+            reason: string(value.reason, "reason", 400, true),
+            boundedTask: string(value.boundedTask, "boundedTask", 800, true),
+        };
+    }),
     "team:computerTask": spec(32 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["title", "objective", "ownerCoworkerId", "teamId", "projectId", "workspaceId", "computerTarget", "computerActions"])); return { title: string(value.title, "title", 120, true), objective: string(value.objective, "objective", 8000, true), ownerCoworkerId: identifier(value.ownerCoworkerId, "ownerCoworkerId"), teamId: identifier(value.teamId, "teamId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }), ...(value.workspaceId === undefined ? {} : { workspaceId: identifier(value.workspaceId, "workspaceId") }), computerTarget: workerComputerTargetShape(value.computerTarget), computerActions: value.computerActions === undefined ? [{ operation: "snapshot", input: {} }] : workerComputerActionsShape(value.computerActions) }; }),
     "team:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId"])); return { teamId: identifier(value.teamId, "teamId") }; }),
     "team:installPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["packId"])); return { packId: identifier(value.packId, "packId") }; }),

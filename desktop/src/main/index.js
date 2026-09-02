@@ -654,6 +654,11 @@ async function main() {
                 "team:get": ({ teamId }) => teamService.get(teamId),
                 "team:computerTask": (payload) => coworkerDispatcher.dispatchComputerTask(payload),
                 "team:activity": (payload) => teamService.activity(payload),
+                "team:requestCollaboration": (payload) => {
+                    const result = teamService.requestCollaboration(payload);
+                    const deliveries = coworkerDispatcher.dispatchMessage(payload.conversationId, result.message.id);
+                    return { ...result, scheduledRecipients: deliveries.length };
+                },
                 "team:installPack": async ({ packId }) => {
                     const result = productSurfaces.recipeList().some((pack) => pack.id === packId)
                         ? teamService.importPack(productSurfaces.getPackRecipe(packId))
@@ -866,7 +871,7 @@ async function main() {
         const searchMutationChannels = new Set([
             "conversation:createDirect", "conversation:createTeam", "conversation:send", "conversation:redirect",
             "artifact:attachViaDialog", "artifact:restoreAsNewVersion", "artifact:reviseViaDialog", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
-            "team:installPack", "team:importPack", "team:importPlaybook", "team:createChannelFromTemplate",
+            "team:requestCollaboration", "team:installPack", "team:importPack", "team:importPlaybook", "team:createChannelFromTemplate",
             "playbook:create", "playbook:update", "playbook:archive", "playbook:restore", "playbook:duplicate", "playbook:import", "playbook:assign",
             "channel:create", "channel:update", "channel:archive", "channel:restore",
             "skill:create", "skill:update", "skill:archive", "skill:restore", "skill:assign", "skill:import",

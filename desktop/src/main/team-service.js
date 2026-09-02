@@ -375,6 +375,10 @@ function safeLedgerText(value, label, max = 240) {
     // collaboration context.
     return text
         .replace(/[A-Za-z]:[\\/][^\s]+|(?:^|\s)\\\\[^\s]+/g, "[private detail]")
+        .replace(/(?:^|\s)\/(?:[^\s/]+\/)+[^\s]*/g, " [private detail]")
+        .replace(/\bBearer\s+[A-Za-z0-9._-]+/gi, "Bearer [private detail]")
+        .replace(/\b(?:sk|pk)-[A-Za-z0-9_-]{8,}\b/gi, "[private detail]")
+        .replace(/\b(?:token|secret|password|api[_-]?key)\s*[:=]\s*[^\s]+/gi, "[private detail]")
         .replace(/\b(?:run|request|operation|event|token|protocolRequest|runtime|audit|session)_[A-Za-z0-9._:-]+\b/gi, "[private detail]");
 }
 
@@ -389,6 +393,8 @@ function safeActiveProtocol(value) {
         const targetCoworkerId = safeId(value.targetCoworkerId, "protocol targetCoworkerId");
         const revision = Number.isInteger(value.revision) && value.revision >= 0 && value.revision <= MAX_PROTOCOL_REVISIONS
             ? value.revision : 0;
+        const boundedTask = safeLedgerText(value.boundedTask, "boundedTask", 800);
+        const reason = safeLedgerText(value.reason, "reason", 400);
         const candidateArtifactIds = Array.isArray(value.candidateArtifactIds)
             ? value.candidateArtifactIds.slice(0, 12).map((id) => safeId(id, "candidate artifactId"))
             : [];
@@ -400,6 +406,8 @@ function safeActiveProtocol(value) {
             targetCoworkerId,
             ...(value.reviewerCoworkerId ? { reviewerCoworkerId: safeId(value.reviewerCoworkerId, "reviewerCoworkerId") } : {}),
             revision,
+            ...(boundedTask ? { boundedTask } : {}),
+            ...(reason ? { reason } : {}),
             candidateArtifactIds,
         };
     }
@@ -418,6 +426,8 @@ function publicActiveProtocol(value, coworkerName = (id) => id) {
         targetCoworkerId: protocol.targetCoworkerId,
         targetCoworker: coworkerName(protocol.targetCoworkerId),
         ...(protocol.reviewerCoworkerId ? { reviewerCoworkerId: protocol.reviewerCoworkerId, reviewerCoworker: coworkerName(protocol.reviewerCoworkerId) } : {}),
+        ...(protocol.boundedTask ? { boundedTask: protocol.boundedTask } : {}),
+        ...(protocol.reason ? { reason: protocol.reason } : {}),
         ...(protocol.candidateArtifactIds.length ? { artifactIds: [...protocol.candidateArtifactIds] } : {}),
     };
 }
@@ -2105,7 +2115,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             startRun({ conversationId: conversation.id, ownerId: order[ownerIndex], stage: stageForIndex(ownerIndex, order), messageId: message.id });
     }
 
-    function resolveHandoff({ conversation, coworkerId, source, requestedCoworkerIds = [] } = {}) {
+    function resolveHandoff({ conversation, coworkerId, source, requestedCoworkerIds = [], allowDirectedTarget = false } = {}) {
         const channel = channelForConversation(conversation?.id);
         if (!channel) return undefined;
         const team = requireTeam(channel.teamId);
@@ -2115,13 +2125,25 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             return { target: flow.lastHandoffTargetId, duplicate: true };
         const order = handoffOrder(team);
         const currentIndex = indexForFlow(flow, order);
+        const requested = Array.isArray(requestedCoworkerIds)
+            ? requestedCoworkerIds.find((id) => id !== coworkerId && team.coworkerIds.includes(id))
+            : undefined;
+        const currentOwnerId = flow.ownerId ?? (currentIndex === undefined ? undefined : order[currentIndex]);
+        if (allowDirectedTarget && currentOwnerId === coworkerId && requested) {
+            const nextIndex = order.indexOf(requested);
+            return {
+                target: requested,
+                nextIndex: nextIndex >= 0 ? nextIndex : undefined,
+                stage: nextIndex >= 0 ? stageForIndex(nextIndex, order) : "specialist",
+                currentIndex,
+                team,
+                flow,
+            };
+        }
         let target;
         let routingDecision;
         if (currentIndex !== undefined && order[currentIndex] === coworkerId) {
             if (currentIndex < order.length - 1) {
-                const requested = Array.isArray(requestedCoworkerIds)
-                    ? requestedCoworkerIds.find((id) => id !== coworkerId && team.coworkerIds.includes(id))
-                    : undefined;
                 const sourceIsTeamMember = source?.senderId && team.coworkerIds.includes(source.senderId);
                 const followsDeclaredPackSequence = team.packId !== "custom-team";
                 const approvedReview = flow.activeProtocol?.kind === "review" && flow.activeProtocol.state === "approved";
@@ -2142,8 +2164,9 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return resolveHandoff(args)?.target;
     }
 
-    function nextHandoff({ conversation, coworkerId, source, requestedCoworkerIds = [], expectedTargetCoworkerId, expectedVersion, expectedRunId, expectedRequestId, expectedOperationId, expectedOperationToken, runtimeProof } = {}) {
-        const decision = resolveHandoff({ conversation, coworkerId, source, requestedCoworkerIds });
+    function nextHandoff({ conversation, coworkerId, source, requestedCoworkerIds = [], expectedTargetCoworkerId, expectedVersion, expectedRunId, expectedRequestId, expectedOperationId, expectedOperationToken, runtimeProof, allowDirectedTarget = false, requestedProtocolKind, boundedTask, reason } = {}) {
+        if (requestedProtocolKind !== undefined && !PROTOCOL_KINDS.has(requestedProtocolKind)) throw new Error("protocol kind is invalid");
+        const decision = resolveHandoff({ conversation, coworkerId, source, requestedCoworkerIds, allowDirectedTarget });
         if (!decision) return undefined;
         if (decision.duplicate) return decision.target;
         const { team, flow, target } = decision;
@@ -2173,7 +2196,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         const nextRequestId = idFactory("request");
         const nextOperationId = idFactory("operation");
         const nextOperationToken = idFactory("token");
-        const nextProtocolKind = decision.stage === "reviewer" ? "review" : "handoff";
+        const nextProtocolKind = requestedProtocolKind ?? (decision.stage === "reviewer" ? "review" : "handoff");
         const nextRevision = flow.activeProtocol?.state === "changes_requested"
             ? (flow.activeProtocol.revision ?? 0) + 1
             : (flow.activeProtocol?.revision ?? 0);
@@ -2187,6 +2210,8 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             targetCoworkerId: target,
             ...(nextProtocolKind === "review" ? { reviewerCoworkerId: target } : {}),
             revision: nextRevision,
+            ...(boundedTask ? { boundedTask: safeLedgerText(boundedTask, "boundedTask", 800) } : {}),
+            ...(reason ? { reason: safeLedgerText(reason, "reason", 400) } : {}),
             candidateArtifactIds: flow.activeProtocol?.candidateArtifactIds ?? [],
         };
         const flowPatch = {
@@ -2208,12 +2233,88 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             // The source message is part of the transition's idempotency key.
         }
         const requestType = nextProtocolKind === "review" ? "review.requested" : "handoff.requested";
-        recordCollaborationEvent({ conversationId: conversation.id, type: requestType, status: "active", actorId: coworkerId, ownerId: coworkerId, targetCoworkerId: target, stage: decision.stage, messageId: source?.id, protocolRequestId: nextRequestId, protocolKind: nextProtocolKind, protocolState: nextProtocol.state, revision: nextRevision, parentOperationId: flow.operationId, runId: flow.runId, requestId: nextRequestId, operationId: nextOperationId, operationToken: nextOperationToken, expectedVersion: expectedVersion ?? (flow.version ?? 0), flowPatch, idempotencyKey: `${requestType}:${source?.id ?? "unknown"}:${target}` });
+        recordCollaborationEvent({ conversationId: conversation.id, type: requestType, status: "active", actorId: coworkerId, ownerId: coworkerId, targetCoworkerId: target, stage: decision.stage, messageId: source?.id, reason, protocolRequestId: nextRequestId, protocolKind: nextProtocolKind, protocolState: nextProtocol.state, revision: nextRevision, parentOperationId: flow.operationId, runId: flow.runId, requestId: nextRequestId, operationId: nextOperationId, operationToken: nextOperationToken, expectedVersion: expectedVersion ?? (flow.version ?? 0), flowPatch, idempotencyKey: `${requestType}:${source?.id ?? "unknown"}:${target}` });
         if (acceptedProofId) {
             const priorProof = runtimeProofs.get(acceptedProofId);
             if (priorProof) runtimeProofs.set(acceptedProofId, { ...priorProof, requestId: nextRequestId, operationId: nextOperationId, operationToken: nextOperationToken, version: (flow.version ?? 0) + 1 });
         }
         return target;
+    }
+
+    function requestCollaboration({ conversationId, targetCoworkerId, handoffType, reason, boundedTask } = {}) {
+        if (!PROTOCOL_KINDS.has(handoffType)) throw new Error("handoffType must be handoff or review");
+        const context = teamContextForConversation(conversationId);
+        if (!context) throw new Error("collaboration request requires a managed team channel");
+        const { channel, team } = context;
+        if (channel.archived) throw new Error("archived channel is read-only");
+        const flow = state.flows[team.id] ?? {};
+        const order = handoffOrder(team);
+        const currentIndex = indexForFlow(flow, order);
+        const ownerId = flow.ownerId ?? (currentIndex === undefined ? undefined : order[currentIndex]);
+        if (!ownerId || flow.stage === "complete" || flow.runStatus !== "active" || !flow.runId)
+            throw new Error("team channel has no active owner");
+        if (!team.coworkerIds.includes(ownerId) || coworkerStore.get(ownerId).state !== "active")
+            throw new Error("current owner is not an active team member");
+        if (!team.coworkerIds.includes(targetCoworkerId)) throw new Error("collaboration target is not a team member");
+        if (targetCoworkerId === ownerId) throw new Error("collaboration target must differ from the current owner");
+        if (coworkerStore.get(targetCoworkerId).state !== "active") throw new Error("collaboration target is not active");
+        if (flow.activeFanout) throw new Error("collaboration request is unavailable while parallel work is active");
+        const activeProtocol = safeActiveProtocol(flow.activeProtocol);
+        const busyStates = new Set(["requested", "review_requested", "accepted", "review_accepted", "working", "reviewing"]);
+        if (activeProtocol && (busyStates.has(activeProtocol.state) || (activeProtocol.kind === "review" && activeProtocol.state === "submitted")))
+            throw new Error("another collaboration request is already active");
+        const safeTask = safeLedgerText(boundedTask, "boundedTask", 800);
+        const safeReason = safeLedgerText(reason, "reason", 400);
+        if (!safeTask || !safeReason) throw new Error("boundedTask and reason are required");
+        const conversation = conversationStore.get(conversationId);
+        const current = collaborationContextForConversation(conversationId);
+        const proof = authorizeHandoffTarget({
+            conversationId,
+            sourceCoworkerId: ownerId,
+            targetCoworkerId,
+            expectedVersion: current?.version,
+            expectedRunId: current?.runId,
+            expectedRequestId: current?.requestId,
+            expectedOperationId: current?.operationId,
+            expectedOperationToken: current?.operationToken,
+        });
+        let message;
+        try {
+            const label = handoffType === "review" ? "Review request" : "Handoff";
+            message = conversationStore.postCoworkerMessage(conversationId, ownerId, {
+                text: `${label}\nBounded task: ${safeTask}\nReason: ${safeReason}`,
+                mentions: [targetCoworkerId],
+            });
+            nextHandoff({
+                conversation,
+                coworkerId: ownerId,
+                source: message,
+                requestedCoworkerIds: [targetCoworkerId],
+                expectedTargetCoworkerId: targetCoworkerId,
+                expectedVersion: current?.version,
+                expectedRunId: current?.runId,
+                expectedRequestId: current?.requestId,
+                expectedOperationId: current?.operationId,
+                expectedOperationToken: current?.operationToken,
+                runtimeProof: proof,
+                allowDirectedTarget: true,
+                requestedProtocolKind: handoffType,
+                boundedTask: safeTask,
+                reason: safeReason,
+            });
+        }
+        catch (error) {
+            if (message) {
+                try { conversationStore.markDelivery(conversationId, message.id, targetCoworkerId, "failed", "The collaboration request could not be committed safely."); } catch {}
+            }
+            throw error;
+        }
+        return {
+            targetCoworkerId,
+            message,
+            team: publicTeam(team),
+            activity: activityForConversation(conversationId, { limit: 12 }),
+        };
     }
 
     function workspaceIdForConversation(conversationId) {
@@ -2304,6 +2405,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         installPack,
         onMessageQueued,
         nextHandoff,
+        requestCollaboration,
         previewHandoff,
         claimStage,
         acceptProtocol,
