@@ -84,8 +84,8 @@ async function captureVisualEvidence(win) {
   const attempts = [];
   const fail = (method, error) => attempts.push({ method, error: String(error?.message ?? error).slice(0, 500) });
   try {
-    win.show();
-    await sleep(200);
+    // Keep the vertical gate headless; capturePage is best effort and must not
+    // turn an acceptance check into a visible-window side effect.
     const image = await win.capturePage(undefined, { stayAwake: true });
     if (!image || image.isEmpty()) throw new Error("BrowserWindow.capturePage returned an empty image");
     return { image, method: "BrowserWindow.capturePage", attempts };
@@ -93,25 +93,11 @@ async function captureVisualEvidence(win) {
     fail("BrowserWindow.capturePage", error);
   }
   try {
-    const { desktopCapturer } = await import("electron");
-    win.show();
-    await sleep(200);
-    const bounds = win.getBounds();
-    const sourceId = win.getMediaSourceId();
-    const sources = await desktopCapturer.getSources({
-      types: ["window"],
-      thumbnailSize: { width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) },
-      fetchWindowIcons: false,
-    });
-    const handle = sourceId.split(":")[1];
-    const source = sources.find((entry) => entry.id === sourceId)
-      ?? sources.find((entry) => entry.id.split(":")[1] === handle)
-      ?? sources.find((entry) => entry.name === win.getTitle());
-    if (!source) throw new Error(`desktopCapturer could not find BrowserWindow source ${sourceId}`);
-    if (!source.thumbnail || source.thumbnail.isEmpty()) throw new Error("desktopCapturer returned an empty BrowserWindow thumbnail");
-    return { image: source.thumbnail, method: "desktopCapturer.window", attempts };
+    const image = await win.webContents.capturePage();
+    if (!image || image.isEmpty()) throw new Error("webContents.capturePage returned an empty image");
+    return { image, method: "webContents.capturePage", attempts };
   } catch (error) {
-    fail("desktopCapturer.window", error);
+    fail("webContents.capturePage", error);
   }
   return { image: undefined, method: undefined, attempts };
 }
@@ -167,8 +153,8 @@ export async function runVerifyV43Attention({ app }) {
     const routineAttentionId = "job-attention-routine";
     const manualAttentionId = "job-attention-manual";
     const initialJobs = [
-      seedJob({ id: routineAttentionId, title: "Routine-linked attention", ownerCoworkerId: chief.id, status: "needs_attention", priority: "high", routineId: "routine_v43_gate", attentionState: { reason: "Routine needs an operator decision.", at: "2026-08-30T08:00:00.000Z" }, createdAt: "2026-08-30T07:55:00.000Z" }),
-      seedJob({ id: manualAttentionId, title: "Manual attention", ownerCoworkerId: chief.id, status: "needs_attention", priority: "normal", attentionState: { reason: "Manual job needs an operator decision.", at: "2026-08-30T09:00:00.000Z" }, createdAt: "2026-08-30T08:55:00.000Z" }),
+      seedJob({ id: routineAttentionId, title: "Routine-linked attention", ownerCoworkerId: chief.id, status: "needs_attention", priority: "high", routineId: "routine_v43_gate", attentionState: { reason: "A bounded retry is needed after a real blocker.", category: "real-blocker", at: "2026-08-30T08:00:00.000Z" }, createdAt: "2026-08-30T07:55:00.000Z" }),
+      seedJob({ id: manualAttentionId, title: "Manual attention", ownerCoworkerId: chief.id, status: "needs_attention", priority: "normal", attentionState: { reason: "A bounded retry is needed after a real blocker.", category: "real-blocker", at: "2026-08-30T09:00:00.000Z" }, createdAt: "2026-08-30T08:55:00.000Z" }),
       seedJob({ id: "job-not-attention", title: "Completed non-attention job", ownerCoworkerId: chief.id, status: "completed", createdAt: "2026-08-30T06:00:00.000Z" }),
     ];
     await writeFile(join(stateDir, "jobs.json"), `${JSON.stringify({ schema: JOBS_SCHEMA, jobs: initialJobs }, null, 2)}\n`, "utf8");
@@ -223,10 +209,11 @@ export async function runVerifyV43Attention({ app }) {
         "job:getConversation": ({ jobId }) => jobs.getConversation(jobId),
         "job:cancel": ({ jobId }) => jobs.cancel(jobId),
         "job:pause": ({ jobId }) => jobs.pause(jobId),
-        "job:resume": ({ jobId }) => jobs.resume(jobId),
-        "job:approve": ({ jobId }) => jobs.approve(jobId),
-        "job:dismiss": ({ jobId }) => jobs.dismiss(jobId),
-        "job:attention": () => jobs.attentionJobs(),
+         "job:resume": ({ jobId }) => jobs.resume(jobId),
+         "job:approve": ({ jobId }) => jobs.approve(jobId),
+         "job:snooze": ({ jobId, minutes }) => jobs.snooze(jobId, minutes),
+         "job:dismiss": ({ jobId }) => jobs.dismiss(jobId),
+         "job:attention": (payload) => jobs.attentionJobs(payload),
         "routine:create": (payload) => routines.create(payload),
         "routine:list": () => routines.list(),
         "routine:get": ({ routineId }) => routines.get(routineId),
@@ -268,11 +255,12 @@ export async function runVerifyV43Attention({ app }) {
       cards: [...document.querySelectorAll('#attention-list .job-card')].map((card)=>({ id: card.dataset.jobId, text: card.innerText, buttons: [...card.querySelectorAll('button')].map((button)=>button.textContent.trim()) })),
       body: document.getElementById('view-attention')?.innerText || ''
     })`);
-    const requiredEnglish = ["Reason", "Priority", "Source", "Raised", "Retry", "Dismiss", "Open job"];
+    const requiredEnglish = ["Reason", "Priority", "Source", "Raised", "Category", "Retry", "Snooze", "Dismiss", "Open job"];
     check("dedicated Attention view is visible and Work is hidden", english.attentionVisible && english.workHidden && english.active.length === 1 && english.active[0] === "nav-attention");
     check("Attention badge is driven by job:attention projection", english.badge === "2");
     check("Attention list contains only projection Jobs", english.cards.length === 2 && !english.cards.some((card) => card.id === "job-not-attention"));
-    check("Attention cards expose operator fields and single-item actions", requiredEnglish.every((label) => english.body.includes(label)) && english.cards.every((card) => JSON.stringify(card.buttons) === JSON.stringify(["Open job", "Retry", "Dismiss"])), JSON.stringify(english.cards));
+    check("Attention cards expose trusted categories and bounded single-item actions", requiredEnglish.every((label) => english.body.includes(label)) && english.cards.every((card) => ["Open job", "Retry", "Snooze", "Dismiss"].every((label) => card.buttons.some((button) => button.includes(label)))), JSON.stringify(english.cards));
+    check("Attention filters and snooze choices are present", english.body.includes("All categories") && english.body.includes("Snoozed") && english.body.includes("1 hour"), JSON.stringify(english));
     check("Routine-linked Attention identifies Routine source", english.cards.find((card) => card.id === routineAttentionId)?.text.includes("Source: Routine"));
     check("Manual Attention identifies Job source", english.cards.find((card) => card.id === manualAttentionId)?.text.includes("Source: Job"));
     check("Attention UI has no batch or permission actions", !/(Retry all|Dismiss all|Approve all|Always allow|Grant permission|Allow forever|Remember this decision)/.test(english.body));
@@ -300,7 +288,7 @@ export async function runVerifyV43Attention({ app }) {
     await win.webContents.executeJavaScript("document.getElementById('nav-attention')?.click()");
     await sleep(300);
 
-    await win.webContents.executeJavaScript(`document.querySelector('#attention-list .job-card[data-job-id="${routineAttentionId}"] button:nth-of-type(2)')?.click()`);
+    await win.webContents.executeJavaScript(`[...document.querySelector('#attention-list .job-card[data-job-id="${routineAttentionId}"]')?.querySelectorAll('button') ?? []].find((button)=>button.textContent.includes('Retry'))?.click()`);
     await sleep(150);
     await jobs.flush();
     await sleep(500);
@@ -315,7 +303,22 @@ export async function runVerifyV43Attention({ app }) {
     check("Retry removes resolved item and synchronizes badge", retryState.badge === "1" && retryState.cards.length === 1 && retryState.cards[0] === manualAttentionId, JSON.stringify(retryState));
     check("Retry leaves durable operator decision message", retriedConversation.messages.some((message) => message.text === "Attention retried by operator."));
 
-    await win.webContents.executeJavaScript(`document.querySelector('#attention-list .job-card[data-job-id="${manualAttentionId}"] button:nth-of-type(3)')?.click()`);
+    await win.webContents.executeJavaScript(`[...document.querySelector('#attention-list .job-card[data-job-id="${manualAttentionId}"]')?.querySelectorAll('button') ?? []].find((button)=>button.textContent.includes('Snooze'))?.click()`);
+    await sleep(300);
+    const snoozedState = await win.webContents.executeJavaScript(`({ badge: document.getElementById('attention-badge')?.textContent?.trim(), cards: document.querySelectorAll('#attention-list .job-card').length })`);
+    check("Snooze removes the item from the active Attention view", snoozedState.badge === "0" && snoozedState.cards === 0, JSON.stringify(snoozedState));
+    await win.webContents.executeJavaScript("(()=>{const f=document.getElementById('attention-visibility-filter'); f.value='snoozed'; f.dispatchEvent(new Event('change',{bubbles:true})); return true})()");
+    await sleep(300);
+    const snoozedVisible = await win.webContents.executeJavaScript(`({ cards: [...document.querySelectorAll('#attention-list .job-card')].map((card)=>card.innerText), badge: document.getElementById('attention-badge')?.textContent?.trim() })`);
+    check("Snoozed filter reads the durable Job projection", snoozedVisible.cards.length === 1 && snoozedVisible.cards[0].includes("Snoozed until") && snoozedVisible.badge === "0", JSON.stringify(snoozedVisible));
+    jobs = createJobs();
+    await win.webContents.executeJavaScript("window.SovereignJobsUI.refreshAttention()");
+    await sleep(250);
+    const afterSnoozeRestart = await win.webContents.executeJavaScript(`({ cards: document.querySelectorAll('#attention-list .job-card').length, badge: document.getElementById('attention-badge')?.textContent?.trim() })`);
+    check("Snooze remains after controller restart", afterSnoozeRestart.cards === 1 && afterSnoozeRestart.badge === "0", JSON.stringify(afterSnoozeRestart));
+    await win.webContents.executeJavaScript("(()=>{const f=document.getElementById('attention-visibility-filter'); f.value='all'; f.dispatchEvent(new Event('change',{bubbles:true})); return true})()");
+    await sleep(300);
+    await win.webContents.executeJavaScript(`[...document.querySelector('#attention-list .job-card[data-job-id="${manualAttentionId}"]')?.querySelectorAll('button') ?? []].find((button)=>button.textContent.includes('Dismiss'))?.click()`);
     await sleep(300);
     dismissState = await win.webContents.executeJavaScript(`({ badge: document.getElementById('attention-badge')?.textContent?.trim(), list: document.getElementById('attention-list')?.innerText || '' })`);
     const dismissedJob = jobs.getJob(manualAttentionId);

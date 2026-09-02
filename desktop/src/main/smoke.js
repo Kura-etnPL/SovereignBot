@@ -252,7 +252,7 @@ export async function runSmokeMode({ app, mode = "smoke" }) {
                 "job-detail-dialog", "job-detail-approve", "job-detail-dismiss",
             ];
             const surfaces = surfaceIds.every((id) => Boolean(document.getElementById(id)));
-            const jobMethods = ["submit", "list", "getStatus", "getConversation", "cancel", "pause", "resume", "approve", "dismiss", "attention"];
+            const jobMethods = ["submit", "list", "getStatus", "getConversation", "cancel", "pause", "resume", "approve", "snooze", "dismiss", "attention"];
             const jobPreload = jobMethods.every((name) => typeof jobs?.[name] === "function");
             const jobsUiLoaded = Boolean(jobsUi && typeof jobsUi.refresh === "function" && typeof jobsUi.renderList === "function");
             const chiefUiLoaded = typeof globalThis.openDirect === "function"

@@ -9,6 +9,17 @@ import { normalizeComputerTarget } from "./computer-target-controller.js";
 export const JOBS_SCHEMA = "sovereignbot.desktop.jobs.v1";
 export const MAX_OBJECTIVE = 8000;
 export const MAX_TITLE = 120;
+export const ATTENTION_CATEGORIES = Object.freeze({
+  LOGIN_REQUIRED: "login-required",
+  SECRET_REQUIRED: "secret-required",
+  APPROVAL_REQUIRED: "approval-required",
+  PROVIDER_UNAVAILABLE: "provider-unavailable",
+  COMPUTER_TAKEOVER: "computer-takeover",
+  DANGEROUS_ACTION: "dangerous-action",
+  REAL_BLOCKER: "real-blocker",
+});
+export const ATTENTION_CATEGORY_VALUES = Object.freeze(Object.values(ATTENTION_CATEGORIES));
+export const SNOOZE_MINUTES = Object.freeze([15, 60, 240, 1440]);
 const MAX_MESSAGES = 100;
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 // Jobs waiting for an operator decision are already stopped. They must survive
@@ -18,6 +29,38 @@ const INTERRUPTED_ON_RESTART = new Set(["queued", "working", "waiting"]);
 const VALID_STATUSES = new Set(["queued", "working", "waiting", "needs_attention", "completed", "failed", "cancelled"]);
 const CAPS = Object.freeze({ maxDepth: 6, maxAttempts: 3, maxChildren: 10, maxWorkerNodeReconnects: 5, fingerprintWindowMs: 180_000 });
 const WORKER_NODE_DISPATCHER = "worker-node-dispatcher";
+const VALID_ATTENTION_CATEGORIES = new Set(ATTENTION_CATEGORY_VALUES);
+const ATTENTION_CONFIG = Object.freeze({
+  [ATTENTION_CATEGORIES.LOGIN_REQUIRED]: Object.freeze({
+    reason: "Provider sign-in is required before this Job can continue.",
+    actions: Object.freeze(["open", "open-settings", "snooze", "dismiss"]),
+  }),
+  [ATTENTION_CATEGORIES.SECRET_REQUIRED]: Object.freeze({
+    reason: "A secret must be supplied through the existing secure Computer flow.",
+    actions: Object.freeze(["open", "open-this-pc", "snooze", "dismiss"]),
+  }),
+  [ATTENTION_CATEGORIES.APPROVAL_REQUIRED]: Object.freeze({
+    reason: "This Job is waiting for an operator decision.",
+    actions: Object.freeze(["open", "snooze", "dismiss"]),
+  }),
+  [ATTENTION_CATEGORIES.PROVIDER_UNAVAILABLE]: Object.freeze({
+    reason: "The selected execution provider is unavailable.",
+    actions: Object.freeze(["open", "open-settings", "retry", "snooze", "dismiss"]),
+  }),
+  [ATTENTION_CATEGORIES.COMPUTER_TAKEOVER]: Object.freeze({
+    reason: "This Computer Job needs attention in the existing This PC controls.",
+    actions: Object.freeze(["open", "open-this-pc", "snooze", "dismiss"]),
+  }),
+  [ATTENTION_CATEGORIES.DANGEROUS_ACTION]: Object.freeze({
+    reason: "The Governor blocked a potentially dangerous action.",
+    actions: Object.freeze(["open", "snooze", "dismiss"]),
+  }),
+  [ATTENTION_CATEGORIES.REAL_BLOCKER]: Object.freeze({
+    reason: "This Job is blocked and needs review.",
+    actions: Object.freeze(["open", "retry", "snooze", "dismiss"]),
+  }),
+});
+const SENSITIVE_PUBLIC_TEXT = /(?:bearer|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|secret|credential|cookie|session|continuation|provider\s*(?:id|token|ref|metadata)?\s*[:=]|backend\s*(?:id|ref)?\s*[:=]|(?:[A-Za-z]:[\\/]|file:\/\/|\\\\|\/(?:Users|home|tmp|var|private|workspace|worktrees?)[\\/]))/i;
 
 function normalizeExecutionTarget(value) {
   if (value === undefined || value === null) return { kind: "local" };
@@ -41,6 +84,72 @@ function isEconomyFailure(message) { return /\[ECONOMY:(?:METERED_DISABLED|BUDGE
 function isTransportFailure(error) { return /worker-node transport unavailable|reconnect required/i.test(String(error?.message ?? error)); }
 function makeWorkerRequestId() { return `worker_request_${randomBytes(8).toString("hex")}`; }
 function isValidIsoTimestamp(value) { return typeof value === "string" && value.length <= 64 && Number.isFinite(Date.parse(value)); }
+function publicText(value, fallback = "—", max = 8000) {
+  const text = String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  if (!text) return fallback;
+  return text
+    .replace(/((?:bearer\s+|(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|secret|credential|cookie|session)\s*[:=]))[^\s,;]+/gi, "$1[redacted]")
+    .replace(/(?:[A-Za-z]:[\\/]|file:\/\/|\\\\|\/(?:Users|home|tmp|var|private|workspace|worktrees?)[\\/])[^\s"'<>]*/gi, "[redacted path]")
+    .replace(/https?:\/\/[^\s"'<>]+/gi, "[redacted link]")
+    .slice(0, max);
+}
+function attentionCategory(job) {
+  const stored = job?.attentionState?.category;
+  if (VALID_ATTENTION_CATEGORIES.has(stored)) return stored;
+  const reason = `${job?.attentionState?.reason ?? ""} ${job?.error ?? ""}`;
+  if (/(?:secret|password|credential|api[_ -]?key|token)\s*(?:required|requested|needed)|request_secret/i.test(reason)) return ATTENTION_CATEGORIES.SECRET_REQUIRED;
+  if (/sign[ -]?in|login|logged[ -]?out|signed[ -]?out|not authenticated|authentication required/i.test(reason)) return ATTENTION_CATEGORIES.LOGIN_REQUIRED;
+  if (/dangerous|unsafe|governor|policy|permission denied|forbidden|unsafe action/i.test(reason)) return ATTENTION_CATEGORIES.DANGEROUS_ACTION;
+  if (/approval|approve|operator decision|human decision|awaiting review|review required|confirmation required/i.test(reason)) return ATTENTION_CATEGORIES.APPROVAL_REQUIRED;
+  if (/take[ -]?over|takeover|human control|controlled by operator|hand[ -]?back/i.test(reason)) return ATTENTION_CATEGORIES.COMPUTER_TAKEOVER;
+  if (/provider|worker node|reconnect|capacity|no ready|unavailable|disabled|economy/i.test(reason)) return ATTENTION_CATEGORIES.PROVIDER_UNAVAILABLE;
+  return ATTENTION_CATEGORIES.REAL_BLOCKER;
+}
+function classifyFailureCategory(job, reason) {
+  return attentionCategory({ ...job, attentionState: { reason: String(reason ?? "") } });
+}
+function attentionConfig(job) { return ATTENTION_CONFIG[attentionCategory(job)] ?? ATTENTION_CONFIG[ATTENTION_CATEGORIES.REAL_BLOCKER]; }
+function publicAttentionState(job) {
+  if (!job?.attentionState && job?.status !== "needs_attention") return undefined;
+  const category = attentionCategory(job);
+  const config = attentionConfig(job);
+  const state = job.attentionState && typeof job.attentionState === "object" && !Array.isArray(job.attentionState) ? job.attentionState : {};
+  const at = isValidIsoTimestamp(state.at) ? state.at : isValidIsoTimestamp(job.updatedAt) ? job.updatedAt : undefined;
+  const snoozedUntil = isValidIsoTimestamp(state.snoozedUntil) ? state.snoozedUntil : undefined;
+  const dismissedAt = isValidIsoTimestamp(state.dismissedAt) ? state.dismissedAt : undefined;
+  const rawReason = state.reason ?? job.error;
+  const reason = SENSITIVE_PUBLIC_TEXT.test(String(rawReason ?? "")) || /provider|backend|session|continuation/i.test(String(rawReason ?? ""))
+    ? config.reason
+    : publicText(rawReason, config.reason, 500);
+  return {
+    category,
+    reason,
+    actions: [...config.actions],
+    ...(at ? { at } : {}),
+    ...(snoozedUntil ? { snoozedUntil } : {}),
+    ...(dismissedAt ? { dismissedAt } : {}),
+  };
+}
+function publicError(job) {
+  const raw = String(job?.error ?? "");
+  if (!raw) return undefined;
+  if (SENSITIVE_PUBLIC_TEXT.test(raw) || /provider|backend|session|continuation/i.test(raw)) return attentionConfig(job).reason;
+  return publicText(raw, "Job failed.", 500);
+}
+function publicConversationMessage(job, message) {
+  const raw = String(message?.text ?? "");
+  const protectedText = SENSITIVE_PUBLIC_TEXT.test(raw) || /provider|backend|session|continuation/i.test(raw);
+  return {
+    at: isValidIsoTimestamp(message?.at) ? message.at : undefined,
+    role: ["user", "assistant", "system"].includes(message?.role) ? message.role : "system",
+    kind: typeof message?.kind === "string" && /^[a-z][\w-]{0,31}$/i.test(message.kind) ? message.kind : "system",
+    text: protectedText ? attentionConfig(job).reason : publicText(raw, "Job update.", 4000),
+  };
+}
+function isSnoozed(job, at = Date.now()) {
+  const until = Date.parse(job?.attentionState?.snoozedUntil ?? "");
+  return Number.isFinite(until) && until > at;
+}
 
 export function makeJobId() { return `job_${randomBytes(8).toString("hex")}`; }
 function slice(v, n) { const s = String(v ?? "").replace(/\s+/g, " ").trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; }
@@ -56,16 +165,21 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
 
   const loaded = loadJsonState(persistPath, null);
   const jobs = loaded?.schema === JOBS_SCHEMA && Array.isArray(loaded.jobs) ? loaded.jobs.filter(j => j && typeof j.id === "string" && VALID_STATUSES.has(j.status)) : [];
+  let hydrationDirty = false;
   for (const j of jobs) {
-    try { j.executionTarget = normalizeExecutionTarget(j.executionTarget); }
-    catch { j.executionTarget = { kind: "local" }; j.status = "needs_attention"; j.error = "invalid persisted execution target"; j.attentionState = { reason: j.error, at: now() }; }
+    try { const target = normalizeExecutionTarget(j.executionTarget); if (JSON.stringify(j.executionTarget ?? { kind: "local" }) !== JSON.stringify(target)) hydrationDirty = true; j.executionTarget = target; }
+    catch { j.executionTarget = { kind: "local" }; j.status = "needs_attention"; j.error = "invalid persisted execution target"; j.attentionState = { reason: j.error, category: ATTENTION_CATEGORIES.REAL_BLOCKER, at: now() }; hydrationDirty = true; }
     if (j.computerTarget !== undefined) {
       try { j.computerTarget = normalizeComputerTarget(j.computerTarget); }
-      catch { delete j.computerTarget; j.status = "needs_attention"; j.error = "invalid persisted Computer target"; j.attentionState = { reason: j.error, at: now() }; }
+      catch { delete j.computerTarget; j.status = "needs_attention"; j.error = "invalid persisted Computer target"; j.attentionState = { reason: j.error, category: ATTENTION_CATEGORIES.REAL_BLOCKER, at: now() }; hydrationDirty = true; }
     }
     if (j.computerTarget !== undefined) {
       try { j.computerActions = computerTargetController?.normalizeActions?.(j.computerActions); }
-      catch { delete j.computerTarget; delete j.computerActions; j.status = "needs_attention"; j.error = "invalid persisted Computer actions"; j.attentionState = { reason: j.error, at: now() }; }
+      catch { delete j.computerTarget; delete j.computerActions; j.status = "needs_attention"; j.error = "invalid persisted Computer actions"; j.attentionState = { reason: j.error, category: ATTENTION_CATEGORIES.DANGEROUS_ACTION, at: now() }; hydrationDirty = true; }
+    }
+    if (j.attentionState && typeof j.attentionState === "object" && !Array.isArray(j.attentionState)) {
+      if (j.attentionState.snoozedUntil !== undefined && !isValidIsoTimestamp(j.attentionState.snoozedUntil)) { delete j.attentionState.snoozedUntil; hydrationDirty = true; }
+      if (j.status === "needs_attention" && !VALID_ATTENTION_CATEGORIES.has(j.attentionState.category)) { j.attentionState.category = attentionCategory(j); hydrationDirty = true; }
     }
     if (INTERRUPTED_ON_RESTART.has(j.status)) {
       if (isWorkerNodeTarget(j)) {
@@ -79,6 +193,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         j.error = j.error ?? "interrupted by application shutdown";
       }
       j.updatedAt = now();
+      hydrationDirty = true;
     }
   }
   for (const j of jobs) {
@@ -91,6 +206,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
   }
 
   function save() { saveJsonState(persistPath, { schema: JOBS_SCHEMA, jobs }); }
+  if (hydrationDirty) save();
   function rosterSnapshot() {
     const s = roster();
     if (!s?.ready || s.mode === "demo") throw new Error(s?.mode === "demo" ? "demo roster" : "no ready AI provider roster");
@@ -144,8 +260,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     job.error = "Worker Node connection interrupted; reconnecting without a new remote task.";
     if (attempts >= CAPS.maxWorkerNodeReconnects) {
       job.nextActionAt = undefined;
-      setStatus(job, "needs_attention");
-      job.attentionState = { reason: "Worker Node reconnect budget exhausted", reconnectAttempts: attempts, at: now() };
+      setAttention(job, "Worker Node reconnect budget exhausted", ATTENTION_CATEGORIES.PROVIDER_UNAVAILABLE, { reconnectAttempts: attempts });
     } else {
       job.nextActionAt = new Date(Date.now() + 5000).toISOString();
       setStatus(job, "waiting");
@@ -165,7 +280,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     return { workspaceId: `coworker:${coworker.id}`, cwd };
   }
   function getJob(id) { const j = jobs.find(x => x.id === String(id)); if (!j) throw new Error(`unknown job id: ${id}`); return j; }
-  function publicJob(j) { return { id: j.id, title: j.title, objective: j.objective, status: j.status, priority: j.priority, ownerCoworkerId: j.ownerCoworkerId, parentJobId: j.parentJobId ?? null, workspaceId: j.workspaceId, executionTarget: structuredClone(j.executionTarget ?? { kind: "local" }), computerTarget: j.computerTarget ? structuredClone(j.computerTarget) : undefined, computerActions: j.computerActions?.map(({ operation }) => ({ operation })), workerNodeName: j.workerNodeName ?? undefined, workerWorkspaceName: j.workerWorkspaceName ?? undefined, routineId: j.routineId ?? undefined, skillId: j.skillId ?? undefined, teamId: j.teamId ?? undefined, projectId: j.projectId ?? undefined, scheduledFor: j.scheduledFor ?? undefined, nextActionAt: j.nextActionAt ?? null, attempt: j.attempt, depth: depthOf(jobs, j.id), childJobIds: [...(j.childJobIds ?? [])], attentionState: j.attentionState ? structuredClone(j.attentionState) : undefined, outcomeSummary: j.outcomeSummary ?? undefined, error: j.error ?? undefined, createdAt: j.createdAt, updatedAt: j.updatedAt, conversationId: j.conversationId ?? undefined, taskIds: [...(j.taskIds ?? [])] }; }
+  function publicJob(j) { return { id: j.id, title: publicText(j.title, "Untitled Job", MAX_TITLE), objective: publicText(j.objective, "Job objective unavailable.", MAX_OBJECTIVE), status: j.status, priority: j.priority, ownerCoworkerId: j.ownerCoworkerId, parentJobId: j.parentJobId ?? null, workspaceId: j.workspaceId, executionTarget: structuredClone(j.executionTarget ?? { kind: "local" }), computerTarget: j.computerTarget ? structuredClone(j.computerTarget) : undefined, computerActions: j.computerActions?.map(({ operation }) => ({ operation })), workerNodeName: publicText(j.workerNodeName, undefined, 160), workerWorkspaceName: publicText(j.workerWorkspaceName, undefined, 160), routineId: j.routineId ?? undefined, skillId: j.skillId ?? undefined, teamId: j.teamId ?? undefined, projectId: j.projectId ?? undefined, scheduledFor: j.scheduledFor ?? undefined, nextActionAt: j.nextActionAt ?? null, attempt: j.attempt, depth: depthOf(jobs, j.id), childJobIds: [...(j.childJobIds ?? [])], attentionState: publicAttentionState(j), outcomeSummary: j.outcomeSummary ? publicText(j.outcomeSummary, "Job completed.", 8000) : undefined, error: publicError(j), createdAt: j.createdAt, updatedAt: j.updatedAt, conversationId: j.conversationId ?? undefined, taskIds: [...(j.taskIds ?? [])] }; }
   function appendMessage(job, kind, text, role = "system") {
     job.conversation = job.conversation ?? { messages: [] };
     job.conversation.messages.push({ at: now(), role, kind, text: String(text).slice(0, 4000) });
@@ -179,6 +294,11 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     if (previous !== status) {
       try { onStatus?.(publicJob(job), { previous, status }); } catch { /* notifications are best effort */ }
     }
+  }
+  function setAttention(job, reason, category = ATTENTION_CATEGORIES.REAL_BLOCKER, details = {}) {
+    const safeCategory = VALID_ATTENTION_CATEGORIES.has(category) ? category : ATTENTION_CATEGORIES.REAL_BLOCKER;
+    job.attentionState = { ...details, reason: String(reason ?? "Job requires operator attention").slice(0, 500), category: safeCategory, at: now() };
+    setStatus(job, "needs_attention");
   }
   function normalizeInternalContext(value) {
     if (value === undefined) return {};
@@ -292,8 +412,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       }
       job._fingerprint = { key: fp, at: now() };
       if (job._repeatCount >= 2) {
-        setStatus(job, "needs_attention");
-        job.attentionState = { reason: "repeated objective fingerprint", fingerprint: fp, at: now() };
+        setAttention(job, "repeated objective fingerprint", ATTENTION_CATEGORIES.REAL_BLOCKER, { fingerprint: fp });
         job.outcomeSummary = "Needs attention: repeated objective detected.";
         save(); return;
       }
@@ -366,8 +485,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       job.error = String(finished?.error ?? `job task ended as ${status}`).slice(0, 500);
       appendMessage(job, "answer", `Job attempt ${attempt} did not complete: ${job.error}`);
       if (rosterProviderForJob(job) === "economy" || isEconomyFailure(job.error)) {
-        setStatus(job, "needs_attention");
-        job.attentionState = { reason: job.error, attempt, at: now() };
+        setAttention(job, job.error, ATTENTION_CATEGORIES.PROVIDER_UNAVAILABLE, { attempt });
         save(); return;
       }
       if (attempt < CAPS.maxAttempts) {
@@ -383,8 +501,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         setStatus(job, "waiting");
         save(); return;
       }
-      setStatus(job, "needs_attention");
-      job.attentionState = { reason: job.error, attempt, at: now() };
+      setAttention(job, job.error, classifyFailureCategory(job, job.error), { attempt });
       save();
     } catch (error) {
       const msg = String(error?.message ?? error).slice(0, 500);
@@ -398,22 +515,18 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
           scheduleWorkerNodeReconnect(j);
         } else {
           j.workerNodeReconnectAttempts = 0;
-          setStatus(j, "needs_attention");
-          j.attentionState = { reason: msg, attempt: j.attempt ?? 0, at: now() };
+          setAttention(j, msg, classifyFailureCategory(j, msg), { attempt: j.attempt ?? 0 });
         }
       } else if (isComputerTarget(j)) {
-        setStatus(j, "needs_attention");
-        j.attentionState = { reason: msg, attempt: j.attempt ?? 0, at: now() };
+        setAttention(j, msg, classifyFailureCategory(j, msg), { attempt: j.attempt ?? 0 });
       } else if (rosterProviderForJob(j) === "economy" || isEconomyFailure(msg)) {
-        setStatus(j, "needs_attention");
-        j.attentionState = { reason: msg, attempt: j.attempt ?? 0, at: now() };
+        setAttention(j, msg, ATTENTION_CATEGORIES.PROVIDER_UNAVAILABLE, { attempt: j.attempt ?? 0 });
       } else if (attempt + 1 < CAPS.maxAttempts && !/no ready AI provider|demo roster/i.test(msg)) {
         j.attempt = attempt + 1;
         j.nextActionAt = new Date(Date.now() + 1000 * Math.pow(2, j.attempt)).toISOString();
         setStatus(j, "waiting");
       } else {
-        setStatus(j, "needs_attention");
-        j.attentionState = { reason: msg, attempt: j.attempt ?? 0, at: now() };
+        setAttention(j, msg, classifyFailureCategory(j, msg), { attempt: j.attempt ?? 0 });
       }
       save();
     }
@@ -464,7 +577,11 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     },
     getJob(jobId) { return publicJob(getJob(jobId)); },
     listJobs() { return { schema: JOBS_SCHEMA, jobs: jobs.map(publicJob) }; },
-    attentionJobs() {
+    attentionJobs({ category, visibility = "active" } = {}) {
+      const selectedCategory = category === undefined || category === "all" ? undefined : (VALID_ATTENTION_CATEGORIES.has(category) ? category : ATTENTION_CATEGORIES.REAL_BLOCKER);
+      const selectedVisibility = ["active", "snoozed", "all"].includes(visibility) ? visibility : "active";
+      const nowMs = Date.parse(now());
+      const at = Number.isFinite(nowMs) ? nowMs : Date.now();
       const priorityRank = { high: 0, normal: 1, low: 2 };
       const timestamp = (job) => {
         const candidates = [job.attentionState?.at, job.updatedAt, job.createdAt];
@@ -474,7 +591,15 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         }
         return Number.POSITIVE_INFINITY;
       };
-      const attention = jobs.filter(j => j.status === "needs_attention").slice();
+      const attentionAll = jobs.filter((j) => {
+        if (j.status !== "needs_attention") return false;
+        if (selectedCategory && attentionCategory(j) !== selectedCategory) return false;
+        const snoozed = isSnoozed(j, at);
+        return selectedVisibility === "all" || (selectedVisibility === "snoozed" ? snoozed : !snoozed);
+      }).slice();
+      const activeCount = jobs.filter((j) => j.status === "needs_attention" && !isSnoozed(j, at)).length;
+      const snoozedCount = jobs.filter((j) => j.status === "needs_attention" && isSnoozed(j, at)).length;
+      const attention = attentionAll;
       attention.sort((a, b) => {
         const priority = (priorityRank[a.priority] ?? 1) - (priorityRank[b.priority] ?? 1);
         if (priority) return priority;
@@ -482,11 +607,11 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         if (raised) return raised;
         return String(a.id).localeCompare(String(b.id));
       });
-      return { schema: JOBS_SCHEMA, jobs: attention.map(publicJob) };
+      return { schema: JOBS_SCHEMA, jobs: attention.map(publicJob), activeCount, snoozedCount };
     },
     getConversation(jobId) {
       const j = getJob(jobId);
-      return { jobId: j.id, conversationId: j.conversationId ?? `job-conv-${j.id}`, messages: structuredClone((j.conversation?.messages ?? []).slice(-MAX_MESSAGES)) };
+      return { jobId: j.id, conversationId: j.conversationId ?? `job-conv-${j.id}`, messages: (j.conversation?.messages ?? []).slice(-MAX_MESSAGES).map((message) => publicConversationMessage(j, message)) };
     },
     async cancel(jobId) {
       const j = getJob(jobId);
@@ -496,8 +621,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         const latestRemote = j.remoteTaskId ?? (await runtime.orchestrator.listTasks()).filter((task) => (j.taskIds ?? []).includes(task.id)).map((task) => task.harnessState?.remoteTaskId).find(Boolean);
         if (!latestRemote) {
           j.error = "remote cancellation unconfirmed";
-          j.attentionState = { reason: "remote cancellation unconfirmed: remote task id is not bound", at: now() };
-          setStatus(j, "needs_attention");
+          setAttention(j, "remote cancellation unconfirmed: remote task id is not bound", ATTENTION_CATEGORIES.REAL_BLOCKER);
           save();
           return publicJob(j);
         }
@@ -509,8 +633,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
         }
         catch (error) {
           j.error = "remote cancellation unconfirmed";
-          j.attentionState = { reason: j.error, at: now() };
-          setStatus(j, "needs_attention");
+          setAttention(j, j.error, ATTENTION_CATEGORIES.REAL_BLOCKER);
           save();
           return publicJob(j);
         }
@@ -525,6 +648,7 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
       if (j.status !== "waiting" && j.status !== "needs_attention") throw new Error(`only waiting/needs_attention jobs can be resumed (current: ${j.status})`);
       const fromWaiting = j.status === "waiting";
       const fromNeedsAttention = j.status === "needs_attention";
+      if (fromNeedsAttention && !attentionConfig(j).actions.includes("retry")) throw new Error("this attention item requires its existing operator flow before it can be retried");
       if (fromNeedsAttention) appendMessage(j, "decision", "Attention retried by operator.", "user");
       if (fromNeedsAttention) { j.attempt = 0; j._fingerprint = undefined; j._repeatCount = 0; }
       j.workerNodeReconnectAttempts = 0;
@@ -536,11 +660,24 @@ export function createJobController({ dataDir, runtime, roster, coworkerStore, s
     async approve(jobId) {
       const j = getJob(jobId);
       if (j.status !== "needs_attention") throw new Error(`only needs_attention jobs can be approved`);
+      if (!attentionConfig(j).actions.includes("retry")) throw new Error("this attention item requires its existing operator flow before it can be retried");
       appendMessage(j, "decision", "Attention retried by operator.", "user");
       j.workerNodeReconnectAttempts = 0;
       j.attempt = 0; j.error = undefined; j.attentionState = undefined; j.nextActionAt = undefined;
       j._fingerprint = undefined; j._repeatCount = 0; delete j._skipFingerprintOnce;
       setStatus(j, "queued"); save(); schedule(j.id); return publicJob(j);
+    },
+    async snooze(jobId, minutes) {
+      const j = getJob(jobId);
+      if (j.status !== "needs_attention") throw new Error(`only needs_attention jobs can be snoozed`);
+      if (!SNOOZE_MINUTES.includes(minutes)) throw new Error(`snooze minutes must be one of: ${SNOOZE_MINUTES.join(", ")}`);
+      const base = Date.parse(now());
+      const until = new Date((Number.isFinite(base) ? base : Date.now()) + minutes * 60_000).toISOString();
+      j.attentionState = { ...(j.attentionState ?? {}), category: attentionCategory(j), snoozedUntil: until };
+      appendMessage(j, "decision", `Attention snoozed by operator until ${until}.`, "user");
+      j.updatedAt = now();
+      save();
+      return publicJob(j);
     },
     async dismiss(jobId) {
       const j = getJob(jobId);

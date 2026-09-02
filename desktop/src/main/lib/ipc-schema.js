@@ -229,12 +229,27 @@ export const IPC_CHANNELS = Object.freeze({
         maxPayloadBytes: 1024,
         validateRequest: requiredFields({ jobId: idField() }, 1024),
     }),
+    "job:snooze": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({
+            jobId: idField(),
+            minutes: enumField([15, 60, 240, 1440]),
+        }, 1024),
+    }),
     "job:dismiss": Object.freeze({
         direction: "renderer->main",
         maxPayloadBytes: 1024,
         validateRequest: requiredFields({ jobId: idField() }, 1024),
     }),
-    "job:attention": emptyRequest(),
+    "job:attention": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: optionalFields({
+            category: enumField(["login-required", "secret-required", "approval-required", "provider-unavailable", "computer-takeover", "dangerous-action", "real-blocker", "all"]),
+            visibility: enumField(["active", "snoozed", "all"]),
+        }),
+    }),
     "settings:get": emptyRequest(),
     "update:status": emptyRequest(),
     "update:check": emptyRequest(),

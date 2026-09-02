@@ -21,6 +21,40 @@
   let currentRoutineId;
   let workerNodes = [];
   let computerTargets = [];
+  const ATTENTION_CATEGORIES = Object.freeze([
+    ["login-required", "Login required / 需要登录"],
+    ["secret-required", "Secret required / 需要密钥"],
+    ["approval-required", "Approval required / 需要审批"],
+    ["provider-unavailable", "Provider unavailable / 提供方不可用"],
+    ["computer-takeover", "Computer takeover / 电脑接管"],
+    ["dangerous-action", "Dangerous action / 危险操作"],
+    ["real-blocker", "Real blocker / 实际阻塞"],
+  ]);
+  const ATTENTION_CATEGORY_LABELS = Object.freeze(Object.fromEntries(ATTENTION_CATEGORIES));
+  const SNOOZE_OPTIONS = Object.freeze([[15, "15 min / 15 分钟"], [60, "1 hour / 1 小时"], [240, "4 hours / 4 小时"], [1440, "1 day / 1 天"]]);
+  let attentionActiveCount = 0;
+
+  function attentionActionAllowed(job, action) {
+    const actions = job?.attentionState?.actions;
+    return Array.isArray(actions) && actions.includes(action);
+  }
+  function attentionCategoryLabel(category) { return ATTENTION_CATEGORY_LABELS[category] ?? ATTENTION_CATEGORY_LABELS["real-blocker"]; }
+  function selectedSnoozeMinutes() {
+    const value = Number($("attention-snooze-duration")?.value ?? 60);
+    return SNOOZE_OPTIONS.some(([minutes]) => minutes === value) ? value : 60;
+  }
+  function openAttentionDestination(action) {
+    if (action === "open-settings") { $("nav-settings")?.click(); return; }
+    if (action === "open-this-pc") { $("nav-this-pc")?.click(); return; }
+  }
+  function attentionButton(label, className, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = label;
+    button.addEventListener("click", onClick);
+    return button;
+  }
 
   function statusClass(s) { return `job-status ${s}`; }
   function statusLabel(s) { return t(`work.status.${s}`, s); }
@@ -76,13 +110,13 @@
       const openBtn = document.createElement("button");
       openBtn.type = "button"; openBtn.className = "quiet-action"; openBtn.textContent = t("action.open", "Open");
       openBtn.addEventListener("click", () => openDetail(job.id));
-      actions.append(openBtn);
+      if (job.status !== "needs_attention" || attentionActionAllowed(job, "open")) actions.append(openBtn);
       if (job.status === "needs_attention") {
-        const ap = document.createElement("button"); ap.type = "button"; ap.className = "hero-action"; ap.textContent = t("action.approve", "Approve");
-        ap.addEventListener("click", async () => { await window.sovereignbot.jobs.approve({ jobId: job.id }); await refresh(); });
-        const dm = document.createElement("button"); dm.type = "button"; dm.className = "quiet-action"; dm.textContent = t("action.dismiss", "Dismiss");
-        dm.addEventListener("click", async () => { await window.sovereignbot.jobs.dismiss({ jobId: job.id }); await refresh(); });
-        actions.append(ap, dm);
+        if (attentionActionAllowed(job, "open-settings")) actions.append(attentionButton("Open settings / 打开设置", "quiet-action", () => openAttentionDestination("open-settings")));
+        if (attentionActionAllowed(job, "open-this-pc")) actions.append(attentionButton("Open This PC / 打开此电脑", "quiet-action", () => openAttentionDestination("open-this-pc")));
+        if (attentionActionAllowed(job, "retry")) actions.append(attentionButton(t("attention.retry", "Retry"), "hero-action", async () => { await window.sovereignbot.jobs.approve({ jobId: job.id }); await refresh(); }));
+        if (attentionActionAllowed(job, "snooze")) actions.append(attentionButton(t("attention.snooze", "Snooze"), "quiet-action", async () => { await window.sovereignbot.jobs.snooze({ jobId: job.id, minutes: selectedSnoozeMinutes() }); await refresh(); }));
+        if (attentionActionAllowed(job, "dismiss")) actions.append(attentionButton(t("attention.dismiss", "Dismiss"), "quiet-action", async () => { await window.sovereignbot.jobs.dismiss({ jobId: job.id }); await refresh(); }));
       }
       card.append(head, meta, actions);
       root.append(card);
@@ -92,7 +126,7 @@
   function updateAttentionBadge() {
     const badge = $("attention-badge");
     if (!badge) return;
-    const n = attentionJobs.length;
+    const n = attentionActiveCount;
     badge.textContent = String(n);
     badge.classList.toggle("hidden", n === 0);
   }
@@ -108,7 +142,9 @@
     if (!attentionJobs.length) {
       const p = document.createElement("p");
       p.className = "setting-feedback";
-      p.textContent = t("attention.empty", "Nothing needs your attention.");
+      p.textContent = $("attention-visibility-filter")?.value === "snoozed"
+        ? t("attention.emptySnoozed", "No snoozed attention items.")
+        : t("attention.empty", "Nothing needs your attention.");
       root.append(p);
       return;
     }
@@ -139,6 +175,10 @@
       status.className = statusClass(job.status);
       status.textContent = statusLabel(job.status);
       head.append(title, status);
+      const category = document.createElement("span");
+      category.className = "job-status attention-category";
+      category.textContent = attentionCategoryLabel(job.attentionState?.category);
+      head.append(category);
       const reason = job.attentionState?.reason || job.error || job.outcomeSummary || "—";
       const owner = I18n()?.displayCoworkerName?.(job.ownerCoworkerId) ?? job.ownerCoworkerId ?? "—";
       const priority = t(`attention.priority.${job.priority}`, job.priority ?? "normal");
@@ -153,6 +193,7 @@
         detailRow(t("attention.priority", "Priority"), priority),
         detailRow(t("attention.source", "Source"), source),
         detailRow(t("attention.raised", "Raised"), raised),
+        ...(job.attentionState?.snoozedUntil ? [detailRow(t("attention.snoozedUntil", "Snoozed until"), new Date(job.attentionState.snoozedUntil).toLocaleString())] : []),
       );
       const actions = document.createElement("div");
       actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
@@ -169,16 +210,21 @@
           button.disabled = false;
         }
       };
-      const open = document.createElement("button");
-      open.type = "button"; open.className = "quiet-action"; open.textContent = t("attention.openJob", "Open job");
-      open.addEventListener("click", () => { void openDetail(job.id); });
-      const retry = document.createElement("button");
-      retry.type = "button"; retry.className = "hero-action"; retry.textContent = t("attention.retry", "Retry");
-      retry.addEventListener("click", () => runAction(retry, () => window.sovereignbot.jobs.approve({ jobId: job.id })));
-      const dismiss = document.createElement("button");
-      dismiss.type = "button"; dismiss.className = "quiet-action"; dismiss.textContent = t("attention.dismiss", "Dismiss");
-      dismiss.addEventListener("click", () => runAction(dismiss, () => window.sovereignbot.jobs.dismiss({ jobId: job.id })));
-      actions.append(open, retry, dismiss);
+      if (attentionActionAllowed(job, "open")) actions.append(attentionButton(t("attention.openJob", "Open job"), "quiet-action", () => { void openDetail(job.id); }));
+      if (attentionActionAllowed(job, "open-settings")) actions.append(attentionButton(t("attention.openSettings", "Open settings"), "quiet-action", () => openAttentionDestination("open-settings")));
+      if (attentionActionAllowed(job, "open-this-pc")) actions.append(attentionButton(t("attention.openThisPc", "Open This PC"), "quiet-action", () => openAttentionDestination("open-this-pc")));
+      if (attentionActionAllowed(job, "retry")) {
+        const retry = attentionButton(t("attention.retry", "Retry"), "hero-action", () => runAction(retry, () => window.sovereignbot.jobs.approve({ jobId: job.id })));
+        actions.append(retry);
+      }
+      if (attentionActionAllowed(job, "snooze")) {
+        const snooze = attentionButton(`${t("attention.snooze", "Snooze")} · ${$("attention-snooze-duration")?.selectedOptions?.[0]?.textContent ?? "1 hour"}`, "quiet-action", () => runAction(snooze, () => window.sovereignbot.jobs.snooze({ jobId: job.id, minutes: selectedSnoozeMinutes() })));
+        actions.append(snooze);
+      }
+      if (attentionActionAllowed(job, "dismiss")) {
+        const dismiss = attentionButton(t("attention.dismiss", "Dismiss"), "quiet-action", () => runAction(dismiss, () => window.sovereignbot.jobs.dismiss({ jobId: job.id })));
+        actions.append(dismiss);
+      }
       card.append(head, details, actions);
       root.append(card);
     }
@@ -235,9 +281,12 @@
   async function refreshAttention() {
     const request = ++attentionRequest;
     try {
-      const res = await window.sovereignbot.jobs.attention({});
+      const category = $("attention-category-filter")?.value ?? "all";
+      const visibility = $("attention-visibility-filter")?.value ?? "active";
+      const res = await window.sovereignbot.jobs.attention({ category, visibility });
       if (request !== attentionRequest) return;
       attentionJobs = res?.jobs ?? [];
+      attentionActiveCount = Number.isInteger(res?.activeCount) ? res.activeCount : visibility === "active" ? attentionJobs.length : 0;
       const errorEl = $("attention-error");
       errorEl?.classList.add("hidden");
       renderAttentionList();
@@ -257,10 +306,12 @@
       body.textContent = msgs.length ? msgs.map(m => `[${m.kind ?? m.role}] ${m.text}`).join("\n\n") : (job.outcomeSummary ?? job.error ?? "");
       const needs = job.status === "needs_attention";
       const waiting = job.status === "waiting";
+      const canRetry = needs && attentionActionAllowed(job, "retry");
+      const canDismiss = needs && attentionActionAllowed(job, "dismiss");
       const approve = $("job-detail-approve");
       if (approve) approve.textContent = t("attention.retry", "Retry");
-      $("job-detail-approve")?.classList.toggle("hidden", !needs);
-      $("job-detail-dismiss")?.classList.toggle("hidden", !needs);
+      $("job-detail-approve")?.classList.toggle("hidden", !canRetry);
+      $("job-detail-dismiss")?.classList.toggle("hidden", !canDismiss);
       $("job-detail-pause")?.classList.toggle("hidden", waiting || needs || ["completed","failed","cancelled"].includes(job.status));
       $("job-detail-resume")?.classList.toggle("hidden", !waiting);
       if ($("job-detail-resume")) $("job-detail-resume").textContent = t("action.resume", "Resume");
@@ -397,6 +448,7 @@
       section.className = "main-view settings-view hidden";
       section.innerHTML = `
         <header class="page-header"><div><span class="eyebrow" data-i18n="attention.title">Attention</span><h1 data-i18n="attention.title">Attention</h1><p data-i18n="attention.subtitle">Items that need your decision before work can continue.</p></div><button id="attention-refresh" class="quiet-action" type="button" data-i18n="action.refresh">Refresh</button></header>
+        <div class="settings-card attention-toolbar"><div class="detail-actions"><label>Category / 分类<select id="attention-category-filter" aria-label="Attention category"><option value="all">All categories / 全部分类</option>${ATTENTION_CATEGORIES.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></label><label>Show / 显示<select id="attention-visibility-filter" aria-label="Attention visibility"><option value="active">Active / 活跃</option><option value="snoozed">Snoozed / 已稍后处理</option><option value="all">All / 全部</option></select></label><label>Snooze duration / 稍后处理时长<select id="attention-snooze-duration" aria-label="Snooze duration">${SNOOZE_OPTIONS.map(([minutes, label]) => `<option value="${minutes}"${minutes === 60 ? " selected" : ""}>${label}</option>`).join("")}</select></label></div><p class="detail-help">Categories and allowed actions come from the trusted main-process projection. They do not grant permissions or bypass Governor review.</p></div>
         <p id="attention-error" class="inline-error hidden"></p>
         <div id="attention-list" class="workspace-cards"></div>`;
       document.querySelector(".workspace-shell")?.append(section);
@@ -690,6 +742,8 @@
     $("job-detail-resume")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.resume({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refresh(); });
     $("routine-refresh")?.addEventListener("click", refreshRoutines);
     $("attention-refresh")?.addEventListener("click", refreshAttention);
+    $("attention-category-filter")?.addEventListener("change", refreshAttention);
+    $("attention-visibility-filter")?.addEventListener("change", refreshAttention);
     $("routine-new")?.addEventListener("click", async () => { await populateRoutineForm(); $("routine-dialog")?.showModal?.(); });
     $("routine-type")?.addEventListener("change", showScheduleFields);
     $("routine-template")?.addEventListener("change", applyRoutineTemplate);

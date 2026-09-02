@@ -601,17 +601,25 @@ async function refreshInlineAttention(conversationId, force = false) {
       card.className = "attention-inline-card";
       const copy = document.createElement("span");
       copy.textContent = `${job.title}: ${job.attentionState?.reason || job.error || "Needs your decision"}`.slice(0, 360);
-      const retry = document.createElement("button");
-      retry.type = "button";
-      retry.className = "hero-action";
-      retry.textContent = "Retry / 重试";
-      retry.addEventListener("click", async () => { retry.disabled = true; try { await window.sovereignbot.jobs.approve({ jobId: job.id }); await refreshInlineAttention(conversationId, true); } finally { retry.disabled = false; } });
-      const dismiss = document.createElement("button");
-      dismiss.type = "button";
-      dismiss.className = "quiet-action";
-      dismiss.textContent = "Dismiss / 忽略";
-      dismiss.addEventListener("click", async () => { dismiss.disabled = true; try { await window.sovereignbot.jobs.dismiss({ jobId: job.id }); await refreshInlineAttention(conversationId, true); } finally { dismiss.disabled = false; } });
-      card.append(copy, retry, dismiss);
+      const allowed = job.attentionState?.actions;
+      const actions = [];
+      if (Array.isArray(allowed) && allowed.includes("retry")) {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "hero-action";
+        retry.textContent = "Retry / 重试";
+        retry.addEventListener("click", async () => { retry.disabled = true; try { await window.sovereignbot.jobs.approve({ jobId: job.id }); await refreshInlineAttention(conversationId, true); } finally { retry.disabled = false; } });
+        actions.push(retry);
+      }
+      if (Array.isArray(allowed) && allowed.includes("dismiss")) {
+        const dismiss = document.createElement("button");
+        dismiss.type = "button";
+        dismiss.className = "quiet-action";
+        dismiss.textContent = "Dismiss / 忽略";
+        dismiss.addEventListener("click", async () => { dismiss.disabled = true; try { await window.sovereignbot.jobs.dismiss({ jobId: job.id }); await refreshInlineAttention(conversationId, true); } finally { dismiss.disabled = false; } });
+        actions.push(dismiss);
+      }
+      card.append(copy, ...actions);
       root.append(card);
     }
   } catch {

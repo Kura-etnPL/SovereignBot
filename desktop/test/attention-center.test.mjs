@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createJobController, JOBS_SCHEMA } from "../src/main/job-controller.js";
+import { ATTENTION_CATEGORIES, createJobController, JOBS_SCHEMA } from "../src/main/job-controller.js";
 import { coworkerAgentId } from "../src/main/provider-roster.js";
 
 const chiefId = "coworker_0000000000000001";
@@ -131,6 +131,59 @@ test("Attention projection survives restart, sorts deterministically, and record
     assert.equal(controller.getJob("job-high").status, "completed");
     assert.equal(controller.getJob("job-normal-fallback").status, "failed");
   } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test("Attention categories are trusted, actions are bounded, and snooze survives restart", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "sovereign-attention-snooze-"));
+  const clock = { value: "2026-08-30T12:00:00.000Z" };
+  const jobs = [
+    seedJob({ id: "job-login", title: "Login", status: "needs_attention", attentionState: { reason: "Sign in is required" } }),
+    seedJob({ id: "job-secret", title: "Secret", status: "needs_attention", attentionState: { reason: "Secret requested" } }),
+    seedJob({ id: "job-approval", title: "Approval", status: "needs_attention", attentionState: { reason: "Awaiting review" } }),
+    seedJob({ id: "job-provider", title: "Provider", status: "needs_attention", attentionState: { reason: "selected provider is unavailable" } }),
+    seedJob({ id: "job-takeover", title: "Takeover", status: "needs_attention", attentionState: { reason: "Take over is required" } }),
+    seedJob({ id: "job-danger", title: "Danger", status: "needs_attention", attentionState: { reason: "Governor blocked a dangerous action" } }),
+    seedJob({ id: "job-blocker", title: "Blocker", status: "needs_attention", attentionState: { reason: "C:\\private\\report.txt token=never-show" } }),
+  ];
+  const persistPath = join(dataDir, "desktop-state", "jobs.json");
+  await mkdir(join(dataDir, "desktop-state"), { recursive: true });
+  await writeFile(persistPath, `${JSON.stringify({ schema: JOBS_SCHEMA, jobs }, null, 2)}\n`, "utf8");
+  try {
+    let { controller } = await createHarness(dataDir, clock);
+    const all = controller.attentionJobs({ visibility: "all" }).jobs;
+    assert.deepEqual(Object.fromEntries(all.map((job) => [job.id, job.attentionState.category])), {
+      "job-login": ATTENTION_CATEGORIES.LOGIN_REQUIRED,
+      "job-secret": ATTENTION_CATEGORIES.SECRET_REQUIRED,
+      "job-approval": ATTENTION_CATEGORIES.APPROVAL_REQUIRED,
+      "job-provider": ATTENTION_CATEGORIES.PROVIDER_UNAVAILABLE,
+      "job-takeover": ATTENTION_CATEGORIES.COMPUTER_TAKEOVER,
+      "job-danger": ATTENTION_CATEGORIES.DANGEROUS_ACTION,
+      "job-blocker": ATTENTION_CATEGORIES.REAL_BLOCKER,
+    });
+    const danger = all.find((job) => job.id === "job-danger");
+    assert.deepEqual(danger.attentionState.actions, ["open", "snooze", "dismiss"]);
+    assert.equal(danger.attentionState.actions.includes("retry"), false);
+    assert.doesNotMatch(all.find((job) => job.id === "job-blocker").attentionState.reason, /private|token|never-show/i);
+
+    const snoozed = await controller.snooze("job-blocker", 60);
+    assert.equal(snoozed.attentionState.snoozedUntil, "2026-08-30T13:00:00.000Z");
+    assert.deepEqual(controller.attentionJobs().jobs.map((job) => job.id).includes("job-blocker"), false);
+    assert.deepEqual(controller.attentionJobs({ visibility: "snoozed" }).jobs.map((job) => job.id), ["job-blocker"]);
+    const persisted = JSON.parse(await readFile(persistPath, "utf8"));
+    assert.equal(persisted.jobs.find((job) => job.id === "job-blocker").attentionState.snoozedUntil, "2026-08-30T13:00:00.000Z");
+    await assert.rejects(() => controller.snooze("job-login", 30), /snooze minutes/);
+
+    ({ controller } = await createHarness(dataDir, clock));
+    assert.equal(controller.attentionJobs().jobs.some((job) => job.id === "job-blocker"), false);
+    assert.equal(controller.attentionJobs({ visibility: "snoozed" }).jobs.some((job) => job.id === "job-blocker"), true);
+    clock.value = "2026-08-30T13:00:01.000Z";
+    ({ controller } = await createHarness(dataDir, clock));
+    assert.equal(controller.attentionJobs().jobs.some((job) => job.id === "job-blocker"), true);
+    assert.equal(controller.attentionJobs().activeCount, 7);
+  }
+  finally {
     await rm(dataDir, { recursive: true, force: true });
   }
 });
