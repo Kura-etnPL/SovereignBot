@@ -414,12 +414,55 @@
   const api = window.sovereignbot;
   if (!api?.projects) return;
   const $ = (id) => document.getElementById(id);
+  const state = { projects: [], selectedProjectId: "" };
   const clear = (node) => { if (node) node.textContent = ""; };
   const error = (reason) => { const node = $("project-result"); if (node) node.textContent = String(reason?.message ?? reason).slice(0, 240); };
   const setResult = (value) => { const node = $("project-result"); if (node) node.textContent = value; };
-  const button = (label, fn) => { const node = document.createElement("button"); node.type = "button"; node.className = "quiet-action"; node.textContent = label; node.addEventListener("click", () => Promise.resolve().then(fn).catch(error)); return node; };
+  const button = (label, fn, { disabled = false, className = "quiet-action" } = {}) => { const node = document.createElement("button"); node.type = "button"; node.className = className; node.textContent = label; node.disabled = disabled; if (!disabled) node.addEventListener("click", () => Promise.resolve().then(fn).catch(error)); return node; };
   const element = (tag, textContent) => { const node = document.createElement(tag); if (textContent !== undefined) node.textContent = textContent; return node; };
   async function copy(value) { try { await navigator.clipboard.writeText(JSON.stringify(value, null, 2)); setResult("Project export copied / 项目导出已复制"); } catch { setResult("Clipboard is unavailable / 剪贴板不可用"); } }
+  function navigateCanonical(kind, entry) {
+    if (kind === "channels" && entry.conversationId && typeof openConversation === "function") { void openConversation(entry.conversationId); return; }
+    if (kind === "memory") { document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: state.selectedProjectId, memoryId: entry.id } })); return; }
+    const target = kind === "triggers" ? $("nav-triggers") : kind === "apps" ? $("nav-apps") : kind === "files" || kind === "artifacts" ? $("nav-artifacts") : kind === "skills" ? $("nav-skills") : kind === "playbooks" ? $("nav-playbooks") : kind === "routines" ? $("nav-routines") : kind === "coworkers" ? $("nav-settings") : $("nav-work");
+    if (target) target.click(); else if (typeof switchView === "function") switchView(kind === "coworkers" ? "settings" : kind === "triggers" ? "triggers" : "work");
+    setResult(`${kind} canonical surface opened / 已打开${kind}标准页面`);
+  }
+  function renderContentSection(root, kind, label, section) {
+    const card = element("section"); card.className = "project-content-section";
+    const heading = element("div"); heading.className = "card-heading";
+    const title = element("h3", `${label} / ${section.total ?? 0}${section.truncated ? " · showing first 50 / 仅显示前 50 项" : ""}`);
+    const summary = element("p", section.total ? "Bounded Project contents / 已按项目范围限制" : `No ${label} yet / 暂无${label}`);
+    heading.append(title, summary); card.append(heading);
+    const list = element("div"); list.className = "project-content-list";
+    for (const entry of section.items ?? []) {
+      const row = element("article"); row.className = "project-content-item";
+      const copy = element("div");
+      const name = element("strong", entry.name ?? entry.title ?? entry.fileName ?? "Unnamed");
+      const meta = element("p", [entry.state, entry.status, entry.summary].filter(Boolean).join(" · ") || "Project item");
+      copy.append(name, meta); row.append(copy);
+      const actions = element("div"); actions.className = "detail-actions";
+      const canNavigate = kind !== "teams" || entry.navigation;
+      actions.append(button(kind === "channels" ? "Open Channel / 打开频道" : kind === "memory" ? "Open Memory / 打开记忆" : `Open ${label} / 打开${label}`, () => navigateCanonical(kind, entry), { disabled: !canNavigate }));
+      if ((kind === "files" || kind === "artifacts") && entry.conversationId) actions.append(button("Source conversation / 来源会话", () => { if (typeof openConversation === "function") void openConversation(entry.conversationId); }));
+      row.append(actions); list.append(row);
+    }
+    if (!section.items?.length) list.append(element("p", `No ${label} in this Project / 此项目暂无${label}`));
+    card.append(list); root.append(card);
+  }
+  function renderDetail(project) {
+    const root = $("project-detail"); if (!root) return; clear(root);
+    if (!project) { root.append(element("p", "Choose a Project to inspect its command center / 请选择项目查看项目指挥中心")); return; }
+    const heading = element("div"); heading.className = "project-workbench-heading";
+    heading.append(element("h2", project.name), element("p", `${project.state === "archived" ? "Archived / 已归档" : "Active / 活跃"} · ${project.available ? "Available / 可用" : "Unavailable / 不可用"} · ${project.summary ?? ""}`));
+    if (project.lastOpenedAt || project.updatedAt) heading.append(element("p", `Recent activity / 最近活动: ${project.lastOpenedAt ?? project.updatedAt}`));
+    root.append(heading);
+    if (!project.available) { const unavailable = element("p", "This Project is inspectable but read-only until its trusted workspace is available. / 此项目可查看，但可信工作区不可用期间为只读。"); unavailable.className = "inline-error"; root.append(unavailable); }
+    const contents = project.contents ?? {};
+    const groups = [["teams", "Teams / 团队"], ["channels", "Channels / 频道"], ["coworkers", "Coworkers / 同事"], ["files", "Files / 文件"], ["artifacts", "Artifacts / 成果"], ["skills", "Skills / 技能"], ["playbooks", "Playbooks / 工作方法"], ["routines", "Routines / 例行任务"], ["triggers", "Triggers / 触发器"], ["memory", "Memory / 记忆"], ["connectedApps", "Connected Apps / 已连接应用"]];
+    for (const [kind, label] of groups) renderContentSection(root, kind, label, contents[kind] ?? { items: [], total: 0, truncated: false });
+  }
+  function selectProject(projectId, message = true) { state.selectedProjectId = projectId || ""; const project = state.projects.find((entry) => entry.projectId === state.selectedProjectId); renderDetail(project); const switcher = $("project-switcher"); if (switcher) switcher.value = state.selectedProjectId; if (message && project) setResult(`Selected ${project.name} / 已选择项目`); }
   function ensureView() {
     if ($("nav-projects") && $("view-projects")) return;
     const nav = document.createElement("button"); nav.id = "nav-projects"; nav.type = "button"; nav.className = "utility-nav"; nav.textContent = "◈ Projects / 项目";
@@ -430,42 +473,48 @@
     const intro = element("div"); const eyebrow = element("span", "PROJECTS / 项目"); eyebrow.className = "eyebrow"; intro.append(eyebrow, element("h1", "Projects"), element("p", "Projects organize Teams, Channels, Coworkers, Files, Artifacts, Skills, Playbooks, Routines, Triggers, Memory, and Connected Apps."));
     const controls = element("div"); controls.className = "detail-actions"; const switcher = element("select"); switcher.id = "project-switcher"; switcher.setAttribute("aria-label", "Project switcher"); switcher.append(element("option", "Choose a Project / 选择项目")); const refreshButton = element("button", "Refresh / 刷新"); refreshButton.id = "project-refresh"; refreshButton.type = "button"; refreshButton.className = "quiet-action"; const createButton = element("button", "New Project / 新建项目"); createButton.id = "project-create"; createButton.type = "button"; createButton.className = "hero-action"; controls.append(switcher, refreshButton, createButton); header.append(intro, controls);
     const result = element("p"); result.id = "project-result"; result.className = "setting-feedback";
-    const card = element("section"); card.className = "settings-card span-2"; const cardHeading = element("div"); cardHeading.className = "card-heading"; const cardCopy = element("div"); cardCopy.append(element("h2", "Recent Projects / 最近项目"), element("p", "Switch, inspect, archive, restore, export, or back up a Project. Trusted workspace details remain hidden.")); cardHeading.append(cardCopy); const list = element("div"); list.id = "project-list"; list.className = "project-list"; card.append(cardHeading, list); view.append(header, result, card);
+    const card = element("section"); card.className = "settings-card span-2"; const cardHeading = element("div"); cardHeading.className = "card-heading"; const cardCopy = element("div"); cardCopy.append(element("h2", "Projects / 项目"), element("p", "Select a Project to inspect its command center. Trusted workspace details remain hidden.")); cardHeading.append(cardCopy); const list = element("div"); list.id = "project-list"; list.className = "project-list"; card.append(cardHeading, list);
+    const detailCard = element("section"); detailCard.className = "settings-card span-2"; const detailHeading = element("div"); detailHeading.className = "card-heading"; const detailCopy = element("div"); detailCopy.append(element("h2", "Project Command Center / 项目指挥中心"), element("p", "One bounded view of the selected Project and its canonical related surfaces.")); detailHeading.append(detailCopy); const detail = element("div"); detail.id = "project-detail"; detail.className = "project-workbench"; detailCard.append(detailHeading, detail); view.append(header, result, card, detailCard);
     $("view-product-hubs")?.parentElement?.insertBefore(view, $("view-product-hubs"));
-    $("project-switcher")?.addEventListener("change", async (event) => { if (!event.target.value) return; try { const project = await api.projects.open({ projectId: event.target.value }); setResult(`Opened ${project.name} / 已打开`); const conversationId = project.teams?.[0]?.channels?.[0]?.conversationId; if (conversationId && typeof openConversation === "function") openConversation(conversationId); await refresh(); } catch (reason) { error(reason); } });
+    $("project-switcher")?.addEventListener("change", (event) => selectProject(event.target.value));
     $("project-refresh")?.addEventListener("click", () => void refresh());
     $("project-create")?.addEventListener("click", async () => { const name = window.prompt("Project name / 项目名称"); if (!name) return; try { await api.projects.create({ name }); setResult("Project created / 项目已创建"); await refresh(); } catch (reason) { error(reason); } });
   }
-  function render(projects) {
+  function render(projects, preferredProjectId = state.selectedProjectId) {
+    state.projects = Array.isArray(projects) ? projects : [];
     const root = $("project-list"); if (!root) return; clear(root);
-    const switcher = $("project-switcher"); if (switcher) { const current = switcher.value; switcher.textContent = ""; const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Choose a Project / 选择项目"; switcher.append(placeholder); for (const project of projects) { const option = document.createElement("option"); option.value = project.projectId; option.textContent = `${project.name}${project.state === "archived" ? " · Archived / 已归档" : ""}`; switcher.append(option); } if ([...switcher.options].some((option) => option.value === current)) switcher.value = current; }
+    const switcher = $("project-switcher"); if (switcher) { switcher.textContent = ""; const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Choose a Project / 选择项目"; switcher.append(placeholder); for (const project of state.projects) { const option = document.createElement("option"); option.value = project.projectId; option.textContent = `${project.name}${project.state === "archived" ? " · Archived / 已归档" : ""}${!project.available ? " · Unavailable / 不可用" : ""}`; switcher.append(option); } }
+    const selectedId = state.projects.some((entry) => entry.projectId === preferredProjectId) ? preferredProjectId : state.projects[0]?.projectId ?? "";
     for (const project of projects) {
       const card = document.createElement("article"); card.className = "project-card";
       const title = document.createElement("h3"); title.textContent = project.name;
       const status = document.createElement("p"); status.textContent = `${project.state === "archived" ? "Archived / 已归档" : "Active / 活跃"} · ${project.available ? "Available / 可用" : "Unavailable / 不可用"}`;
+      card.classList.toggle("selected", project.projectId === selectedId);
       const counts = document.createElement("p"); counts.className = "project-counts"; counts.textContent = Object.entries(project.counts ?? {}).map(([key, value]) => `${key}: ${value}`).join(" · ");
-      const contents = document.createElement("p"); contents.textContent = (project.teams ?? []).map((team) => `${team.name} (${team.channels?.length ?? 0} channels)`).join(" · ") || "No Teams yet / 暂无团队";
-      const memory = document.createElement("p"); memory.className = "project-memory-summary"; memory.textContent = project.memory?.length ? `Memory / 记忆: ${project.memory.map((entry) => entry.title).join(" · ")}` : "Memory / 记忆: none yet";
+      const contents = document.createElement("p"); contents.textContent = project.summary ?? ((project.teams ?? []).map((team) => `${team.name} (${team.channels?.length ?? 0} channels)`).join(" · ") || "No Teams yet / 暂无团队");
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Open / 打开", async () => { await api.projects.open({ projectId: project.projectId }); const conversationId = project.teams?.[0]?.channels?.[0]?.conversationId; if (conversationId && typeof openConversation === "function") openConversation(conversationId); await refresh(); }));
-      actions.append(button(project.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (project.state === "archived" ? api.projects.restore : api.projects.archive)({ projectId: project.projectId }); await refresh(); }));
-      actions.append(button("Export / 导出", async () => copy(await api.projects.export({ projectId: project.projectId }))));
-      actions.append(button("Backup / 备份", async () => { await api.projects.backup({ projectId: project.projectId }); setResult("Portable Project backup created / 可移植项目备份已创建"); }));
+      actions.append(button("Inspect / 查看", () => selectProject(project.projectId), { className: "hero-action" }));
+      actions.append(button("Open / 打开", async () => { await api.projects.open({ projectId: project.projectId }); setResult(`Opened ${project.name} / 已打开`); await refresh(project.projectId); }, { disabled: project.state === "archived" || !project.available }));
+      actions.append(button(project.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (project.state === "archived" ? api.projects.restore : api.projects.archive)({ projectId: project.projectId }); await refresh(project.projectId); }, { disabled: !project.available }));
+      actions.append(button("Export / 导出", async () => copy(await api.projects.export({ projectId: project.projectId })), { disabled: !project.available }));
+      actions.append(button("Backup / 备份", async () => { await api.projects.backup({ projectId: project.projectId }); setResult("Portable Project backup created / 可移植项目备份已创建"); }, { disabled: !project.available }));
       actions.append(button("Memory / 记忆", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId } }))));
-      actions.append(button("Add fact / 添加事实", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId, addFact: true } }))));
-      card.append(title, status, counts, contents, memory, actions); root.append(card);
+      actions.append(button("Add fact / 添加事实", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId, addFact: true } })), { disabled: project.state === "archived" || !project.available }));
+      card.append(title, status, counts, contents, actions); root.append(card);
     }
     if (!projects.length) { const empty = document.createElement("p"); empty.textContent = "No Projects yet / 暂无项目"; root.append(empty); }
+    if (switcher) switcher.value = selectedId;
+    selectProject(selectedId, false);
   }
-  async function refresh() { ensureView(); try { const result = await api.projects.list({ includeArchived: true, limit: 50 }); render(result.projects ?? []); } catch (reason) { error(reason); } }
-  window.addEventListener("DOMContentLoaded", () => { ensureView(); void refresh(); });
+  async function refresh(preferredProjectId = state.selectedProjectId) { ensureView(); try { const result = await api.projects.list({ includeArchived: true, limit: 50 }); render(result.projects ?? [], preferredProjectId); } catch (reason) { error(reason); } }
+  const initializeProjectSurface = () => { ensureView(); void refresh(); };
+  if (document.readyState === "loading") window.addEventListener("DOMContentLoaded", initializeProjectSurface, { once: true }); else initializeProjectSurface();
   document.addEventListener("sovereignbot:open-project", async (event) => {
     ensureView();
     if (typeof switchView === "function") switchView("projects");
-    await refresh();
+    document.querySelectorAll(".utility-nav").forEach((item) => item.classList.toggle("active", item.id === "nav-projects"));
     const projectId = event.detail?.projectId;
-    const switcher = $("project-switcher");
-    if (switcher && projectId && [...switcher.options].some((option) => option.value === projectId)) switcher.value = projectId;
+    await refresh(projectId);
   });
 })();
 

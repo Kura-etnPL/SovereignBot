@@ -232,6 +232,7 @@ async function main() {
         connectedApps,
         getRoutines: () => routines?.list(),
         getEventTriggers: () => eventTriggers?.list(),
+        getPlaybooks: () => productSurfaces?.listPlaybooks(),
         getJobs: () => jobs,
         getComputers: async () => {
             if (!host?.runtime?.computer?.listComputers) throw new Error("Computer lease state is unavailable");
