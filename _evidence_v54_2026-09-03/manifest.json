@@ -1,0 +1,22 @@
+{
+  "schema": "sovereignbot.acceptance.evidence.v1",
+  "phase": "V4.3-P15",
+  "date": "2026-09-03",
+  "localOnly": true,
+  "signed": false,
+  "publishEligible": false,
+  "startingCommit": "790710400e07b7b6b35c02d9afc1a24dd532942d",
+  "sourceCommit": "f7b286eaf5ae44cb5ce5165cfc6fd10b3ef57434",
+  "commands": [
+    { "command": "node --test desktop/test/project-command-center.test.mjs", "result": "1/1 PASS" },
+    { "command": "npm --prefix desktop test", "result": "258/258 PASS" },
+    { "command": "npm --prefix desktop run check", "result": "syntax ok: 180 files" },
+    { "command": "npm --prefix desktop run secret-scan", "result": "secretScan: clean" },
+    { "command": "npm --prefix desktop run verify:p15-project-command-center", "result": "12/12 PASS" },
+    { "command": "git diff --check", "result": "clean" }
+  ],
+  "artifacts": [
+    "verify-p15-project-command-center.json",
+    "verify-p15-project-command-center.log"
+  ]
+}

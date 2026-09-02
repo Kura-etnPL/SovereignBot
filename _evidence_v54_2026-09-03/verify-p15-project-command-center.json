@@ -1,0 +1,24 @@
+{
+  "at": "2026-09-02T16:50:25.503Z",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "real preload exposes Project command-center surface": true,
+    "renderer creates canonical Project": true,
+    "Project public projection contains all bounded command-center groups": true,
+    "all associated canonical entities are scoped into the Project": true,
+    "Project projection is bounded and authority-free": true,
+    "Project switcher selects the workbench without jumping to a conversation": true,
+    "workbench renders every grouped section and associated labels": true,
+    "canonical Channel navigation opens only the selected Project conversation": true,
+    "archived Project remains inspectable and labeled": true,
+    "Project and grouped contents survive a real service restart": true,
+    "unavailable workspace remains visible with fail-closed read-only projection": true
+  },
+  "projectId": "project_763a7ec02b190c2a",
+  "teamId": "team_ee3fdf03e486e45c",
+  "conversationId": "conv_953c7919b4aced21",
+  "artifactId": "artifact_322a016fa0415b7c",
+  "memoryId": "mem_65ba2b36-f15a-4eca-b808-d1a9809c3a1f",
+  "routineId": "routine_7fe295dd4b8c6175",
+  "triggerId": "trigger_b11280c5f1658e5f"
+}

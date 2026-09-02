@@ -1,0 +1,124 @@
+PASS hidden Electron window stays hidden
+PASS real preload exposes Project command-center surface {"projects":"function","projectNav":true,"workbench":true,"ready":"complete"}
+PASS renderer creates canonical Project {"projectId":"project_763a7ec02b190c2a","name":"P15 Command Center"}
+PASS Project public projection contains all bounded command-center groups ["teams","channels","coworkers","files","artifacts","skills","playbooks","routines","triggers","memory","connectedApps"]
+PASS all associated canonical entities are scoped into the Project {"teams":1,"channels":1,"coworkers":2,"files":1,"artifacts":1,"skills":1,"playbooks":1,"routines":1,"triggers":1,"memory":1,"connectedApps":1}
+PASS Project projection is bounded and authority-free {"groupTotals":{"teams":1,"channels":1,"coworkers":2,"files":1,"artifacts":1,"skills":1,"playbooks":1,"routines":1,"triggers":1,"memory":1,"connectedApps":1},"sample":{"id":"artifact_322a016fa0415b7c","title":"P15 Report","fileName":"p15-report.md","mimeType":"text/markdown","size":17,"state":"active","createdAt":"2026-09-02T16:50:22.201Z","conversationId":"conv_953c7919b4aced21","summary":"p15-report.md · text/markdown","navigation":{"view":"artifacts","artifactId":"artifact_322a016fa0415b7c","conversationId":"conv_953c7919b4aced21"}}}
+PASS Project switcher selects the workbench without jumping to a conversation {"active":true,"selected":"project_763a7ec02b190c2a","conversation":null}
+PASS workbench renders every grouped section and associated labels P15 Command Center
+
+Active / 活跃 · Available / 可用 · 1 Teams · 1 Channels · 2 Coworkers
+
+Recent activity / 最近活动: 2026-09-02T16:50:22.184Z
+
+Teams / 团队 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Command Team
+
+active · available · 1 channel
+
+Open Teams / 团队 / 打开Teams / 团队
+Channels / 频道 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+Project Channel
+
+active · Channel in P15 Command Team
+
+Open Channel / 打开频道
+Coworkers / 同事 / 2
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Chief
+
+active · active · Project member
+
+Open Coworkers / 同事 / 打开Coworkers / 同事
+P15 Specialist
+
+active · active · Project member
+
+Open Coworkers / 同事 / 打开Coworkers / 同事
+Files / 文件 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+p15-report.md
+
+active · text/markdown · 17 bytes
+
+Open Files / 文件 / 打开Files / 文件
+Source conversation / 来源会话
+Artifacts / 成果 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Report
+
+active · p15-report.md · text/markdown
+
+Open Artifacts / 成果 / 打开Artifacts / 成果
+Source conversation / 来源会话
+Skills / 技能 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Skill
+
+active · active · Project-scoped skill
+
+Open Skills / 技能 / 打开Skills / 技能
+Playbooks / 工作方法 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+Team Collaboration
+
+active · active · The current owner delegates bounded work to the next teammate and returns the result to the user.
+
+Open Playbooks / 工作方法 / 打开Playbooks / 工作方法
+Routines / 例行任务 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Routine
+
+active · disabled · Disabled Routine
+
+Open Routines / 例行任务 / 打开Routines / 例行任务
+Triggers / 触发器 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Trigger
+
+disabled · disabled · Event trigger
+
+Open Triggers / 触发器 / 打开Triggers / 触发器
+Memory / 记忆 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Memory
+
+active
+
+Open Memory / 打开记忆
+Connected Apps / 已连接应用 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+Project workspace / 项目工作区
+
+connected · connected · Read and write within the trusted shared or private workspace selected by the Governor.
+
+Open Connected Apps / 已连接应用 / 打开Connected Apps / 已连接应用
+PASS canonical Channel navigation opens only the selected Project conversation {"title":"P15 Command Team","dom":true}
+PASS archived Project remains inspectable and labeled {"state":"archived","teams":1}
+PASS Project and grouped contents survive a real service restart {"state":"active","counts":{"teams":1,"channels":1,"coworkers":2,"files":1,"artifacts":1,"skills":1,"playbooks":1,"routines":1,"triggers":1,"memory":1,"connectedApps":1}}
+PASS unavailable workspace remains visible with fail-closed read-only projection {"projectId":"project_763a7ec02b190c2a","name":"P15 Command Center","state":"active","available":false,"createdAt":"2026-09-02T16:50:22.184Z","updatedAt":"2026-09-02T16:50:24.477Z","summary":"Project workspace is unavailable; contents are read-only.","contents":{"teams":{"items":[],"total":0,"truncated":false},"channels":{"items":[],"total":0,"truncated":false},"coworkers":{"items":[],"total":0,"truncated":false},"files":{"items":[],"total":0,"truncated":false},"artifacts":{"items":[],"total":0,"truncated":false},"skills":{"items":[],"total":0,"truncated":false},"playbooks":{"items":[],"total":0,"truncated":false},"routines":{"items":[],"total":0,"truncated":false},"triggers":{"items":[],"total":0,"truncated":false},"memory":{"items":[],"total":0,"truncated":false},"connectedApps":{"items":[],"total":0,"truncated":false}},"counts":{"teams":0,"channels":0,"coworkers":0,"files":0,"artifacts":0,"skills":0,"playbooks":0,"routines":0,"triggers":0,"memory":0,"connectedApps":0},"teams":[],"coworkers":[],"connectedApps":[],"memory":[]}
+[summary] 12/12 PASS
