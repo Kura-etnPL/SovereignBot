@@ -17,5 +17,5 @@ PASS mark visible read marks visible cards as read and updates badge {"unreadCar
 PASS clear visible dismisses cards from view {"cards":0,"emptyText":"No notifications yet / 暂无通知"}
 PASS forged notification IPC payloads and authority fields are rejected {"rejected":true}
 PASS restart preserves notification state, read status, and dismissals {"totalCount":0,"seenCount":6}
-PASS bounded storage and list limits remain strictly enforced {"id":"notif_fbbf66fcc10b6f5f","category":"routine-completed","title":"Restart verified","body":"Notification persisted safely","createdAt":"2026-09-02T20:18:31.214Z","read":false,"readAt":null,"source":null}
+PASS bounded storage and list limits remain strictly enforced {"id":"notif_9ba0a75a97a7cd94","category":"routine-completed","title":"Restart verified","body":"Notification persisted safely","createdAt":"2026-09-02T21:29:08.635Z","read":false,"readAt":null,"source":null}
 [summary] 20/20 PASS
