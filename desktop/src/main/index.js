@@ -405,6 +405,9 @@ async function main() {
                 key: `goal:${goal.id}:${goal.status}`,
                 title: goal.status === "completed" ? "Coworker finished" : "Attention needed",
                 body: goal.status === "completed" ? goal.textPreview : `${goal.textPreview} — ${goal.error ?? "did not complete"}`,
+                source: goal.status === "completed"
+                    ? (goal.conversationId ? { target: "conversation", conversationId: goal.conversationId } : null)
+                    : { target: "attention" },
             }),
         });
         jobs = createJobController({
@@ -422,14 +425,26 @@ async function main() {
             teamService,
             onStatus: (job, transition) => {
                 if (transition.status === "needs_attention") {
-                    notifications.notify({ category: "attention", key: `job:${job.id}:attention`, title: "Attention needed", body: job.title });
+                    notifications.notify({
+                        category: "attention",
+                        key: `job:${job.id}:attention`,
+                        title: "Attention needed",
+                        body: job.title,
+                        source: { target: "attention", jobId: job.id },
+                    });
                 }
                 else if (transition.status === "completed") {
+                    const isTrigger = Boolean(job.eventMetadata);
+                    const isRoutine = Boolean(job.routineId);
                     notifications.notify({
-                        category: job.eventMetadata ? "trigger-fired" : job.routineId ? "routine-completed" : "coworker-finished",
+                        category: isTrigger ? "trigger-fired" : isRoutine ? "routine-completed" : "coworker-finished",
                         key: `job:${job.id}:completed`,
-                        title: job.routineId ? "Routine completed" : "Coworker finished",
+                        title: isTrigger ? "Trigger fired" : isRoutine ? "Routine completed" : "Coworker finished",
                         body: job.title,
+                        source: isTrigger ? { target: "triggers", triggerId: job.eventMetadata?.triggerId }
+                            : isRoutine ? { target: "routines", routineId: job.routineId }
+                            : job.conversationId ? { target: "conversation", conversationId: job.conversationId }
+                            : { target: "work", jobId: job.id },
                     });
                 }
             },
@@ -824,6 +839,11 @@ async function main() {
                 "job:snooze": async ({ jobId, minutes }) => await jobs.snooze(jobId, minutes),
                 "job:dismiss": async ({ jobId }) => await jobs.dismiss(jobId),
                 "job:attention": (payload) => jobs.attentionJobs(payload),
+                "notification:list": (payload) => notifications.list(payload),
+                "notification:markRead": (payload) => notifications.markRead(payload),
+                "notification:markAllRead": (payload) => notifications.markAllRead(payload),
+                "notification:clear": (payload) => notifications.clear(payload),
+                "notification:clearAll": (payload) => notifications.clearAll(payload),
                 "routine:create": (payload) => routines.create(payload),
                 "routine:list": (payload) => routines.list(payload),
                 "routine:get": ({ routineId }) => routines.get(routineId),

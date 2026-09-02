@@ -38,6 +38,13 @@ const CONVERSATION_CONTROL_CHANNELS = Object.freeze({
 const TEAM_ACTIVITY_CHANNELS = Object.freeze({
     "team:activity": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
 });
+const NOTIFICATION_CHANNELS = Object.freeze({
+    "notification:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
+    "notification:markRead": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "notification:markAllRead": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 8192 }),
+    "notification:clear": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "notification:clearAll": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 8192 }),
+});
 const ROUTINE_CHANNELS = Object.freeze({
     "routine:create": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 16_000 }),
     "routine:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
@@ -82,6 +89,7 @@ const ALL_IPC_CHANNELS = Object.freeze({
     ...TEACH_CHANNELS,
     ...CONVERSATION_CONTROL_CHANNELS,
     ...TEAM_ACTIVITY_CHANNELS,
+    ...NOTIFICATION_CHANNELS,
     ...ROUTINE_CHANNELS,
     ...EVENT_TRIGGER_CHANNELS,
     ...WORKER_NODE_CHANNELS,
@@ -177,6 +185,80 @@ function validateTeamActivityRequest(payload) {
         out.limit = payload.limit;
     }
     return out;
+}
+
+const NOTIFICATION_CATEGORIES_SET = new Set([
+    "all", "attention", "routine-completed", "trigger-fired", "coworker-finished", "channel-unread",
+]);
+
+function notificationId(value, label = "id") {
+    if (typeof value !== "string" || !/^[A-Za-z0-9][\w:.-]{0,199}$/.test(value)) {
+        throw new Error(`${label} must be a valid notification identifier`);
+    }
+    return value;
+}
+
+function validateNotificationRequest(channel, payload) {
+    const bytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
+    if (bytes > NOTIFICATION_CHANNELS[channel].maxPayloadBytes) throw new Error(`${channel} payload is too large`);
+    assertObject(payload, channel);
+
+    if (channel === "notification:list") {
+        exactKeys(payload, new Set(["category", "read", "limit"]), channel);
+        const out = {};
+        if (payload.category !== undefined) {
+            if (typeof payload.category !== "string" || !NOTIFICATION_CATEGORIES_SET.has(payload.category)) {
+                throw new Error("unsupported notification category");
+            }
+            out.category = payload.category;
+        }
+        if (payload.read !== undefined) {
+            if (typeof payload.read !== "boolean") throw new Error("read must be a boolean");
+            out.read = payload.read;
+        }
+        if (payload.limit !== undefined) {
+            if (!Number.isInteger(payload.limit) || payload.limit < 1 || payload.limit > 100) {
+                throw new Error("limit must be an integer between 1 and 100");
+            }
+            out.limit = payload.limit;
+        }
+        return out;
+    }
+
+    if (channel === "notification:markRead") {
+        exactKeys(payload, new Set(["id", "read"]), channel);
+        const out = { id: notificationId(payload.id, "notification id") };
+        if (payload.read !== undefined) {
+            if (typeof payload.read !== "boolean") throw new Error("read must be a boolean");
+            out.read = payload.read;
+        }
+        return out;
+    }
+
+    if (channel === "notification:markAllRead" || channel === "notification:clearAll") {
+        exactKeys(payload, new Set(["category", "ids"]), channel);
+        const out = {};
+        if (payload.category !== undefined) {
+            if (typeof payload.category !== "string" || !NOTIFICATION_CATEGORIES_SET.has(payload.category)) {
+                throw new Error("unsupported notification category");
+            }
+            out.category = payload.category;
+        }
+        if (payload.ids !== undefined) {
+            if (!Array.isArray(payload.ids) || payload.ids.length > 100) {
+                throw new Error("ids must be an array of at most 100 identifiers");
+            }
+            out.ids = payload.ids.map((id) => notificationId(id, "notification id"));
+        }
+        return out;
+    }
+
+    if (channel === "notification:clear") {
+        exactKeys(payload, new Set(["id"]), channel);
+        return { id: notificationId(payload.id, "notification id") };
+    }
+
+    throw new Error(`unhandled notification channel: ${channel}`);
 }
 
 function integerField(min, max) {
@@ -507,6 +589,8 @@ function validateRequest(channel, payload) {
         return validateLiveFrame(payload);
     if (TEAM_ACTIVITY_CHANNELS[channel])
         return validateTeamActivityRequest(payload);
+    if (NOTIFICATION_CHANNELS[channel])
+        return validateNotificationRequest(channel, payload);
     if (channel === ATTACH_CHANNEL) {
         exactKeys(payload, new Set(["conversationId"]), channel);
         return { conversationId: conversationId(payload.conversationId) };
