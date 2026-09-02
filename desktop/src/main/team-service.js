@@ -291,6 +291,54 @@ function safeId(value, label, pattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/) {
     return value;
 }
 
+function safeSemanticIdList(value, label, max) {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || value.length > max) throw new Error(`${label} must contain at most ${max} identifiers`);
+    return [...new Set(value.map((entry) => safeId(entry, label)))];
+}
+
+function safePlaybookSemantics(value) {
+    const out = {};
+    if (value.stages !== undefined) {
+        if (!Array.isArray(value.stages) || value.stages.length > 8) throw new Error("playbook stages must be an array of at most 8 stages");
+        out.stages = value.stages.map((stage) => {
+            if (!stage || typeof stage !== "object" || Array.isArray(stage)) throw new Error("playbook stage must be an object");
+            const allowed = new Set(["id", "name", "instructions", "expectedOutput", "recommendedCoworkerRole", "recommendedSkillIds"]);
+            for (const key of Object.keys(stage)) if (!allowed.has(key)) throw new Error(`playbook stage field is not allowed: ${key}`);
+            return {
+                id: safeId(stage.id, "playbook stage id"),
+                name: safeString(stage.name, "playbook stage name", 120),
+                instructions: safeOptionalString(stage.instructions ?? "", "playbook stage instructions", 2_000),
+                ...(stage.expectedOutput === undefined ? {} : { expectedOutput: safeOptionalString(stage.expectedOutput, "playbook stage expectedOutput", 500) }),
+                ...(stage.recommendedCoworkerRole === undefined ? {} : { recommendedCoworkerRole: safeOptionalString(stage.recommendedCoworkerRole, "playbook stage recommendedCoworkerRole", 120) }),
+                ...(stage.recommendedSkillIds === undefined ? {} : { recommendedSkillIds: safeSemanticIdList(stage.recommendedSkillIds, "playbook stage recommendedSkillId", 8) }),
+            };
+        });
+    }
+    if (value.reviewPoints !== undefined) {
+        if (!Array.isArray(value.reviewPoints) || value.reviewPoints.length > 8) throw new Error("playbook reviewPoints must be an array of at most 8 review points");
+        out.reviewPoints = value.reviewPoints.map((point) => {
+            if (!point || typeof point !== "object" || Array.isArray(point)) throw new Error("playbook review point must be an object");
+            const allowed = new Set(["id", "name", "instructions", "recommendedCoworkerRole", "recommendedSkillIds"]);
+            for (const key of Object.keys(point)) if (!allowed.has(key)) throw new Error(`playbook review point field is not allowed: ${key}`);
+            return {
+                id: safeId(point.id, "playbook review point id"),
+                name: safeString(point.name, "playbook review point name", 120),
+                instructions: safeOptionalString(point.instructions ?? "", "playbook review point instructions", 2_000),
+                ...(point.recommendedCoworkerRole === undefined ? {} : { recommendedCoworkerRole: safeOptionalString(point.recommendedCoworkerRole, "playbook review point recommendedCoworkerRole", 120) }),
+                ...(point.recommendedSkillIds === undefined ? {} : { recommendedSkillIds: safeSemanticIdList(point.recommendedSkillIds, "playbook review point recommendedSkillId", 8) }),
+            };
+        });
+    }
+    if (value.expectedOutput !== undefined) out.expectedOutput = safeOptionalString(value.expectedOutput, "playbook expectedOutput", 500);
+    if (value.recommendedCoworkerRoles !== undefined) {
+        if (!Array.isArray(value.recommendedCoworkerRoles) || value.recommendedCoworkerRoles.length > 8) throw new Error("playbook recommendedCoworkerRoles must contain at most 8 roles");
+        out.recommendedCoworkerRoles = [...new Set(value.recommendedCoworkerRoles.map((role) => safeString(role, "playbook recommendedCoworkerRole", 120)))];
+    }
+    if (value.recommendedSkillIds !== undefined) out.recommendedSkillIds = safeSemanticIdList(value.recommendedSkillIds, "playbook recommendedSkillId", 16);
+    return out;
+}
+
 function safeCoworkerIds(value) {
     if (!Array.isArray(value) || value.length < 2 || value.length > 8)
         throw new Error("team coworker roster must contain 2 to 8 coworkers");
@@ -306,6 +354,7 @@ function safePlaybooks(value) {
         name: safeString(entry.name, "playbook name", 120),
         description: safeString(entry.description ?? "", "playbook description", 500),
         steps: Array.isArray(entry.steps) ? entry.steps.slice(0, 12).map((step) => safeId(step, "playbook step")) : [],
+        ...safePlaybookSemantics(entry),
     }));
 }
 
@@ -496,7 +545,7 @@ function sanitizeCollaboration(value, teamIds, conversationIds) {
 function safePlaybookDefinition(value, { requireSchema = false } = {}) {
     if (!value || typeof value !== "object" || Array.isArray(value))
         throw new Error("playbook must be an object");
-    const allowed = new Set(["schema", "id", "name", "description", "steps"]);
+    const allowed = new Set(["schema", "id", "name", "description", "steps", "stages", "reviewPoints", "expectedOutput", "recommendedCoworkerRoles", "recommendedSkillIds"]);
     for (const key of Object.keys(value)) {
         if (!allowed.has(key)) throw new Error(`playbook field is not allowed: ${key}`);
     }
@@ -1804,7 +1853,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             throw new Error(`playbook id already exists in team: ${playbook.id}`);
         }
         if (team.playbooks.length >= 8) throw new Error("team playbook limit reached (8)");
-        team.playbooks.push({ id: playbook.id, name: playbook.name, description: playbook.description, steps: [...playbook.steps] });
+        team.playbooks.push({ id: playbook.id, name: playbook.name, description: playbook.description, steps: [...playbook.steps], ...safePlaybookSemantics(playbook) });
         team.updatedAt = now();
         save();
         return { imported: true, playbook: clone(playbook), team: publicTeam(team) };
@@ -1816,7 +1865,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         if (!playbook) throw new Error(`unknown playbook id: ${playbookId}`);
         if (!patch || typeof patch !== "object" || Array.isArray(patch))
             throw new Error("playbook patch must be an object");
-        const allowed = new Set(["name", "description", "steps"]);
+        const allowed = new Set(["name", "description", "steps", "stages", "reviewPoints", "expectedOutput", "recommendedCoworkerRoles", "recommendedSkillIds"]);
         for (const key of Object.keys(patch))
             if (!allowed.has(key)) throw new Error(`playbook field is not editable: ${key}`);
         if (!Object.keys(patch).length) throw new Error("playbook patch must not be empty");
@@ -1824,11 +1873,12 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             name: patch.name === undefined ? playbook.name : safeString(patch.name, "playbook name", 120),
             description: patch.description === undefined ? playbook.description : safeOptionalString(patch.description, "playbook description", 500),
             steps: patch.steps === undefined ? [...playbook.steps] : patch.steps,
+            ...Object.fromEntries(["stages", "reviewPoints", "expectedOutput", "recommendedCoworkerRoles", "recommendedSkillIds"].map((field) => [field, Object.hasOwn(patch, field) ? patch[field] : playbook[field]]).filter(([, value]) => value !== undefined)),
         };
         if (!Array.isArray(next.steps) || next.steps.length > 12)
             throw new Error("playbook steps must be an array of at most 12 identifiers");
         next.steps = next.steps.map((step) => safeId(step, "playbook step"));
-        Object.assign(playbook, next);
+        Object.assign(playbook, next, safePlaybookSemantics(next));
         team.updatedAt = now();
         save();
         return { playbook: clone(playbook), team: publicTeam(team) };

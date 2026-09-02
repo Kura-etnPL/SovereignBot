@@ -27,6 +27,7 @@ function empty(payload) { if (payload === undefined || payload === null) return 
 function identifier(value, name) { if (typeof value !== "string" || !/^[A-Za-z0-9][\w:.-]{0,127}$/.test(value)) throw new Error(`${name} must be an identifier`); return value; }
 function string(value, name, max, required = false) { if (value === undefined || value === null) { if (required) throw new Error(`missing request field: ${name}`); return undefined; } if (typeof value !== "string") throw new Error(`${name} must be a string`); if (value.length > max) throw new Error(`${name} exceeds ${max} characters`); if (required && !value.trim()) throw new Error(`${name} is required`); return value; }
 function idArray(value, name, max) { if (value === undefined) return undefined; if (!Array.isArray(value) || value.length > max) throw new Error(`${name} must be an array of at most ${max} identifiers`); return [...new Set(value.map((entry) => identifier(entry, name)))]; }
+function stringArray(value, name, maxItems, maxLength) { if (value === undefined) return undefined; if (!Array.isArray(value) || value.length > maxItems) throw new Error(`${name} must be an array of at most ${maxItems} strings`); return [...new Set(value.map((entry) => string(entry, name, maxLength, true)))]; }
 function exact(value, allowed) { for (const key of Object.keys(value)) { if (!allowed.has(key)) throw new Error(`unexpected request field: ${key}`); } }
 function positiveInteger(value, name, min, max) { if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer from ${min} to ${max}`); return value; }
 function workerComputerTargetShape(value) {
@@ -76,6 +77,47 @@ function memoryTarget(value, { withMemoryId = false, withPatch = false, withPinn
         result.includeForgotten = input.includeForgotten === true;
     }
     return result;
+}
+
+function playbookSemanticShape(value) {
+    const out = {};
+    if (value.stages !== undefined) {
+        if (!Array.isArray(value.stages) || value.stages.length > 8) throw new Error("playbook stages are invalid");
+        out.stages = value.stages.map((stage) => {
+            if (!isPlainObject(stage)) throw new Error("playbook stage must be an object");
+            assertNoAuthority(stage, "playbook.stage");
+            exact(stage, new Set(["id", "name", "instructions", "expectedOutput", "recommendedCoworkerRole", "recommendedSkillIds"]));
+            return {
+                id: identifier(stage.id, "playbook stage id"),
+                name: string(stage.name, "playbook stage name", 120, true),
+                instructions: string(stage.instructions ?? "", "playbook stage instructions", 2_000),
+                ...(stage.expectedOutput === undefined ? {} : { expectedOutput: string(stage.expectedOutput, "playbook stage expectedOutput", 500) }),
+                ...(stage.recommendedCoworkerRole === undefined ? {} : { recommendedCoworkerRole: string(stage.recommendedCoworkerRole, "playbook stage recommendedCoworkerRole", 120) }),
+                ...(stage.recommendedSkillIds === undefined ? {} : { recommendedSkillIds: idArray(stage.recommendedSkillIds, "playbook stage recommendedSkillIds", 8) }),
+            };
+        });
+    }
+    if (value.reviewPoints !== undefined) {
+        if (!Array.isArray(value.reviewPoints) || value.reviewPoints.length > 8) throw new Error("playbook reviewPoints are invalid");
+        out.reviewPoints = value.reviewPoints.map((point) => {
+            if (!isPlainObject(point)) throw new Error("playbook review point must be an object");
+            assertNoAuthority(point, "playbook.reviewPoint");
+            exact(point, new Set(["id", "name", "instructions", "recommendedCoworkerRole", "recommendedSkillIds"]));
+            return {
+                id: identifier(point.id, "playbook review point id"),
+                name: string(point.name, "playbook review point name", 120, true),
+                instructions: string(point.instructions ?? "", "playbook review point instructions", 2_000),
+                ...(point.recommendedCoworkerRole === undefined ? {} : { recommendedCoworkerRole: string(point.recommendedCoworkerRole, "playbook review point recommendedCoworkerRole", 120) }),
+                ...(point.recommendedSkillIds === undefined ? {} : { recommendedSkillIds: idArray(point.recommendedSkillIds, "playbook review point recommendedSkillIds", 8) }),
+            };
+        });
+    }
+    if (value.expectedOutput !== undefined) out.expectedOutput = string(value.expectedOutput, "playbook expectedOutput", 500);
+    const roles = stringArray(value.recommendedCoworkerRoles, "playbook recommendedCoworkerRoles", 8, 120);
+    if (roles !== undefined) out.recommendedCoworkerRoles = roles;
+    const skills = idArray(value.recommendedSkillIds, "playbook recommendedSkillIds", 16);
+    if (skills !== undefined) out.recommendedSkillIds = skills;
+    return out;
 }
 function memoryFactTarget(value) {
     const input = objectPayload(value);
@@ -254,13 +296,14 @@ function teamPackShape(value) {
         throw new Error("team pack must contain 1 to 8 playbooks");
     const playbooks = value.playbooks.map((entry) => {
         if (!isPlainObject(entry)) throw new Error("team pack playbook must be an object");
-        exact(entry, new Set(["id", "name", "description", "steps"]));
+        exact(entry, new Set(["id", "name", "description", "steps", "stages", "reviewPoints", "expectedOutput", "recommendedCoworkerRoles", "recommendedSkillIds"]));
         if (!Array.isArray(entry.steps) || entry.steps.length > 12) throw new Error("team pack playbook steps are invalid");
         return {
             id: identifier(entry.id, "playbookId"),
             name: string(entry.name, "playbook name", 120, true),
             description: string(entry.description, "playbook description", 500, true),
             steps: entry.steps.map((step) => identifier(step, "playbook step")),
+            ...playbookSemanticShape(entry),
         };
     });
     return { schema: value.schema, id, name, description, coworkers, channels, playbooks };
@@ -269,7 +312,7 @@ function teamPackShape(value) {
 function teamPlaybookShape(value) {
     if (!isPlainObject(value)) throw new Error("playbook must be an object");
     assertNoAuthority(value, "playbook");
-    exact(value, new Set(["schema", "id", "name", "description", "steps"]));
+    exact(value, new Set(["schema", "id", "name", "description", "steps", "stages", "reviewPoints", "expectedOutput", "recommendedCoworkerRoles", "recommendedSkillIds"]));
     if (value.schema !== "sovereignbot.desktop.playbook.v1") throw new Error("playbook schema is invalid");
     if (!Array.isArray(value.steps) || value.steps.length > 12) throw new Error("playbook steps are invalid");
     return {
@@ -278,6 +321,7 @@ function teamPlaybookShape(value) {
         name: string(value.name, "playbook name", 120, true),
         description: string(value.description, "playbook description", 500, true),
         steps: value.steps.map((step) => identifier(step, "playbook step")),
+        ...playbookSemanticShape(value),
     };
 }
 
@@ -363,8 +407,8 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "team:exportPackRecipe": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["packId"])); return { packId: identifier(value.packId, "packId") }; }),
     "team:editPack": spec(64 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["packId", "patch"])); const patch = objectPayload(value.patch); exact(patch, new Set(["name", "description", "coworkers", "channels", "playbooks"])); return { packId: identifier(value.packId, "packId"), patch: structuredClone(patch) }; }),
     "playbook:list": spec(1024, (payload) => { if (payload === undefined || payload === null) return { includeArchived: false }; const value = objectPayload(payload); exact(value, new Set(["includeArchived"])); return { includeArchived: value.includeArchived === true }; }),
-    "playbook:create": spec(8 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["playbook"])); const playbook = objectPayload(value.playbook); exact(playbook, new Set(["name", "description", "steps"])); if (!Array.isArray(playbook.steps) || playbook.steps.length > 12) throw new Error("playbook steps are invalid"); return { playbook: { schema: "sovereignbot.desktop.playbook.v1", name: playbook.name, description: playbook.description ?? "", steps: [...playbook.steps] } }; }),
-    "playbook:update": spec(8 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["playbookId", "patch"])); const patch = objectPayload(value.patch); exact(patch, new Set(["name", "description", "steps"])); return { playbookId: identifier(value.playbookId, "playbookId"), patch: structuredClone(patch) }; }),
+    "playbook:create": spec(8 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["playbook"])); const playbook = objectPayload(value.playbook); exact(playbook, new Set(["name", "description", "steps", "stages", "reviewPoints", "expectedOutput", "recommendedCoworkerRoles", "recommendedSkillIds"])); if (!Array.isArray(playbook.steps) || playbook.steps.length > 12) throw new Error("playbook steps are invalid"); return { playbook: { schema: "sovereignbot.desktop.playbook.v1", name: playbook.name, description: playbook.description ?? "", steps: [...playbook.steps], ...playbookSemanticShape(playbook) } }; }),
+    "playbook:update": spec(8 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["playbookId", "patch"])); const patch = objectPayload(value.patch); exact(patch, new Set(["name", "description", "steps", "stages", "reviewPoints", "expectedOutput", "recommendedCoworkerRoles", "recommendedSkillIds"])); if (patch.steps !== undefined && (!Array.isArray(patch.steps) || patch.steps.length > 12)) throw new Error("playbook steps are invalid"); return { playbookId: identifier(value.playbookId, "playbookId"), patch: { ...structuredClone(patch), ...playbookSemanticShape(patch) } }; }),
     "playbook:archive": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["playbookId"])); return { playbookId: identifier(value.playbookId, "playbookId") }; }),
     "playbook:restore": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["playbookId"])); return { playbookId: identifier(value.playbookId, "playbookId") }; }),
     "playbook:duplicate": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["playbookId"])); return { playbookId: identifier(value.playbookId, "playbookId") }; }),

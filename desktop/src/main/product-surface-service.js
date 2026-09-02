@@ -7,6 +7,10 @@ const PLAYBOOK_SCHEMA = "sovereignbot.desktop.playbook.v1";
 const PACK_SCHEMA = "sovereignbot.desktop.team-pack.v1";
 const MAX_PLAYBOOKS = 256;
 const MAX_PACK_RECIPES = 128;
+const MAX_PLAYBOOK_STAGES = 8;
+const MAX_PLAYBOOK_REVIEW_POINTS = 8;
+const MAX_PLAYBOOK_RECOMMENDED_ROLES = 8;
+const MAX_PLAYBOOK_RECOMMENDED_SKILLS = 16;
 
 function clone(value) { return structuredClone(value); }
 function text(value, label, max, required = false) {
@@ -26,9 +30,56 @@ function id(value, label) {
 }
 function makeId(prefix) { return `${prefix}_${randomBytes(8).toString("hex")}`; }
 
+function normalizedIdList(value, label, max) {
+    if (!Array.isArray(value) || value.length > max) throw new Error(`${label} must contain at most ${max} identifiers`);
+    return [...new Set(value.map((entry) => id(entry, label)))];
+}
+
+function normalizePlaybookSemantics(input) {
+    const out = {};
+    if (input.stages !== undefined) {
+        if (!Array.isArray(input.stages) || input.stages.length > MAX_PLAYBOOK_STAGES) throw new Error("playbook stages must be an array of at most 8 stages");
+        out.stages = input.stages.map((stage) => {
+            if (!stage || typeof stage !== "object" || Array.isArray(stage)) throw new Error("playbook stage must be an object");
+            const allowed = new Set(["id", "name", "instructions", "expectedOutput", "recommendedCoworkerRole", "recommendedSkillIds"]);
+            for (const key of Object.keys(stage)) if (!allowed.has(key)) throw new Error(`playbook stage field is not allowed: ${key}`);
+            return {
+                id: id(stage.id, "playbook stage id"),
+                name: text(stage.name, "playbook stage name", 120, true),
+                instructions: text(stage.instructions ?? "", "playbook stage instructions", 2_000),
+                ...(stage.expectedOutput === undefined ? {} : { expectedOutput: text(stage.expectedOutput, "playbook stage expectedOutput", 500) }),
+                ...(stage.recommendedCoworkerRole === undefined ? {} : { recommendedCoworkerRole: text(stage.recommendedCoworkerRole, "playbook stage recommendedCoworkerRole", 120) }),
+                ...(stage.recommendedSkillIds === undefined ? {} : { recommendedSkillIds: normalizedIdList(stage.recommendedSkillIds, "playbook stage recommendedSkillId", 8) }),
+            };
+        });
+    }
+    if (input.reviewPoints !== undefined) {
+        if (!Array.isArray(input.reviewPoints) || input.reviewPoints.length > MAX_PLAYBOOK_REVIEW_POINTS) throw new Error("playbook reviewPoints must be an array of at most 8 review points");
+        out.reviewPoints = input.reviewPoints.map((point) => {
+            if (!point || typeof point !== "object" || Array.isArray(point)) throw new Error("playbook review point must be an object");
+            const allowed = new Set(["id", "name", "instructions", "recommendedCoworkerRole", "recommendedSkillIds"]);
+            for (const key of Object.keys(point)) if (!allowed.has(key)) throw new Error(`playbook review point field is not allowed: ${key}`);
+            return {
+                id: id(point.id, "playbook review point id"),
+                name: text(point.name, "playbook review point name", 120, true),
+                instructions: text(point.instructions ?? "", "playbook review point instructions", 2_000),
+                ...(point.recommendedCoworkerRole === undefined ? {} : { recommendedCoworkerRole: text(point.recommendedCoworkerRole, "playbook review point recommendedCoworkerRole", 120) }),
+                ...(point.recommendedSkillIds === undefined ? {} : { recommendedSkillIds: normalizedIdList(point.recommendedSkillIds, "playbook review point recommendedSkillId", 8) }),
+            };
+        });
+    }
+    if (input.expectedOutput !== undefined) out.expectedOutput = text(input.expectedOutput, "playbook expectedOutput", 500);
+    if (input.recommendedCoworkerRoles !== undefined) {
+        if (!Array.isArray(input.recommendedCoworkerRoles) || input.recommendedCoworkerRoles.length > MAX_PLAYBOOK_RECOMMENDED_ROLES) throw new Error("playbook recommendedCoworkerRoles must contain at most 8 roles");
+        out.recommendedCoworkerRoles = [...new Set(input.recommendedCoworkerRoles.map((role) => text(role, "playbook recommendedCoworkerRole", 120, true)))];
+    }
+    if (input.recommendedSkillIds !== undefined) out.recommendedSkillIds = normalizedIdList(input.recommendedSkillIds, "playbook recommendedSkillId", MAX_PLAYBOOK_RECOMMENDED_SKILLS);
+    return out;
+}
+
 function normalizePlaybook(input, { requireSchema = false, generatedId } = {}) {
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("playbook must be an object");
-    const allowed = new Set(["schema", "id", "name", "description", "steps"]);
+    const allowed = new Set(["schema", "id", "name", "description", "steps", "stages", "reviewPoints", "expectedOutput", "recommendedCoworkerRoles", "recommendedSkillIds"]);
     for (const key of Object.keys(input)) if (!allowed.has(key)) throw new Error(`playbook field is not allowed: ${key}`);
     if (requireSchema && input.schema !== PLAYBOOK_SCHEMA) throw new Error(`playbook schema must be ${PLAYBOOK_SCHEMA}`);
     const steps = input.steps;
@@ -38,6 +89,7 @@ function normalizePlaybook(input, { requireSchema = false, generatedId } = {}) {
         name: text(input.name, "playbook name", 120, true),
         description: text(input.description ?? "", "playbook description", 500),
         steps: steps.map((step) => id(step, "playbook step")),
+        ...normalizePlaybookSemantics(input),
     };
 }
 
@@ -115,7 +167,7 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
     function publicPlaybook(entry) {
         const teams = teamService.list().teams.filter((team) => team.playbooks?.some((item) => item.id === entry.id)).map((team) => ({ id: team.id, name: team.name }));
         const channels = teamService.list().teams.flatMap((team) => (team.channels ?? []).filter((channel) => channel.playbookId === entry.id).map((channel) => ({ id: channel.id, name: channel.name, teamId: team.id, teamName: team.name })));
-        return { schema: PLAYBOOK_SCHEMA, id: entry.id, name: entry.name, description: entry.description, steps: [...entry.steps], state: entry.state, createdAt: entry.createdAt, updatedAt: entry.updatedAt, assignedTeams: teams, assignedChannels: channels };
+        return { schema: PLAYBOOK_SCHEMA, id: entry.id, name: entry.name, description: entry.description, steps: [...entry.steps], ...normalizePlaybookSemantics(entry), state: entry.state, createdAt: entry.createdAt, updatedAt: entry.updatedAt, assignedTeams: teams, assignedChannels: channels };
     }
     function listPlaybooks({ includeArchived = false } = {}) {
         return { schema: PLAYBOOK_SCHEMA, playbooks: state.playbooks.filter((entry) => includeArchived || entry.state !== "archived").map(publicPlaybook) };
@@ -127,16 +179,17 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
     }
     function updatePlaybook(playbookId, patch) {
         const entry = playbookById(playbookId); if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new Error("playbook patch must be an object");
-        const next = normalizePlaybook({ id: entry.id, name: patch.name ?? entry.name, description: patch.description ?? entry.description, steps: patch.steps ?? entry.steps });
+        const semanticFields = ["stages", "reviewPoints", "expectedOutput", "recommendedCoworkerRoles", "recommendedSkillIds"];
+        const next = normalizePlaybook({ id: entry.id, name: patch.name ?? entry.name, description: patch.description ?? entry.description, steps: patch.steps ?? entry.steps, ...Object.fromEntries(semanticFields.map((field) => [field, Object.hasOwn(patch, field) ? patch[field] : entry[field]]).filter(([, value]) => value !== undefined)) });
         const assignedTeams = teamService.list().teams.filter((team) => team.playbooks?.some((item) => item.id === entry.id));
         if (typeof teamService.updatePlaybook !== "function" && assignedTeams.length)
             throw new Error("assigned playbook updates are unavailable");
         for (const team of assignedTeams)
-            teamService.updatePlaybook(team.id, entry.id, { name: next.name, description: next.description, steps: next.steps });
+            teamService.updatePlaybook(team.id, entry.id, { name: next.name, description: next.description, steps: next.steps, ...normalizePlaybookSemantics(next) });
         Object.assign(entry, next, { updatedAt: now() }); save(); return publicPlaybook(entry);
     }
     function setPlaybookState(playbookId, value) { const entry = playbookById(playbookId); entry.state = value; entry.updatedAt = now(); save(); return publicPlaybook(entry); }
-    function duplicatePlaybook(playbookId) { const entry = playbookById(playbookId); return createPlaybook({ name: `${entry.name} copy`, description: entry.description, steps: entry.steps }); }
+    function duplicatePlaybook(playbookId) { const entry = playbookById(playbookId); return createPlaybook({ name: `${entry.name} copy`, description: entry.description, steps: entry.steps, ...normalizePlaybookSemantics(entry) }); }
     function importPlaybook(input) {
         const normalized = normalizePlaybook(input, { requireSchema: true });
         const existing = state.playbooks.find((entry) => entry.id === normalized.id);
@@ -148,15 +201,15 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
         if ((teamId === undefined) === (channelId === undefined)) throw new Error("assign a playbook to exactly one team or channel");
         if (teamId !== undefined) {
             const team = teamService.get(teamId);
-            if (!team.playbooks.some((item) => item.id === entry.id)) teamService.importPlaybook(team.id, { schema: PLAYBOOK_SCHEMA, id: entry.id, name: entry.name, description: entry.description, steps: entry.steps });
+            if (!team.playbooks.some((item) => item.id === entry.id)) teamService.importPlaybook(team.id, { schema: PLAYBOOK_SCHEMA, id: entry.id, name: entry.name, description: entry.description, steps: entry.steps, ...normalizePlaybookSemantics(entry) });
         } else {
             const channel = teamService.getChannel(channelId);
-            if (!teamService.get(channel.teamId).playbooks.some((item) => item.id === entry.id)) teamService.importPlaybook(channel.teamId, { schema: PLAYBOOK_SCHEMA, id: entry.id, name: entry.name, description: entry.description, steps: entry.steps });
+            if (!teamService.get(channel.teamId).playbooks.some((item) => item.id === entry.id)) teamService.importPlaybook(channel.teamId, { schema: PLAYBOOK_SCHEMA, id: entry.id, name: entry.name, description: entry.description, steps: entry.steps, ...normalizePlaybookSemantics(entry) });
             teamService.updateChannel(channel.id, { playbookId: entry.id });
         }
         return publicPlaybook(entry);
     }
-    function exportPlaybook(playbookId) { const entry = playbookById(playbookId); return { schema: PLAYBOOK_SCHEMA, id: entry.id, name: entry.name, description: entry.description, steps: [...entry.steps] }; }
+    function exportPlaybook(playbookId) { const entry = playbookById(playbookId); return { schema: PLAYBOOK_SCHEMA, id: entry.id, name: entry.name, description: entry.description, steps: [...entry.steps], ...normalizePlaybookSemantics(entry) }; }
     function artifactView(artifact, channels, { eventOnly = false } = {}) {
         const channel = channels.find((item) => item.conversationId === artifact.conversationId);
         const creator = artifact.createdByCoworkerId ? coworkerStore.get(artifact.createdByCoworkerId) : undefined;

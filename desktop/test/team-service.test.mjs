@@ -250,6 +250,18 @@ test("Playbook export/import is bounded and idempotent", () => {
         });
         assert.equal(imported.imported, true);
         assert.equal(imported.team.playbooks.some((playbook) => playbook.id === "review-method"), true);
+        const semantic = teams.importPlaybook(installed.team.id, {
+            ...exported,
+            id: "semantic-method",
+            name: "Semantic Method",
+            stages: [{ id: "draft", name: "Draft", instructions: "Prepare the bounded draft.", expectedOutput: "Draft", recommendedCoworkerRole: "Author", recommendedSkillIds: ["skill_writing"] }],
+            reviewPoints: [{ id: "review", name: "Review", instructions: "Current owner reviews before proceeding.", recommendedCoworkerRole: "Reviewer" }],
+            expectedOutput: "Approved result",
+            recommendedCoworkerRoles: ["Author", "Reviewer"],
+            recommendedSkillIds: ["skill_writing"],
+        });
+        assert.equal(semantic.playbook.stages[0].name, "Draft");
+        assert.deepEqual(teams.exportPlaybook(installed.team.id, "semantic-method").reviewPoints, [{ id: "review", name: "Review", instructions: "Current owner reviews before proceeding.", recommendedCoworkerRole: "Reviewer" }]);
         assert.equal(teams.importPlaybook(installed.team.id, {
             ...exported,
             id: "review-method",
@@ -258,6 +270,10 @@ test("Playbook export/import is bounded and idempotent", () => {
         }).imported, false);
         assert.throws(
             () => teams.importPlaybook(installed.team.id, { ...exported, id: "bad", workspacePath: "E:/private" }),
+            /field is not allowed/,
+        );
+        assert.throws(
+            () => teams.importPlaybook(installed.team.id, { ...exported, id: "bad-authority", stages: [{ id: "draft", name: "Draft", instructions: "Draft", capabilityGrant: "computer" }] }),
             /field is not allowed/,
         );
     }
@@ -274,6 +290,8 @@ test("Playbook Library edits update the assigned team's reusable procedure", () 
             name: "Software Delivery v2",
             description: "",
             steps: ["chief", "coding-lead", "reviewer", "chief"],
+            stages: [{ id: "ship", name: "Ship", instructions: "Prepare the bounded change." }],
+            expectedOutput: "Released change",
         });
         assert.equal(updated.playbook.name, "Software Delivery v2");
         assert.equal(updated.playbook.description, "");
@@ -281,6 +299,8 @@ test("Playbook Library edits update the assigned team's reusable procedure", () 
         assert.equal(current.playbooks[0].name, "Software Delivery v2");
         assert.equal(current.playbooks[0].description, "");
         assert.deepEqual(current.playbooks[0].steps, ["chief", "coding-lead", "reviewer", "chief"]);
+        assert.equal(current.playbooks[0].stages[0].id, "ship");
+        assert.equal(current.playbooks[0].expectedOutput, "Released change");
     }
     finally {
         rmSync(root, { recursive: true, force: true });

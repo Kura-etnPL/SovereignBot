@@ -133,6 +133,10 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
     for (const expression of [
         /playbooks\.duplicate/,
         /playbooks\.assign/,
+        /playbookSemanticPlan/,
+        /reviewPoints/,
+        /Recommended Skills/,
+        /Optional semantic plan JSON/,
         /artifacts\.hub/,
         /History \/ 历史/,
         /Go to conversation \/ 前往会话/,

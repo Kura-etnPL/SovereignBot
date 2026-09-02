@@ -140,6 +140,11 @@ test("playbook transfer is declarative and rejects runtime state", () => {
         name: "Delivery",
         description: "A bounded delivery method.",
         steps: ["chief", "coding-lead", "reviewer", "chief"],
+        stages: [{ id: "prepare", name: "Prepare", instructions: "Prepare the bounded change.", expectedOutput: "Draft", recommendedCoworkerRole: "Author", recommendedSkillIds: ["skill_writing"] }],
+        reviewPoints: [{ id: "review", name: "Review", instructions: "Current owner reviews the draft.", recommendedCoworkerRole: "Reviewer" }],
+        expectedOutput: "Approved delivery",
+        recommendedCoworkerRoles: ["Author", "Reviewer"],
+        recommendedSkillIds: ["skill_writing"],
     };
     assert.deepEqual(
         validateV3IpcRequest("team:importPlaybook", { teamId: "team_1111111111111111", playbook }),
@@ -152,6 +157,10 @@ test("playbook transfer is declarative and rejects runtime state", () => {
     assert.throws(
         () => validateV3IpcRequest("team:importPlaybook", { teamId: "team_1111111111111111", playbook: { ...playbook, workspacePath: "E:/private" } }),
         /unexpected request field: workspacePath/,
+    );
+    assert.throws(
+        () => validateV3IpcRequest("playbook:update", { playbookId: "delivery", patch: { stages: [{ id: "prepare", name: "Prepare", instructions: "Draft", providerAccountId: "account" }] } }),
+        /unexpected request field: providerAccountId/,
     );
 });
 

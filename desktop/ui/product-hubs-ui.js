@@ -512,18 +512,48 @@
   }
   function selected(id, fallback) { return $(id)?.value || fallback; }
 
+  function playbookSemanticPlan(item) {
+    return Object.fromEntries(["stages", "reviewPoints", "expectedOutput", "recommendedCoworkerRoles", "recommendedSkillIds"].map((field) => [field, item[field]]).filter(([, value]) => value !== undefined));
+  }
+  function appendPlaybookPlan(card, item) {
+    const plan = playbookSemanticPlan(item); const hasPlan = Object.keys(plan).length > 0; if (!hasPlan) return;
+    const details = document.createElement("details"); details.className = "playbook-plan";
+    const summary = document.createElement("summary"); summary.textContent = `Plan / 计划 · ${item.stages?.length ?? 0} stages · ${item.reviewPoints?.length ?? 0} review points`; details.append(summary);
+    details.append(text("Guidance / 使用方式", "Current owner may skip or reorder stages, bring in a specialist, or request review. Recommendations are advisory."));
+    if (item.expectedOutput) details.append(text("Expected output / 预期产出", item.expectedOutput));
+    if (item.recommendedCoworkerRoles?.length) details.append(text("Recommended Coworker roles / 推荐同事角色", item.recommendedCoworkerRoles.join(", ")));
+    if (item.recommendedSkillIds?.length) details.append(text("Recommended Skills / 推荐技能", item.recommendedSkillIds.join(", ")));
+    for (const [index, stage] of (item.stages ?? []).entries()) {
+      const stageNode = document.createElement("div"); stageNode.className = "playbook-stage";
+      stageNode.append(text(`Stage ${index + 1} / 阶段 ${index + 1}`, stage.name), text("Instructions / 指引", stage.instructions));
+      if (stage.expectedOutput) stageNode.append(text("Stage output / 阶段产出", stage.expectedOutput));
+      if (stage.recommendedCoworkerRole) stageNode.append(text("Coworker role / 同事角色", stage.recommendedCoworkerRole));
+      if (stage.recommendedSkillIds?.length) stageNode.append(text("Skills / 技能", stage.recommendedSkillIds.join(", ")));
+      details.append(stageNode);
+    }
+    for (const [index, point] of (item.reviewPoints ?? []).entries()) {
+      const pointNode = document.createElement("div"); pointNode.className = "playbook-review-point";
+      pointNode.append(text(`Review point ${index + 1} / 复核点 ${index + 1}`, point.name), text("Review instructions / 复核指引", point.instructions));
+      if (point.recommendedCoworkerRole) pointNode.append(text("Reviewer role / 复核角色", point.recommendedCoworkerRole));
+      if (point.recommendedSkillIds?.length) pointNode.append(text("Skills / 技能", point.recommendedSkillIds.join(", ")));
+      details.append(pointNode);
+    }
+    card.append(details);
+  }
+
   function playbooks(items) {
     const root = pageRoots.playbooks; if (!root) return; clear(root);
     for (const item of items) {
       const card = document.createElement("article"); card.className = "settings-card";
       const title = document.createElement("h3"); title.textContent = item.name;
-      card.append(title, text("Description", item.description), text("Steps", item.steps.join(" → ")), text("Teams", item.assignedTeams.map((entry) => entry.name).join(", ") || "None"), text("Channels", item.assignedChannels.map((entry) => entry.name).join(", ") || "None"), text("State", item.state), text("Updated", item.updatedAt));
+      card.append(title, text("Description", item.description), text("Steps", item.steps.join(" → ")), text("Teams", item.assignedTeams.map((entry) => entry.name).join(", ") || "None"), text("Channels", item.assignedChannels.map((entry) => entry.name).join(", ") || "None"), text("State", item.state), text("Updated", item.updatedAt)); appendPlaybookPlan(card, item);
       const actions = document.createElement("div"); actions.className = "detail-actions";
       actions.append(button("Export / 导出", () => api.playbooks.export({ playbookId: item.id }).then(copy), root), button("Duplicate / 复制", async () => { await api.playbooks.duplicate({ playbookId: item.id }); await refresh(); }, root), button(item.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (item.state === "archived" ? api.playbooks.restore : api.playbooks.archive)({ playbookId: item.id }); await refresh(); }, root), button("Edit / 编辑", async () => {
         const name = window.prompt("Playbook name", item.name); if (!name) return;
         const description = window.prompt("Description", item.description); if (description === null) return;
         const steps = window.prompt("Steps, comma separated", item.steps.join(",")); if (steps === null) return;
-        await api.playbooks.update({ playbookId: item.id, patch: { name, description, steps: steps.split(",").map((entry) => entry.trim()).filter(Boolean) } }); await refresh();
+        const plan = readJson("Semantic plan JSON (stages, reviewPoints, expectedOutput, recommended roles/Skills)", playbookSemanticPlan(item)); if (plan === undefined) return;
+        await api.playbooks.update({ playbookId: item.id, patch: { name, description, steps: steps.split(",").map((entry) => entry.trim()).filter(Boolean), ...plan } }); await refresh();
       }, root));
       const teamSelect = select("Team for playbook " + item.name);
       for (const team of cache.teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = `Team: ${team.name}`; teamSelect.append(option); }
@@ -655,7 +685,7 @@
     const name = window.prompt("Channel name", channel?.name ?? "Project Channel"); if (!name) return; const instructions = window.prompt("Instructions", channel?.instructions ?? "") ?? ""; const payload = { name, kind: channel?.kind ?? "project", instructions, ...(team.sharedWorkspaceId ? { workspaceId: team.sharedWorkspaceId } : {}), ...(team.playbooks?.[0]?.id ? { playbookId: team.playbooks[0].id } : {}) };
     return channelId ? api.channels.update({ channelId, patch: payload }).then(refreshHost).then(refresh) : api.channels.create({ teamId, ...payload }).then(refreshHost).then(refresh);
   }
-  async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description", "") ?? ""; const steps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; await api.playbooks.create({ playbook: { name, description, steps: steps.split(",").map((entry) => entry.trim()).filter(Boolean) } }); await refresh(); }
+  async function createPlaybook() { const name = window.prompt("Playbook name"); if (!name) return; const description = window.prompt("Description", "") ?? ""; const steps = window.prompt("Steps, comma separated", "chief,coding-lead,reviewer,chief") ?? "chief,coding-lead,reviewer,chief"; const plan = readJson("Optional semantic plan JSON (stages, reviewPoints, expectedOutput, recommended roles/Skills)", {}); if (plan === undefined) return; await api.playbooks.create({ playbook: { name, description, steps: steps.split(",").map((entry) => entry.trim()).filter(Boolean), ...plan } }); await refresh(); }
   async function createSkill() { const name = window.prompt("Skill name"); if (!name) return; const description = window.prompt("Description", "") ?? ""; const instructions = window.prompt("Instructions"); if (!instructions) return; await api.skills.create({ skill: { name, description, instructions } }); await refresh(); }
   async function importPack() { const pack = readJson("Paste Team Pack JSON"); if (!pack) return; await api.teams.importPack({ pack }); await refreshHost(); await refresh(); }
 
