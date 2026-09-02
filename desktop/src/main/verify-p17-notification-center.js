@@ -70,6 +70,7 @@ function handlers(fixture) {
     "coworker:get": ({ coworkerId }) => coworkerStore.get(coworkerId),
     "conversation:list": () => conversationStore.list(),
     "conversation:get": ({ conversationId }) => conversationStore.get(conversationId),
+    "conversation:acknowledge": ({ conversationId }) => notifications.resolveChannelUnread(conversationId),
     "team:list": () => teamService.list(),
     "team:get": ({ teamId }) => teamService.get(teamId),
     "team:activity": (payload) => teamService.activity(payload),

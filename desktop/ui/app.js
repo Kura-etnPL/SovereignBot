@@ -101,10 +101,25 @@ function conversationUnread(conversation) {
 }
 
 function markConversationRead(conversation) {
+  if (!conversation?.id) return Promise.resolve();
   const stamp = conversation?.messages?.at(-1)?.createdAt;
-  if (!conversation?.id || !stamp) return;
-  readMarkers[conversation.id] = stamp;
-  try { window.localStorage.setItem(READ_MARKERS_KEY, JSON.stringify(readMarkers)); } catch {}
+  if (stamp) {
+    readMarkers[conversation.id] = stamp;
+    try { window.localStorage.setItem(READ_MARKERS_KEY, JSON.stringify(readMarkers)); } catch {}
+  }
+  let ackPromise;
+  try {
+    ackPromise = window.sovereignbot?.conversations?.acknowledge?.({ conversationId: conversation.id });
+  } catch (err) {
+    ackPromise = Promise.reject(err);
+  }
+  return Promise.resolve(ackPromise)
+    .then(() => {
+      document.dispatchEvent(new CustomEvent("sovereignbot:refresh-notifications-badge"));
+    })
+    .catch((err) => {
+      console.warn("[app] conversation acknowledgement failed:", err);
+    });
 }
 
 function channelForConversation(conversationId) {

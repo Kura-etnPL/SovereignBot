@@ -107,6 +107,7 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
 
     let resolveTeamRoute = typeof teamRouteResolver === "function" ? teamRouteResolver : undefined;
     let validateArtifactReferences;
+    const messageObservers = new Set();
 
     function save() { saveJsonState(persistPath, { schema: CONVERSATIONS_SCHEMA, conversations }); }
     function requireConversation(id) { const conversation = conversations.find((entry) => entry.id === String(id)); if (!conversation) throw new Error(`unknown conversation id: ${id}`); return conversation; }
@@ -180,7 +181,7 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         return summarize(conversation);
     }
 
-    function post(conversationId, payload, { senderId, voiceEligible = false }) {
+    function post(conversationId, payload, { senderId, voiceEligible = false, internal = false, notifyChannelUnread = undefined } = {}) {
         const conversation = requireConversation(conversationId);
         requireParticipant(conversation, senderId);
         plainObject(payload, "message");
@@ -208,11 +209,33 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         if (conversation.messages.length > MAX_MESSAGES_PER_CONVERSATION) conversation.messages.splice(0, conversation.messages.length - MAX_MESSAGES_PER_CONVERSATION);
         conversation.updatedAt = createdAt;
         save();
-        return clone(message);
+        const cloned = clone(message);
+        for (const observer of messageObservers) {
+            try {
+                observer({
+                    conversation: summarize(conversation),
+                    message: cloned,
+                    options: {
+                        senderId,
+                        voiceEligible: Boolean(voiceEligible),
+                        internal: Boolean(internal),
+                        notifyChannelUnread,
+                    },
+                });
+            } catch (err) {
+                console.error("[conversation-store] message observer failed:", err);
+            }
+        }
+        return cloned;
     }
 
     return {
         schema: CONVERSATIONS_SCHEMA,
+        onMessage(observer) {
+            if (typeof observer !== "function") throw new Error("message observer must be a function");
+            messageObservers.add(observer);
+            return () => { messageObservers.delete(observer); };
+        },
         setTeamRouteResolver(resolver) {
             if (resolver !== undefined && typeof resolver !== "function") throw new Error("team route resolver must be a function");
             resolveTeamRoute = resolver;
@@ -236,7 +259,15 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
             return createConversation({ kind: "team", title, coworkerIds, leadCoworkerId });
         },
         postUserMessage(conversationId, payload) { return post(conversationId, payload, { senderId: USER_PARTICIPANT }); },
-        postCoworkerMessage(conversationId, coworkerId, payload, options = {}) { requireCoworker(coworkerId); return post(conversationId, payload, { senderId: coworkerId, voiceEligible: options.voiceEligible === true }); },
+        postCoworkerMessage(conversationId, coworkerId, payload, options = {}) {
+            requireCoworker(coworkerId);
+            return post(conversationId, payload, {
+                senderId: coworkerId,
+                voiceEligible: options.voiceEligible === true,
+                internal: options.internal === true,
+                notifyChannelUnread: options.notifyChannelUnread,
+            });
+        },
         markDelivery(conversationId, messageId, coworkerId, status, detail) {
             if (!["pending", "delivered", "failed"].includes(status)) throw new Error("delivery status must be pending, delivered, or failed");
             const conversation = requireConversation(conversationId);

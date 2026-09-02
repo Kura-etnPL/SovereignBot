@@ -584,7 +584,7 @@ export function createCoworkerDispatcher({
                 text: visibleText.slice(0, MAX_REPLY_TEXT),
                 replyTo: source.id,
                 mentions: childIds,
-            });
+            }, { internal: true, notifyChannelUnread: false });
             teamFlow.bindFanoutMessage({ conversationId, kind: "owner", messageId: reply.id, expectedFanoutId: requested.fanoutId });
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
             state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
@@ -600,7 +600,7 @@ export function createCoworkerDispatcher({
                 discardArtifacts(createdArtifactIds);
                 throw error;
             }
-            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: visibleText.slice(0, MAX_REPLY_TEXT), replyTo: source.id });
+            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: visibleText.slice(0, MAX_REPLY_TEXT), replyTo: source.id }, { internal: true, notifyChannelUnread: false });
             closeInternalReply(conversationId, reply);
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
             state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
@@ -612,7 +612,7 @@ export function createCoworkerDispatcher({
                     text: "Parallel specialist results are ready for the required independent review.",
                     replyTo: source.id,
                     mentions: [afterChild.reviewerCoworkerId],
-                });
+                }, { internal: true, notifyChannelUnread: false });
                 teamFlow.bindFanoutMessage({ conversationId, kind: "review", messageId: reviewMessage.id, expectedFanoutId: afterChild.fanoutId });
                 dispatchMessage(conversationId, reviewMessage.id);
             }
@@ -627,7 +627,7 @@ export function createCoworkerDispatcher({
             }
             discardArtifacts(createdArtifactIds);
             const reviewed = teamFlow.completeFanoutReview({ conversationId, coworkerId, decision: reviewResult.decision, resultText: reviewResult.text });
-            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: reviewResult.text || (reviewResult.decision === "approved" ? "Independent review approved." : "Independent review requested changes."), replyTo: source.id });
+            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: reviewResult.text || (reviewResult.decision === "approved" ? "Independent review approved." : "Independent review requested changes."), replyTo: source.id }, { internal: true, notifyChannelUnread: false });
             closeInternalReply(conversationId, reply);
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
             state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
@@ -637,7 +637,7 @@ export function createCoworkerDispatcher({
                     text: "Independent review approved; the original owner will now join the specialist results.",
                     replyTo: source.id,
                     mentions: [reviewed.ownerCoworkerId],
-                });
+                }, { internal: true, notifyChannelUnread: false });
                 teamFlow.bindFanoutMessage({ conversationId, kind: "join", messageId: joinMessage.id, expectedFanoutId: reviewed.fanoutId });
                 dispatchMessage(conversationId, joinMessage.id);
             }
@@ -654,7 +654,7 @@ export function createCoworkerDispatcher({
                 discardArtifacts(createdArtifactIds);
                 throw error;
             }
-            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: visibleText.slice(0, MAX_REPLY_TEXT), replyTo: source.id, ...(publishArtifactIds.length ? { artifactIds: publishArtifactIds } : {}) }, { voiceEligible: true });
+            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: visibleText.slice(0, MAX_REPLY_TEXT), replyTo: source.id, ...(publishArtifactIds.length ? { artifactIds: publishArtifactIds } : {}) }, { voiceEligible: true, notifyChannelUnread: true });
             closeInternalReply(conversationId, reply);
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
             state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
@@ -706,7 +706,13 @@ export function createCoworkerDispatcher({
             ? decisionContext.activeProtocol?.sourceCoworkerId
             : undefined;
         const handoffIds = reviewRevisionTarget ? [reviewRevisionTarget] : handoffResult.coworkerIds;
-        const proposedTarget = reviewRevisionTarget ?? teamFlow?.previewHandoff?.({
+        const handoffDecision = teamFlow?.previewHandoffDecision?.({
+            conversation,
+            coworkerId,
+            source,
+            requestedCoworkerIds: handoffIds,
+        });
+        const proposedTarget = reviewRevisionTarget ?? handoffDecision?.target ?? teamFlow?.previewHandoff?.({
             conversation,
             coworkerId,
             source,
@@ -777,6 +783,15 @@ export function createCoworkerDispatcher({
                 throw error;
             }
         }
+        const isManagedTeamIntermediate = Boolean(managedTeam && !handoffDecision?.terminal);
+        const isHandoffStage = Boolean(!handoffBlocked && (productHandoff || (!managedTeam && nextCoworkerIds.length > 0) || isManagedTeamIntermediate));
+        const isIntermediateStage = Boolean(
+            isReview
+            || targetIsReview
+            || isHandoffStage
+            || !shouldPublishResult
+            || handoffBlocked
+        );
         const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, {
             text: visibleText.slice(0, MAX_REPLY_TEXT),
             replyTo: source.id,
@@ -787,6 +802,8 @@ export function createCoworkerDispatcher({
             // explicit/opt-in renderer speech. Internal protocol, review,
             // attention, and handoff messages remain silent by construction.
             voiceEligible: Boolean(shouldPublishResult && !nextCoworkerIds.length && !isReview && !managedTeam && !productHandoff && !handoffBlocked),
+            internal: isIntermediateStage,
+            notifyChannelUnread: Boolean(shouldPublishResult && !isIntermediateStage),
         });
         if (!handoffBlocked && (productHandoff || managedTeam)) {
             const handoffContext = teamFlow?.collaborationContextForConversation?.(conversationId);

@@ -29,6 +29,9 @@ export function createAttachmentAwareConversationStore(conversationStore, artifa
         postCoworkerMessage(...args) {
             return conversationStore.postCoworkerMessage(...args);
         },
+        onMessage(...args) {
+            return conversationStore.onMessage?.(...args);
+        },
     };
 }
 

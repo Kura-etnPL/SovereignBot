@@ -385,6 +385,7 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "palette:execute": spec(16 * 1024, (payload) => paletteTarget(payload)),
     "conversation:list": spec(1024, empty),
     "conversation:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["conversationId"])); return { conversationId: identifier(value.conversationId, "conversationId") }; }),
+    "conversation:acknowledge": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["conversationId"])); return { conversationId: identifier(value.conversationId, "conversationId") }; }),
     "conversation:createDirect": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),
     "conversation:createTeam": spec(4096, (payload) => {
         const value = objectPayload(payload);

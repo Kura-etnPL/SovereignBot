@@ -1246,7 +1246,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
                 text: `Parallel specialists requested.\nReason: ${safeReason}`,
                 replyTo: source.id,
                 mentions: safeChildren.map((entry) => entry.coworkerId),
-            });
+            }, { internal: true, notifyChannelUnread: false });
             bindFanoutMessage({ conversationId, kind: "owner", messageId: message.id, expectedFanoutId: fanout.fanoutId });
             conversationStore.markDelivery(conversationId, source.id, ownerCoworkerId, "delivered");
         }
@@ -2250,6 +2250,10 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return resolveHandoff(args)?.target;
     }
 
+    function previewHandoffDecision(args) {
+        return resolveHandoff(args);
+    }
+
     function nextHandoff({ conversation, coworkerId, source, requestedCoworkerIds = [], expectedTargetCoworkerId, expectedVersion, expectedRunId, expectedRequestId, expectedOperationId, expectedOperationToken, runtimeProof, allowDirectedTarget = false, requestedProtocolKind, boundedTask, reason } = {}) {
         if (requestedProtocolKind !== undefined && !PROTOCOL_KINDS.has(requestedProtocolKind)) throw new Error("protocol kind is invalid");
         const decision = resolveHandoff({ conversation, coworkerId, source, requestedCoworkerIds, allowDirectedTarget });
@@ -2370,7 +2374,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             message = conversationStore.postCoworkerMessage(conversationId, ownerId, {
                 text: `${label}\nBounded task: ${safeTask}\nReason: ${safeReason}`,
                 mentions: [targetCoworkerId],
-            });
+            }, { internal: true, notifyChannelUnread: false });
             nextHandoff({
                 conversation,
                 coworkerId: ownerId,
@@ -2493,6 +2497,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         nextHandoff,
         requestCollaboration,
         previewHandoff,
+        previewHandoffDecision,
         claimStage,
         acceptProtocol,
         pendingProtocolProof,
@@ -2537,6 +2542,10 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         isManagedConversation,
         isReviewerForConversation,
         isArchivedConversation,
+        channelForConversation(conversationId) {
+            const channel = channelForConversation(conversationId);
+            return channel ? publicChannel(channel) : undefined;
+        },
         setCoworkerAppAccessResolver(resolver) {
             if (resolver !== undefined && typeof resolver !== "function") throw new Error("coworker app access resolver must be a function");
             resolveCoworkerAppAccess = resolver;

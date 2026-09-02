@@ -114,7 +114,7 @@
 
   function renderNotificationCard(item) {
     const card = document.createElement("article");
-    card.className = "settings-card notification-card" + (item.read ? "" : " unread");
+    card.className = "settings-card notification-card" + (item.read ? " read" : " unread");
     card.setAttribute("role", "article");
     card.dataset.id = item.id;
 
@@ -331,6 +331,7 @@
     void refreshBadgeOnly();
     pollTimer = setInterval(refreshBadgeOnly, 10000);
     window.addEventListener("focus", refreshBadgeOnly);
+    document.addEventListener("sovereignbot:refresh-notifications-badge", refreshBadgeOnly);
   }
 
   window.addEventListener("DOMContentLoaded", bindEvents);

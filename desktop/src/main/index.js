@@ -44,6 +44,7 @@ import { createLocalIsolatedComputer } from "./local-isolated-computer.js";
 import { createDesktopDataLifecycle } from "./data-lifecycle.js";
 import { createSquirrelUpdateExecutor, createUpdateService } from "./update-service.js";
 import { createNotificationService } from "./notification-service.js";
+import { createChannelUnreadProducer } from "./channel-unread-producer.js";
 
 const SQUIRREL_FLAGS = new Set([
     "--squirrel-install",
@@ -197,6 +198,12 @@ async function main() {
         coworkerStore,
         conversationStore,
         services,
+    });
+    const channelUnreadProducer = createChannelUnreadProducer({
+        notifications,
+        teamService,
+        coworkerStore,
+        conversationStore,
     });
     skillStore.setTargetResolver({
         hasCoworker: (id) => coworkerStore.list().coworkers.some((entry) => entry.id === id),
@@ -762,6 +769,7 @@ async function main() {
                 "teach:cancel": ({ sessionId }) => teachOnce.cancel(sessionId),
                 "conversation:list": () => conversationStore.list(),
                 "conversation:get": ({ conversationId }) => conversationStore.get(conversationId),
+                "conversation:acknowledge": ({ conversationId }) => notifications.resolveChannelUnread(conversationId),
                 "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
                 "conversation:createTeam": ({ title, coworkerIds, leadCoworkerId }) => teamService.createTeam({ title, coworkerIds, leadCoworkerId }).conversation,
                 "conversation:stop": async ({ conversationId }) => coworkerDispatcher.stopConversation(conversationId),

@@ -199,16 +199,51 @@ export function createNotificationService({ dataDir, getSettings, NotificationCl
         return settings?.notifications !== false && settings?.notificationPreferences?.[category] !== false;
     }
 
-    function notify({ category, key, title, body, source }) {
+    function notify({ category, key, title, body, source, coalesce = false }) {
         if (!NOTIFICATION_CATEGORIES.includes(category)) throw new Error(`unsupported notification category: ${category}`);
         const safeKey = clean(key, 180);
         if (!safeKey) return { shown: false, deduplicated: false };
         const dedupeKey = digestKey(safeKey);
-        if (seen.has(dedupeKey)) return { shown: false, deduplicated: true };
+        const existing = seen.get(dedupeKey);
 
         const createdAt = new Date().toISOString();
         const safeTitle = cleanAndRedact(title || defaultTitle(category), 120);
         const safeBody = cleanAndRedact(body || "", 400);
+
+        if (existing) {
+            if (category === "channel-unread" || coalesce) {
+                // If it is currently unread and not dismissed: coalesce in-place (no duplicate card, no spam popup)
+                if (!existing.dismissed && !existing.read) {
+                    existing.title = safeTitle;
+                    existing.body = safeBody;
+                    existing.createdAt = createdAt;
+                    existing.at = createdAt;
+                    existing.source = sanitizeSource(source);
+                    persist();
+                    return { shown: false, deduplicated: true, updated: true };
+                }
+                // If previously read or dismissed: reactivate as unread for new activity
+                existing.read = false;
+                existing.readAt = null;
+                existing.dismissed = false;
+                existing.title = safeTitle;
+                existing.body = safeBody;
+                existing.createdAt = createdAt;
+                existing.at = createdAt;
+                existing.source = sanitizeSource(source);
+                persist();
+                if (!enabled(category)) return { shown: false, deduplicated: false, reactivated: true };
+                if (!NotificationClass || NotificationClass.isSupported?.() === false) return { shown: false, deduplicated: false, reactivated: true };
+                try {
+                    new NotificationClass({ title: safeTitle, body: safeBody, silent: true }).show();
+                    return { shown: true, deduplicated: false, reactivated: true };
+                } catch {
+                    return { shown: false, deduplicated: false, reactivated: true };
+                }
+            }
+            return { shown: false, deduplicated: true };
+        }
+
         let id;
         do {
             id = generateOpaqueId();
@@ -241,6 +276,31 @@ export function createNotificationService({ dataDir, getSettings, NotificationCl
         catch {
             return { shown: false, deduplicated: false };
         }
+    }
+
+    function resolveChannelUnread(conversationId) {
+        if (!conversationId || typeof conversationId !== "string") return { resolved: false, count: 0 };
+        const targetId = conversationId.trim();
+        let count = 0;
+        const nowIso = new Date().toISOString();
+        for (const item of seen.values()) {
+            if (
+                item.category === "channel-unread" &&
+                !item.dismissed &&
+                !item.read &&
+                item.source?.target === "conversation" &&
+                item.source?.conversationId === targetId
+            ) {
+                item.read = true;
+                item.readAt = nowIso;
+                count++;
+            }
+        }
+        if (count > 0) {
+            persist();
+            return { resolved: true, count };
+        }
+        return { resolved: false, count: 0 };
     }
 
     // Mutations only match by opaque id; internal dedupe key is never accepted from renderer.
@@ -366,6 +426,7 @@ export function createNotificationService({ dataDir, getSettings, NotificationCl
         markAllRead,
         clear,
         clearAll,
+        resolveChannelUnread,
         seenCount: () => seen.size,
         isEnabled: enabled,
     };

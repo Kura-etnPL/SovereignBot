@@ -23,6 +23,7 @@
         "verify:p15-project-command-center": "node scripts/verify-p15-project-command-center.mjs",
         "verify:p16-team-activity": "node scripts/verify-p16-team-activity.mjs",
         "verify:p17-notification-center": "node scripts/verify-p17-notification-center.mjs",
+        "verify:p18-channel-unread": "node scripts/verify-p18-channel-unread.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",
