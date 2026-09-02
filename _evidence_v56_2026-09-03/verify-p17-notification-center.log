@@ -5,16 +5,17 @@ PASS clicking nav-notifications displays Notification Center {"notifVisible":tru
 PASS cards render newest-first with bilingual categories, times, titles, and bodies {"count":6,"unreadCards":6}
 PASS public notification projections omit internal dedupe key and use opaque IDs {"keysOmitted":true,"allOpaque":true,"noDataAttrsOnNav":true}
 PASS ordinary UI copy contains no storage paths and notes channel-unread limitation {"noPathInCopy":true,"mentionsChannelLimitation":true}
-PASS redaction canary enforces secret, token, and path redaction at service boundary {"canaryCard":{"hasRedactedPath":true,"hasRedactedToken":true,"leaksSecretAdmin":false,"leaksTokenSecret":false},"diskClean":true}
+PASS redaction canary enforces secret, token, and path redaction at service boundary without credential tails or key leaks {"canaryCard":{"hasRedactedPath":true,"hasRedactedToken":true,"leaksSecretAdmin":false,"leaksArbitrarySecret":false,"leaksArbitraryCookie":false,"leaksArbitraryToken":false},"diskClean":true,"diskKeysAreDigests":true}
 PASS category filter isolates selected category {"count":1,"title":"Routine completed"}
 PASS routine source navigation button opens Routines surface {"routinesVisible":true,"notifHidden":true,"navRoutinesActive":true}
 PASS attention source navigation button navigates to Attention surface {"attentionVisible":true,"notifHidden":true}
-PASS conversation source navigation button opens Conversation surface safely {"convVisible":true,"notifHidden":true}
+PASS conversation source navigation button opens intended Conversation identity and content safely {"convVisible":true,"headerTitle":"Project Channel","hasExpectedMessage":true}
+PASS refresh generation guard discards stale async success and failure responses {"staleSuccessDiscarded":true,"staleFailureDiscarded":true}
 PASS card markRead action toggles read state and updates badge {"unread":5,"badge":"5"}
 PASS read state filter isolates unread vs read {"count":1,"unreadCount":0}
 PASS mark visible read marks visible cards as read and updates badge {"unreadCards":0,"badge":"0","badgeHidden":true}
 PASS clear visible dismisses cards from view {"cards":0,"emptyText":"No notifications yet / 暂无通知"}
 PASS forged notification IPC payloads and authority fields are rejected {"rejected":true}
 PASS restart preserves notification state, read status, and dismissals {"totalCount":0,"seenCount":6}
-PASS bounded storage and list limits remain strictly enforced {"id":"notif_e28f5489c6ef301c","category":"routine-completed","title":"Restart verified","body":"Notification persisted safely","createdAt":"2026-09-02T20:04:27.921Z","read":false,"readAt":null,"source":null}
-[summary] 19/19 PASS
+PASS bounded storage and list limits remain strictly enforced {"id":"notif_fbbf66fcc10b6f5f","category":"routine-completed","title":"Restart verified","body":"Notification persisted safely","createdAt":"2026-09-02T20:18:31.214Z","read":false,"readAt":null,"source":null}
+[summary] 20/20 PASS
