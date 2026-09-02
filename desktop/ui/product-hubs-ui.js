@@ -660,6 +660,8 @@
     $("product-channel-switch-page")?.addEventListener("change", (event) => openConversationSafe(event.target.value));
     api.onNavigate?.((target) => { if (navViews.has("nav-" + target) || ["product-hubs", "playbooks", "artifacts", "computer-history", "skills", "team-packs", "channels"].includes(target)) nav(target); });
     document.addEventListener("sovereignbot:open-artifact", (event) => { if (event.detail?.artifactId) nav("artifacts"); });
+    document.addEventListener("sovereignbot:open-artifacts", () => nav("artifacts"));
+    document.addEventListener("sovereignbot:open-computer-history", () => nav("computer-history"));
     window.refreshIndependentProductPages = refresh;
   }
   window.addEventListener("DOMContentLoaded", setup);

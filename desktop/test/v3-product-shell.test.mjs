@@ -8,6 +8,7 @@ const html = read("../ui/index.html");
 const app = read("../ui/app.js");
 const voice = read("../ui/voice-controller.js");
 const productHubs = read("../ui/product-hubs-ui.js");
+const thisPcUi = read("../ui/this-pc-ui.js");
 const appsCatalog = read("../ui/apps-catalog-ui.js");
 const memoryUi = read("../ui/memory-ui.js");
 const css = read("../ui/style.css");
@@ -147,4 +148,24 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
     ]) assert.match(productHubs, expression);
     assert.doesNotMatch(productHubs, /innerHTML\s*=/);
     assert.doesNotMatch(productHubs, /eval\s*\(/);
+});
+
+test("This PC is a status-first Coworker surface with safe detail entry points", () => {
+    for (const id of ["nav-this-pc", "view-this-pc", "this-pc-project", "this-pc-refresh", "this-pc-list"]) assert.match(html, new RegExp(`id="${id}"`), id);
+    assert.match(html, /See what each Coworker is doing/);
+    for (const expression of [
+        /computer\.health\?\.status/,
+        /Show latest screen \/ 查看最新画面/,
+        /Show page details \/ 查看页面详情/,
+        /sovereignbot:open-artifacts/,
+        /sovereignbot:open-computer-history/,
+        /No latest screen yet/,
+        /No page details loaded/,
+        /context\?\.label/,
+    ]) assert.match(thisPcUi, expression);
+    for (const expression of [/sovereignbot:open-artifacts/, /sovereignbot:open-computer-history/]) assert.match(productHubs, expression);
+    assert.doesNotMatch(thisPcUi, /Computer Node|WebDriver|driver|lease|profile path|absolute path|provider account|authority|session|token/i);
+    assert.doesNotMatch(html.match(/<section id="view-this-pc"[\s\S]*?<\/section>/)?.[0] ?? "", /Computer Node|WebDriver|driver|lease|profile path|absolute path|provider account|authority|session|token/i);
+    assert.match(css, /\.this-pc-grid/);
+    assert.match(css, /\.this-pc-status/);
 });

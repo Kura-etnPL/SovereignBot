@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -80,8 +80,29 @@ test("This PC product boundary reuses governed Computer authority and stays safe
     const runningPromiseB = runtime.orchestrator.runNext();
     await waitFor(runtime, taskB.id, "running");
 
+    const originalFrame = runtime.computerLifecycle.frame.bind(runtime.computerLifecycle);
+    runtime.computerLifecycle.frame = async (agentId) => ({ agentId, mimeType: "image/png", data: "aGVsbG8=", url: "https://example.com/app?session=hidden" });
+    const safeFrame = await service.frame(PROJECT_A, sharedA.id);
+    assert.deepEqual({ available: safeFrame.available, mimeType: safeFrame.mimeType, site: safeFrame.site }, { available: true, mimeType: "image/png", site: "example.com" });
+    assert.equal(JSON.stringify(safeFrame).includes("session=hidden"), false);
+    assert.deepEqual(await service.health(PROJECT_A, sharedA.id), { ok: true, status: "ready", message: "Computer is ready." });
+    runtime.computerLifecycle.frame = async () => ({ mimeType: "text/html", data: "not-an-image" });
+    await assert.rejects(() => service.frame(PROJECT_A, sharedA.id), /unsupported frame/);
+    runtime.computerLifecycle.frame = originalFrame;
+
+    const originalHealth = runtime.computerLifecycle.health.bind(runtime.computerLifecycle);
+    runtime.computerLifecycle.health = async () => ({ ok: false, state: "permission-denied" });
+    assert.deepEqual(await service.health(PROJECT_A, sharedA.id), { ok: false, status: "unavailable", message: "Computer is temporarily unavailable." });
+    const unavailable = (await service.list({ projectId: PROJECT_A })).computers.find((entry) => entry.coworkerId === sharedA.id);
+    assert.equal(unavailable.status, "unavailable");
+    assert.equal(unavailable.canTakeOver, false);
+    runtime.computerLifecycle.health = originalHealth;
+
     const ready = (await service.list({ projectId: PROJECT_A })).computers.find((entry) => entry.coworkerId === sharedA.id);
     assert.equal(ready.status, "working");
+    assert.equal(ready.health.status, "ready");
+    assert.equal(ready.context.detail, "Shared Coworkers take turns in this Project.");
+    assert.equal(ready.currentWork, "Shared governed Computer work");
     assert.equal(ready.artifacts[0].fileName, "release.md");
     assert.equal(ready.artifacts[0].storageRelativePath, undefined);
     const safeSnapshot = await service.snapshot(PROJECT_A, sharedA.id);
@@ -94,6 +115,12 @@ test("This PC product boundary reuses governed Computer authority and stays safe
     assert.equal(files.some((entry) => "path" in entry), false);
     await runtime.computer.click("agent-a", task.id, { snapshotId: safeSnapshot.snapshotId, ref: "go" });
 
+    await runtime.computer.requestHelp("agent-a", task.id, "Approve C:\\private\\token.txt");
+    const attention = (await service.list({ projectId: PROJECT_A })).computers.find((entry) => entry.coworkerId === sharedA.id);
+    assert.equal(attention.status, "attention");
+    assert.equal(attention.statusMessage, "This Coworker needs your attention.");
+    await runtime.computerRegistry.setControl("agent-a", { mode: "agent", updatedAt: new Date().toISOString() });
+
     await service.takeOver(PROJECT_A, sharedA.id);
     await assert.rejects(() => service.takeOver(PROJECT_A, sharedB.id), /Shared Computer context is already controlled/);
     await assert.rejects(() => runtime.computer.click("agent-a", task.id, { snapshotId: safeSnapshot.snapshotId, ref: "go" }), /human control is active/);
@@ -101,6 +128,28 @@ test("This PC product boundary reuses governed Computer authority and stays safe
     assert.equal(handBack.status, "working");
     const resumedSnapshot = await service.snapshot(PROJECT_A, sharedA.id);
     await runtime.computer.click("agent-a", task.id, { snapshotId: resumedSnapshot.snapshotId, ref: "go" });
+
+    const originalSnapshot = runtime.computer.snapshot.bind(runtime.computer);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const snapshotOrder = [];
+    runtime.computer.snapshot = async (agentId, taskId) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      snapshotOrder.push(agentId);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      try { return await originalSnapshot(agentId, taskId); }
+      finally { inFlight -= 1; }
+    };
+    const [serializedA, serializedB] = await Promise.all([
+      service.snapshot(PROJECT_A, sharedA.id),
+      service.snapshot(PROJECT_A, sharedB.id),
+    ]);
+    assert.equal(maxInFlight, 1, "shared Computer side effects are serialized");
+    assert.equal(serializedA.elements.length >= 0, true);
+    assert.equal(serializedB.elements.length >= 0, true);
+    assert.deepEqual(new Set(snapshotOrder), new Set(["agent-a", "agent-b"]));
+    runtime.computer.snapshot = originalSnapshot;
 
     await assert.rejects(() => service.snapshot(PROJECT_B, sharedA.id), /not a member/);
     await assert.rejects(() => runtime.computer.snapshot("agent-b", task.id), /not owned/);
@@ -118,5 +167,33 @@ test("This PC product boundary reuses governed Computer authority and stays safe
   }
   finally {
     await runtime.close();
+  }
+});
+
+test("This PC survives a clean runtime restart and refuses corrupt Computer state", async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), "sovereign-this-pc-restart-"));
+  const config = runtimeConfig(dataDir, ["agent-a"]);
+  const statePath = join(dataDir, "computers", "state.json");
+  let runtime;
+  let restarted;
+  try {
+    runtime = await createRuntime(config, { computerDriverFactory: createMemoryComputerDriverFactory() });
+    await runtime.computer.takeControl("agent-a", "desktop-operator");
+    await runtime.close();
+    runtime = undefined;
+
+    restarted = await createRuntime(config, { computerDriverFactory: createMemoryComputerDriverFactory() });
+    assert.equal((await restarted.computer.control("agent-a")).mode, "human");
+    await restarted.computer.releaseControl("agent-a", "desktop-operator");
+    await restarted.close();
+    restarted = undefined;
+
+    await writeFile(statePath, "{\"version\":2,\"agents\":");
+    await assert.rejects(() => createRuntime(config, { computerDriverFactory: createMemoryComputerDriverFactory() }), /computer|state|json|migration/i);
+  }
+  finally {
+    await restarted?.close?.();
+    await runtime?.close?.();
+    await rm(dataDir, { recursive: true, force: true });
   }
 });
