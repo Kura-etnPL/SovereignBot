@@ -3,9 +3,9 @@
 Updated: 2026-09-03
 
 - Branch: `codex/v4-review-directed-handoff-protocol`
-- P16 source commit: `058e2491e5dd14f71074b1389231fbba86c530a2`
-- Scope completed: first-class desktop Team Activity drawer with selected-channel context, safe Team fallback selector, bounded newest-first timeline, collaboration/parallel summary, canonical Channel/Artifacts/Attention navigation, stale-response guard, and restart persistence.
-- Acceptance: `npm run verify:p16-team-activity` → 13/13 PASS; `npm test` → 258/258 PASS; `npm run check` → syntax ok, 183 files; `npm run secret-scan` → clean; `git diff --check` → clean.
-- Evidence: `_evidence_v55_2026-09-03/`; local unsigned evidence with `publishEligible=false`. The evidence-only commit is the final commit containing this handoff, the P16 acceptance document, and the evidence directory; its SHA is reported in the delivery summary.
+- P17 source commit: `bbfab400d742c562aee2369b981c01c7ece1d2ba`
+- Scope completed: first-class local Desktop Notification Center with prominent sidebar entry/badge, bounded newest-first inbox, category and read/unread filtering, durable mark read/unread, mark all visible read, dismiss one/all, OS popup preference preservation, safe allowlisted source navigation projections without raw paths or authority, DOM text nodes rendering, and restart persistence.
+- Acceptance: `npm run verify:p17-notification-center` → 14/14 PASS; `npm test` (desktop) → 265/265 PASS; `npm test` (root) → 234/234 PASS (232 pass, 2 skipped, 0 fail); `npm run check` → syntax ok, 187 files; `npm run secret-scan` → clean; `git diff --check` → clean.
+- Evidence: `_evidence_v56_2026-09-03/`; local unsigned evidence with `publishEligible=false`. The evidence-only commit is the final commit containing this handoff, the P17 acceptance document, and the evidence directory; its SHA is reported in the delivery summary.
 - No provider, network, OAuth, cloud, remote, packaging, deployment, or account action was performed.
-- Acceptance document: `docs/acceptance/V4.3-P16-DESKTOP-TEAM-ACTIVITY-ACCEPTANCE-2026-09-03.md`.
+- Acceptance document: `docs/acceptance/V4.3-P17-DESKTOP-NOTIFICATION-CENTER-ACCEPTANCE-2026-09-03.md`.

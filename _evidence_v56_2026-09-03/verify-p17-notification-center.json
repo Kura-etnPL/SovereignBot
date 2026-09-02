@@ -1,0 +1,115 @@
+{
+  "at": "2026-09-02T18:23:17.098Z",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "real preload exposes notification center operations": true,
+    "sidebar has notifications button with unread count badge": true,
+    "clicking nav-notifications displays Notification Center": true,
+    "cards render newest-first with bilingual categories, times, titles, and bodies": true,
+    "category filter isolates selected category": true,
+    "card markRead action toggles read state and updates badge": true,
+    "read state filter isolates unread vs read": true,
+    "safe source navigation button navigates to target surface": true,
+    "mark visible read marks visible cards as read and updates badge": true,
+    "clear visible dismisses cards from view": true,
+    "forged notification IPC payloads and authority fields are rejected": true,
+    "restart preserves notification state, read status, and dismissals": true,
+    "bounded storage and list limits remain strictly enforced": true
+  },
+  "requests": [
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 1
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "category": "attention",
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:markRead",
+      "payload": {
+        "id": "notif_job_job_cowork_4_completed",
+        "read": true
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "read": true,
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:markAllRead",
+      "payload": {
+        "ids": [
+          "notif_job_job_cowork_4_completed",
+          "notif_channel_general_unread",
+          "notif_job_job_trig_3_completed",
+          "notif_job_job_rout_2_completed",
+          "notif_job_job_attn_1_attention"
+        ]
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:clearAll",
+      "payload": {
+        "ids": [
+          "notif_job_job_cowork_4_completed",
+          "notif_channel_general_unread",
+          "notif_job_job_trig_3_completed",
+          "notif_job_job_rout_2_completed",
+          "notif_job_job_attn_1_attention"
+        ]
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+PASS hidden Electron window stays hidden
+PASS real preload exposes notification center operations {"list":true,"markRead":true,"markAllRead":true,"clear":true,"clearAll":true}
+PASS sidebar has notifications button with unread count badge {"text":"5","hidden":false}
+PASS clicking nav-notifications displays Notification Center {"notifVisible":true,"welcomeHidden":true,"navActive":true}
+PASS cards render newest-first with bilingual categories, times, titles, and bodies {"count":5,"unreadCards":5,"titles":["Coworker finished","Channel unread","Trigger fired","Routine completed","Attention needed"],"summary":"Total: 5 · Unread: 5 / 总计: 5 · 未读: 5"}
+PASS category filter isolates selected category {"count":1,"title":"Attention needed"}
+PASS card markRead action toggles read state and updates badge {"unread":4,"badge":"4"}
+PASS read state filter isolates unread vs read {"count":1,"unreadCount":0}
+PASS safe source navigation button navigates to target surface {"attentionVisible":true,"notifHidden":true}
+PASS mark visible read marks visible cards as read and updates badge {"unreadCards":0,"badge":"0","badgeHidden":true}
+PASS clear visible dismisses cards from view {"cards":0,"emptyText":"No notifications yet / 暂无通知"}
+PASS forged notification IPC payloads and authority fields are rejected {"rejected":true}
+PASS restart preserves notification state, read status, and dismissals {"totalCount":0,"seenCount":5}
+PASS bounded storage and list limits remain strictly enforced {"id":"notif_job_restart_test_1","key":"job:restart_test:1","category":"routine-completed","title":"Restart verified","body":"Notification persisted safely","createdAt":"2026-09-02T18:23:17.097Z","read":false,"readAt":null,"source":null}
+[summary] 14/14 PASS
