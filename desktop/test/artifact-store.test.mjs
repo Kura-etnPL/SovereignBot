@@ -88,6 +88,47 @@ test("artifact state reloads from its versioned metadata without exposing manage
     }
 });
 
+test("artifact restore creates an immutable durable version lineage", () => {
+    const { root, workspace, store } = fixture();
+    try {
+        const sourcePath = join(workspace, "reports", "release.md");
+        writeFileSync(sourcePath, "# Release v1\n", "utf8");
+        const source = store.ingestWorkspaceFile({
+            workspaceId: "workspace_project",
+            workspacePath: workspace,
+            relativePath: "reports/release.md",
+            title: "Release report",
+            createdByCoworkerId: "coworker_1234567890abcdef",
+            conversationId: "conv_1234567890abcdef",
+            sourceMessageId: "msg_1234567890abcdef",
+        });
+        const restored = store.restoreAsNewVersion(source.id);
+        assert.notEqual(restored.id, source.id);
+        assert.equal(source.version, 1);
+        assert.equal(restored.version, 2);
+        assert.equal(restored.artifactFamilyId, source.artifactFamilyId);
+        assert.equal(restored.parentArtifactId, source.id);
+        assert.equal(restored.conversationId, source.conversationId);
+        assert.equal(restored.createdByCoworkerId, source.createdByCoworkerId);
+        assert.equal(store.previewText(restored.id).preview, "# Release v1\n");
+        assert.equal(readFileSync(store.managedPath(source.id), "utf8"), "# Release v1\n");
+        assert.deepEqual(store.history(restored.id).history.map((entry) => [entry.id, entry.version, entry.parentArtifactId]), [
+            [restored.id, 2, source.id],
+            [source.id, 1, undefined],
+        ]);
+        const reloaded = createArtifactStore({ dataDir: join(root, "data") });
+        assert.deepEqual(reloaded.history(restored.id).history.map((entry) => [entry.id, entry.version, entry.artifactFamilyId]), [
+            [restored.id, 2, source.artifactFamilyId],
+            [source.id, 1, source.artifactFamilyId],
+        ]);
+        assert.equal(Object.hasOwn(restored, "storageRelativePath"), false);
+        assert.equal(Object.hasOwn(restored, "sourceRelativePath"), false);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("coworker artifacts remain private until the publish gate commits them", () => {
     const { root, workspace, store } = fixture();
     try {

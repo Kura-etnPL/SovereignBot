@@ -7,12 +7,14 @@ import { V3_IPC_CHANNELS, validateV3IpcRequest } from "../src/main/lib/v3-ipc-sc
 const ARTIFACT_ID = "artifact_1234567890abcdef";
 
 test("artifact renderer channels are enumerated, identifier-only and bounded", () => {
-    for (const channel of ["artifact:list", "artifact:get", "artifact:preview", "artifact:open", "artifact:reveal", "artifact:hub"])
+    for (const channel of ["artifact:list", "artifact:get", "artifact:preview", "artifact:open", "artifact:reveal", "artifact:history", "artifact:restoreAsNewVersion", "artifact:hub"])
         assert.ok(V3_IPC_CHANNELS[channel], channel);
     assert.deepEqual(validateV3IpcRequest("artifact:get", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
     assert.deepEqual(validateV3IpcRequest("artifact:preview", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
     assert.deepEqual(validateV3IpcRequest("artifact:open", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
     assert.deepEqual(validateV3IpcRequest("artifact:reveal", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
+    assert.deepEqual(validateV3IpcRequest("artifact:history", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
+    assert.deepEqual(validateV3IpcRequest("artifact:restoreAsNewVersion", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
     assert.deepEqual(validateV3IpcRequest("artifact:hub", { type: "text/markdown", limit: 25 }), { type: "text/markdown", limit: 25 });
     assert.throws(() => validateV3IpcRequest("artifact:hub", { type: "text/markdown", cwd: "C:/secret" }), /not accepted from the renderer/);
     assert.deepEqual(validateV3IpcRequest("artifact:list", { conversationId: "conv_1234567890abcdef", limit: 25 }), { conversationId: "conv_1234567890abcdef", limit: 25 });
@@ -27,6 +29,8 @@ test("sandboxed preload exposes artifact operations without a raw file path API"
     assert.match(source, /artifact:preview/);
     assert.match(source, /artifact:open/);
     assert.match(source, /artifact:reveal/);
+    assert.match(source, /artifact:history/);
+    assert.match(source, /artifact:restoreAsNewVersion/);
     assert.doesNotMatch(source, /readFile/);
     assert.doesNotMatch(source, /writeFile/);
 });

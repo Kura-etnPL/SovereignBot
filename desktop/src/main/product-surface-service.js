@@ -157,6 +157,37 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
         return publicPlaybook(entry);
     }
     function exportPlaybook(playbookId) { const entry = playbookById(playbookId); return { schema: PLAYBOOK_SCHEMA, id: entry.id, name: entry.name, description: entry.description, steps: [...entry.steps] }; }
+    function artifactView(artifact, channels, { eventOnly = false } = {}) {
+        const channel = channels.find((item) => item.conversationId === artifact.conversationId);
+        const creator = artifact.createdByCoworkerId ? coworkerStore.get(artifact.createdByCoworkerId) : undefined;
+        const view = {
+            id: safeOpaqueId(artifact.id),
+            title: safeHistoryText(artifact.title, 180),
+            fileName: safeHistoryText(artifact.fileName, 180),
+            mimeType: artifact.mimeType,
+            size: artifact.size,
+            createdAt: artifact.createdAt,
+            version: Number.isInteger(artifact.version) ? artifact.version : undefined,
+            artifactFamilyId: safeOpaqueId(artifact.artifactFamilyId ?? artifact.id),
+            creator: creator ? { id: safeOpaqueId(creator.id), name: safeHistoryText(creator.name, 120) } : undefined,
+            coworkerId: safeOpaqueId(artifact.createdByCoworkerId),
+            team: channel ? { id: safeOpaqueId(channel.teamId), name: safeHistoryText(channel.teamName, 120) } : undefined,
+            channel: channel ? { id: safeOpaqueId(channel.id), name: safeHistoryText(channel.name, 120) } : undefined,
+            conversationId: safeOpaqueId(artifact.conversationId),
+            sourceMessageId: safeOpaqueId(artifact.sourceMessageId),
+        };
+        if (eventOnly) {
+            return {
+                event: artifact.parentArtifactId ? "restored" : "created",
+                timestamp: artifact.createdAt,
+                version: view.version,
+                artifactId: view.id,
+                parentArtifactId: safeOpaqueId(artifact.parentArtifactId),
+                creator: view.creator,
+            };
+        }
+        return view;
+    }
     function artifactHub({ limit = 100, teamId, channelId, coworkerId, type } = {}) {
         if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact hub limit must be 1..500");
         if (type !== undefined && (typeof type !== "string" || !type.trim() || type.length > 120)) throw new Error("artifact hub type must be a bounded string");
@@ -167,33 +198,26 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
         // Fetch the bounded store maximum before applying the location filter. A
         // recent unrelated artifact must not hide an older result from the selected
         // Team or Channel merely because the store sliced first.
-        const result = artifactStore.list({ limit: 500, coworkerId }).artifacts
+        const latestByFamily = new Map();
+        for (const artifact of artifactStore.list({ limit: 500, coworkerId }).artifacts) {
+            const familyId = artifact.artifactFamilyId ?? artifact.id;
+            const current = latestByFamily.get(familyId);
+            if (!current || (Number.isInteger(artifact.version) ? artifact.version : 1) > (Number.isInteger(current.version) ? current.version : 1)) latestByFamily.set(familyId, artifact);
+        }
+        const result = [...latestByFamily.values()]
             .filter((artifact) => !locationScoped ? true : Boolean(artifact.conversationId) && allowedConversationIds.has(artifact.conversationId))
             .filter((artifact) => !normalizedType || artifact.mimeType === normalizedType)
-            .slice(0, limit).map((artifact) => {
-            const channel = channels.find((item) => item.conversationId === artifact.conversationId); const creator = artifact.createdByCoworkerId ? coworkerStore.get(artifact.createdByCoworkerId) : undefined;
-            return {
-                id: safeOpaqueId(artifact.id),
-                title: safeHistoryText(artifact.title, 180),
-                fileName: safeHistoryText(artifact.fileName, 180),
-                mimeType: artifact.mimeType,
-                size: artifact.size,
-                createdAt: artifact.createdAt,
-                creator: creator ? { id: safeOpaqueId(creator.id), name: safeHistoryText(creator.name, 120) } : undefined,
-                coworkerId: safeOpaqueId(artifact.createdByCoworkerId),
-                team: channel ? { id: safeOpaqueId(channel.teamId), name: safeHistoryText(channel.teamName, 120) } : undefined,
-                channel: channel ? { id: safeOpaqueId(channel.id), name: safeHistoryText(channel.name, 120) } : undefined,
-                conversationId: safeOpaqueId(artifact.conversationId),
-                sourceMessageId: safeOpaqueId(artifact.sourceMessageId),
-                history: [{
-                    event: "created",
-                    timestamp: artifact.createdAt,
-                    creator: creator ? { id: safeOpaqueId(creator.id), name: safeHistoryText(creator.name, 120) } : undefined,
-                }],
+            .slice(0, limit).map((artifact) => ({
+                ...artifactView(artifact, channels),
+                history: [artifactView(artifact, channels, { eventOnly: true })],
                 status: "available",
-            };
-        });
+            }));
         return { artifacts: result };
+    }
+    function artifactHistory({ artifactId } = {}) {
+        if (typeof artifactStore.history !== "function") return { artifacts: [] };
+        const channels = teamService.list().teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
+        return { artifacts: artifactStore.history(artifactId).history.map((artifact) => artifactView(artifact, channels)) };
     }
     async function computerHistory({ limit = 100 } = {}) {
         if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("computer history limit must be 1..500");
@@ -250,5 +274,5 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
         return saveRecipe(normalizePack({ ...source, ...patch, id: source.id }));
     }
     function recipeList() { return state.packRecipes.map((entry) => ({ id: entry.recipe.id, name: entry.recipe.name, description: entry.recipe.description, category: "Custom", coworkerNames: entry.recipe.coworkers.map((item) => item.name), channelNames: entry.recipe.channels.map((item) => item.name), playbookNames: entry.recipe.playbooks.map((item) => item.name), installed: teamService.list().teams.some((team) => team.packId === entry.recipe.id || team.packId === `imported:${entry.recipe.id}`), custom: true })); }
-    return { listPlaybooks, createPlaybook, updatePlaybook, archivePlaybook: (id) => setPlaybookState(id, "archived"), restorePlaybook: (id) => setPlaybookState(id, "active"), duplicatePlaybook, importPlaybook, exportPlaybook, assignPlaybook, artifactHub, computerHistory, recipeList, duplicatePack, editPack, getPackRecipe: (id) => sourceRecipe(id), exportPack: (id) => sourceRecipe(id) };
+    return { listPlaybooks, createPlaybook, updatePlaybook, archivePlaybook: (id) => setPlaybookState(id, "archived"), restorePlaybook: (id) => setPlaybookState(id, "active"), duplicatePlaybook, importPlaybook, exportPlaybook, assignPlaybook, artifactHub, artifactHistory, computerHistory, recipeList, duplicatePack, editPack, getPackRecipe: (id) => sourceRecipe(id), exportPack: (id) => sourceRecipe(id) };
 }

@@ -754,6 +754,8 @@ async function main() {
                 "artifact:list": ({ conversationId, coworkerId, limit }) => artifactStore.list({ conversationId, coworkerId, limit }),
                 "artifact:get": ({ artifactId }) => artifactStore.get(artifactId),
                 "artifact:preview": ({ artifactId }) => artifactStore.previewText(artifactId),
+                "artifact:history": ({ artifactId }) => productSurfaces.artifactHistory({ artifactId }),
+                "artifact:restoreAsNewVersion": ({ artifactId }) => artifactStore.restoreAsNewVersion(artifactId),
                 "artifact:open": async ({ artifactId }) => {
                     const managedPath = artifactStore.managedPath(artifactId);
                     if (process.env.SOVEREIGNBOT_VERIFY_SOFTWARE_TEAM === "1") return { ok: true, verified: "managed-artifact", action: "open", artifactId };
@@ -862,7 +864,7 @@ async function main() {
         };
         const searchMutationChannels = new Set([
             "conversation:createDirect", "conversation:createTeam", "conversation:send", "conversation:redirect",
-            "artifact:attachViaDialog", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
+            "artifact:attachViaDialog", "artifact:restoreAsNewVersion", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
             "team:installPack", "team:importPack", "team:importPlaybook", "team:createChannelFromTemplate",
             "playbook:create", "playbook:update", "playbook:archive", "playbook:restore", "playbook:duplicate", "playbook:import", "playbook:assign",
             "channel:create", "channel:update", "channel:archive", "channel:restore",

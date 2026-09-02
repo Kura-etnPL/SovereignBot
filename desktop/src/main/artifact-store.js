@@ -10,6 +10,7 @@ const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 128 * 1024;
 const MAX_ATTACHMENT_CONTEXT_BYTES = 24 * 1024;
 const MAX_TITLE = 180;
+const MAX_ARTIFACT_VERSION = MAX_ARTIFACTS;
 
 const MIME_BY_EXT = new Map([
     [".md", "text/markdown"], [".txt", "text/plain"], [".json", "application/json"],
@@ -24,6 +25,10 @@ const MIME_BY_EXT = new Map([
 
 function makeId() {
     return `artifact_${randomBytes(8).toString("hex")}`;
+}
+
+function isArtifactId(value) {
+    return typeof value === "string" && /^artifact_[a-f0-9]{16}$/i.test(value);
 }
 
 function validId(value, prefix) {
@@ -124,9 +129,22 @@ function sanitizePersisted(entry) {
         if (typeof entry.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(entry.sha256)) return undefined;
         if (typeof entry.storageRelativePath !== "string" || !entry.storageRelativePath) return undefined;
         if (typeof entry.createdAt !== "string") return undefined;
+        const artifactFamilyId = entry.artifactFamilyId === undefined ? entry.id : entry.artifactFamilyId;
+        if (!isArtifactId(artifactFamilyId)) return undefined;
+        const version = entry.version === undefined ? 1 : entry.version;
+        if (!Number.isInteger(version) || version < 1 || version > MAX_ARTIFACT_VERSION) return undefined;
+        const parentArtifactId = entry.parentArtifactId === undefined ? undefined : entry.parentArtifactId;
+        if (parentArtifactId !== undefined && (!isArtifactId(parentArtifactId) || parentArtifactId === entry.id)) return undefined;
         const protocolLineage = entry.protocolLineage === undefined ? undefined : normalizeProtocolLineage(entry.protocolLineage);
         if (entry.protocolLineage !== undefined && !protocolLineage) return undefined;
-        return { ...entry, ...(protocolLineage ? { protocolLineage } : {}), published: entry.published !== false };
+        return {
+            ...entry,
+            artifactFamilyId,
+            version,
+            ...(parentArtifactId ? { parentArtifactId } : {}),
+            ...(protocolLineage ? { protocolLineage } : {}),
+            published: entry.published !== false,
+        };
     } catch {
         return undefined;
     }
@@ -174,6 +192,12 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
         const storedName = fileName.slice(0, 180) || "artifact";
         const destination = join(artifactDir, storedName);
         copyFileSync(actual, destination);
+        const artifactFamilyId = metadata.artifactFamilyId ?? id;
+        const version = metadata.version ?? 1;
+        const parentArtifactId = metadata.parentArtifactId;
+        if (!isArtifactId(artifactFamilyId)) throw new Error("artifact family id is invalid");
+        if (!Number.isInteger(version) || version < 1 || version > MAX_ARTIFACT_VERSION) throw new Error("artifact version is invalid");
+        if (parentArtifactId !== undefined && (!isArtifactId(parentArtifactId) || parentArtifactId === id)) throw new Error("artifact parent id is invalid");
         const entry = {
             id,
             title: boundedText(title, "artifact title", MAX_TITLE) ?? fileName,
@@ -182,6 +206,9 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             size: stat.size,
             sha256: sha256File(destination),
             ...metadata,
+            artifactFamilyId,
+            version,
+            ...(parentArtifactId ? { parentArtifactId } : {}),
             storageRelativePath: relative(rootDir, destination),
             createdAt: now(),
         };
@@ -223,6 +250,49 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             const buffer = readFileSync(full);
             const slice = buffer.subarray(0, MAX_PREVIEW_BYTES);
             return { artifact: publicView(entry), preview: slice.toString("utf8"), truncated: buffer.length > MAX_PREVIEW_BYTES };
+        },
+
+        history(id, { limit = 100 } = {}) {
+            if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact history limit must be 1..500");
+            const source = requirePublicArtifact(id);
+            const familyId = source.artifactFamilyId ?? source.id;
+            const history = artifacts
+                .filter((entry) => entry.published !== false && (entry.artifactFamilyId ?? entry.id) === familyId)
+                .sort((left, right) => (right.version - left.version) || String(right.createdAt).localeCompare(String(left.createdAt)) || right.id.localeCompare(left.id))
+                .slice(0, limit)
+                .map(publicView);
+            return { schema: ARTIFACTS_SCHEMA, artifactId: source.id, artifactFamilyId: familyId, history };
+        },
+
+        restoreAsNewVersion(id) {
+            const source = requirePublicArtifact(id);
+            const sourcePath = storagePath(source);
+            const sourceLstat = lstatSync(sourcePath);
+            if (sourceLstat.isSymbolicLink() || !sourceLstat.isFile()) throw new Error("artifact source is not a regular managed file");
+            const stat = statSync(sourcePath);
+            if (stat.size < 0 || stat.size > MAX_FILE_BYTES) throw new Error(`artifact source exceeds ${MAX_FILE_BYTES} bytes`);
+            const artifactFamilyId = source.artifactFamilyId ?? source.id;
+            const currentVersion = artifacts
+                .filter((entry) => (entry.artifactFamilyId ?? entry.id) === artifactFamilyId)
+                .reduce((highest, entry) => Math.max(highest, Number.isInteger(entry.version) ? entry.version : 1), 0);
+            if (currentVersion >= MAX_ARTIFACT_VERSION) throw new Error("artifact version limit reached");
+            return allocateStoredCopy({
+                actual: sourcePath,
+                stat,
+                title: source.title,
+                metadata: {
+                    artifactFamilyId,
+                    version: currentVersion + 1,
+                    parentArtifactId: source.id,
+                    published: true,
+                    ...(source.sourceKind ? { sourceKind: source.sourceKind } : {}),
+                    ...(source.workspaceId ? { workspaceId: source.workspaceId } : {}),
+                    ...(source.sourceRelativePath ? { sourceRelativePath: source.sourceRelativePath } : {}),
+                    ...(source.createdByCoworkerId ? { createdByCoworkerId: source.createdByCoworkerId } : {}),
+                    ...(source.conversationId ? { conversationId: source.conversationId } : {}),
+                    ...(source.sourceMessageId ? { sourceMessageId: source.sourceMessageId } : {}),
+                },
+            });
         },
 
         contextForMessage(artifactIds = []) {
