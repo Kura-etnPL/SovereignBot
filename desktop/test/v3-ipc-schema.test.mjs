@@ -8,7 +8,7 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     const expected = [
         "coworker:list", "coworker:get", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
         "conversation:list", "conversation:get", "conversation:createDirect", "conversation:createTeam", "conversation:send",
-        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:exportPlaybook", "team:importPlaybook", "team:createChannelFromTemplate", "channel:list", "channel:get", "channel:create", "channel:update", "channel:archive", "channel:restore",
+        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:exportPlaybook", "team:importPlaybook", "team:createChannelFromTemplate", "team:requestParallel", "channel:list", "channel:get", "channel:create", "channel:update", "channel:archive", "channel:restore",
         "connectedApps:list", "connectedApps:search", "connectedApps:review", "connectedApps:assign", "connectedApps:connect", "connectedApps:disconnect", "connectedApps:disable", "connectedApps:health",
     ];
     for (const channel of expected)
@@ -26,6 +26,23 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     assert.match(preloadSource, /activity: invoke\("team:activity"\)/);
     assert.match(preloadSource, /review: invoke\("connectedApps:review"\)/);
     assert.match(preloadSource, /disable: invoke\("connectedApps:disable"\)/);
+});
+
+test("parallel Team requests accept only bounded specialist tasks and a separate reviewer", () => {
+    const payload = {
+        conversationId: "conversation_1234567890abcdef",
+        children: [
+            { targetCoworkerId: "coworker_1111111111111111", boundedTask: "Inspect the bounded failure." },
+            { targetCoworkerId: "coworker_2222222222222222", boundedTask: "Implement the bounded change.", requiresComputer: true },
+        ],
+        reviewerCoworkerId: "coworker_3333333333333333",
+        reason: "These tasks are independent and need one required review.",
+    };
+    assert.deepEqual(validateV3IpcRequest("team:requestParallel", payload), payload);
+    assert.throws(() => validateV3IpcRequest("team:requestParallel", { ...payload, children: payload.children.slice(0, 1) }), /2 to 4/);
+    assert.throws(() => validateV3IpcRequest("team:requestParallel", { ...payload, ownerId: "coworker_1111111111111111" }), /unexpected request field: ownerId/);
+    assert.throws(() => validateV3IpcRequest("team:requestParallel", { ...payload, children: [{ ...payload.children[0], capability: "computer" }, payload.children[1]] }), /not accepted from the renderer/);
+    assert.throws(() => validateV3IpcRequest("team:requestParallel", { ...payload, children: payload.children.map((entry) => ({ ...entry, boundedTask: "" })) }), /boundedTask is required/);
 });
 
 test("coworker create/update accepts product metadata but rejects execution authority recursively", () => {

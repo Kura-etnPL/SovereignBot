@@ -408,6 +408,29 @@ export const V3_IPC_CHANNELS = Object.freeze({
             boundedTask: string(value.boundedTask, "boundedTask", 800, true),
         };
     }),
+    "team:requestParallel": spec(16 * 1024, (payload) => {
+        const value = objectPayload(payload);
+        exact(value, new Set(["conversationId", "children", "reviewerCoworkerId", "reason"]));
+        if (!Array.isArray(value.children) || value.children.length < 2 || value.children.length > 4)
+            throw new Error("children must contain 2 to 4 specialists");
+        const children = value.children.map((entry) => {
+            const child = objectPayload(entry);
+            exact(child, new Set(["targetCoworkerId", "boundedTask", "requiresComputer"]));
+            if (child.requiresComputer !== undefined && typeof child.requiresComputer !== "boolean")
+                throw new Error("requiresComputer must be a boolean");
+            return {
+                targetCoworkerId: identifier(child.targetCoworkerId, "targetCoworkerId"),
+                boundedTask: string(child.boundedTask, "boundedTask", 800, true),
+                ...(child.requiresComputer === true ? { requiresComputer: true } : {}),
+            };
+        });
+        return {
+            conversationId: identifier(value.conversationId, "conversationId"),
+            children,
+            reviewerCoworkerId: identifier(value.reviewerCoworkerId, "reviewerCoworkerId"),
+            reason: string(value.reason, "reason", 400, true),
+        };
+    }),
     "team:computerTask": spec(32 * 1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["title", "objective", "ownerCoworkerId", "teamId", "projectId", "workspaceId", "computerTarget", "computerActions"])); return { title: string(value.title, "title", 120, true), objective: string(value.objective, "objective", 8000, true), ownerCoworkerId: identifier(value.ownerCoworkerId, "ownerCoworkerId"), teamId: identifier(value.teamId, "teamId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }), ...(value.workspaceId === undefined ? {} : { workspaceId: identifier(value.workspaceId, "workspaceId") }), computerTarget: workerComputerTargetShape(value.computerTarget), computerActions: value.computerActions === undefined ? [{ operation: "snapshot", input: {} }] : workerComputerActionsShape(value.computerActions) }; }),
     "team:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["teamId"])); return { teamId: identifier(value.teamId, "teamId") }; }),
     "team:installPack": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["packId"])); return { packId: identifier(value.packId, "packId") }; }),

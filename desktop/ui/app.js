@@ -840,9 +840,10 @@ function renderCollaborationControls(conversation, team) {
   const protocol = flow.activeProtocol;
   const waitingForProtocol = ["requested", "review_requested", "accepted", "review_accepted", "working", "reviewing"].includes(protocol?.state)
     || (protocol?.kind === "review" && protocol.state === "submitted");
-  submit.disabled = !owner || !targets.length || waitingForProtocol;
+  const parallelActive = Boolean(flow.activeFanout);
+  submit.disabled = !owner || !targets.length || waitingForProtocol || parallelActive;
   submit.textContent = $("collaboration-type")?.value === "review" ? "Ask for review / 请求审阅" : "Send to teammate / 发给同事";
-  submit.title = waitingForProtocol ? "Finish the current collaboration first" : "Send a bounded task to the selected teammate";
+  submit.title = parallelActive ? "Finish parallel work first" : waitingForProtocol ? "Finish the current collaboration first" : "Send a bounded task to the selected teammate";
 }
 
 async function submitCollaborationRequest() {
@@ -871,6 +872,225 @@ async function submitCollaborationRequest() {
     show(errorTarget);
   } finally {
     if (state.selectedConversation) renderCollaborationControls(state.selectedConversation, teamForConversation(state.selectedConversation.id));
+  }
+}
+
+function makeParallelLabel(label, control) {
+  const wrapper = document.createElement("label");
+  wrapper.textContent = label;
+  wrapper.append(control);
+  return wrapper;
+}
+
+function ensureParallelControls() {
+  const existing = $("details-parallel-collaboration");
+  if (existing) return existing;
+  const collaboration = $("details-collaboration");
+  if (!collaboration) return undefined;
+  const section = document.createElement("section");
+  section.id = "details-parallel-collaboration";
+  section.className = "detail-section hidden";
+  const label = document.createElement("span");
+  label.className = "detail-label";
+  label.textContent = "Parallel Specialists / 并行专家";
+  const help = document.createElement("p");
+  help.id = "parallel-collaboration-help";
+  help.className = "detail-help";
+  help.textContent = "Split this bounded task across 2–4 active Specialists, then require one independent review before the current owner joins the results.";
+  const progress = document.createElement("div");
+  progress.id = "parallel-collaboration-progress";
+  progress.className = "detail-value parallel-progress";
+  const progressList = document.createElement("div");
+  progressList.id = "parallel-progress-list";
+  progressList.className = "member-list parallel-progress-list";
+  const form = document.createElement("div");
+  form.id = "parallel-collaboration-form";
+  const rows = document.createElement("div");
+  rows.id = "parallel-specialist-list";
+  rows.className = "parallel-specialist-list";
+  const add = document.createElement("button");
+  add.id = "parallel-add-specialist";
+  add.type = "button";
+  add.className = "quiet-action";
+  add.textContent = "Add Specialist / 添加专家";
+  add.addEventListener("click", () => {
+    const list = $("parallel-specialist-list");
+    if (!list || list.children.length >= 4) return;
+    list.append(makeParallelRow());
+    renderParallelControls(state.selectedConversation, teamForConversation(state.selectedConversation?.id));
+  });
+  const rowActions = document.createElement("div");
+  rowActions.className = "detail-actions";
+  rowActions.append(add);
+  const reviewer = document.createElement("select");
+  reviewer.id = "parallel-reviewer";
+  reviewer.className = "detail-select";
+  const reason = document.createElement("input");
+  reason.id = "parallel-reason";
+  reason.maxLength = 400;
+  reason.placeholder = "Why split this work? / 为什么并行？";
+  const submit = document.createElement("button");
+  submit.id = "parallel-submit";
+  submit.type = "button";
+  submit.className = "hero-action";
+  submit.textContent = "Start parallel work / 开始并行";
+  const error = document.createElement("p");
+  error.id = "parallel-form-error";
+  error.className = "inline-error hidden";
+  form.append(rows, rowActions, makeParallelLabel("Independent reviewer / 独立审阅者", reviewer), makeParallelLabel("Reason / 原因", reason), submit, error);
+  section.append(label, help, progress, progressList, form);
+  collaboration.after(section);
+  submit.addEventListener("click", submitParallelCollaboration);
+  if (!rows.children.length) { rows.append(makeParallelRow(), makeParallelRow()); }
+  return section;
+}
+
+function makeParallelRow() {
+  const row = document.createElement("div");
+  row.className = "parallel-specialist-row";
+  const title = document.createElement("span");
+  title.className = "detail-label";
+  title.textContent = "Specialist / 专家";
+  const target = document.createElement("select");
+  target.className = "detail-select parallel-target";
+  target.addEventListener("change", () => renderParallelControls(state.selectedConversation, teamForConversation(state.selectedConversation?.id)));
+  const task = document.createElement("textarea");
+  task.className = "parallel-task";
+  task.maxLength = 800;
+  task.rows = 2;
+  task.placeholder = "Bounded subtask / 有界子任务";
+  const computerLabel = document.createElement("label");
+  computerLabel.className = "parallel-computer-label";
+  const computer = document.createElement("input");
+  computer.type = "checkbox";
+  computer.className = "parallel-computer";
+  computerLabel.append(computer, document.createTextNode(" Needs Computer / 需要电脑"));
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "quiet-action parallel-remove";
+  remove.textContent = "Remove / 移除";
+  remove.addEventListener("click", () => {
+    const list = $("parallel-specialist-list");
+    if (list?.children.length <= 2) return;
+    row.remove();
+    renderParallelControls(state.selectedConversation, teamForConversation(state.selectedConversation?.id));
+  });
+  row.append(title, target, task, computerLabel, remove);
+  return row;
+}
+
+function parallelRows() {
+  return [...document.querySelectorAll("#parallel-specialist-list .parallel-specialist-row")];
+}
+
+function refreshParallelReviewerOptions(members, ownerId) {
+  const reviewer = $("parallel-reviewer");
+  if (!reviewer) return;
+  const previous = reviewer.value;
+  const selected = new Set(parallelRows().map((row) => row.querySelector(".parallel-target")?.value).filter(Boolean));
+  reviewer.textContent = "";
+  for (const coworker of members.filter((entry) => entry.state === "active" && entry.id !== ownerId && !selected.has(entry.id))) {
+    const option = document.createElement("option");
+    option.value = coworker.id;
+    option.textContent = coworker.name;
+    reviewer.append(option);
+  }
+  if ([...reviewer.options].some((option) => option.value === previous)) reviewer.value = previous;
+}
+
+function renderParallelControls(conversation, team) {
+  const section = ensureParallelControls();
+  if (!section) return;
+  const flow = team?.flow ?? {};
+  const owner = flow.currentOwnerId ? coworkerById(flow.currentOwnerId) : undefined;
+  const members = participantCoworkers(conversation);
+  const visible = conversation?.kind === "team" && Boolean(team) && Boolean(owner);
+  section.classList.toggle("hidden", !visible);
+  if (!visible) return;
+  const fanout = flow.activeFanout;
+  const progress = $("parallel-collaboration-progress");
+  const progressList = $("parallel-progress-list");
+  const form = $("parallel-collaboration-form");
+  if (fanout?.children?.length) {
+    const completed = fanout.children.filter((entry) => entry.status === "completed").length;
+    const status = fanout.state === "blocked" || fanout.state === "stopped" ? "Attention" : fanout.state === "review_requested" || fanout.state === "reviewing" ? "Reviewing" : fanout.state === "join_requested" || fanout.state === "joining" ? "Joining" : "Parallel work";
+    progress.textContent = `${completed}/${fanout.children.length} specialists complete · ${status}`;
+    progressList.textContent = "";
+    for (const child of fanout.children) {
+      const row = document.createElement("div");
+      row.className = "member-row parallel-progress-row";
+      const copy = document.createElement("span");
+      const childStatus = { requested: "Queued", running: "Working", completed: "Complete", failed: "Attention", stopped: "Stopped" }[child.status] ?? child.status;
+      copy.textContent = `${child.coworker} · ${childStatus} · ${child.task}`;
+      row.append(copy);
+      if (child.resultSummary) {
+        const result = document.createElement("small");
+        result.textContent = child.resultSummary;
+        row.append(result);
+      }
+      progressList.append(row);
+    }
+    if (fanout.reviewSummary) {
+      const review = document.createElement("div");
+      review.className = "detail-help";
+      review.textContent = `Review: ${fanout.reviewSummary}`;
+      progressList.append(review);
+    }
+    show(progress); show(progressList); hide(form);
+    return;
+  }
+  hide(progress); hide(progressList); show(form);
+  const list = $("parallel-specialist-list");
+  while (list.children.length < 2) list.append(makeParallelRow());
+  const targets = members.filter((entry) => entry.state === "active" && entry.id !== owner.id);
+  const selected = new Set();
+  for (const row of parallelRows()) {
+    const select = row.querySelector(".parallel-target");
+    const previous = select.value;
+    select.textContent = "";
+    for (const coworker of targets) {
+      const option = document.createElement("option");
+      option.value = coworker.id;
+      option.textContent = coworker.name;
+      option.disabled = selected.has(coworker.id) && coworker.id !== previous;
+      select.append(option);
+    }
+    if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+    if (select.value) selected.add(select.value);
+    row.querySelector(".parallel-remove").disabled = list.children.length <= 2;
+  }
+  $("parallel-add-specialist").disabled = list.children.length >= 4;
+  refreshParallelReviewerOptions(members, owner.id);
+}
+
+async function submitParallelCollaboration() {
+  const conversation = state.selectedConversation;
+  const rows = parallelRows();
+  const reviewerCoworkerId = $("parallel-reviewer")?.value;
+  const reason = $("parallel-reason")?.value.trim();
+  const errorTarget = $("parallel-form-error");
+  const submit = $("parallel-submit");
+  if (!conversation || conversation.kind !== "team") return;
+  hide(errorTarget);
+  const children = rows.map((row) => ({
+    targetCoworkerId: row.querySelector(".parallel-target")?.value,
+    boundedTask: row.querySelector(".parallel-task")?.value.trim(),
+    ...(row.querySelector(".parallel-computer")?.checked ? { requiresComputer: true } : {}),
+  }));
+  if (children.length < 2 || children.some((entry) => !entry.targetCoworkerId || !entry.boundedTask) || !reviewerCoworkerId || !reason) {
+    errorTarget.textContent = "Choose 2–4 Specialists, give each a bounded subtask, choose an independent reviewer, and provide a reason.";
+    show(errorTarget);
+    return;
+  }
+  submit.disabled = true;
+  try {
+    await window.sovereignbot.teams.requestParallel({ conversationId: conversation.id, children, reviewerCoworkerId, reason });
+    await refreshConversation(true);
+  } catch (error) {
+    errorTarget.textContent = text(error?.message || error).replace(/^.*Error: /, "");
+    show(errorTarget);
+  } finally {
+    if (state.selectedConversation) renderParallelControls(state.selectedConversation, teamForConversation(state.selectedConversation.id));
   }
 }
 
@@ -971,6 +1191,7 @@ function renderDetails(conversation) {
     ? `${team.flow.status === "needs-attention" ? "Attention" : team.flow.status === "active" ? "Active" : team.flow.status === "stopped" ? "Attention" : "Waiting"} · ${team.flow.currentOwner}${activitySuffix}`
     : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
   renderCollaborationControls(conversation, team);
+  renderParallelControls(conversation, team);
   void renderMemorySections(conversation, team);
 }
 

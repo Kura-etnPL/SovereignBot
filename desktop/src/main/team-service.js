@@ -499,10 +499,13 @@ function publicActiveFanout(value, coworkerName = (id) => id) {
         children: fanout.children.map((child) => ({
             key: child.key,
             coworker: coworkerName(child.coworkerId),
+            task: child.task,
             status: child.state,
             artifactCount: child.artifactIds?.length ?? 0,
+            ...(child.resultText ? { resultSummary: child.resultText } : {}),
         })),
         review: fanout.reviewDecision ?? (fanout.state === "review_requested" || fanout.state === "reviewing" ? "pending" : undefined),
+        ...(fanout.reviewText ? { reviewSummary: fanout.reviewText } : {}),
         joinReady: fanout.state === "join_requested" || fanout.state === "joining",
     };
 }
@@ -1180,6 +1183,88 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             idempotencyKey: `fanout.requested:${sourceMessageId}`,
         });
         return clone(activeFanout);
+    }
+
+    function requestParallelCollaboration({ conversationId, children = [], reviewerCoworkerId, reason } = {}) {
+        const context = teamContextForConversation(conversationId);
+        if (!context) throw new Error("parallel collaboration requires a managed team channel");
+        const { channel, team } = context;
+        if (channel.archived) throw new Error("archived channel is read-only");
+        const flow = state.flows[team.id] ?? {};
+        const order = handoffOrder(team);
+        const currentIndex = indexForFlow(flow, order);
+        const ownerCoworkerId = flow.ownerId ?? (currentIndex === undefined ? undefined : order[currentIndex]);
+        if (!ownerCoworkerId || flow.stage === "complete" || flow.runStatus !== "active" || !flow.runId)
+            throw new Error("team channel has no active owner");
+        if (!team.coworkerIds.includes(ownerCoworkerId) || coworkerStore.get(ownerCoworkerId).state !== "active")
+            throw new Error("current owner is not an active team member");
+        if (flow.activeFanout) throw new Error("parallel work is already active");
+        const activeProtocol = safeActiveProtocol(flow.activeProtocol);
+        const protocolBusy = activeProtocol && (new Set(["requested", "review_requested", "accepted", "review_accepted", "working", "reviewing"]).has(activeProtocol.state)
+            || (activeProtocol.kind === "review" && activeProtocol.state === "submitted"));
+        if (protocolBusy) throw new Error("parallel work is unavailable while collaboration is active");
+        if (!Array.isArray(children) || children.length < 2 || children.length > MAX_FANOUT_CHILDREN)
+            throw new Error("parallel collaboration requires 2 to 4 specialists");
+        const safeReason = safeLedgerText(reason, "reason", 400);
+        if (!safeReason) throw new Error("reason is required");
+        const safeChildren = children.map((entry, index) => {
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("parallel specialist must be an object");
+            const targetCoworkerId = safeId(entry.targetCoworkerId, "targetCoworkerId");
+            const boundedTask = safeLedgerText(entry.boundedTask, "boundedTask", 800);
+            if (!boundedTask) throw new Error("boundedTask is required for every specialist");
+            return {
+                key: `specialist-${index + 1}`,
+                coworkerId: targetCoworkerId,
+                task: boundedTask,
+                ...(entry.requiresComputer === true ? { requiresComputer: true } : {}),
+            };
+        });
+        const targetIds = new Set(safeChildren.map((entry) => entry.coworkerId));
+        if (targetIds.size !== safeChildren.length) throw new Error("parallel specialist targets must be unique");
+        const reviewerId = safeId(reviewerCoworkerId, "reviewerCoworkerId");
+        if (reviewerId === ownerCoworkerId || targetIds.has(reviewerId)) throw new Error("reviewer must be independent from the owner and specialists");
+        const conversation = conversationStore.get(conversationId);
+        const source = conversation.messages.at(-1);
+        if (!source) throw new Error("parallel collaboration requires an existing conversation message");
+        const current = collaborationContextForConversation(conversationId);
+        const fanout = requestFanout({
+            conversationId,
+            ownerCoworkerId,
+            sourceMessageId: source.id,
+            reviewerCoworkerId: reviewerId,
+            children: safeChildren,
+            expectedVersion: current?.version,
+            expectedRunId: current?.runId,
+            expectedRequestId: current?.requestId,
+            expectedOperationId: current?.operationId,
+            expectedOperationToken: current?.operationToken,
+        });
+        let message;
+        try {
+            message = conversationStore.postCoworkerMessage(conversationId, ownerCoworkerId, {
+                text: `Parallel specialists requested.\nReason: ${safeReason}`,
+                replyTo: source.id,
+                mentions: safeChildren.map((entry) => entry.coworkerId),
+            });
+            bindFanoutMessage({ conversationId, kind: "owner", messageId: message.id, expectedFanoutId: fanout.fanoutId });
+            conversationStore.markDelivery(conversationId, source.id, ownerCoworkerId, "delivered");
+        }
+        catch (error) {
+            if (message) {
+                try { conversationStore.markDelivery(conversationId, message.id, ownerCoworkerId, "failed", "The parallel request could not be committed safely."); } catch {}
+            }
+            try { blockFanout({ conversationId, coworkerId: ownerCoworkerId, reason: "The parallel request could not be published safely." }); } catch {}
+            throw error;
+        }
+        const publicFanout = publicActiveFanout(state.flows[team.id]?.activeFanout, coworkerName);
+        return {
+            reviewerCoworkerId: reviewerId,
+            childCoworkerIds: safeChildren.map((entry) => entry.coworkerId),
+            fanout: publicFanout,
+            message,
+            team: publicTeam(team),
+            activity: activityForConversation(conversationId, { limit: 24 }),
+        };
     }
 
     function updateFanout(conversationId, mutate, event = {}) {
@@ -2419,6 +2504,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         collaborationContextForConversation,
         fanoutContextForConversation,
         requestFanout,
+        requestParallelCollaboration,
         bindFanoutMessage,
         fanoutChildForDelivery,
         fanoutReviewForDelivery,

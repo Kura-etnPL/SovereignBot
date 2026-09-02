@@ -19,6 +19,7 @@
         "dogfood:packaged": "node scripts/run-packaged-dogfood.mjs",
         "verify:software-team": "node scripts/verify-software-team.mjs",
         "verify:p13-team-collaboration": "node scripts/verify-p13-team-collaboration.mjs",
+        "verify:p14-team-fanout": "node scripts/verify-p14-team-fanout.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",
