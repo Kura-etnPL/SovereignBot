@@ -10,6 +10,20 @@ import { createArtifactStore } from "../src/main/artifact-store.js";
 import { buildProviderRoster, coworkerAgentId, coworkerCapability } from "../src/main/provider-roster.js";
 import { createDesktopServices } from "../src/main/services.js";
 import { COLLABORATION_SCHEMA, createTeamService } from "../src/main/team-service.js";
+import { createNotificationService } from "../src/main/notification-service.js";
+import { createChannelUnreadProducer } from "../src/main/channel-unread-producer.js";
+
+function fakeNotificationService(dataDir) {
+    return createNotificationService({
+        dataDir,
+        getSettings: () => ({ notifications: true }),
+        NotificationClass: class FakeNotification {
+            constructor(opts) { this.opts = opts; }
+            show() {}
+            static isSupported() { return true; }
+        },
+    });
+}
 
 function fixture() {
     const root = mkdtempSync(join(tmpdir(), "sovereign-collaboration-"));
@@ -318,10 +332,32 @@ test("Dispatcher runs a real Chief to Researcher to Coder chain through trusted 
             return { targetCoworkerId, agentId: coworkerAgentId(targetCoworkerId), workspaceId };
         });
         const artifacts = createArtifactStore({ dataDir: root });
+        const notifications = fakeNotificationService(root);
+        const unreadProducer = createChannelUnreadProducer({
+            notifications,
+            teamService: teams,
+            coworkerStore: coworkers,
+            conversationStore: conversations,
+        });
         const dispatcher = createCoworkerDispatcher({ dataDir: root, runtime, roster: () => roster, coworkerStore: coworkers, conversationStore: conversations, artifactStore: artifacts, services, teamFlow: teams });
         const first = conversations.postUserMessage(created.conversation.id, { text: "Research and implement this bounded change." });
+        assert.equal(notifications.list().totalCount, 0, "user message produces no notification");
         dispatcher.dispatchMessage(created.conversation.id, first.id);
-        for (let attempt = 0; attempt < 5; attempt += 1) await dispatcher.flush();
+        await dispatcher.flush(); // Chief handoff -> researcher
+        assert.equal(notifications.list().totalCount, 0, "Chief intermediate handoff must not notify");
+        await dispatcher.flush(); // Researcher handoff -> coder
+        assert.equal(notifications.list().totalCount, 0, "Researcher intermediate handoff must not notify");
+        await dispatcher.flush(); // Coder review/handoff -> chief
+        assert.equal(notifications.list().totalCount, 0, "Coder intermediate review must not notify");
+        await dispatcher.flush(); // Chief final synthesis
+        const postSynthesis = notifications.list();
+        assert.equal(postSynthesis.totalCount, 1, "final synthesis must produce exactly 1 notification");
+        assert.equal(postSynthesis.unreadCount, 1);
+        assert.equal(postSynthesis.notifications[0].category, "channel-unread");
+        assert.equal(postSynthesis.notifications[0].title, "Project Channel · Chief");
+        assert.equal(postSynthesis.notifications[0].body, "Chief synthesized the result.");
+        assert.equal(postSynthesis.notifications[0].read, false);
+        await dispatcher.flush(); // idle
         const view = conversations.get(created.conversation.id);
         assert.equal(runtime.tasks.length, 4);
         assert.deepEqual(runtime.tasks.map((task) => task.preferredAgentId), [chief, researcher, coder, chief].map((entry) => coworkerAgentId(entry.id)));
@@ -330,6 +366,12 @@ test("Dispatcher runs a real Chief to Researcher to Coder chain through trusted 
         assert.equal(preflightCalls, 3);
         assert.equal(view.messages.filter((message) => message.senderId !== "user").length, 4);
         assert.equal(teams.get(created.team.id).flow.status, "available");
+        conversations.postCoworkerMessage(created.conversation.id, chief.id, { text: "Follow-up deliverable." }, { notifyChannelUnread: true });
+        const coalesced = notifications.list();
+        assert.equal(coalesced.totalCount, 1, "subsequent completion must coalesce into existing notification");
+        assert.equal(coalesced.unreadCount, 1);
+        assert.equal(coalesced.notifications[0].body, "Follow-up deliverable.");
+        unreadProducer.dispose?.();
     }
     finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -628,8 +670,16 @@ test("controlled fanout runs independent children, required review, and original
             "Chief joined the approved specialist results.",
         ]);
         teams.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => ({ targetCoworkerId, agentId: coworkerAgentId(targetCoworkerId), workspaceId: workspaceId ?? teams.workspaceIdForConversation(conversationId) }));
+        const notifications = fakeNotificationService(root);
+        const unreadProducer = createChannelUnreadProducer({
+            notifications,
+            teamService: teams,
+            coworkerStore: coworkers,
+            conversationStore: conversations,
+        });
         const dispatcher = createCoworkerDispatcher({ dataDir: root, runtime, roster: () => roster, coworkerStore: coworkers, conversationStore: conversations, artifactStore: createArtifactStore({ dataDir: root }), services, teamFlow: teams });
         const first = conversations.postUserMessage(created.conversation.id, { text: "Investigate and implement these independent parts, then join them." });
+        assert.equal(notifications.list().totalCount, 0, "user message produces no notification");
         dispatcher.dispatchMessage(created.conversation.id, first.id);
         for (let attempt = 0; attempt < 10; attempt += 1) await dispatcher.flush();
         const view = conversations.get(created.conversation.id);
@@ -646,6 +696,14 @@ test("controlled fanout runs independent children, required review, and original
         assert.ok(teams.activity({ conversationId: created.conversation.id }).events.some((event) => event.label === "Approved"), JSON.stringify(teams.activity({ conversationId: created.conversation.id }).events));
         assert.ok(teams.activity({ conversationId: created.conversation.id }).events.some((event) => event.label === "Completed"));
         assert.doesNotMatch(JSON.stringify(flow), /(?:request_|operation_|workspaceKey|task_)/i);
+        const fanoutNotifs = notifications.list();
+        assert.equal(fanoutNotifs.totalCount, 1, "fanout join produces exactly 1 coalesced channel-unread notification");
+        assert.equal(fanoutNotifs.unreadCount, 1);
+        assert.equal(fanoutNotifs.notifications[0].category, "channel-unread");
+        assert.equal(fanoutNotifs.notifications[0].title, "Project Channel · Chief");
+        assert.equal(fanoutNotifs.notifications[0].body, "Chief joined the approved specialist results.");
+        assert.equal(fanoutNotifs.notifications[0].read, false);
+        unreadProducer.dispose?.();
     }
     finally { rmSync(root, { recursive: true, force: true }); }
 });
