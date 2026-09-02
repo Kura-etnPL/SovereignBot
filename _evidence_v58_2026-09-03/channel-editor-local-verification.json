@@ -1,0 +1,39 @@
+{
+  "schema": "sovereignbot.desktop.product-burst-channel-editor.v1",
+  "date": "2026-09-03",
+  "sourceCommit": "8725ade",
+  "scope": "E:/Eternal/Auto_Empire/projects/SovereignBot-luna-attention",
+  "externalActions": false,
+  "runtimeNote": "Real Electron canary run with the repository's explicit dev-only SOVEREIGNBOT_INTERNAL_NODE override; no packaged runtime or deployment was used.",
+  "checks": {
+    "productPageReachability": "PASS",
+    "channelEditorCreateDialog": "PASS",
+    "channelEditorCreate": "PASS",
+    "channelEditorEdit": "PASS",
+    "channelEditorPersistence": "PASS",
+    "channelEditorFields": {
+      "kindOptions": ["work", "personal", "project"],
+      "workspaceId": "team.sharedWorkspaceId",
+      "playbookId": "software-delivery"
+    },
+    "fullSoftwareTeamElectronCanary": "PASS",
+    "desktopSyntaxCheck": "PASS: 192 files",
+    "desktopTests": "PASS: 275 passed, 1 skipped, 0 failed",
+    "focusedProductShellTest": "PASS: 13 passed, 0 failed"
+  },
+  "uiSequence": [
+    "Open Channels page",
+    "Click New channel",
+    "Set name, kind, instructions, workspace, and Playbook",
+    "Submit and observe the new channel card",
+    "Click Edit on that card",
+    "Change name, kind, and instructions",
+    "Submit and verify the persisted channel through the renderer IPC API"
+  ],
+  "remainingGaps": [
+    "External Control production secure paired/relay attach lifecycle is not wired into Desktop startup.",
+    "Team Pack Gallery still lacks a real file-picker/download roundtrip proof.",
+    "Files, Computer History, Skills, and Playbooks need dedicated independent UI click-path gates beyond their existing service/page coverage."
+  ],
+  "publishEligible": false
+}
