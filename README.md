@@ -583,10 +583,13 @@ Required regression coverage includes:
 
 ## Release status
 
-Core v1.0.0 is published with a verified tag/release/asset chain. The active line is
-**Desktop v1.1** (`desktop/`, see [docs/desktop.md](docs/desktop.md)): an Electron front end over
-the same governed runtime, packaged as a signed-off Squirrel Setup.exe with installer E2E and a
-provenance release manifest. Desktop gates and acceptance criteria live in issue #48.
+Core v1.0.0 is the published historical baseline. The active line is **Desktop 4.0.0 RC**
+(`desktop/`, see [docs/desktop.md](docs/desktop.md)): an Electron front end over the same governed
+runtime, locally packaged as an unsigned Squirrel RC with a clean provenance manifest, verified
+fuses, packaged smoke, and packaged dogfood evidence. Setup.exe was generated but not run, and no
+public release claim is made until signing, protected release provenance, fresh installation, real
+provider validation, and upload gates are available. Desktop gates and acceptance criteria live in
+the acceptance documents under `docs/acceptance/`.
 
 Public Cloudflare/domain deployment, AG-UI, extra providers, and mandatory container/VM packaging remain intentionally non-blocking future work.
 
