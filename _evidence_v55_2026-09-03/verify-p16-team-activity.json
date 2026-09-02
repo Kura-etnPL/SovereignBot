@@ -1,0 +1,64 @@
+{
+  "at": "2026-09-02T17:42:37.926Z",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "real preload exposes Team Activity and the drawer timeline": true,
+    "uncontextual Activity offers a safe Team selector and bounded accessible rows": true,
+    "Team selector isolates Beta history and shows parallel progress labels": true,
+    "selected Team Channel makes Activity contextual and keeps Alpha isolated": true,
+    "timeline exposes canonical source Team Channel navigation": true,
+    "stale Alpha response cannot overwrite newly selected Beta context": true,
+    "artifact reference opens the existing Files & Artifacts surface": true,
+    "Attention event opens the existing Attention surface": true,
+    "forged Team Activity fields and over-limit requests are rejected before the handler": true,
+    "renderer Team Activity requests contain only opaque scope and bounded limit": true,
+    "restart preserves bounded Team timeline and opaque source conversation": true,
+    "Team Activity IPC and persisted ledger remain capped": true
+  },
+  "alphaTeamId": "team_a510112bbfe0e830",
+  "betaTeamId": "team_2da9de6288abe832",
+  "alphaConversationId": "conv_6720521437c0e0c3",
+  "betaConversationId": "conv_4849ad100d24bdb9",
+  "requests": [
+    {
+      "teamId": "team_a510112bbfe0e830",
+      "limit": 24
+    },
+    {
+      "teamId": "team_2da9de6288abe832",
+      "limit": 24
+    },
+    {
+      "conversationId": "conv_6720521437c0e0c3",
+      "limit": 24
+    },
+    {
+      "conversationId": "conv_6720521437c0e0c3",
+      "limit": 24
+    },
+    {
+      "conversationId": "conv_6720521437c0e0c3",
+      "limit": 24
+    },
+    {
+      "conversationId": "conv_6720521437c0e0c3",
+      "limit": 24
+    },
+    {
+      "conversationId": "conv_4849ad100d24bdb9",
+      "limit": 24
+    },
+    {
+      "conversationId": "conv_4849ad100d24bdb9",
+      "limit": 24
+    },
+    {
+      "conversationId": "conv_6720521437c0e0c3",
+      "limit": 24
+    },
+    {
+      "conversationId": "conv_6720521437c0e0c3",
+      "limit": 24
+    }
+  ]
+}

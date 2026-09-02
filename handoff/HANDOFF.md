@@ -3,8 +3,9 @@
 Updated: 2026-09-03
 
 - Branch: `codex/v4-review-directed-handoff-protocol`
-- P15 source commits: `f7b286eaf5ae44cb5ce5165cfc6fd10b3ef57434`, correction `816bc664175bb9ebcfb3144eceb2c6205f87830f`
-- Scope completed: local desktop Project Command Center with bounded canonical and compatibility contents, safe navigation, archived/unavailable read-only behavior, restart persistence, trusted full export, focused test, and hidden Electron acceptance gate.
-- Acceptance: `npm --prefix desktop run verify:p15-project-command-center` → 13/13 PASS; full desktop test → 258/258 PASS; syntax check → 180 files; secret scan → clean.
-- Evidence: `_evidence_v54_2026-09-03/`; local unsigned evidence with `publishEligible=false`.
+- P16 source commit: `058e2491e5dd14f71074b1389231fbba86c530a2`
+- Scope completed: first-class desktop Team Activity drawer with selected-channel context, safe Team fallback selector, bounded newest-first timeline, collaboration/parallel summary, canonical Channel/Artifacts/Attention navigation, stale-response guard, and restart persistence.
+- Acceptance: `npm run verify:p16-team-activity` → 13/13 PASS; `npm test` → 258/258 PASS; `npm run check` → syntax ok, 183 files; `npm run secret-scan` → clean; `git diff --check` → clean.
+- Evidence: `_evidence_v55_2026-09-03/`; local unsigned evidence with `publishEligible=false`. The evidence-only commit is the final commit containing this handoff, the P16 acceptance document, and the evidence directory; its SHA is reported in the delivery summary.
 - No provider, network, OAuth, cloud, remote, packaging, deployment, or account action was performed.
+- Acceptance document: `docs/acceptance/V4.3-P16-DESKTOP-TEAM-ACTIVITY-ACCEPTANCE-2026-09-03.md`.
