@@ -1,0 +1,470 @@
+{
+  "at": "2026-09-02T15:24:32.657Z",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "preload exposes the bounded collaboration action and Team Channel surface": true,
+    "Team Channel shows available teammate targets without runtime internals": true,
+    "inactive target is rejected through renderer/preload/IPC": true,
+    "inactive target cannot change owner, ledger, or delivery": true,
+    "self target is rejected through renderer/preload/IPC": true,
+    "self target cannot change owner, ledger, or delivery": true,
+    "non-roster target is rejected through renderer/preload/IPC": true,
+    "non-roster target cannot change owner, ledger, or delivery": true,
+    "forged ownerId is rejected before the collaboration handler": true,
+    "forged ownerId cannot change owner, ledger, or delivery": true,
+    "forged providerAccountId is rejected before the collaboration handler": true,
+    "forged providerAccountId cannot change owner, ledger, or delivery": true,
+    "forged capability is rejected before the collaboration handler": true,
+    "forged capability cannot change owner, ledger, or delivery": true,
+    "forged token is rejected before the collaboration handler": true,
+    "forged token cannot change owner, ledger, or delivery": true,
+    "forged workspacePath is rejected before the collaboration handler": true,
+    "forged workspacePath cannot change owner, ledger, or delivery": true,
+    "forged sessionId is rejected before the collaboration handler": true,
+    "forged sessionId cannot change owner, ledger, or delivery": true,
+    "renderer submits only the bounded public collaboration fields": true,
+    "non-hardcoded specialist becomes the single current owner": true,
+    "only the selected teammate is woken": true,
+    "bot-to-bot projection is visible as safe handoff activity": true,
+    "public Team and Channel state carries no execution authority": true,
+    "duplicate active request is rejected through renderer/preload/IPC": true,
+    "duplicate active request cannot overreach the owner or ledger": true,
+    "trusted protocol completes and submits the bounded handoff": true,
+    "same renderer/preload/IPC requests review to another active Specialist": true,
+    "review delivery is only to the selected active Specialist": true,
+    "trusted review acceptance, submission, and approval leave one reviewer owner": true,
+    "same renderer/preload/IPC hands back to the original implementation Specialist": true,
+    "handback delivery is only to the original implementation Specialist": true,
+    "restart preserves the handback owner, bounded task, and pending target delivery": true,
+    "restart safe projection remains authority-free": true
+  },
+  "teamId": "team_0ec83d9284adc120",
+  "channelId": "channel_c88fc36a823b687e",
+  "targetCoworkerId": "coworker_0398c7fe23794759",
+  "reviewCoworkerId": "coworker_90d683ab45b02b12",
+  "wakeLog": [
+    "coworker_0398c7fe23794759",
+    "coworker_90d683ab45b02b12",
+    "coworker_0398c7fe23794759"
+  ],
+  "requestStats": {
+    "total": 7,
+    "targets": [
+      {
+        "targetCoworkerId": "coworker_90d683ab45b02b12",
+        "handoffType": "review"
+      },
+      {
+        "targetCoworkerId": "coworker_10164297733e5d53",
+        "handoffType": "handoff"
+      },
+      {
+        "targetCoworkerId": "coworker_628bbf7f350a8ec6",
+        "handoffType": "handoff"
+      },
+      {
+        "targetCoworkerId": "coworker_0398c7fe23794759",
+        "handoffType": "handoff"
+      },
+      {
+        "targetCoworkerId": "coworker_90d683ab45b02b12",
+        "handoffType": "review"
+      },
+      {
+        "targetCoworkerId": "coworker_90d683ab45b02b12",
+        "handoffType": "review"
+      },
+      {
+        "targetCoworkerId": "coworker_0398c7fe23794759",
+        "handoffType": "handoff"
+      }
+    ]
+  },
+  "snapshot": {
+    "team": {
+      "id": "team_0ec83d9284adc120",
+      "packId": "custom-team",
+      "name": "P13 Directed Team",
+      "coworkerIds": [
+        "coworker_10164297733e5d53",
+        "coworker_33ac649aea5575ba",
+        "coworker_0398c7fe23794759",
+        "coworker_90d683ab45b02b12"
+      ],
+      "coworkers": [
+        {
+          "id": "coworker_10164297733e5d53",
+          "name": "P13 Chief"
+        },
+        {
+          "id": "coworker_33ac649aea5575ba",
+          "name": "P13 Research"
+        },
+        {
+          "id": "coworker_0398c7fe23794759",
+          "name": "P13 Build Specialist"
+        },
+        {
+          "id": "coworker_90d683ab45b02b12",
+          "name": "P13 Quality Specialist"
+        }
+      ],
+      "channelIds": [
+        "channel_c88fc36a823b687e"
+      ],
+      "channels": [
+        {
+          "id": "channel_c88fc36a823b687e",
+          "teamId": "team_0ec83d9284adc120",
+          "kind": "project",
+          "name": "Project Channel",
+          "instructions": "Bounded team collaboration: one owner at a time, explicit handoffs, and a visible result.",
+          "coworkerIds": [
+            "coworker_10164297733e5d53",
+            "coworker_33ac649aea5575ba",
+            "coworker_0398c7fe23794759",
+            "coworker_90d683ab45b02b12"
+          ],
+          "workspaceId": "ws_721c823e71ed00ac",
+          "conversationId": "conv_128e0786d5053ed0",
+          "playbookId": "team-collaboration",
+          "archived": false,
+          "createdAt": "2026-09-02T15:24:30.324Z",
+          "updatedAt": "2026-09-02T15:24:30.324Z"
+        }
+      ],
+      "sharedWorkspaceId": "ws_721c823e71ed00ac",
+      "sharedWorkspaceLabel": "P13 Directed Team project",
+      "privateWorkspaceLabel": "Private workspace",
+      "playbooks": [
+        {
+          "id": "team-collaboration",
+          "name": "Team Collaboration",
+          "description": "The current owner delegates bounded work to the next teammate and returns the result to the user.",
+          "steps": [
+            "owner",
+            "teammate",
+            "owner"
+          ]
+        }
+      ],
+      "flow": {
+        "stage": "specialist",
+        "status": "active",
+        "currentOwnerId": "coworker_0398c7fe23794759",
+        "currentOwner": "P13 Build Specialist",
+        "pendingCoworkerIds": [
+          "coworker_0398c7fe23794759"
+        ],
+        "attentionCoworkerIds": [],
+        "channelId": "channel_c88fc36a823b687e",
+        "activity": [
+          {
+            "kind": "handoff",
+            "label": "Handoff requested",
+            "status": "working",
+            "owner": "P13 Quality Specialist",
+            "targetCoworker": "P13 Build Specialist",
+            "revision": 0,
+            "reason": "Return ownership to the original implementation Specialist.",
+            "at": "2026-09-02T15:24:31.663Z"
+          },
+          {
+            "kind": "approved",
+            "label": "Approved",
+            "status": "completed",
+            "owner": "P13 Quality Specialist",
+            "targetCoworker": "P13 Quality Specialist",
+            "revision": 0,
+            "decision": "approved",
+            "at": "2026-09-02T15:24:31.658Z"
+          },
+          {
+            "kind": "submitted",
+            "label": "Submitted",
+            "status": "completed",
+            "owner": "P13 Quality Specialist",
+            "targetCoworker": "P13 Quality Specialist",
+            "revision": 0,
+            "at": "2026-09-02T15:24:31.656Z"
+          },
+          {
+            "kind": "working",
+            "label": "Working",
+            "status": "working",
+            "owner": "P13 Quality Specialist",
+            "revision": 0,
+            "at": "2026-09-02T15:24:31.655Z"
+          },
+          {
+            "kind": "reviewing",
+            "label": "Reviewing",
+            "status": "working",
+            "owner": "P13 Quality Specialist",
+            "targetCoworker": "P13 Quality Specialist",
+            "revision": 0,
+            "at": "2026-09-02T15:24:31.654Z"
+          },
+          {
+            "kind": "review-requested",
+            "label": "Review requested",
+            "status": "working",
+            "owner": "P13 Build Specialist",
+            "targetCoworker": "P13 Quality Specialist",
+            "revision": 0,
+            "reason": "A separate active Specialist must validate the implementation.",
+            "at": "2026-09-02T15:24:31.650Z"
+          },
+          {
+            "kind": "submitted",
+            "label": "Submitted",
+            "status": "completed",
+            "owner": "P13 Build Specialist",
+            "targetCoworker": "P13 Build Specialist",
+            "revision": 0,
+            "at": "2026-09-02T15:24:31.644Z"
+          },
+          {
+            "kind": "working",
+            "label": "Working",
+            "status": "working",
+            "owner": "P13 Build Specialist",
+            "revision": 0,
+            "at": "2026-09-02T15:24:31.643Z"
+          },
+          {
+            "kind": "handoff-accepted",
+            "label": "Handoff accepted",
+            "status": "working",
+            "owner": "P13 Build Specialist",
+            "targetCoworker": "P13 Build Specialist",
+            "revision": 0,
+            "at": "2026-09-02T15:24:31.641Z"
+          },
+          {
+            "kind": "handoff",
+            "label": "Handoff requested",
+            "status": "working",
+            "owner": "P13 Chief",
+            "targetCoworker": "P13 Build Specialist",
+            "revision": 0,
+            "reason": "The build specialist owns this slice.",
+            "at": "2026-09-02T15:24:31.631Z"
+          },
+          {
+            "kind": "working",
+            "label": "Working",
+            "status": "working",
+            "owner": "P13 Chief",
+            "at": "2026-09-02T15:24:30.330Z"
+          }
+        ],
+        "activeProtocol": {
+          "kind": "handoff",
+          "state": "requested",
+          "revision": 0,
+          "sourceCoworkerId": "coworker_90d683ab45b02b12",
+          "sourceCoworker": "P13 Quality Specialist",
+          "targetCoworkerId": "coworker_0398c7fe23794759",
+          "targetCoworker": "P13 Build Specialist",
+          "boundedTask": "Continue from the approved review and finish the bounded change.",
+          "reason": "Return ownership to the original implementation Specialist."
+        }
+      },
+      "createdAt": "2026-09-02T15:24:30.324Z",
+      "updatedAt": "2026-09-02T15:24:30.329Z"
+    },
+    "conversation": {
+      "id": "conv_128e0786d5053ed0",
+      "kind": "team",
+      "title": "P13 Directed Team",
+      "participants": [
+        "user",
+        "coworker_10164297733e5d53",
+        "coworker_33ac649aea5575ba",
+        "coworker_0398c7fe23794759",
+        "coworker_90d683ab45b02b12"
+      ],
+      "leadCoworkerId": "coworker_10164297733e5d53",
+      "createdAt": "2026-09-02T15:24:30.325Z",
+      "updatedAt": "2026-09-02T15:24:31.662Z",
+      "messageCount": 4,
+      "lastMessage": {
+        "id": "msg_80dfdf0aca8c34ac",
+        "senderId": "coworker_90d683ab45b02b12",
+        "textPreview": "Handoff\nBounded task: Continue from the approved review and finish the bounded change.\nReason: Return ownership to the original implementation Specialist.",
+        "createdAt": "2026-09-02T15:24:31.662Z"
+      },
+      "messages": [
+        {
+          "id": "msg_346860fcc8841d1f",
+          "senderId": "user",
+          "text": "Start a bounded Team delivery.",
+          "mentions": [],
+          "artifactIds": [],
+          "delivery": {
+            "coworker_10164297733e5d53": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T15:24:30.331Z"
+            }
+          },
+          "createdAt": "2026-09-02T15:24:30.328Z"
+        },
+        {
+          "id": "msg_836211a4a01f97b2",
+          "senderId": "coworker_10164297733e5d53",
+          "text": "Handoff\nBounded task: Inspect the bounded change and report the smallest safe result.\nReason: The build specialist owns this slice.",
+          "mentions": [
+            "coworker_0398c7fe23794759"
+          ],
+          "artifactIds": [],
+          "delivery": {
+            "coworker_0398c7fe23794759": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T15:24:31.645Z"
+            }
+          },
+          "createdAt": "2026-09-02T15:24:31.629Z"
+        },
+        {
+          "id": "msg_25453c2879014e83",
+          "senderId": "coworker_0398c7fe23794759",
+          "text": "Review request\nBounded task: Review the bounded implementation and approve only the smallest safe result.\nReason: A separate active Specialist must validate the implementation.",
+          "mentions": [
+            "coworker_90d683ab45b02b12"
+          ],
+          "artifactIds": [],
+          "delivery": {
+            "coworker_90d683ab45b02b12": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T15:24:31.659Z"
+            }
+          },
+          "createdAt": "2026-09-02T15:24:31.649Z"
+        },
+        {
+          "id": "msg_80dfdf0aca8c34ac",
+          "senderId": "coworker_90d683ab45b02b12",
+          "text": "Handoff\nBounded task: Continue from the approved review and finish the bounded change.\nReason: Return ownership to the original implementation Specialist.",
+          "mentions": [
+            "coworker_0398c7fe23794759"
+          ],
+          "artifactIds": [],
+          "delivery": {
+            "coworker_0398c7fe23794759": {
+              "status": "pending",
+              "updatedAt": "2026-09-02T15:24:31.662Z"
+            }
+          },
+          "createdAt": "2026-09-02T15:24:31.662Z"
+        }
+      ]
+    },
+    "activity": {
+      "schema": "sovereignbot.desktop.collaboration.v1",
+      "conversationId": "conv_128e0786d5053ed0",
+      "teamId": "team_0ec83d9284adc120",
+      "events": [
+        {
+          "kind": "handoff",
+          "label": "Handoff requested",
+          "status": "working",
+          "owner": "P13 Quality Specialist",
+          "targetCoworker": "P13 Build Specialist",
+          "revision": 0,
+          "reason": "Return ownership to the original implementation Specialist.",
+          "at": "2026-09-02T15:24:31.663Z"
+        },
+        {
+          "kind": "approved",
+          "label": "Approved",
+          "status": "completed",
+          "owner": "P13 Quality Specialist",
+          "targetCoworker": "P13 Quality Specialist",
+          "revision": 0,
+          "decision": "approved",
+          "at": "2026-09-02T15:24:31.658Z"
+        },
+        {
+          "kind": "submitted",
+          "label": "Submitted",
+          "status": "completed",
+          "owner": "P13 Quality Specialist",
+          "targetCoworker": "P13 Quality Specialist",
+          "revision": 0,
+          "at": "2026-09-02T15:24:31.656Z"
+        },
+        {
+          "kind": "working",
+          "label": "Working",
+          "status": "working",
+          "owner": "P13 Quality Specialist",
+          "revision": 0,
+          "at": "2026-09-02T15:24:31.655Z"
+        },
+        {
+          "kind": "reviewing",
+          "label": "Reviewing",
+          "status": "working",
+          "owner": "P13 Quality Specialist",
+          "targetCoworker": "P13 Quality Specialist",
+          "revision": 0,
+          "at": "2026-09-02T15:24:31.654Z"
+        },
+        {
+          "kind": "review-requested",
+          "label": "Review requested",
+          "status": "working",
+          "owner": "P13 Build Specialist",
+          "targetCoworker": "P13 Quality Specialist",
+          "revision": 0,
+          "reason": "A separate active Specialist must validate the implementation.",
+          "at": "2026-09-02T15:24:31.650Z"
+        },
+        {
+          "kind": "submitted",
+          "label": "Submitted",
+          "status": "completed",
+          "owner": "P13 Build Specialist",
+          "targetCoworker": "P13 Build Specialist",
+          "revision": 0,
+          "at": "2026-09-02T15:24:31.644Z"
+        },
+        {
+          "kind": "working",
+          "label": "Working",
+          "status": "working",
+          "owner": "P13 Build Specialist",
+          "revision": 0,
+          "at": "2026-09-02T15:24:31.643Z"
+        },
+        {
+          "kind": "handoff-accepted",
+          "label": "Handoff accepted",
+          "status": "working",
+          "owner": "P13 Build Specialist",
+          "targetCoworker": "P13 Build Specialist",
+          "revision": 0,
+          "at": "2026-09-02T15:24:31.641Z"
+        },
+        {
+          "kind": "handoff",
+          "label": "Handoff requested",
+          "status": "working",
+          "owner": "P13 Chief",
+          "targetCoworker": "P13 Build Specialist",
+          "revision": 0,
+          "reason": "The build specialist owns this slice.",
+          "at": "2026-09-02T15:24:31.631Z"
+        },
+        {
+          "kind": "working",
+          "label": "Working",
+          "status": "working",
+          "owner": "P13 Chief",
+          "at": "2026-09-02T15:24:30.330Z"
+        }
+      ]
+    }
+  }
+}
