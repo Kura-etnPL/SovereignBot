@@ -1,16 +1,22 @@
 {
-  "at": "2026-09-02T18:23:17.098Z",
+  "at": "2026-09-02T20:04:27.923Z",
   "publishEligible": false,
+  "channelUnreadStatus": "Channel-unread category is allowlisted and supported in storage, UI, and filters. Automated production event hook remains unwired in main process pending trusted event source.",
   "checks": {
     "hidden Electron window stays hidden": true,
     "real preload exposes notification center operations": true,
     "sidebar has notifications button with unread count badge": true,
     "clicking nav-notifications displays Notification Center": true,
     "cards render newest-first with bilingual categories, times, titles, and bodies": true,
+    "public notification projections omit internal dedupe key and use opaque IDs": true,
+    "ordinary UI copy contains no storage paths and notes channel-unread limitation": true,
+    "redaction canary enforces secret, token, and path redaction at service boundary": true,
     "category filter isolates selected category": true,
+    "routine source navigation button opens Routines surface": true,
+    "attention source navigation button navigates to Attention surface": true,
+    "conversation source navigation button opens Conversation surface safely": true,
     "card markRead action toggles read state and updates badge": true,
     "read state filter isolates unread vs read": true,
-    "safe source navigation button navigates to target surface": true,
     "mark visible read marks visible cards as read and updates badge": true,
     "clear visible dismisses cards from view": true,
     "forged notification IPC payloads and authority fields are rejected": true,
@@ -33,7 +39,26 @@
     {
       "channel": "notification:list",
       "payload": {
-        "category": "attention",
+        "category": "routine-completed",
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "category": "routine-completed",
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
         "limit": 100
       }
     },
@@ -46,7 +71,7 @@
     {
       "channel": "notification:markRead",
       "payload": {
-        "id": "notif_job_job_cowork_4_completed",
+        "id": "notif_9ac5362a5dd5bc59",
         "read": true
       }
     },
@@ -70,20 +95,15 @@
       }
     },
     {
-      "channel": "notification:list",
-      "payload": {
-        "limit": 100
-      }
-    },
-    {
       "channel": "notification:markAllRead",
       "payload": {
         "ids": [
-          "notif_job_job_cowork_4_completed",
-          "notif_channel_general_unread",
-          "notif_job_job_trig_3_completed",
-          "notif_job_job_rout_2_completed",
-          "notif_job_job_attn_1_attention"
+          "notif_9ac5362a5dd5bc59",
+          "notif_c07b6f20ed0e9f6f",
+          "notif_24988ce2b90b6f5a",
+          "notif_77c34d8c7cbb5820",
+          "notif_e51293dd8a712658",
+          "notif_b56923d75910512d"
         ]
       }
     },
@@ -97,11 +117,12 @@
       "channel": "notification:clearAll",
       "payload": {
         "ids": [
-          "notif_job_job_cowork_4_completed",
-          "notif_channel_general_unread",
-          "notif_job_job_trig_3_completed",
-          "notif_job_job_rout_2_completed",
-          "notif_job_job_attn_1_attention"
+          "notif_9ac5362a5dd5bc59",
+          "notif_c07b6f20ed0e9f6f",
+          "notif_24988ce2b90b6f5a",
+          "notif_77c34d8c7cbb5820",
+          "notif_e51293dd8a712658",
+          "notif_b56923d75910512d"
         ]
       }
     },
