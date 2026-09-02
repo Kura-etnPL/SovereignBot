@@ -32,6 +32,8 @@ const state = {
   inlineAttentionRequest: 0,
 };
 
+let voiceController;
+
 const READ_MARKERS_KEY = "sovereignbot.conversation-read-v1";
 let readMarkers = {};
 try {
@@ -42,6 +44,29 @@ try {
 const $ = (id) => document.getElementById(id);
 const show = (el) => el?.classList.remove("hidden");
 const hide = (el) => el?.classList.add("hidden");
+
+const VOICE_STATUS_TEXT = Object.freeze({
+  ready: "Voice ready / 语音已就绪",
+  listening: "Listening — release to finish / 正在聆听——松开完成",
+  transcribed: "Transcript added to this conversation / 转写已加入当前会话",
+  unsupported: "Voice is unavailable in this environment / 当前环境不支持语音",
+  "permission-denied": "Microphone permission was denied / 麦克风权限被拒绝",
+  "no-conversation": "Open a conversation before using voice / 请先打开会话",
+  muted: "Voice is muted / 语音已静音",
+  stopped: "Voice stopped / 语音已停止",
+  "conversation-switch": "Voice stopped after conversation change / 会话切换后已停止语音",
+  "view-switch": "Voice stopped / 语音已停止",
+  "app-quit": "Voice stopped / 语音已停止",
+  error: "Voice is unavailable / 语音暂不可用",
+});
+
+function renderVoiceStatus({ code = "ready", detail = "" } = {}) {
+  const value = VOICE_STATUS_TEXT[code] || (detail ? `Voice unavailable: ${detail}` : VOICE_STATUS_TEXT.error);
+  for (const id of ["voice-input-status", "voice-settings-status", "voice-status"]) {
+    const target = $(id);
+    if (target) target.textContent = value;
+  }
+}
 
 function text(value) {
   return String(value ?? "");
@@ -139,6 +164,7 @@ function formatRelative(iso) {
 }
 
 function switchView(name) {
+  if (name !== "conversation") voiceController?.stop("view-switch");
   state.activeView = name;
   for (const view of document.querySelectorAll(".main-view")) hide(view);
   show($(`view-${name}`));
@@ -403,6 +429,7 @@ async function openDirect(coworkerId) {
 }
 
 async function openConversation(conversationId) {
+  if (state.selectedConversationId && state.selectedConversationId !== conversationId) voiceController?.stop("conversation-switch");
   state.selectedConversationId = conversationId;
   state.mentionIds.clear();
   state.replyTo = undefined;
@@ -585,18 +612,8 @@ function replyPreview(conversation, replyTo) {
   return conversation.messages.find((entry) => entry.id === replyTo)?.text;
 }
 
-function speakMessage(messageText, button) {
-  const synthesis = window.speechSynthesis;
-  const Utterance = window.SpeechSynthesisUtterance;
-  if (!synthesis || typeof Utterance !== "function") return;
-  synthesis.cancel();
-  const utterance = new Utterance(messageText);
-  utterance.lang = document.documentElement.lang?.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
-  button?.classList.add("speaking");
-  const clear = () => button?.classList.remove("speaking");
-  utterance.onend = clear;
-  utterance.onerror = clear;
-  synthesis.speak(utterance);
+function speakMessage(conversation, message, button) {
+  return voiceController?.speakReply(conversation?.id, message, button) ?? false;
 }
 
 function renderMessage(conversation, message) {
@@ -654,12 +671,13 @@ function renderMessage(conversation, message) {
     try { $("composer-input")?.focus({ preventScroll: true }); } catch { $("composer-input")?.focus(); }
   });
   actions.append(reply);
-  if (!user && window.speechSynthesis && typeof window.SpeechSynthesisUtterance === "function") {
+  if (!user && message.voiceEligible === true && window.speechSynthesis && typeof window.SpeechSynthesisUtterance === "function") {
     const speak = document.createElement("button");
     speak.type = "button";
     speak.className = "message-action";
     speak.textContent = "Speak / 播放";
-    speak.addEventListener("click", () => speakMessage(message.text, speak));
+    speak.setAttribute("aria-label", "Speak final reply / 播放最终回复");
+    speak.addEventListener("click", () => voiceController?.speakReply(conversation.id, message, speak));
     actions.append(speak);
   }
   content.append(actions);
@@ -678,6 +696,7 @@ function renderMessage(conversation, message) {
 }
 
 function renderMessages(conversation, forceScroll = false) {
+  voiceController?.observeConversation(conversation.id, conversation.messages ?? []);
   const list = $("conversation-messages");
   const signature = JSON.stringify(conversation.messages ?? []);
   if (signature === state.conversationSignature) return;
@@ -1219,95 +1238,20 @@ async function setSelectedChannelArchived(archived) {
 }
 
 function setupVoiceInput() {
-  const button = $("voice-input");
-  if (!button) return;
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (typeof Recognition !== "function") {
-    button.disabled = true;
-    button.title = "Voice input is unavailable in this environment / 当前环境不支持语音输入";
-    return;
-  }
-  let recognition;
-  try {
-    recognition = new Recognition();
-  } catch {
-    button.disabled = true;
-    button.title = "Voice input is unavailable in this environment / 当前环境不支持语音输入";
-    return;
-  }
-  let held = false;
-  const setListening = (listening) => {
-    state.voice.listening = listening;
-    button.classList.toggle("recording", listening);
-    button.setAttribute("aria-pressed", String(listening));
-    button.textContent = listening ? "■" : "🎙";
-    button.title = listening ? "Release to finish / 松开完成" : "Hold to talk / 按住说话";
-    if (listening) $("composer-hint").textContent = "Listening… release to finish · 松开完成";
-  };
-  const start = () => {
-    held = true;
-    if (state.voice.listening) return;
-    recognition.lang = document.documentElement.lang?.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
-    try { recognition.start(); }
-    catch (error) {
-      held = false;
-      if (error?.name !== "InvalidStateError") {
-        $("composer-error").textContent = "Voice input could not start / 语音输入无法启动";
-        show($("composer-error"));
-      }
-    }
-  };
-  const stop = () => {
-    held = false;
-    if (!state.voice.listening) return;
-    try { recognition.stop(); } catch { /* recognition may already be ending */ }
-  };
-  recognition.continuous = false;
-  recognition.interimResults = false;
-  recognition.maxAlternatives = 1;
-  recognition.onstart = () => {
-    setListening(true);
-    if (!held) stop();
-  };
-  recognition.onresult = (event) => {
-    const transcript = [...event.results].map((result) => result[0]?.transcript ?? "").join(" ").trim();
-    if (!transcript) return;
-    const input = $("composer-input");
-    const existing = input.value.trim();
-    input.value = existing ? `${existing} ${transcript}` : transcript;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-  };
-  recognition.onerror = (event) => {
-    if (event.error === "aborted" || event.error === "no-speech") return;
-    $("composer-error").textContent = "Voice input needs permission or is unavailable / 语音输入需要权限或暂不可用";
-    show($("composer-error"));
-  };
-  recognition.onend = () => {
-    setListening(false);
-    const conversation = state.selectedConversation;
-    const pending = conversation ? pendingUserRecipients(conversation).size : 0;
-    if ($("composer-hint")) $("composer-hint").textContent = state.redirectMode
-      ? "Enter to redirect the active work · Shift+Enter for a new line"
-      : pending ? "Active work is running · Redirect changes its direction" : "Enter to send · Shift+Enter for a new line";
-  };
-  const keyStart = (event) => {
-    if ((event.key === " " || event.key === "Enter") && !event.repeat) {
-      event.preventDefault();
-      start();
-    }
-  };
-  const keyStop = (event) => {
-    if (event.key === " " || event.key === "Enter") {
-      event.preventDefault();
-      stop();
-    }
-  };
-  button.addEventListener("pointerdown", (event) => { event.preventDefault(); start(); });
-  button.addEventListener("pointerup", stop);
-  button.addEventListener("pointercancel", stop);
-  button.addEventListener("pointerleave", stop);
-  button.addEventListener("keydown", keyStart);
-  button.addEventListener("keyup", keyStop);
+  if (!globalThis.SovereignVoice) return;
+  voiceController = globalThis.SovereignVoice.createVoiceController({
+    window,
+    document,
+    getConversationId: () => state.selectedConversationId,
+    getComposer: () => $("composer-input"),
+    getSystemLocale: () => state.handshake?.locale || navigator.language,
+    getContext: () => ({ conversationId: state.selectedConversationId, activeView: state.activeView }),
+    setStatus: renderVoiceStatus,
+  });
+  voiceController.setupInput($("voice-input"));
+  window.sovereignbotStopVoice = () => voiceController?.stop("stopped");
+  window.addEventListener("beforeunload", () => voiceController?.stop("app-quit"), { once: true });
+  window.addEventListener("pagehide", () => voiceController?.stop("app-quit"), { once: true });
 }
 
 function renderConnectedApps() {
@@ -1420,6 +1364,7 @@ function renderConnectedApps() {
 }
 
 async function stopCurrentConversation() {
+  voiceController?.stop("stopped");
   const conversation = state.selectedConversation;
   if (!conversation || !window.sovereignbot.conversations.stop) return;
   const button = $("conversation-stop");
@@ -1679,6 +1624,8 @@ function renderSettings() {
   const settings = state.settings;
   if (!settings) return;
   ensureSettingsPreferences();
+  ensureVoiceSettingsCard();
+  voiceController?.setSettings(settings);
   $("setting-theme").value = settings.theme ?? "system";
   document.body.dataset.theme = settings.theme ?? "system";
   $("setting-close").value = settings.closeBehavior ?? "ask";
@@ -1690,6 +1637,9 @@ function renderSettings() {
     input.disabled = settings.notifications === false;
   }
   $("setting-language").value = settings.language ?? "system";
+  $("setting-voice-language").value = settings.voiceLanguage ?? "system";
+  $("setting-speak-replies").checked = settings.speakReplies === true;
+  $("setting-voice-muted").checked = settings.voiceMuted === true;
   applyLocale(settings.language ?? "system", state.handshake?.locale);
 }
 
@@ -1793,6 +1743,72 @@ function renderWorkspaces() {
 function renderAdvancedRoster() {
   const lines = (state.roster?.agents ?? []).map((agent) => `${agent.name}\n  ${agent.harnessKind} · ${agent.capabilities.join(", ")}`);
   $("advanced-roster").textContent = lines.join("\n\n") || "No active runtime agents.";
+}
+
+function ensureVoiceSettingsCard() {
+  if ($("voice-settings-card")) return;
+  const grid = document.querySelector("#view-settings .settings-grid");
+  if (!grid) return;
+  const card = document.createElement("section");
+  card.id = "voice-settings-card";
+  card.className = "settings-card span-2 voice-settings";
+  const heading = document.createElement("div");
+  heading.className = "card-heading";
+  const copy = document.createElement("div");
+  const title = document.createElement("h2");
+  title.textContent = "Voice / 语音";
+  const description = document.createElement("p");
+  description.textContent = "Uses this device's Web Speech support. Voice input only fills the open conversation composer; no audio is saved.";
+  copy.append(title, description);
+  const stop = document.createElement("button");
+  stop.id = "voice-stop";
+  stop.type = "button";
+  stop.className = "quiet-action";
+  stop.textContent = "Stop / 停止";
+  stop.setAttribute("aria-label", "Stop voice playback or input / 停止语音播放或输入");
+  heading.append(copy, stop);
+  const languageLabel = document.createElement("label");
+  languageLabel.className = "setting-field";
+  languageLabel.textContent = "Voice language / 语音语言";
+  const language = document.createElement("select");
+  language.id = "setting-voice-language";
+  language.setAttribute("aria-label", "Voice language / 语音语言");
+  for (const [value, label] of [["system", "System / 系统"], ["zh-CN", "简体中文"], ["en", "English"]]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    language.append(option);
+  }
+  languageLabel.append(language);
+  const toggle = (id, titleText, descriptionText) => {
+    const row = document.createElement("label");
+    row.className = "toggle-row";
+    const span = document.createElement("span");
+    const strong = document.createElement("strong");
+    strong.textContent = titleText;
+    const small = document.createElement("small");
+    small.textContent = descriptionText;
+    span.append(strong, small);
+    const input = document.createElement("input");
+    input.id = id;
+    input.type = "checkbox";
+    row.append(span, input);
+    return row;
+  };
+  const speak = toggle("setting-speak-replies", "Speak replies / 朗读回复", "Only final Coworker replies; off by default / 仅朗读同事最终回复，默认关闭");
+  const muted = toggle("setting-voice-muted", "Mute voice / 静音语音", "Stops current speech and blocks new playback / 停止当前播放并阻止新播放");
+  const status = document.createElement("p");
+  status.id = "voice-status";
+  status.className = "setting-feedback";
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  status.textContent = "Voice is ready / 语音已就绪";
+  card.append(heading, languageLabel, speak, muted, status);
+  grid.insertBefore(card, grid.firstElementChild);
+  stop.addEventListener("click", () => voiceController?.stop("stopped"));
+  language.addEventListener("change", (event) => saveSimpleSetting("voiceLanguage", event.target.value));
+  speak.querySelector("input").addEventListener("change", (event) => saveSimpleSetting("speakReplies", event.target.checked));
+  muted.querySelector("input").addEventListener("change", (event) => saveSimpleSetting("voiceMuted", event.target.checked));
 }
 
 function ensureSettingsPreferences() {
@@ -1908,6 +1924,7 @@ function ensureUpdateCard() {
 
 async function refreshSettingsData() {
   try {
+    ensureVoiceSettingsCard();
     ensureDataLifecycleCard();
     ensureUpdateCard();
     const [settings, workspaces, firstRun, roster, connectedApps, updateStatus] = await Promise.all([
@@ -1979,6 +1996,7 @@ function showToastError(error) {
 }
 
 function bindEvents() {
+  ensureVoiceSettingsCard();
   $("new-coworker").addEventListener("click", () => { resetCoworkerDialog(); populateCoworkerAdvanced(); openDialog("coworker-dialog"); });
   $("refresh-coworkers").addEventListener("click", () => Promise.all([refreshCoworkers(), refreshConversations(), refreshRoster()]));
   $("new-team").addEventListener("click", () => { populateTeamPicker(); openDialog("team-dialog"); });

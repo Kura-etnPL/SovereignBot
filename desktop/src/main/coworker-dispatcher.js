@@ -654,7 +654,7 @@ export function createCoworkerDispatcher({
                 discardArtifacts(createdArtifactIds);
                 throw error;
             }
-            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: visibleText.slice(0, MAX_REPLY_TEXT), replyTo: source.id, ...(publishArtifactIds.length ? { artifactIds: publishArtifactIds } : {}) });
+            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: visibleText.slice(0, MAX_REPLY_TEXT), replyTo: source.id, ...(publishArtifactIds.length ? { artifactIds: publishArtifactIds } : {}) }, { voiceEligible: true });
             closeInternalReply(conversationId, reply);
             conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
             state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
@@ -782,6 +782,11 @@ export function createCoworkerDispatcher({
             replyTo: source.id,
             ...(nextCoworkerIds.length ? { mentions: nextCoworkerIds } : {}),
             ...(shouldPublishResult && publishArtifactIds.length ? { artifactIds: publishArtifactIds } : {}),
+        }, {
+            // Only a published, terminal, non-handoff result is eligible for
+            // explicit/opt-in renderer speech. Internal protocol, review,
+            // attention, and handoff messages remain silent by construction.
+            voiceEligible: Boolean(shouldPublishResult && !nextCoworkerIds.length && !isReview && !managedTeam && !productHandoff && !handoffBlocked),
         });
         if (!handoffBlocked && (productHandoff || managedTeam)) {
             const handoffContext = teamFlow?.collaborationContextForConversation?.(conversationId);

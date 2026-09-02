@@ -59,7 +59,7 @@
 
     const actions = document.createElement("div");
     actions.className = "detail-actions";
-    if (computer.canTakeOver) actions.append(button("Take Over / 接管", async () => { await api.thisPc.takeOver({ projectId, coworkerId: computer.coworkerId }); result("Computer actions paused for the Coworker / 已暂停同事操作"); await refresh(); }, "hero-action"));
+    if (computer.canTakeOver) actions.append(button("Take Over / 接管", async () => { window.sovereignbotStopVoice?.(); await api.thisPc.takeOver({ projectId, coworkerId: computer.coworkerId }); result("Computer actions paused for the Coworker / 已暂停同事操作"); await refresh(); }, "hero-action"));
     if (computer.canHandBack) actions.append(button("Hand Back / 交还", async () => { await api.thisPc.handBack({ projectId, coworkerId: computer.coworkerId }); result("Computer returned through the task-bound path / 已通过任务绑定路径交还"); await refresh(); }, "hero-action"));
     actions.append(button("Refresh screen / 刷新屏幕", async () => {
       const frame = await api.thisPc.frame({ projectId, coworkerId: computer.coworkerId });

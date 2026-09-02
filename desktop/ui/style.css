@@ -195,6 +195,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-actions { display: flex; justify-content: flex-end; margin-top: 7px; }
 .message-action { border: 0; padding: 0; background: transparent; color: var(--text-3); cursor: pointer; font-size: 10px; }
 .message-action:hover { color: var(--text); }
+.message-action.speaking { color: var(--accent); }
 .reply-compose { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; padding: 7px 11px; border: 1px solid var(--line-strong); border-bottom: 0; border-radius: 12px 12px 0 0; background: var(--panel-2); color: var(--text-2); font-size: 10px; }
 .reply-compose > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .reply-clear { min-height: 26px; padding: 0 8px; flex: 0 0 auto; font-size: 9px; }

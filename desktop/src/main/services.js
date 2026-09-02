@@ -30,6 +30,9 @@ export const DESKTOP_SETTINGS_SCHEMA = Object.freeze({
     demoMode: "boolean",
     defaultModelProfile: Object.freeze(["automatic", "efficient", "deep", "economy"]),
     language: Object.freeze(["system", "zh-CN", "en"]),
+    voiceLanguage: Object.freeze(["system", "zh-CN", "en"]),
+    speakReplies: "boolean",
+    voiceMuted: "boolean",
     updateChannel: Object.freeze(["stable", "preview", "off"]),
 });
 
@@ -53,6 +56,9 @@ function defaultSettings() {
         demoMode: false,
         defaultModelProfile: "automatic",
         language: "system",
+        voiceLanguage: "system",
+        speakReplies: false,
+        voiceMuted: false,
         updateChannel: "stable",
         providers: { codex: { enabled: true }, claude: { enabled: true }, "chatgpt-web": { enabled: true }, antigravity: { enabled: true }, economy: { enabled: true } },
         roles: {},
@@ -62,6 +68,9 @@ function defaultSettings() {
 function normalizeSettings(value) {
     const settings = { ...defaultSettings(), ...value };
     if (!["system", "zh-CN", "en"].includes(settings.language)) settings.language = "system";
+    if (!["system", "zh-CN", "en"].includes(settings.voiceLanguage)) settings.voiceLanguage = "system";
+    settings.speakReplies = settings.speakReplies === true;
+    settings.voiceMuted = settings.voiceMuted === true;
     if (!["stable", "preview", "off"].includes(settings.updateChannel)) settings.updateChannel = "stable";
     if (![
         "automatic", "efficient", "deep", "economy",

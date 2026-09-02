@@ -284,7 +284,7 @@ export const IPC_CHANNELS = Object.freeze({
             if (!isPlainObject(payload) || Object.keys(payload).length === 0)
                 throw new Error("settings update payload must be a non-empty object");
             assertNoForbiddenKeys(payload);
-            const allowed = new Set(["theme", "closeBehavior", "notifications", "notificationPreferences", "defaultModelProfile", "demoMode", "language", "providers", "roles"]);
+            const allowed = new Set(["theme", "closeBehavior", "notifications", "notificationPreferences", "defaultModelProfile", "demoMode", "language", "voiceLanguage", "speakReplies", "voiceMuted", "providers", "roles"]);
             for (const key of Object.keys(payload)) {
                 if (!allowed.has(key))
                     throw new Error(`unexpected settings field: ${key.slice(0, 40)}`);
@@ -298,6 +298,13 @@ export const IPC_CHANNELS = Object.freeze({
             if (payload.defaultModelProfile !== undefined
                 && !["automatic", "efficient", "deep", "economy"].includes(payload.defaultModelProfile))
                 throw new Error("invalid defaultModelProfile");
+            if (payload.voiceLanguage !== undefined
+                && !["system", "zh-CN", "en"].includes(payload.voiceLanguage))
+                throw new Error("invalid voiceLanguage");
+            for (const key of ["speakReplies", "voiceMuted"]) {
+                if (payload[key] !== undefined && typeof payload[key] !== "boolean")
+                    throw new Error(`${key} must be a boolean`);
+            }
             return payload;
         },
     }),

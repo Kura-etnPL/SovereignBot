@@ -6,6 +6,7 @@ import test from "node:test";
 const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
 const html = read("../ui/index.html");
 const app = read("../ui/app.js");
+const voice = read("../ui/voice-controller.js");
 const productHubs = read("../ui/product-hubs-ui.js");
 const css = read("../ui/style.css");
 
@@ -49,7 +50,7 @@ test("V3 conversation UX supports durable polling, team mentions, details and pr
     assert.match(html, /id="conversation-presence"/);
     assert.match(html, /id="mention-row"/);
     assert.match(html, /id="provider-cards"/);
-    assert.match(app, /SpeechRecognition/);
+    assert.match(voice, /SpeechRecognition/);
     assert.match(app, /speechSynthesis/);
 });
 

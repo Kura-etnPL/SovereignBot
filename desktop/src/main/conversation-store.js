@@ -70,6 +70,8 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
             if (typeof message.text !== "string" || !message.text.trim() || message.text.length > MAX_MESSAGE_TEXT) return false;
             if (typeof message.createdAt !== "string") return false;
             if (message.replyTo !== undefined && !validMessageId(message.replyTo)) return false;
+            if (message.voiceEligible !== undefined && typeof message.voiceEligible !== "boolean") return false;
+            if (message.voiceEligible === true && message.senderId === USER_PARTICIPANT) return false;
             idList(message.mentions, "mentions", { max: MAX_PARTICIPANTS });
             idList(message.artifactIds, "artifactIds");
             if (!message.delivery || typeof message.delivery !== "object" || Array.isArray(message.delivery)) return false;
@@ -178,7 +180,7 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         return summarize(conversation);
     }
 
-    function post(conversationId, payload, { senderId }) {
+    function post(conversationId, payload, { senderId, voiceEligible = false }) {
         const conversation = requireConversation(conversationId);
         requireParticipant(conversation, senderId);
         plainObject(payload, "message");
@@ -201,7 +203,7 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         if (!validMessageId(id) || conversation.messages.some((entry) => entry.id === id)) throw new Error("message id factory returned an invalid or duplicate id");
         const createdAt = now();
         const delivery = Object.fromEntries(recipients.map((recipientId) => [recipientId, { status: "pending", updatedAt: createdAt }]));
-        const message = { id, senderId, text, mentions, artifactIds, ...(replyTo ? { replyTo } : {}), ...(clientMessageId ? { clientMessageId } : {}), delivery, createdAt };
+        const message = { id, senderId, text, mentions, artifactIds, ...(replyTo ? { replyTo } : {}), ...(clientMessageId ? { clientMessageId } : {}), ...(voiceEligible === true ? { voiceEligible: true } : {}), delivery, createdAt };
         conversation.messages.push(message);
         if (conversation.messages.length > MAX_MESSAGES_PER_CONVERSATION) conversation.messages.splice(0, conversation.messages.length - MAX_MESSAGES_PER_CONVERSATION);
         conversation.updatedAt = createdAt;
@@ -234,7 +236,7 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
             return createConversation({ kind: "team", title, coworkerIds, leadCoworkerId });
         },
         postUserMessage(conversationId, payload) { return post(conversationId, payload, { senderId: USER_PARTICIPANT }); },
-        postCoworkerMessage(conversationId, coworkerId, payload) { requireCoworker(coworkerId); return post(conversationId, payload, { senderId: coworkerId }); },
+        postCoworkerMessage(conversationId, coworkerId, payload, options = {}) { requireCoworker(coworkerId); return post(conversationId, payload, { senderId: coworkerId, voiceEligible: options.voiceEligible === true }); },
         markDelivery(conversationId, messageId, coworkerId, status, detail) {
             if (!["pending", "delivered", "failed"].includes(status)) throw new Error("delivery status must be pending, delivered, or failed");
             const conversation = requireConversation(conversationId);

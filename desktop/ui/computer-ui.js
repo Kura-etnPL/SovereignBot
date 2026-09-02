@@ -49,7 +49,7 @@
           const status = document.createElement("span"); status.textContent = `Status / 状态: ${computer.status} · ${computer.statusMessage}`;
           card.append(name, mode, status);
           const actions = document.createElement("div"); actions.className = "computer-actions-row";
-          if (computer.canTakeOver) actions.append(Object.assign(document.createElement("button"), { type: "button", className: "computer-action primary", textContent: "Take Over / 接管", onclick: async () => { await window.sovereignbot.thisPc.takeOver({ projectId: project.projectId, coworkerId: computer.coworkerId }); await safeRender(conversation); } }));
+          if (computer.canTakeOver) actions.append(Object.assign(document.createElement("button"), { type: "button", className: "computer-action primary", textContent: "Take Over / 接管", onclick: async () => { window.sovereignbotStopVoice?.(); await window.sovereignbot.thisPc.takeOver({ projectId: project.projectId, coworkerId: computer.coworkerId }); await safeRender(conversation); } }));
           if (computer.canHandBack) actions.append(Object.assign(document.createElement("button"), { type: "button", className: "computer-action primary", textContent: "Hand Back / 交还", onclick: async () => { await window.sovereignbot.thisPc.handBack({ projectId: project.projectId, coworkerId: computer.coworkerId }); await safeRender(conversation); } }));
           card.append(actions); root.append(card);
         }
@@ -322,7 +322,7 @@
       actions.append(release);
     } else {
       const take = makeButton(computer.control?.mode === "requested" ? "Take over now" : "Take control", "computer-action primary");
-      take.addEventListener("click", () => runAction(take, () => window.sovereignbot.computer.control({ agentId: binding.agentId, action: "take" }), refresh));
+      take.addEventListener("click", () => runAction(take, () => { window.sovereignbotStopVoice?.(); return window.sovereignbot.computer.control({ agentId: binding.agentId, action: "take" }); }, refresh));
       actions.append(take);
       const stop = makeButton("Stop");
       stop.addEventListener("click", () => runAction(stop, () => window.sovereignbot.computer.lifecycle({ agentId: binding.agentId, action: "stop" }), refresh));

@@ -16,6 +16,7 @@ export const APP_ASSETS = Object.freeze({
     "/": Object.freeze({ file: "index.html", type: HTML }),
     "/index.html": Object.freeze({ file: "index.html", type: HTML }),
     "/app.js": Object.freeze({ file: "app.js", type: JS }),
+    "/voice-controller.js": Object.freeze({ file: "voice-controller.js", type: JS }),
     "/style.css": Object.freeze({ file: "style.css", type: CSS }),
     "/artifacts-ui.js": Object.freeze({ file: "artifacts-ui.js", type: JS }),
     "/computer-ui.js": Object.freeze({ file: "computer-ui.js", type: JS }),
