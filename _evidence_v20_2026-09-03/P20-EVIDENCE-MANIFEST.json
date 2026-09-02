@@ -1,0 +1,22 @@
+{
+  "schema": "sovereignbot.desktop.acceptance-evidence.v1",
+  "workItem": "P20 Team Pack local file flow",
+  "at": "2026-09-03",
+  "sourceCommit": "839a314",
+  "publishEligible": false,
+  "checks": {
+    "electronTeamPackGate": "23/23 PASS",
+    "desktopTests": "278 pass, 1 skipped, 0 fail",
+    "syntax": "194 files",
+    "secretScan": "clean",
+    "diffCheck": "clean"
+  },
+  "artifacts": [
+    "verify-p11-team-packs.json",
+    "verify-p11-team-packs.log"
+  ],
+  "notes": [
+    "Evidence contains only local bounded public projections and acceptance logs.",
+    "The existing custom Edit prompt remains unchanged; the gate verifies its control reachability and the same preload IPC persistence contract separately."
+  ]
+}

@@ -1,0 +1,1003 @@
+{
+  "at": "2026-09-02T22:43:21.999Z",
+  "checks": {
+    "gate window stays hidden": true,
+    "renderer exposes the existing Team Pack gallery path": true,
+    "fresh gallery discovers the three differentiated first-party packs": true,
+    "gallery exposes Product, Sales, and Support filters": true,
+    "gallery search isolates Revenue Planning": true,
+    "gallery category filter isolates Customer Support": true,
+    "preview inspects the safe Customer Support composition": true,
+    "preview inspects the safe Product Discovery composition": true,
+    "gallery installs Product Discovery through the existing action": true,
+    "installed Product pack has the expected governed composition": true,
+    "installed pack does not enlist unrelated coworkers": true,
+    "first-party composition preview stays declarative": true,
+    "installed public projections stay path and authority free": true,
+    "installed Team Pack state is durable in the existing store": true,
+    "gallery exports a bounded declarative Team Pack through the native save path": true,
+    "gallery export result exposes only the selected file name": true,
+    "gallery imports the exported file through the native open path": true,
+    "gallery search and Custom filter expose reusable recipes": true,
+    "gallery exposes duplicate/edit controls and edited recipe persists through preload IPC": true,
+    "file import rejects authority-bearing Team Pack JSON": true,
+    "restart preserves installed first-party Team Pack": true,
+    "restart keeps gallery install status and safe user-facing state": true,
+    "restart public catalog stays path and authority free": true
+  },
+  "catalog": {
+    "schema": "sovereignbot.desktop.teams.v1",
+    "teams": [],
+    "packs": [
+      {
+        "id": "software-team",
+        "name": "Software Team",
+        "description": "A small delivery team that scopes, implements, reviews, and reports the result.",
+        "category": "Software",
+        "coworkerNames": [
+          "Chief of Staff",
+          "Coding Lead",
+          "Reviewer"
+        ],
+        "channelNames": [
+          "Project Channel"
+        ],
+        "playbookNames": [
+          "Software Delivery"
+        ],
+        "installed": false
+      },
+      {
+        "id": "research-team",
+        "name": "Research Team",
+        "description": "A focused research team that frames a question, investigates it, reviews evidence, and reports the result.",
+        "category": "Research",
+        "coworkerNames": [
+          "Chief of Staff",
+          "Research Lead",
+          "Reviewer"
+        ],
+        "channelNames": [
+          "Research Room"
+        ],
+        "playbookNames": [
+          "Research Brief"
+        ],
+        "installed": false
+      },
+      {
+        "id": "content-team",
+        "name": "Content Team",
+        "description": "A compact content team that shapes a brief, drafts the piece, reviews it, and delivers a polished result.",
+        "category": "Content",
+        "coworkerNames": [
+          "Chief of Staff",
+          "Content Lead",
+          "Reviewer"
+        ],
+        "channelNames": [
+          "Content Studio"
+        ],
+        "playbookNames": [
+          "Content Delivery"
+        ],
+        "installed": false
+      },
+      {
+        "id": "operations-team",
+        "name": "Operations Team",
+        "description": "A practical operations team that scopes a runbook, carries out bounded work, reviews it, and reports status.",
+        "category": "Operations",
+        "coworkerNames": [
+          "Chief of Staff",
+          "Operations Lead",
+          "Reviewer"
+        ],
+        "channelNames": [
+          "Operations Room"
+        ],
+        "playbookNames": [
+          "Operations Runbook"
+        ],
+        "installed": false
+      },
+      {
+        "id": "product-team",
+        "name": "Product Discovery Team",
+        "description": "A product discovery team that frames user problems, shapes a decision-ready brief, reviews trade-offs, and reports next steps.",
+        "category": "Product",
+        "coworkerNames": [
+          "Chief of Staff",
+          "Product Lead",
+          "Reviewer"
+        ],
+        "channelNames": [
+          "Product Discovery"
+        ],
+        "playbookNames": [
+          "Product Discovery"
+        ],
+        "installed": false
+      },
+      {
+        "id": "revenue-team",
+        "name": "Revenue Planning Team",
+        "description": "A revenue planning team that organizes account context, evaluates commercial options, reviews assumptions, and reports a bounded plan.",
+        "category": "Sales",
+        "coworkerNames": [
+          "Chief of Staff",
+          "Revenue Lead",
+          "Reviewer"
+        ],
+        "channelNames": [
+          "Revenue Planning"
+        ],
+        "playbookNames": [
+          "Revenue Planning"
+        ],
+        "installed": false
+      },
+      {
+        "id": "support-team",
+        "name": "Customer Support Team",
+        "description": "A customer support team that triages supplied cases, drafts grounded replies, reviews risks, and recommends escalation.",
+        "category": "Support",
+        "coworkerNames": [
+          "Chief of Staff",
+          "Support Lead",
+          "Reviewer"
+        ],
+        "channelNames": [
+          "Support Triage"
+        ],
+        "playbookNames": [
+          "Support Triage"
+        ],
+        "installed": false
+      }
+    ],
+    "channelTemplates": [
+      {
+        "id": "work",
+        "name": "Work Channel",
+        "kind": "work",
+        "instructions": "A focused work room for bounded tasks, progress updates, and teammate handoffs."
+      },
+      {
+        "id": "personal",
+        "name": "Personal Channel",
+        "kind": "personal",
+        "instructions": "A private-feeling planning room for the user's own context and next actions."
+      },
+      {
+        "id": "project",
+        "name": "Project Channel",
+        "kind": "project",
+        "instructions": "A shared project room for goals, artifacts, ownership, and a visible final result."
+      }
+    ]
+  },
+  "installed": {
+    "teams": {
+      "schema": "sovereignbot.desktop.teams.v1",
+      "teams": [
+        {
+          "id": "team_ebbb6cb0be140349",
+          "packId": "product-team",
+          "name": "Product Discovery Team",
+          "coworkerIds": [
+            "coworker_b82c630d92eef58a",
+            "coworker_fbce08ca3ec61ff4",
+            "coworker_78e6974cad1ac609"
+          ],
+          "coworkers": [
+            {
+              "id": "coworker_b82c630d92eef58a",
+              "name": "Chief of Staff"
+            },
+            {
+              "id": "coworker_fbce08ca3ec61ff4",
+              "name": "Product Lead"
+            },
+            {
+              "id": "coworker_78e6974cad1ac609",
+              "name": "Reviewer"
+            }
+          ],
+          "channelIds": [
+            "channel_592630c6c04b128d"
+          ],
+          "channels": [
+            {
+              "id": "channel_592630c6c04b128d",
+              "teamId": "team_ebbb6cb0be140349",
+              "kind": "project",
+              "name": "Product Discovery",
+              "instructions": "Product Discovery: Chief frames the outcome, Product Lead shapes the problem brief and criteria, Reviewer checks assumptions and trade-offs, and Chief reports the decision path.",
+              "coworkerIds": [
+                "coworker_b82c630d92eef58a",
+                "coworker_fbce08ca3ec61ff4",
+                "coworker_78e6974cad1ac609"
+              ],
+              "workspaceId": "ws_5062860373d59417",
+              "conversationId": "conv_a79798d02f119b63",
+              "playbookId": "product-discovery",
+              "archived": false,
+              "createdAt": "2026-09-02T22:43:20.389Z",
+              "updatedAt": "2026-09-02T22:43:20.389Z"
+            }
+          ],
+          "sharedWorkspaceId": "ws_5062860373d59417",
+          "sharedWorkspaceLabel": "Product Discovery Team project",
+          "privateWorkspaceLabel": "Private workspace",
+          "playbooks": [
+            {
+              "id": "product-discovery",
+              "name": "Product Discovery",
+              "description": "Chief frames → Product Lead shapes the brief → Reviewer checks trade-offs → Chief reports.",
+              "steps": [
+                "chief",
+                "specialist",
+                "reviewer",
+                "chief"
+              ]
+            }
+          ],
+          "flow": {
+            "stage": "complete",
+            "status": "available",
+            "pendingCoworkerIds": [],
+            "attentionCoworkerIds": [],
+            "channelId": "channel_592630c6c04b128d",
+            "activity": []
+          },
+          "createdAt": "2026-09-02T22:43:20.389Z",
+          "updatedAt": "2026-09-02T22:43:20.389Z"
+        }
+      ],
+      "packs": [
+        {
+          "id": "software-team",
+          "name": "Software Team",
+          "description": "A small delivery team that scopes, implements, reviews, and reports the result.",
+          "category": "Software",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Coding Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Project Channel"
+          ],
+          "playbookNames": [
+            "Software Delivery"
+          ],
+          "installed": false
+        },
+        {
+          "id": "research-team",
+          "name": "Research Team",
+          "description": "A focused research team that frames a question, investigates it, reviews evidence, and reports the result.",
+          "category": "Research",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Research Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Research Room"
+          ],
+          "playbookNames": [
+            "Research Brief"
+          ],
+          "installed": false
+        },
+        {
+          "id": "content-team",
+          "name": "Content Team",
+          "description": "A compact content team that shapes a brief, drafts the piece, reviews it, and delivers a polished result.",
+          "category": "Content",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Content Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Content Studio"
+          ],
+          "playbookNames": [
+            "Content Delivery"
+          ],
+          "installed": false
+        },
+        {
+          "id": "operations-team",
+          "name": "Operations Team",
+          "description": "A practical operations team that scopes a runbook, carries out bounded work, reviews it, and reports status.",
+          "category": "Operations",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Operations Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Operations Room"
+          ],
+          "playbookNames": [
+            "Operations Runbook"
+          ],
+          "installed": false
+        },
+        {
+          "id": "product-team",
+          "name": "Product Discovery Team",
+          "description": "A product discovery team that frames user problems, shapes a decision-ready brief, reviews trade-offs, and reports next steps.",
+          "category": "Product",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Product Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Product Discovery"
+          ],
+          "playbookNames": [
+            "Product Discovery"
+          ],
+          "installed": true
+        },
+        {
+          "id": "revenue-team",
+          "name": "Revenue Planning Team",
+          "description": "A revenue planning team that organizes account context, evaluates commercial options, reviews assumptions, and reports a bounded plan.",
+          "category": "Sales",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Revenue Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Revenue Planning"
+          ],
+          "playbookNames": [
+            "Revenue Planning"
+          ],
+          "installed": false
+        },
+        {
+          "id": "support-team",
+          "name": "Customer Support Team",
+          "description": "A customer support team that triages supplied cases, drafts grounded replies, reviews risks, and recommends escalation.",
+          "category": "Support",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Support Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Support Triage"
+          ],
+          "playbookNames": [
+            "Support Triage"
+          ],
+          "installed": false
+        }
+      ],
+      "channelTemplates": [
+        {
+          "id": "work",
+          "name": "Work Channel",
+          "kind": "work",
+          "instructions": "A focused work room for bounded tasks, progress updates, and teammate handoffs."
+        },
+        {
+          "id": "personal",
+          "name": "Personal Channel",
+          "kind": "personal",
+          "instructions": "A private-feeling planning room for the user's own context and next actions."
+        },
+        {
+          "id": "project",
+          "name": "Project Channel",
+          "kind": "project",
+          "instructions": "A shared project room for goals, artifacts, ownership, and a visible final result."
+        }
+      ]
+    },
+    "coworkers": {
+      "schema": "sovereignbot.desktop.coworkers.v1",
+      "coworkers": [
+        {
+          "id": "coworker_b82c630d92eef58a",
+          "name": "Chief of Staff",
+          "role": "Own the outcome, coordinate specialists, escalate only when human judgment is needed.",
+          "instructions": "Turn high-level goals into coordinated work. Delegate to the right coworkers, monitor progress, request review, and keep the user informed without exposing internal orchestration machinery.",
+          "avatar": "✦",
+          "providerPreference": "auto",
+          "modelBinding": {
+            "profile": "automatic"
+          },
+          "skillIds": [],
+          "workspaceIds": [
+            "ws_a917a8b088f7ab83"
+          ],
+          "computerMode": "shared-login",
+          "state": "active",
+          "createdAt": "2026-09-02T22:43:18.779Z",
+          "updatedAt": "2026-09-02T22:43:20.377Z"
+        },
+        {
+          "id": "coworker_2f4d6f00933e7818",
+          "name": "Coding Lead",
+          "role": "Implement, debug, test, and improve software in trusted workspaces.",
+          "instructions": "Take ownership of software changes. Inspect the workspace, make focused changes, run relevant checks, and hand important changes to an independent reviewer before declaring success.",
+          "avatar": "⌘",
+          "providerPreference": "codex",
+          "modelBinding": {
+            "profile": "efficient"
+          },
+          "skillIds": [],
+          "workspaceIds": [],
+          "computerMode": "shared-login",
+          "state": "active",
+          "createdAt": "2026-09-02T22:43:18.780Z",
+          "updatedAt": "2026-09-02T22:43:18.780Z"
+        },
+        {
+          "id": "coworker_42875ee177aa232f",
+          "name": "Researcher",
+          "role": "Investigate questions, compare evidence, and produce decision-ready findings.",
+          "instructions": "Research thoroughly, distinguish evidence from inference, preserve source provenance, and deliver concise findings that another coworker can act on.",
+          "avatar": "◈",
+          "providerPreference": "auto",
+          "modelBinding": {
+            "profile": "automatic"
+          },
+          "skillIds": [],
+          "workspaceIds": [],
+          "computerMode": "shared-login",
+          "state": "active",
+          "createdAt": "2026-09-02T22:43:18.782Z",
+          "updatedAt": "2026-09-02T22:43:18.782Z"
+        },
+        {
+          "id": "coworker_fbce08ca3ec61ff4",
+          "name": "Product Lead",
+          "role": "Turn user needs and evidence into a bounded product decision.",
+          "instructions": "Frame the user problem, distinguish evidence from assumptions, propose a concise product brief with acceptance criteria and trade-offs, and return a decision-ready draft for review. Do not promise implementation or access external systems.",
+          "avatar": "⌘",
+          "providerPreference": "codex",
+          "modelBinding": {
+            "profile": "efficient"
+          },
+          "skillIds": [],
+          "workspaceIds": [
+            "ws_9c914cd983e6152c"
+          ],
+          "computerMode": "shared-login",
+          "state": "active",
+          "createdAt": "2026-09-02T22:43:20.378Z",
+          "updatedAt": "2026-09-02T22:43:20.381Z"
+        },
+        {
+          "id": "coworker_78e6974cad1ac609",
+          "name": "Reviewer",
+          "role": "Review the specialist result and report risks or approval.",
+          "instructions": "Review the specialist result independently, identify concrete issues, and give the Chief a concise go/no-go assessment.",
+          "avatar": "✓",
+          "providerPreference": "codex",
+          "modelBinding": {
+            "profile": "efficient"
+          },
+          "skillIds": [],
+          "workspaceIds": [
+            "ws_14579d91c71e8bf6"
+          ],
+          "computerMode": "shared-login",
+          "state": "active",
+          "createdAt": "2026-09-02T22:43:20.382Z",
+          "updatedAt": "2026-09-02T22:43:20.386Z"
+        }
+      ]
+    },
+    "recipe": {
+      "schema": "sovereignbot.desktop.team-pack.v1",
+      "id": "product-team",
+      "name": "Product Discovery Team",
+      "description": "A product discovery team that frames user problems, shapes a decision-ready brief, reviews trade-offs, and reports next steps.",
+      "coworkers": [
+        {
+          "key": "chief",
+          "name": "Chief of Staff",
+          "role": "Own the outcome and coordinate the team.",
+          "instructions": "Scope the desired outcome, delegate the work to Product Lead, ask the Reviewer to check it, then synthesize the final answer for the user.",
+          "avatar": "✦",
+          "modelBinding": {
+            "profile": "automatic"
+          }
+        },
+        {
+          "key": "specialist",
+          "name": "Product Lead",
+          "role": "Turn user needs and evidence into a bounded product decision.",
+          "instructions": "Frame the user problem, distinguish evidence from assumptions, propose a concise product brief with acceptance criteria and trade-offs, and return a decision-ready draft for review. Do not promise implementation or access external systems.",
+          "avatar": "⌘",
+          "modelBinding": {
+            "profile": "efficient",
+            "provider": "codex",
+            "model": "luna"
+          }
+        },
+        {
+          "key": "reviewer",
+          "name": "Reviewer",
+          "role": "Review the specialist result and report risks or approval.",
+          "instructions": "Review the specialist result independently, identify concrete issues, and give the Chief a concise go/no-go assessment.",
+          "avatar": "✓",
+          "modelBinding": {
+            "profile": "efficient",
+            "provider": "codex",
+            "model": "luna"
+          }
+        }
+      ],
+      "channels": [
+        {
+          "key": "project",
+          "name": "Product Discovery",
+          "kind": "project",
+          "instructions": "Product Discovery: Chief frames the outcome, Product Lead shapes the problem brief and criteria, Reviewer checks assumptions and trade-offs, and Chief reports the decision path.",
+          "playbookId": "product-discovery"
+        }
+      ],
+      "playbooks": [
+        {
+          "id": "product-discovery",
+          "name": "Product Discovery",
+          "description": "Chief frames → Product Lead shapes the brief → Reviewer checks trade-offs → Chief reports.",
+          "steps": [
+            "chief",
+            "specialist",
+            "reviewer",
+            "chief"
+          ]
+        }
+      ]
+    }
+  },
+  "restart": {
+    "catalog": {
+      "schema": "sovereignbot.desktop.teams.v1",
+      "teams": [
+        {
+          "id": "team_ebbb6cb0be140349",
+          "packId": "product-team",
+          "name": "Product Discovery Team",
+          "coworkerIds": [
+            "coworker_b82c630d92eef58a",
+            "coworker_fbce08ca3ec61ff4",
+            "coworker_78e6974cad1ac609"
+          ],
+          "coworkers": [
+            {
+              "id": "coworker_b82c630d92eef58a",
+              "name": "Chief of Staff"
+            },
+            {
+              "id": "coworker_fbce08ca3ec61ff4",
+              "name": "Product Lead"
+            },
+            {
+              "id": "coworker_78e6974cad1ac609",
+              "name": "Reviewer"
+            }
+          ],
+          "channelIds": [
+            "channel_592630c6c04b128d"
+          ],
+          "channels": [
+            {
+              "id": "channel_592630c6c04b128d",
+              "teamId": "team_ebbb6cb0be140349",
+              "kind": "project",
+              "name": "Product Discovery",
+              "instructions": "Product Discovery: Chief frames the outcome, Product Lead shapes the problem brief and criteria, Reviewer checks assumptions and trade-offs, and Chief reports the decision path.",
+              "coworkerIds": [
+                "coworker_b82c630d92eef58a",
+                "coworker_fbce08ca3ec61ff4",
+                "coworker_78e6974cad1ac609"
+              ],
+              "workspaceId": "ws_5062860373d59417",
+              "conversationId": "conv_a79798d02f119b63",
+              "playbookId": "product-discovery",
+              "archived": false,
+              "createdAt": "2026-09-02T22:43:20.389Z",
+              "updatedAt": "2026-09-02T22:43:20.389Z"
+            }
+          ],
+          "sharedWorkspaceId": "ws_5062860373d59417",
+          "sharedWorkspaceLabel": "Product Discovery Team project",
+          "privateWorkspaceLabel": "Private workspace",
+          "playbooks": [
+            {
+              "id": "product-discovery",
+              "name": "Product Discovery",
+              "description": "Chief frames → Product Lead shapes the brief → Reviewer checks trade-offs → Chief reports.",
+              "steps": [
+                "chief",
+                "specialist",
+                "reviewer",
+                "chief"
+              ]
+            }
+          ],
+          "flow": {
+            "stage": "complete",
+            "status": "available",
+            "pendingCoworkerIds": [],
+            "attentionCoworkerIds": [],
+            "channelId": "channel_592630c6c04b128d",
+            "activity": []
+          },
+          "createdAt": "2026-09-02T22:43:20.389Z",
+          "updatedAt": "2026-09-02T22:43:20.389Z"
+        },
+        {
+          "id": "team_1d237336814ec519",
+          "packId": "imported:product-team",
+          "name": "Product Discovery Team",
+          "coworkerIds": [
+            "coworker_b82c630d92eef58a",
+            "coworker_fbce08ca3ec61ff4",
+            "coworker_78e6974cad1ac609"
+          ],
+          "coworkers": [
+            {
+              "id": "coworker_b82c630d92eef58a",
+              "name": "Chief of Staff"
+            },
+            {
+              "id": "coworker_fbce08ca3ec61ff4",
+              "name": "Product Lead"
+            },
+            {
+              "id": "coworker_78e6974cad1ac609",
+              "name": "Reviewer"
+            }
+          ],
+          "channelIds": [
+            "channel_60ef5c04068d59c5"
+          ],
+          "channels": [
+            {
+              "id": "channel_60ef5c04068d59c5",
+              "teamId": "team_1d237336814ec519",
+              "kind": "project",
+              "name": "Product Discovery",
+              "instructions": "Product Discovery: Chief frames the outcome, Product Lead shapes the problem brief and criteria, Reviewer checks assumptions and trade-offs, and Chief reports the decision path.",
+              "coworkerIds": [
+                "coworker_b82c630d92eef58a",
+                "coworker_fbce08ca3ec61ff4",
+                "coworker_78e6974cad1ac609"
+              ],
+              "workspaceId": "ws_93d21b51553631eb",
+              "conversationId": "conv_29523ca7bc6d19e2",
+              "playbookId": "product-discovery",
+              "archived": false,
+              "createdAt": "2026-09-02T22:43:20.584Z",
+              "updatedAt": "2026-09-02T22:43:20.584Z"
+            }
+          ],
+          "sharedWorkspaceId": "ws_93d21b51553631eb",
+          "sharedWorkspaceLabel": "Product Discovery Team project",
+          "privateWorkspaceLabel": "Private workspace",
+          "playbooks": [
+            {
+              "id": "product-discovery",
+              "name": "Product Discovery",
+              "description": "Chief frames → Product Lead shapes the brief → Reviewer checks trade-offs → Chief reports.",
+              "steps": [
+                "chief",
+                "specialist",
+                "reviewer",
+                "chief"
+              ]
+            }
+          ],
+          "flow": {
+            "stage": "complete",
+            "status": "available",
+            "pendingCoworkerIds": [],
+            "attentionCoworkerIds": [],
+            "channelId": "channel_60ef5c04068d59c5",
+            "activity": []
+          },
+          "createdAt": "2026-09-02T22:43:20.584Z",
+          "updatedAt": "2026-09-02T22:43:20.584Z"
+        }
+      ],
+      "packs": [
+        {
+          "id": "software-team",
+          "name": "Software Team",
+          "description": "A small delivery team that scopes, implements, reviews, and reports the result.",
+          "category": "Software",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Coding Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Project Channel"
+          ],
+          "playbookNames": [
+            "Software Delivery"
+          ],
+          "installed": false
+        },
+        {
+          "id": "research-team",
+          "name": "Research Team",
+          "description": "A focused research team that frames a question, investigates it, reviews evidence, and reports the result.",
+          "category": "Research",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Research Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Research Room"
+          ],
+          "playbookNames": [
+            "Research Brief"
+          ],
+          "installed": false
+        },
+        {
+          "id": "content-team",
+          "name": "Content Team",
+          "description": "A compact content team that shapes a brief, drafts the piece, reviews it, and delivers a polished result.",
+          "category": "Content",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Content Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Content Studio"
+          ],
+          "playbookNames": [
+            "Content Delivery"
+          ],
+          "installed": false
+        },
+        {
+          "id": "operations-team",
+          "name": "Operations Team",
+          "description": "A practical operations team that scopes a runbook, carries out bounded work, reviews it, and reports status.",
+          "category": "Operations",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Operations Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Operations Room"
+          ],
+          "playbookNames": [
+            "Operations Runbook"
+          ],
+          "installed": false
+        },
+        {
+          "id": "product-team",
+          "name": "Product Discovery Team",
+          "description": "A product discovery team that frames user problems, shapes a decision-ready brief, reviews trade-offs, and reports next steps.",
+          "category": "Product",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Product Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Product Discovery"
+          ],
+          "playbookNames": [
+            "Product Discovery"
+          ],
+          "installed": true
+        },
+        {
+          "id": "revenue-team",
+          "name": "Revenue Planning Team",
+          "description": "A revenue planning team that organizes account context, evaluates commercial options, reviews assumptions, and reports a bounded plan.",
+          "category": "Sales",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Revenue Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Revenue Planning"
+          ],
+          "playbookNames": [
+            "Revenue Planning"
+          ],
+          "installed": false
+        },
+        {
+          "id": "support-team",
+          "name": "Customer Support Team",
+          "description": "A customer support team that triages supplied cases, drafts grounded replies, reviews risks, and recommends escalation.",
+          "category": "Support",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Support Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Support Triage"
+          ],
+          "playbookNames": [
+            "Support Triage"
+          ],
+          "installed": false
+        },
+        {
+          "id": "imported:product-team",
+          "name": "Product Discovery Team",
+          "description": "A reusable team recipe saved in SovereignBot.",
+          "category": "Custom",
+          "custom": true,
+          "coworkerNames": [
+            "Chief of Staff",
+            "Product Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Product Discovery"
+          ],
+          "playbookNames": [
+            "Product Discovery"
+          ],
+          "installed": true
+        },
+        {
+          "id": "custom-pack-087085d0f17f",
+          "name": "P20 Edited Recipe",
+          "description": "P20 edited declarative recipe",
+          "category": "Custom",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Product Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Product Discovery"
+          ],
+          "playbookNames": [
+            "Product Discovery"
+          ],
+          "installed": false,
+          "custom": true
+        }
+      ],
+      "channelTemplates": [
+        {
+          "id": "work",
+          "name": "Work Channel",
+          "kind": "work",
+          "instructions": "A focused work room for bounded tasks, progress updates, and teammate handoffs."
+        },
+        {
+          "id": "personal",
+          "name": "Personal Channel",
+          "kind": "personal",
+          "instructions": "A private-feeling planning room for the user's own context and next actions."
+        },
+        {
+          "id": "project",
+          "name": "Project Channel",
+          "kind": "project",
+          "instructions": "A shared project room for goals, artifacts, ownership, and a visible final result."
+        }
+      ]
+    },
+    "coworkers": {
+      "schema": "sovereignbot.desktop.coworkers.v1",
+      "coworkers": [
+        {
+          "id": "coworker_b82c630d92eef58a",
+          "name": "Chief of Staff",
+          "role": "Own the outcome, coordinate specialists, escalate only when human judgment is needed.",
+          "instructions": "Turn high-level goals into coordinated work. Delegate to the right coworkers, monitor progress, request review, and keep the user informed without exposing internal orchestration machinery.",
+          "avatar": "✦",
+          "providerPreference": "auto",
+          "modelBinding": {
+            "profile": "automatic"
+          },
+          "skillIds": [],
+          "workspaceIds": [
+            "ws_a917a8b088f7ab83"
+          ],
+          "computerMode": "shared-login",
+          "state": "active",
+          "createdAt": "2026-09-02T22:43:18.779Z",
+          "updatedAt": "2026-09-02T22:43:20.377Z"
+        },
+        {
+          "id": "coworker_2f4d6f00933e7818",
+          "name": "Coding Lead",
+          "role": "Implement, debug, test, and improve software in trusted workspaces.",
+          "instructions": "Take ownership of software changes. Inspect the workspace, make focused changes, run relevant checks, and hand important changes to an independent reviewer before declaring success.",
+          "avatar": "⌘",
+          "providerPreference": "codex",
+          "modelBinding": {
+            "profile": "efficient"
+          },
+          "skillIds": [],
+          "workspaceIds": [],
+          "computerMode": "shared-login",
+          "state": "active",
+          "createdAt": "2026-09-02T22:43:18.780Z",
+          "updatedAt": "2026-09-02T22:43:18.780Z"
+        },
+        {
+          "id": "coworker_42875ee177aa232f",
+          "name": "Researcher",
+          "role": "Investigate questions, compare evidence, and produce decision-ready findings.",
+          "instructions": "Research thoroughly, distinguish evidence from inference, preserve source provenance, and deliver concise findings that another coworker can act on.",
+          "avatar": "◈",
+          "providerPreference": "auto",
+          "modelBinding": {
+            "profile": "automatic"
+          },
+          "skillIds": [],
+          "workspaceIds": [],
+          "computerMode": "shared-login",
+          "state": "active",
+          "createdAt": "2026-09-02T22:43:18.782Z",
+          "updatedAt": "2026-09-02T22:43:18.782Z"
+        },
+        {
+          "id": "coworker_fbce08ca3ec61ff4",
+          "name": "Product Lead",
+          "role": "Turn user needs and evidence into a bounded product decision.",
+          "instructions": "Frame the user problem, distinguish evidence from assumptions, propose a concise product brief with acceptance criteria and trade-offs, and return a decision-ready draft for review. Do not promise implementation or access external systems.",
+          "avatar": "⌘",
+          "providerPreference": "codex",
+          "modelBinding": {
+            "profile": "efficient"
+          },
+          "skillIds": [],
+          "workspaceIds": [
+            "ws_9c914cd983e6152c"
+          ],
+          "computerMode": "shared-login",
+          "state": "active",
+          "createdAt": "2026-09-02T22:43:20.378Z",
+          "updatedAt": "2026-09-02T22:43:20.381Z"
+        },
+        {
+          "id": "coworker_78e6974cad1ac609",
+          "name": "Reviewer",
+          "role": "Review the specialist result and report risks or approval.",
+          "instructions": "Review the specialist result independently, identify concrete issues, and give the Chief a concise go/no-go assessment.",
+          "avatar": "✓",
+          "providerPreference": "codex",
+          "modelBinding": {
+            "profile": "efficient"
+          },
+          "skillIds": [],
+          "workspaceIds": [
+            "ws_14579d91c71e8bf6"
+          ],
+          "computerMode": "shared-login",
+          "state": "active",
+          "createdAt": "2026-09-02T22:43:20.382Z",
+          "updatedAt": "2026-09-02T22:43:20.386Z"
+        }
+      ]
+    }
+  }
+}
