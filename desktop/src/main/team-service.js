@@ -906,6 +906,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
             kind: productEvent.kind,
             label: productEvent.label,
             status: productEvent.status,
+            conversationId: String(event.conversationId),
             ...(ownerId ? { owner: coworkerName(ownerId) } : {}),
             ...(targetCoworkerId ? { targetCoworker: coworkerName(targetCoworkerId) } : {}),
             ...(event.artifactIds?.length ? { artifactIds: [...event.artifactIds] } : {}),

@@ -31,6 +31,8 @@ const state = {
   inlineAttentionFor: undefined,
   inlineAttentionAt: 0,
   inlineAttentionRequest: 0,
+  activityScopeTeamId: undefined,
+  activityRequestId: 0,
 };
 
 let voiceController;
@@ -112,6 +114,17 @@ function channelForConversation(conversationId) {
 function teamForConversation(conversationId) {
   const channel = channelForConversation(conversationId);
   return channel ? state.teams.find((entry) => entry.id === channel.teamId) : undefined;
+}
+
+function activityContext() {
+  const contextualTeam = teamForConversation(state.selectedConversationId);
+  if (contextualTeam) return { team: contextualTeam, teamId: contextualTeam.id, conversationId: state.selectedConversationId, contextual: true };
+  const team = state.teams.find((entry) => entry.id === state.activityScopeTeamId) ?? state.teams[0];
+  return team ? { team, teamId: team.id, contextual: false } : { contextual: false };
+}
+
+function activityContextKey(context = activityContext()) {
+  return `${context.teamId ?? "none"}:${context.conversationId ?? "team"}`;
 }
 
 function bindingFor(coworkerId) {
@@ -406,6 +419,7 @@ async function refreshTeams() {
   renderConnectedApps();
   renderTeamPackActions();
   renderSidebar();
+  if (!$("activity-drawer")?.classList.contains("hidden")) renderActivityTeamSelector(activityContext());
 }
 
 async function refreshProjects() {
@@ -459,6 +473,7 @@ async function openConversation(conversationId) {
     const root = document.scrollingElement;
     if (root && root.scrollTop !== 0) root.scrollTop = 0;
   } catch {}
+  if (!$("activity-drawer")?.classList.contains("hidden")) void refreshActivity();
 }
 
 function participantCoworkers(conversation) {
@@ -2272,12 +2287,213 @@ async function saveSimpleSetting(key, value) {
   }
 }
 
+const ACTIVITY_STATUS_LABELS = Object.freeze({
+  working: "Working / 工作中",
+  active: "Active / 活跃",
+  completed: "Complete / 已完成",
+  available: "Complete / 已完成",
+  attention: "Attention / 需处理",
+  "needs-attention": "Attention / 需处理",
+  stopped: "Stopped / 已停止",
+  waiting: "Waiting / 等待中",
+});
+
+const ACTIVITY_STAGE_LABELS = Object.freeze({
+  chief: "Chief",
+  "coding-lead": "Coding Lead",
+  specialist: "Specialist",
+  reviewer: "Reviewer",
+  synthesis: "Synthesis",
+  complete: "Complete",
+});
+
+function activityStatusLabel(value) {
+  return ACTIVITY_STATUS_LABELS[value] ?? "Team activity / 团队动态";
+}
+
+function activityStageLabel(value) {
+  return ACTIVITY_STAGE_LABELS[value] ?? "Unassigned phase / 未分配阶段";
+}
+
+function renderActivityTeamSelector(context = activityContext()) {
+  const select = $("activity-team-select");
+  if (!select) return;
+  select.textContent = "";
+  if (!state.teams.length) {
+    const option = document.createElement("option");
+    option.textContent = "No managed Teams / 没有受管团队";
+    option.value = "";
+    select.append(option);
+    select.disabled = true;
+    return;
+  }
+  for (const team of state.teams) {
+    const option = document.createElement("option");
+    option.value = team.id;
+    option.textContent = team.name;
+    option.selected = team.id === context.teamId;
+    select.append(option);
+  }
+  select.disabled = Boolean(context.contextual);
+  if (context.teamId) select.value = context.teamId;
+}
+
+function appendActivitySummaryRow(root, label, value) {
+  const row = document.createElement("div");
+  row.className = "team-activity-summary-row";
+  const key = document.createElement("span");
+  key.className = "team-activity-summary-label";
+  key.textContent = label;
+  const copy = document.createElement("strong");
+  copy.textContent = value;
+  row.append(key, copy);
+  root.append(row);
+}
+
+function renderTeamActivitySummary(context = activityContext()) {
+  const contextEl = $("team-activity-context");
+  const summary = $("team-activity-summary");
+  if (!summary) return;
+  summary.textContent = "";
+  if (!context.team) {
+    if (contextEl) contextEl.textContent = "Choose a managed Team to inspect its bounded collaboration history. / 请选择受管团队以查看有界协作历史。";
+    const empty = document.createElement("p");
+    empty.className = "activity-empty-copy";
+    empty.textContent = "No managed Team is available yet. / 当前还没有可用的受管团队。";
+    summary.append(empty);
+    return;
+  }
+  const channel = context.conversationId ? channelForConversation(context.conversationId) : undefined;
+  const flow = context.team.flow ?? {};
+  if (contextEl) contextEl.textContent = channel
+    ? `Context: ${context.team.name} · ${channel.name}${channel.archived ? " · Archived / 已归档" : ""}`
+    : `Scope: ${context.team.name} · all Team Channels / 全部团队频道`;
+  appendActivitySummaryRow(summary, "Team / 团队", context.team.name);
+  appendActivitySummaryRow(summary, "Status / 状态", activityStatusLabel(flow.status ?? "waiting"));
+  appendActivitySummaryRow(summary, "Phase / 阶段", activityStageLabel(flow.stage));
+  appendActivitySummaryRow(summary, "Current owner / 当前负责人", flow.currentOwner ?? "No active owner / 当前无负责人");
+  if (flow.activeFanout?.children?.length) {
+    const children = flow.activeFanout.children;
+    const done = children.filter((entry) => entry.status === "completed").length;
+    const progress = `${done}/${children.length} specialists complete · ${flow.activeFanout.state === "reviewing" ? "Reviewing" : flow.activeFanout.state === "joining" || flow.activeFanout.state === "join_requested" ? "Joining results" : "Parallel work"}`;
+    appendActivitySummaryRow(summary, "Parallel / 并行", progress);
+  } else if (flow.activeProtocol) {
+    const protocol = flow.activeProtocol;
+    const kind = protocol.kind === "review" ? "Review" : "Handoff";
+    appendActivitySummaryRow(summary, "Collaboration / 协作", `${kind} · ${protocol.targetCoworker ?? "teammate"} · ${protocol.state}`);
+  } else {
+    appendActivitySummaryRow(summary, "Collaboration / 协作", flow.status === "needs-attention" ? (flow.attentionReason ?? "Needs a decision / 需要决策") : "No active request / 当前无活动请求");
+  }
+}
+
+function appendActivityAction(root, label, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "quiet-action";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  root.append(button);
+}
+
+function renderTeamActivityEvents(events, context) {
+  const status = $("team-activity-status");
+  const timeline = $("team-activity-timeline");
+  if (!timeline || !status) return;
+  timeline.textContent = "";
+  status.className = "activity-status";
+  if (!events.length) {
+    status.textContent = "No Team events in this scope yet. / 当前范围暂无团队动态。";
+    return;
+  }
+  status.textContent = `Showing ${events.length} bounded event${events.length === 1 ? "" : "s"}, newest first. / 显示 ${events.length} 条有界动态，最新在前。`;
+  for (const event of events) {
+    const row = document.createElement("article");
+    row.className = `team-activity-row status-${event.status ?? "working"}`;
+    row.setAttribute("role", "listitem");
+    const header = document.createElement("div");
+    header.className = "team-activity-row-header";
+    const title = document.createElement("strong");
+    title.textContent = event.label ?? "Team activity";
+    const badge = document.createElement("span");
+    badge.className = "activity-event-status";
+    badge.textContent = activityStatusLabel(event.status);
+    const time = document.createElement("time");
+    const timestamp = new Date(event.at);
+    if (Number.isFinite(timestamp.getTime())) {
+      time.dateTime = timestamp.toISOString();
+      time.textContent = formatTime(event.at) || "Time";
+      time.title = timestamp.toLocaleString();
+    } else time.textContent = "Time unavailable / 时间不可用";
+    header.append(title, badge, time);
+    row.append(header);
+    const people = [];
+    if (event.owner) people.push(`Owner: ${event.owner}`);
+    if (event.targetCoworker) people.push(`Target: ${event.targetCoworker}`);
+    if (people.length) {
+      const meta = document.createElement("p");
+      meta.className = "team-activity-row-meta";
+      meta.textContent = people.join(" · ");
+      row.append(meta);
+    }
+    if (event.reason) {
+      const reason = document.createElement("p");
+      reason.className = "team-activity-row-reason";
+      reason.textContent = event.reason;
+      row.append(reason);
+    }
+    const details = [];
+    if (event.decision) details.push(`Decision: ${event.decision === "approved" ? "Approved" : "Changes requested"}`);
+    if (Number.isInteger(event.revision)) details.push(`Revision ${event.revision}`);
+    if (event.artifactIds?.length) details.push(`${event.artifactIds.length} artifact${event.artifactIds.length === 1 ? "" : "s"}`);
+    if (details.length) {
+      const detail = document.createElement("p");
+      detail.className = "team-activity-row-detail";
+      detail.textContent = details.join(" · ");
+      row.append(detail);
+    }
+    const actions = document.createElement("div");
+    actions.className = "team-activity-row-actions";
+    const sourceChannel = state.channels.find((channel) => channel.teamId === context.teamId && channel.conversationId === event.conversationId);
+    if (sourceChannel) appendActivityAction(actions, `Open ${sourceChannel.name} / 打开频道`, async () => { hide($("activity-drawer")); await openConversation(sourceChannel.conversationId); });
+    if (event.artifactIds?.length) appendActivityAction(actions, `Files & Artifacts (${event.artifactIds.length}) / 文件成果`, () => { hide($("activity-drawer")); $("nav-artifacts")?.click(); });
+    if (event.status === "attention" || event.label === "Attention") appendActivityAction(actions, "Open Attention / 打开需关注", () => { hide($("activity-drawer")); $("nav-attention")?.click(); });
+    if (actions.childElementCount) row.append(actions);
+    timeline.append(row);
+  }
+}
+
+function renderTeamActivityLoading(context) {
+  renderActivityTeamSelector(context);
+  renderTeamActivitySummary(context);
+  const status = $("team-activity-status");
+  const timeline = $("team-activity-timeline");
+  if (status) { status.className = "activity-status loading"; status.textContent = "Loading Team activity… / 正在加载团队动态……"; }
+  if (timeline) timeline.textContent = "";
+}
+
 async function refreshActivity() {
-  try {
-    const [overview, audit] = await Promise.all([
-      window.sovereignbot.operator.getOverview({}),
-      window.sovereignbot.operator.getAudit({ limit: 30 }),
-    ]);
+  const requestId = ++state.activityRequestId;
+  const context = activityContext();
+  const contextKey = activityContextKey(context);
+  renderTeamActivityLoading(context);
+  const teamPromise = context.teamId
+    ? window.sovereignbot.teams.activity(context.conversationId ? { conversationId: context.conversationId, limit: 24 } : { teamId: context.teamId, limit: 24 })
+    : Promise.resolve({ events: [] });
+  const runtimePromise = Promise.all([
+    window.sovereignbot.operator.getOverview({}),
+    window.sovereignbot.operator.getAudit({ limit: 30 }),
+  ]);
+  const [teamResult, runtimeResult] = await Promise.allSettled([teamPromise, runtimePromise]);
+  if (requestId !== state.activityRequestId || activityContextKey() !== contextKey) return;
+  if (teamResult.status === "fulfilled") renderTeamActivityEvents(Array.isArray(teamResult.value?.events) ? teamResult.value.events : [], context);
+  else {
+    const status = $("team-activity-status");
+    const timeline = $("team-activity-timeline");
+    if (status) { status.className = "activity-status error"; status.textContent = "Team activity is unavailable right now. / 团队动态暂不可用。"; }
+    if (timeline) timeline.textContent = "";
+  }
+  if (runtimeResult.status === "fulfilled") {
+    const [overview, audit] = runtimeResult.value;
     const agents = (overview.agents ?? []).map((entry) => `${entry.name || entry.id} · ${entry.harnessKind || entry.harness?.kind || ""}`);
     const tasks = overview.tasks ?? [];
     const counts = {};
@@ -2285,8 +2501,8 @@ async function refreshActivity() {
     $("overview-block").textContent = `Coworker/runtime agents\n${agents.join("\n") || "…"}\n\nTasks ${JSON.stringify(counts)}`;
     const auditEntries = Array.isArray(audit) ? audit : (audit?.entries ?? []);
     $("audit-block").textContent = auditEntries.map((entry) => `${entry.at ?? ""}  ${entry.type}  ${entry.subject ?? ""}`).join("\n") || "No audit entries.";
-  } catch {
-    $("overview-block").textContent = "Activity is unavailable in this runtime mode.";
+  } else {
+    $("overview-block").textContent = "Runtime overview is unavailable in this mode.";
     $("audit-block").textContent = "";
   }
 }
@@ -2351,6 +2567,13 @@ function bindEvents() {
   $("close-details").addEventListener("click", () => hide($("details-panel")));
   $("nav-settings").addEventListener("click", async () => { switchView("settings"); await refreshSettingsData(); });
   $("nav-activity").addEventListener("click", async () => { show($("activity-drawer")); await refreshActivity(); });
+  $("activity-refresh")?.addEventListener("click", () => { void refreshActivity(); });
+  $("activity-team-select")?.addEventListener("change", (event) => {
+    const context = activityContext();
+    if (context.contextual) return;
+    state.activityScopeTeamId = event.target.value || undefined;
+    void refreshActivity();
+  });
   $("close-activity").addEventListener("click", () => hide($("activity-drawer")));
 
   $("settings-refresh-providers").addEventListener("click", async () => {

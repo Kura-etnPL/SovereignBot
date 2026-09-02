@@ -32,6 +32,7 @@ test("collaboration runs and events are durable, correlated, and owner-gated", (
 
         const started = teams.activity({ conversationId: created.conversation.id });
         assert.equal(started.schema, COLLABORATION_SCHEMA);
+        assert.equal(started.events[0].conversationId, created.conversation.id);
         assert.equal(started.events[0].kind, "working");
         assert.equal(started.events[0].label, "Working");
         assert.equal(Object.keys(started.events[0]).some((key) => /(?:event|run|request|operation|token|protocol)/i.test(key)), false);
