@@ -20,7 +20,7 @@ console.error(`[verify-v47] spawning hidden artifact lineage gate (timeout ${TIM
 const child = spawn(process.platform === "win32" ? electronExe : electronBin, [`--user-data-dir=${join(tempRoot, "electron-user-data")}`, "src/main/verify-v47-artifact-lineage-entry.js"], {
   cwd: DESKTOP_ROOT,
   stdio: ["ignore", "pipe", "pipe"],
-  env: { ...process.env, SOVEREIGNBOT_V47_TEMP_ROOT: tempRoot },
+  env: { ...process.env, SOVEREIGNBOT_V48_TEMP_ROOT: tempRoot },
   shell: false,
   windowsHide: true,
 });

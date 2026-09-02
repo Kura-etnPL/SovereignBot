@@ -169,6 +169,7 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
             createdAt: artifact.createdAt,
             version: Number.isInteger(artifact.version) ? artifact.version : undefined,
             artifactFamilyId: safeOpaqueId(artifact.artifactFamilyId ?? artifact.id),
+            parentArtifactId: safeOpaqueId(artifact.parentArtifactId),
             creator: creator ? { id: safeOpaqueId(creator.id), name: safeHistoryText(creator.name, 120) } : undefined,
             coworkerId: safeOpaqueId(artifact.createdByCoworkerId),
             team: channel ? { id: safeOpaqueId(channel.teamId), name: safeHistoryText(channel.teamName, 120) } : undefined,

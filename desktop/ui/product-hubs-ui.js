@@ -474,7 +474,7 @@
 // without creating another store or execution engine.
 (() => {
   const api = window.sovereignbot;
-  if (!api?.playbooks || !api?.artifacts?.hub || !api?.skills || !api?.teams) return;
+  if (!api?.playbooks || !api?.artifacts?.hub || typeof api.artifacts.history !== "function" || typeof api.artifacts.restoreAsNewVersion !== "function" || typeof api.artifacts.reviseViaDialog !== "function" || !api?.skills || !api?.teams) return;
   const $ = (id) => document.getElementById(id);
   const pageRoots = {
     playbooks: $("product-playbooks-page"),
@@ -544,7 +544,24 @@
       const title = document.createElement("h3"); title.textContent = item.title || item.fileName;
       card.append(title, text("Type", item.mimeType), text("Version", item.version ? `v${item.version}` : "Original"), text("Creator", item.creator?.name), text("Team", item.team?.name), text("Channel", item.channel?.name), text("Created", item.createdAt), text("History", item.history?.map((entry) => `${entry.event} · ${entry.timestamp}`).join(", ")), text("Status", item.status));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Preview / 预览", async () => { const preview = await api.artifacts.preview({ artifactId: item.id }); window.alert(preview?.preview || "Preview is not available."); }, root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root), button("History / 历史", async () => { const result = await api.artifacts.history({ artifactId: item.id }); window.alert((result.artifacts ?? []).map((entry) => `v${entry.version ?? 1} · ${entry.createdAt}${entry.parentArtifactId ? " · restored" : " · created"}`).join("\n") || "No history available."); }, root), button("Restore as new version / 恢复为新版本", async () => { await api.artifacts.restoreAsNewVersion({ artifactId: item.id }); await refresh(); }, root));
+      actions.append(button("Preview / 预览", async () => { const preview = await api.artifacts.preview({ artifactId: item.id }); window.alert(preview?.preview || "Preview is not available."); }, root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root), button("History / 历史", async () => {
+        const existing = card.querySelector(".artifact-history-panel");
+        if (existing) { existing.remove(); return; }
+        const result = await api.artifacts.history({ artifactId: item.id });
+        const panel = document.createElement("div"); panel.className = "artifact-history-panel";
+        for (const entry of result.artifacts ?? []) {
+          const row = document.createElement("div"); row.className = "artifact-history-row";
+          row.append(text("Version", `v${entry.version ?? 1}`), text("Created", entry.createdAt), text("State", entry.parentArtifactId ? "Restored" : "Original"));
+          row.append(button(`Restore v${entry.version ?? 1} as new version / 恢复为新版本`, async () => { await api.artifacts.restoreAsNewVersion({ artifactId: entry.id }); await refresh(); }, root));
+          panel.append(row);
+        }
+        if (!result.artifacts?.length) panel.append(text("History", "No history available."));
+        card.append(panel);
+      }, root), button("Restore as new version / 恢复为新版本", async () => { await api.artifacts.restoreAsNewVersion({ artifactId: item.id }); await refresh(); }, root), button("Revise with local file / 选择文件生成修订版", async () => {
+        const result = await api.artifacts.reviseViaDialog({ artifactId: item.id });
+        if (result?.error) throw new Error(result.error);
+        if (!result?.canceled && result?.artifact) await refresh();
+      }, root));
       if (item.conversationId) actions.append(button("Go to conversation / 前往会话", () => openConversationSafe(item.conversationId), root));
       card.append(actions); root.append(card);
     }

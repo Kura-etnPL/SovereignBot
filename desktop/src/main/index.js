@@ -17,7 +17,7 @@ import { createEventTriggerController } from "./event-trigger-controller.js";
 import { createCoworkerStore } from "./coworker-store.js";
 import { createConversationStore } from "./conversation-store.js";
 import { createArtifactStore } from "./artifact-store.js";
-import { createAttachmentAwareConversationStore, pickConversationAttachments } from "./attachment-integration.js";
+import { createAttachmentAwareConversationStore, pickArtifactRevision, pickConversationAttachments } from "./attachment-integration.js";
 import { createSkillStore } from "./skill-store.js";
 import { createSkillAwareConversationStore, createSkillHandlers } from "./skill-integration.js";
 import { createTeachOnceController } from "./teach-once-controller.js";
@@ -756,6 +756,7 @@ async function main() {
                 "artifact:preview": ({ artifactId }) => artifactStore.previewText(artifactId),
                 "artifact:history": ({ artifactId }) => productSurfaces.artifactHistory({ artifactId }),
                 "artifact:restoreAsNewVersion": ({ artifactId }) => artifactStore.restoreAsNewVersion(artifactId),
+                "artifact:reviseViaDialog": ({ artifactId }) => pickArtifactRevision({ win, dialog, artifactStore, artifactId }),
                 "artifact:open": async ({ artifactId }) => {
                     const managedPath = artifactStore.managedPath(artifactId);
                     if (process.env.SOVEREIGNBOT_VERIFY_SOFTWARE_TEAM === "1") return { ok: true, verified: "managed-artifact", action: "open", artifactId };
@@ -864,7 +865,7 @@ async function main() {
         };
         const searchMutationChannels = new Set([
             "conversation:createDirect", "conversation:createTeam", "conversation:send", "conversation:redirect",
-            "artifact:attachViaDialog", "artifact:restoreAsNewVersion", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
+            "artifact:attachViaDialog", "artifact:restoreAsNewVersion", "artifact:reviseViaDialog", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
             "team:installPack", "team:importPack", "team:importPlaybook", "team:createChannelFromTemplate",
             "playbook:create", "playbook:update", "playbook:archive", "playbook:restore", "playbook:duplicate", "playbook:import", "playbook:assign",
             "channel:create", "channel:update", "channel:archive", "channel:restore",

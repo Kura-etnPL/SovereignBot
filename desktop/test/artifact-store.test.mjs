@@ -102,23 +102,32 @@ test("artifact restore creates an immutable durable version lineage", () => {
             conversationId: "conv_1234567890abcdef",
             sourceMessageId: "msg_1234567890abcdef",
         });
+        const revisionPath = join(workspace, "reports", "revision.md");
+        writeFileSync(revisionPath, "# Release v2\n", "utf8");
+        const revised = store.reviseFromPickedFile({ artifactId: source.id, sourcePath: revisionPath });
         const restored = store.restoreAsNewVersion(source.id);
+        assert.notEqual(revised.id, source.id);
         assert.notEqual(restored.id, source.id);
+        assert.notEqual(restored.id, revised.id);
         assert.equal(source.version, 1);
-        assert.equal(restored.version, 2);
+        assert.equal(revised.version, 2);
+        assert.equal(restored.version, 3);
         assert.equal(restored.artifactFamilyId, source.artifactFamilyId);
         assert.equal(restored.parentArtifactId, source.id);
         assert.equal(restored.conversationId, source.conversationId);
         assert.equal(restored.createdByCoworkerId, source.createdByCoworkerId);
+        assert.equal(store.previewText(revised.id).preview, "# Release v2\n");
         assert.equal(store.previewText(restored.id).preview, "# Release v1\n");
         assert.equal(readFileSync(store.managedPath(source.id), "utf8"), "# Release v1\n");
         assert.deepEqual(store.history(restored.id).history.map((entry) => [entry.id, entry.version, entry.parentArtifactId]), [
-            [restored.id, 2, source.id],
+            [restored.id, 3, source.id],
+            [revised.id, 2, source.id],
             [source.id, 1, undefined],
         ]);
         const reloaded = createArtifactStore({ dataDir: join(root, "data") });
         assert.deepEqual(reloaded.history(restored.id).history.map((entry) => [entry.id, entry.version, entry.artifactFamilyId]), [
-            [restored.id, 2, source.artifactFamilyId],
+            [restored.id, 3, source.artifactFamilyId],
+            [revised.id, 2, source.artifactFamilyId],
             [source.id, 1, source.artifactFamilyId],
         ]);
         assert.equal(Object.hasOwn(restored, "storageRelativePath"), false);

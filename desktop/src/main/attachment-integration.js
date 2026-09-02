@@ -51,3 +51,18 @@ export async function pickConversationAttachments({ win, dialog, artifactStore, 
     }
     return { canceled: false, artifacts, errors };
 }
+
+export async function pickArtifactRevision({ win, dialog, artifactStore, artifactId }) {
+    const selected = await dialog.showOpenDialog(win, {
+        title: "Create a new artifact version",
+        properties: ["openFile"],
+    });
+    if (selected.canceled || !selected.filePaths?.length)
+        return { canceled: true, artifact: undefined };
+    try {
+        return { canceled: false, artifact: artifactStore.reviseFromPickedFile({ artifactId, sourcePath: selected.filePaths[0] }) };
+    }
+    catch (error) {
+        return { canceled: false, artifact: undefined, error: String(error?.message ?? error).slice(0, 300) };
+    }
+}

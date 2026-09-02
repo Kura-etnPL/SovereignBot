@@ -181,6 +181,29 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
         return full;
     }
 
+    function nextVersionFor(familyId) {
+        const currentVersion = artifacts
+            .filter((entry) => (entry.artifactFamilyId ?? entry.id) === familyId)
+            .reduce((highest, entry) => Math.max(highest, Number.isInteger(entry.version) ? entry.version : 1), 0);
+        if (currentVersion >= MAX_ARTIFACT_VERSION) throw new Error("artifact version limit reached");
+        return currentVersion + 1;
+    }
+
+    function versionMetadata(source, { version, parentArtifactId, sourceKind = source.sourceKind } = {}) {
+        return {
+            artifactFamilyId: source.artifactFamilyId ?? source.id,
+            version,
+            parentArtifactId,
+            published: true,
+            ...(sourceKind ? { sourceKind } : {}),
+            ...(source.workspaceId ? { workspaceId: source.workspaceId } : {}),
+            ...(source.sourceRelativePath ? { sourceRelativePath: source.sourceRelativePath } : {}),
+            ...(source.createdByCoworkerId ? { createdByCoworkerId: source.createdByCoworkerId } : {}),
+            ...(source.conversationId ? { conversationId: source.conversationId } : {}),
+            ...(source.sourceMessageId ? { sourceMessageId: source.sourceMessageId } : {}),
+        };
+    }
+
     function allocateStoredCopy({ actual, stat, title, metadata = {} }) {
         if (artifacts.length >= MAX_ARTIFACTS) throw new Error(`artifact registry limit reached (${MAX_ARTIFACTS})`);
         const id = makeArtifactId();
@@ -272,26 +295,25 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             const stat = statSync(sourcePath);
             if (stat.size < 0 || stat.size > MAX_FILE_BYTES) throw new Error(`artifact source exceeds ${MAX_FILE_BYTES} bytes`);
             const artifactFamilyId = source.artifactFamilyId ?? source.id;
-            const currentVersion = artifacts
-                .filter((entry) => (entry.artifactFamilyId ?? entry.id) === artifactFamilyId)
-                .reduce((highest, entry) => Math.max(highest, Number.isInteger(entry.version) ? entry.version : 1), 0);
-            if (currentVersion >= MAX_ARTIFACT_VERSION) throw new Error("artifact version limit reached");
+            const version = nextVersionFor(artifactFamilyId);
             return allocateStoredCopy({
                 actual: sourcePath,
                 stat,
                 title: source.title,
-                metadata: {
-                    artifactFamilyId,
-                    version: currentVersion + 1,
-                    parentArtifactId: source.id,
-                    published: true,
-                    ...(source.sourceKind ? { sourceKind: source.sourceKind } : {}),
-                    ...(source.workspaceId ? { workspaceId: source.workspaceId } : {}),
-                    ...(source.sourceRelativePath ? { sourceRelativePath: source.sourceRelativePath } : {}),
-                    ...(source.createdByCoworkerId ? { createdByCoworkerId: source.createdByCoworkerId } : {}),
-                    ...(source.conversationId ? { conversationId: source.conversationId } : {}),
-                    ...(source.sourceMessageId ? { sourceMessageId: source.sourceMessageId } : {}),
-                },
+                metadata: versionMetadata(source, { version, parentArtifactId: source.id }),
+            });
+        },
+
+        reviseFromPickedFile({ artifactId, sourcePath }) {
+            const source = requirePublicArtifact(artifactId);
+            const picked = assertPickedFile(sourcePath);
+            const artifactFamilyId = source.artifactFamilyId ?? source.id;
+            const version = nextVersionFor(artifactFamilyId);
+            return allocateStoredCopy({
+                actual: picked.actual,
+                stat: picked.stat,
+                title: source.title,
+                metadata: versionMetadata(source, { version, parentArtifactId: source.id, sourceKind: "user" }),
             });
         },
 
