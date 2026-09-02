@@ -1,0 +1,212 @@
+{
+  "at": "2026-09-02T15:10:44.704Z",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "preload exposes the bounded collaboration action and Team Channel surface": true,
+    "Team Channel shows available teammate targets without runtime internals": true,
+    "renderer submits only the bounded public collaboration fields": true,
+    "non-hardcoded specialist becomes the single current owner": true,
+    "only the selected teammate is woken": true,
+    "bot-to-bot projection is visible as safe handoff activity": true,
+    "public Team and Channel state carries no execution authority": true,
+    "restart preserves owner, bounded task, and pending target delivery": true,
+    "restart safe projection remains authority-free": true
+  },
+  "teamId": "team_f80f251834c7f1c3",
+  "channelId": "channel_63e930dfcf786c1d",
+  "targetCoworkerId": "coworker_23a0dd509b315716",
+  "wakeLog": [
+    "coworker_23a0dd509b315716"
+  ],
+  "snapshot": {
+    "team": {
+      "id": "team_f80f251834c7f1c3",
+      "packId": "custom-team",
+      "name": "P13 Directed Team",
+      "coworkerIds": [
+        "coworker_21bccad22ceef187",
+        "coworker_c162c974151fd136",
+        "coworker_23a0dd509b315716",
+        "coworker_d0fb61d8eedb89f5"
+      ],
+      "coworkers": [
+        {
+          "id": "coworker_21bccad22ceef187",
+          "name": "P13 Chief"
+        },
+        {
+          "id": "coworker_c162c974151fd136",
+          "name": "P13 Research"
+        },
+        {
+          "id": "coworker_23a0dd509b315716",
+          "name": "P13 Build Specialist"
+        },
+        {
+          "id": "coworker_d0fb61d8eedb89f5",
+          "name": "P13 Quality Specialist"
+        }
+      ],
+      "channelIds": [
+        "channel_63e930dfcf786c1d"
+      ],
+      "channels": [
+        {
+          "id": "channel_63e930dfcf786c1d",
+          "teamId": "team_f80f251834c7f1c3",
+          "kind": "project",
+          "name": "Project Channel",
+          "instructions": "Bounded team collaboration: one owner at a time, explicit handoffs, and a visible result.",
+          "coworkerIds": [
+            "coworker_21bccad22ceef187",
+            "coworker_c162c974151fd136",
+            "coworker_23a0dd509b315716",
+            "coworker_d0fb61d8eedb89f5"
+          ],
+          "workspaceId": "ws_126f19160d621a78",
+          "conversationId": "conv_0ca527913f181298",
+          "playbookId": "team-collaboration",
+          "archived": false,
+          "createdAt": "2026-09-02T15:10:42.476Z",
+          "updatedAt": "2026-09-02T15:10:42.476Z"
+        }
+      ],
+      "sharedWorkspaceId": "ws_126f19160d621a78",
+      "sharedWorkspaceLabel": "P13 Directed Team project",
+      "privateWorkspaceLabel": "Private workspace",
+      "playbooks": [
+        {
+          "id": "team-collaboration",
+          "name": "Team Collaboration",
+          "description": "The current owner delegates bounded work to the next teammate and returns the result to the user.",
+          "steps": [
+            "owner",
+            "teammate",
+            "owner"
+          ]
+        }
+      ],
+      "flow": {
+        "stage": "specialist",
+        "status": "active",
+        "currentOwnerId": "coworker_23a0dd509b315716",
+        "currentOwner": "P13 Build Specialist",
+        "pendingCoworkerIds": [
+          "coworker_23a0dd509b315716"
+        ],
+        "attentionCoworkerIds": [],
+        "channelId": "channel_63e930dfcf786c1d",
+        "activity": [
+          {
+            "kind": "handoff",
+            "label": "Handoff requested",
+            "status": "working",
+            "owner": "P13 Chief",
+            "targetCoworker": "P13 Build Specialist",
+            "revision": 0,
+            "reason": "The build specialist owns this slice.",
+            "at": "2026-09-02T15:10:43.710Z"
+          },
+          {
+            "kind": "working",
+            "label": "Working",
+            "status": "working",
+            "owner": "P13 Chief",
+            "at": "2026-09-02T15:10:42.482Z"
+          }
+        ],
+        "activeProtocol": {
+          "kind": "handoff",
+          "state": "requested",
+          "revision": 0,
+          "sourceCoworkerId": "coworker_21bccad22ceef187",
+          "sourceCoworker": "P13 Chief",
+          "targetCoworkerId": "coworker_23a0dd509b315716",
+          "targetCoworker": "P13 Build Specialist",
+          "boundedTask": "Inspect the bounded change and report the smallest safe result.",
+          "reason": "The build specialist owns this slice."
+        }
+      },
+      "createdAt": "2026-09-02T15:10:42.476Z",
+      "updatedAt": "2026-09-02T15:10:42.481Z"
+    },
+    "conversation": {
+      "id": "conv_0ca527913f181298",
+      "kind": "team",
+      "title": "P13 Directed Team",
+      "participants": [
+        "user",
+        "coworker_21bccad22ceef187",
+        "coworker_c162c974151fd136",
+        "coworker_23a0dd509b315716",
+        "coworker_d0fb61d8eedb89f5"
+      ],
+      "leadCoworkerId": "coworker_21bccad22ceef187",
+      "createdAt": "2026-09-02T15:10:42.477Z",
+      "updatedAt": "2026-09-02T15:10:43.709Z",
+      "messageCount": 2,
+      "lastMessage": {
+        "id": "msg_75856aa4ef845099",
+        "senderId": "coworker_21bccad22ceef187",
+        "textPreview": "Handoff\nBounded task: Inspect the bounded change and report the smallest safe result.\nReason: The build specialist owns this slice.",
+        "createdAt": "2026-09-02T15:10:43.709Z"
+      },
+      "messages": [
+        {
+          "id": "msg_d72396042da57db3",
+          "senderId": "user",
+          "text": "Start a bounded Team delivery.",
+          "mentions": [],
+          "artifactIds": [],
+          "delivery": {
+            "coworker_21bccad22ceef187": {
+              "status": "delivered",
+              "updatedAt": "2026-09-02T15:10:42.483Z"
+            }
+          },
+          "createdAt": "2026-09-02T15:10:42.480Z"
+        },
+        {
+          "id": "msg_75856aa4ef845099",
+          "senderId": "coworker_21bccad22ceef187",
+          "text": "Handoff\nBounded task: Inspect the bounded change and report the smallest safe result.\nReason: The build specialist owns this slice.",
+          "mentions": [
+            "coworker_23a0dd509b315716"
+          ],
+          "artifactIds": [],
+          "delivery": {
+            "coworker_23a0dd509b315716": {
+              "status": "pending",
+              "updatedAt": "2026-09-02T15:10:43.709Z"
+            }
+          },
+          "createdAt": "2026-09-02T15:10:43.709Z"
+        }
+      ]
+    },
+    "activity": {
+      "schema": "sovereignbot.desktop.collaboration.v1",
+      "conversationId": "conv_0ca527913f181298",
+      "teamId": "team_f80f251834c7f1c3",
+      "events": [
+        {
+          "kind": "handoff",
+          "label": "Handoff requested",
+          "status": "working",
+          "owner": "P13 Chief",
+          "targetCoworker": "P13 Build Specialist",
+          "revision": 0,
+          "reason": "The build specialist owns this slice.",
+          "at": "2026-09-02T15:10:43.710Z"
+        },
+        {
+          "kind": "working",
+          "label": "Working",
+          "status": "working",
+          "owner": "P13 Chief",
+          "at": "2026-09-02T15:10:42.482Z"
+        }
+      ]
+    }
+  }
+}

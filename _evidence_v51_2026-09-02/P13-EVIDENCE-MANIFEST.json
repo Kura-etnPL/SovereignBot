@@ -1,0 +1,38 @@
+{
+  "schema": "sovereignbot.local-acceptance-manifest.v1",
+  "phase": "V4.3-P13",
+  "date": "2026-09-02",
+  "branch": "codex/v4-review-directed-handoff-protocol",
+  "sourceCommit": "6917ade7e920c50e48ac2d7ec7e0ec341cb9f672",
+  "acceptance": {
+    "command": "node scripts/verify-p13-team-collaboration.mjs",
+    "gate": "verify-p13-team-collaboration",
+    "result": "PASS",
+    "checksPassed": 10,
+    "checksTotal": 10,
+    "rawJson": "verify-p13-team-collaboration.json",
+    "rawLog": "verify-p13-team-collaboration.log",
+    "scenario": "fresh hidden Electron Team Channel UI selects a non-hardcoded active Specialist, submits a bounded handoff through validated preload/IPC, wakes only that target, projects safe activity, and preserves owner/protocol/delivery after restart."
+  },
+  "localChecks": {
+    "desktopSyntaxFiles": 173,
+    "desktopFullTestsPassed": 256,
+    "desktopFullTestsFailed": 0,
+    "collaborationLedgerTestsPassed": 15,
+    "collaborationLedgerTestsFailed": 0,
+    "secretScan": "clean",
+    "diffCheck": "pass"
+  },
+  "boundaries": {
+    "networkUsed": false,
+    "dependenciesInstalled": false,
+    "providerOrOAuthUsed": false,
+    "externalAppsOrConnectorsAdded": false,
+    "cloudSyncOrSharingAdded": false,
+    "schedulerOrExecutionAuthorityAdded": false,
+    "workflowOrDagEngineAdded": false,
+    "destructiveRetentionOrDeletionAdded": false,
+    "localRcSigned": false,
+    "publishEligible": false
+  }
+}
