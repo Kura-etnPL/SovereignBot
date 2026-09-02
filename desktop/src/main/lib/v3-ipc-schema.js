@@ -138,8 +138,10 @@ function paletteTarget(value) {
 }
 function connectedAppsQueryTarget(payload) {
     if (payload === undefined || payload === null) return {};
-    const value = objectPayload(payload); exact(value, new Set(["projectId", "query", "limit"]));
-    return { ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }), ...(value.query === undefined ? {} : { query: string(value.query, "query", 120) }), ...(value.limit === undefined ? {} : { limit: positiveInteger(value.limit, "limit", 1, 100) }) };
+    const value = objectPayload(payload); exact(value, new Set(["projectId", "query", "category", "status", "limit"]));
+    if (value.category !== undefined && !["computer", "workspace", "productivity", "other"].includes(value.category)) throw new Error("connected app category is invalid");
+    if (value.status !== undefined && !["available", "configured", "connected", "attention", "ready", "unavailable", "disabled"].includes(value.status)) throw new Error("connected app status is invalid");
+    return { ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }), ...(value.query === undefined ? {} : { query: string(value.query, "query", 120) }), ...(value.category === undefined ? {} : { category: value.category }), ...(value.status === undefined ? {} : { status: value.status }), ...(value.limit === undefined ? {} : { limit: positiveInteger(value.limit, "limit", 1, 100) }) };
 }
 function modelBindingShape(value) {
     if (!isPlainObject(value)) throw new Error("modelBinding must be an object");
@@ -366,14 +368,23 @@ export const V3_IPC_CHANNELS = Object.freeze({
         };
     }),
     "connectedApps:connect": spec(2048, (payload) => {
-        const value = objectPayload(payload); exact(value, new Set(["appId", "projectId"]));
-        return { appId: identifier(value.appId, "appId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }) };
+        const value = objectPayload(payload); exact(value, new Set(["appId", "projectId", "approveMetered"]));
+        if (value.approveMetered !== undefined && typeof value.approveMetered !== "boolean") throw new Error("approveMetered must be boolean");
+        return { appId: identifier(value.appId, "appId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }), ...(value.approveMetered === undefined ? {} : { approveMetered: value.approveMetered }) };
     }),
     "connectedApps:disconnect": spec(2048, (payload) => {
         const value = objectPayload(payload); exact(value, new Set(["appId", "projectId"]));
         return { appId: identifier(value.appId, "appId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }) };
     }),
     "connectedApps:health": spec(2048, (payload) => {
+        const value = objectPayload(payload); exact(value, new Set(["appId", "projectId"]));
+        return { appId: identifier(value.appId, "appId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }) };
+    }),
+    "connectedApps:review": spec(2048, (payload) => {
+        const value = objectPayload(payload); exact(value, new Set(["appId", "projectId"]));
+        return { appId: identifier(value.appId, "appId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }) };
+    }),
+    "connectedApps:disable": spec(2048, (payload) => {
         const value = objectPayload(payload); exact(value, new Set(["appId", "projectId"]));
         return { appId: identifier(value.appId, "appId"), ...(value.projectId === undefined ? {} : { projectId: projectId(value.projectId) }) };
     }),

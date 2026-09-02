@@ -8,6 +8,7 @@ const html = read("../ui/index.html");
 const app = read("../ui/app.js");
 const voice = read("../ui/voice-controller.js");
 const productHubs = read("../ui/product-hubs-ui.js");
+const appsCatalog = read("../ui/apps-catalog-ui.js");
 const css = read("../ui/style.css");
 
 test("V3 default shell is coworker-first rather than Goal/Control-Center-first", () => {
@@ -79,6 +80,14 @@ test("Product hubs expose governed Connected Apps assignment without raw authori
     assert.match(productHubs, /connectedApps\.assign/);
     assert.match(productHubs, /appId: item\.id/);
     assert.doesNotMatch(productHubs, /providerToken|sessionId|rawPath|capabilityGrant/);
+});
+
+test("Apps Catalog is an independent user surface with honest lifecycle review", () => {
+    for (const id of ["nav-apps", "view-apps", "apps-catalog-search", "apps-catalog-category", "apps-catalog-status", "apps-catalog-project", "apps-catalog-list"]) assert.match(html, new RegExp(`id="${id}"`), id);
+    for (const expression of [/connectedApps\.search/, /connectedApps\.review/, /connectedApps\.connect/, /connectedApps\.disconnect/, /connectedApps\.disable/, /Assign Team/, /Assign Coworker/, /trustedSource/, /installationState/, /metered/]) assert.match(appsCatalog, expression);
+    assert.match(appsCatalog, /Review before connecting/);
+    assert.doesNotMatch(appsCatalog, /providerToken|sessionId|rawPath|workspacePath|adapter|transport|credential/);
+    assert.match(css, /\.apps-catalog-card/);
 });
 
 test("Worker Nodes copy matches the authenticated pairing surface", () => {

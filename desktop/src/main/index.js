@@ -701,6 +701,12 @@ async function main() {
                     const refresh = await refreshCoworkerRuntime();
                     return { ...app, refresh };
                 },
+                "connectedApps:review": (payload) => connectedApps.review(payload),
+                "connectedApps:disable": async (payload) => {
+                    const app = await connectedApps.disable(payload);
+                    const refresh = await refreshCoworkerRuntime();
+                    return { ...app, refresh };
+                },
                 "connectedApps:health": (payload) => connectedApps.health(payload),
                 "thisPc:list": (payload) => thisPc.list(payload),
                 "thisPc:frame": (payload) => thisPc.frame(payload.projectId, payload.coworkerId),
