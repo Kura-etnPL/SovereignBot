@@ -129,6 +129,14 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         "product-skills-page",
         "product-packs-page",
         "product-channels-page",
+        "team-pack-editor-dialog",
+        "team-pack-editor-form",
+        "team-pack-editor-coworkers",
+        "team-pack-editor-channels",
+        "team-pack-editor-playbooks",
+        "team-pack-editor-add-coworker",
+        "team-pack-editor-add-channel",
+        "team-pack-editor-add-playbook",
     ]) assert.match(html, new RegExp(`id="${id}"`), id);
     for (const expression of [
         /playbooks\.duplicate/,
@@ -153,8 +161,12 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         /Preview \/ 预览/,
         /openProductChannelEditor/,
         /team-pack-page-import/,
+        /openPackEditor/,
+        /team-pack-editor-form/,
+        /teams\.editPack/,
     ]) assert.match(productHubs, expression);
     assert.doesNotMatch(productHubs, /window\.prompt\("Channel/);
+    assert.doesNotMatch(productHubs, /Edit declarative Team Pack JSON/);
     assert.doesNotMatch(productHubs, /innerHTML\s*=/);
     assert.doesNotMatch(productHubs, /eval\s*\(/);
 });

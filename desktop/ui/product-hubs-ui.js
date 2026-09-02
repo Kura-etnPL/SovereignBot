@@ -685,13 +685,106 @@
     root.append(button("Import skill / 导入技能", async () => { const skill = readJson("Paste safe Skill JSON"); if (skill) { await api.skills.import({ skill }); await refresh(); } }, root));
   }
 
+  let editingPack;
+  const editorRoot = (id) => $(id);
+  const editorClone = (value) => structuredClone(value);
+  const editorId = (prefix) => `${prefix}-${(globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`).replace(/[^A-Za-z0-9]/g, "").slice(0, 16)}`;
+  const editorTextField = (label, value, className, { textarea = false, maxLength } = {}) => {
+    const wrapper = document.createElement("label"); wrapper.className = "setting-field";
+    const caption = document.createElement("span"); caption.textContent = label; wrapper.append(caption);
+    const field = document.createElement(textarea ? "textarea" : "input"); field.className = className; field.value = value ?? ""; if (maxLength) field.maxLength = maxLength; wrapper.append(field); return wrapper;
+  };
+  const editorSelectField = (label, value, className, options) => {
+    const wrapper = document.createElement("label"); wrapper.className = "setting-field";
+    const caption = document.createElement("span"); caption.textContent = label; wrapper.append(caption);
+    const field = document.createElement("select"); field.className = className;
+    for (const option of options) { const node = document.createElement("option"); node.value = option.value; node.textContent = option.label; field.append(node); }
+    field.value = options.some((option) => option.value === value) ? value : options[0]?.value ?? ""; wrapper.append(field); return wrapper;
+  };
+  const editorAction = (label, handler, className = "quiet-action") => { const node = document.createElement("button"); node.type = "button"; node.className = className; node.textContent = label; node.addEventListener("click", () => void handler()); return node; };
+  const editorError = (message = "") => { const node = $("team-pack-editor-error"); if (node) { node.textContent = message; node.classList.toggle("hidden", !message); } };
+  const editorOriginal = (collection, id, key = "id") => collection.find((entry) => entry[key] === id) ?? {};
+
+  function readPackEditor() {
+    if (!editingPack) throw new Error("Team Pack editor is not open.");
+    const pack = editorClone(editingPack);
+    pack.name = $("team-pack-editor-name")?.value.trim() ?? "";
+    pack.description = $("team-pack-editor-description")?.value.trim() ?? "";
+    pack.coworkers = [...(editorRoot("team-pack-editor-coworkers")?.children ?? [])].map((row) => {
+      const original = editorOriginal(pack.coworkers, row.dataset.key, "key");
+      const profile = row.querySelector(".team-pack-editor-coworker-profile")?.value || "automatic";
+      const modelBinding = { ...(original.modelBinding ?? {}), profile };
+      if (profile === "custom") {
+        modelBinding.provider = row.querySelector(".team-pack-editor-coworker-provider")?.value.trim() ?? "";
+        modelBinding.model = row.querySelector(".team-pack-editor-coworker-model")?.value.trim() ?? "";
+      }
+      return { ...original, name: row.querySelector(".team-pack-editor-coworker-name")?.value.trim() ?? "", role: row.querySelector(".team-pack-editor-coworker-role")?.value.trim() ?? "", instructions: row.querySelector(".team-pack-editor-coworker-instructions")?.value.trim() ?? "", modelBinding };
+    });
+    pack.channels = [...(editorRoot("team-pack-editor-channels")?.children ?? [])].map((row) => {
+      const original = editorOriginal(pack.channels, row.dataset.key, "key");
+      return { ...original, name: row.querySelector(".team-pack-editor-channel-name")?.value.trim() ?? "", kind: row.querySelector(".team-pack-editor-channel-kind")?.value || "project", instructions: row.querySelector(".team-pack-editor-channel-instructions")?.value.trim() ?? "", playbookId: row.querySelector(".team-pack-editor-channel-playbook")?.value || pack.playbooks[0]?.id };
+    });
+    pack.playbooks = [...(editorRoot("team-pack-editor-playbooks")?.children ?? [])].map((row) => {
+      const original = editorOriginal(pack.playbooks, row.dataset.id, "id");
+      const expectedOutput = row.querySelector(".team-pack-editor-playbook-output")?.value.trim() ?? "";
+      const recommended = row.querySelector(".team-pack-editor-playbook-roles")?.value.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
+      const next = { ...original, name: row.querySelector(".team-pack-editor-playbook-name")?.value.trim() ?? "", description: row.querySelector(".team-pack-editor-playbook-description")?.value.trim() ?? "", steps: [...row.querySelectorAll(".team-pack-editor-step select")].map((field) => field.value).filter(Boolean) };
+      if (expectedOutput) next.expectedOutput = expectedOutput; else delete next.expectedOutput;
+      if (recommended.length) next.recommendedCoworkerRoles = [...new Set(recommended)]; else delete next.recommendedCoworkerRoles;
+      return next;
+    });
+    return pack;
+  }
+
+  function renderPackEditor(pack) {
+    editingPack = editorClone(pack);
+    $("team-pack-editor-id").value = editingPack.id;
+    $("team-pack-editor-name").value = editingPack.name;
+    $("team-pack-editor-description").value = editingPack.description ?? "";
+    editorError();
+    const coworkersRoot = editorRoot("team-pack-editor-coworkers"); clear(coworkersRoot);
+    for (const entry of editingPack.coworkers) {
+      const row = document.createElement("article"); row.className = "team-pack-editor-row"; row.dataset.key = entry.key;
+      const heading = document.createElement("div"); heading.className = "team-pack-editor-heading"; const title = document.createElement("strong"); title.textContent = entry.name || "Coworker"; heading.append(title); heading.append(editorAction("Remove / 删除", () => { if (editingPack.coworkers.length <= 2) return editorError("A Team Pack needs at least two coworkers."); const next = readPackEditor(); next.coworkers = next.coworkers.filter((item) => item.key !== entry.key); next.playbooks = next.playbooks.map((book) => ({ ...book, steps: book.steps.filter((step) => step !== entry.key) })); renderPackEditor(next); })); row.append(heading);
+      const grid = document.createElement("div"); grid.className = "team-pack-editor-grid";
+      grid.append(editorTextField("Name / 名称", entry.name, "team-pack-editor-coworker-name", { maxLength: 80 }), editorTextField("Role / 角色", entry.role, "team-pack-editor-coworker-role", { maxLength: 120 }), editorSelectField("Model profile / 模型档位", entry.modelBinding?.profile ?? "automatic", "team-pack-editor-coworker-profile", ["automatic", "efficient", "deep", "economy", "custom"].map((value) => ({ value, label: value })))); row.append(grid);
+      row.append(editorTextField("Instructions / 指引", entry.instructions, "team-pack-editor-coworker-instructions", { textarea: true, maxLength: 12000 }));
+      if (entry.modelBinding?.profile === "custom") row.append(document.createElement("div"));
+      const customGrid = document.createElement("div"); customGrid.className = "team-pack-editor-grid"; customGrid.append(editorTextField("Custom provider id / 自定义提供方", entry.modelBinding?.provider, "team-pack-editor-coworker-provider", { maxLength: 128 }), editorTextField("Custom model id / 自定义模型", entry.modelBinding?.model, "team-pack-editor-coworker-model", { maxLength: 128 })); row.append(customGrid);
+      coworkersRoot.append(row);
+    }
+    const channelsRoot = editorRoot("team-pack-editor-channels"); clear(channelsRoot);
+    for (const entry of editingPack.channels) {
+      const row = document.createElement("article"); row.className = "team-pack-editor-row"; row.dataset.key = entry.key;
+      const heading = document.createElement("div"); heading.className = "team-pack-editor-heading"; const title = document.createElement("strong"); title.textContent = entry.name || "Channel"; heading.append(title); heading.append(editorAction("Remove / 删除", () => { if (editingPack.channels.length <= 1) return editorError("A Team Pack needs at least one channel."); const next = readPackEditor(); next.channels = next.channels.filter((item) => item.key !== entry.key); renderPackEditor(next); })); row.append(heading);
+      const grid = document.createElement("div"); grid.className = "team-pack-editor-grid"; grid.append(editorTextField("Name / 名称", entry.name, "team-pack-editor-channel-name", { maxLength: 120 }), editorSelectField("Kind / 类型", entry.kind, "team-pack-editor-channel-kind", [{ value: "work", label: "Work" }, { value: "personal", label: "Personal" }, { value: "project", label: "Project" }]), editorSelectField("Playbook / 工作方法", entry.playbookId, "team-pack-editor-channel-playbook", editingPack.playbooks.map((book) => ({ value: book.id, label: book.name })))); row.append(grid); row.append(editorTextField("Instructions / 指引", entry.instructions, "team-pack-editor-channel-instructions", { textarea: true, maxLength: 12000 })); channelsRoot.append(row);
+    }
+    const playbooksRoot = editorRoot("team-pack-editor-playbooks"); clear(playbooksRoot);
+    for (const entry of editingPack.playbooks) {
+      const row = document.createElement("article"); row.className = "team-pack-editor-row"; row.dataset.id = entry.id;
+      const heading = document.createElement("div"); heading.className = "team-pack-editor-heading"; const title = document.createElement("strong"); title.textContent = entry.name || "Playbook"; heading.append(title); heading.append(editorAction("Remove / 删除", () => { if (editingPack.playbooks.length <= 1) return editorError("A Team Pack needs at least one playbook."); const next = readPackEditor(); next.playbooks = next.playbooks.filter((item) => item.id !== entry.id); const fallback = next.playbooks[0]?.id; next.channels = next.channels.map((channel) => channel.playbookId === entry.id ? { ...channel, playbookId: fallback } : channel); renderPackEditor(next); })); row.append(heading);
+      const grid = document.createElement("div"); grid.className = "team-pack-editor-grid"; grid.append(editorTextField("Name / 名称", entry.name, "team-pack-editor-playbook-name", { maxLength: 120 }), editorTextField("Description / 描述", entry.description, "team-pack-editor-playbook-description", { maxLength: 500 }), editorTextField("Expected output / 预期产出", entry.expectedOutput, "team-pack-editor-playbook-output", { maxLength: 500 }), editorTextField("Recommended roles / 推荐角色", (entry.recommendedCoworkerRoles ?? []).join(", "), "team-pack-editor-playbook-roles", { maxLength: 1000 })); row.append(grid);
+      const steps = document.createElement("div"); steps.className = "team-pack-editor-step-list"; const stepsHeading = document.createElement("strong"); stepsHeading.textContent = "Ordered steps / 顺序步骤"; steps.append(stepsHeading);
+      for (const step of entry.steps ?? []) { const line = document.createElement("div"); line.className = "team-pack-editor-step"; const select = document.createElement("select"); select.className = "team-pack-editor-step-select"; for (const coworker of editingPack.coworkers) { const option = document.createElement("option"); option.value = coworker.key; option.textContent = coworker.name; select.append(option); } select.value = step; line.append(select, editorAction("Remove", () => { const next = readPackEditor(); const book = next.playbooks.find((item) => item.id === entry.id); book.steps = book.steps.filter((value, index) => !(value === step && index === [...(entry.steps ?? [])].indexOf(step))); renderPackEditor(next); })); steps.append(line); }
+      steps.append(editorAction("Add step / 添加步骤", () => { const next = readPackEditor(); const book = next.playbooks.find((item) => item.id === entry.id); book.steps.push(next.coworkers[0]?.key); renderPackEditor(next); })); row.append(steps); playbooksRoot.append(row);
+    }
+  }
+
+  async function openPackEditor(item) {
+    if (!item.custom) return;
+    const pack = await api.teams.exportPackRecipe({ packId: item.id });
+    renderPackEditor(pack);
+    $("team-pack-editor-dialog")?.showModal?.();
+    $("team-pack-editor-name")?.focus();
+  }
+
   function packs(items) {
     const root = pageRoots.packs; if (!root) return; clear(root);
     const query = (selected("team-pack-search-page", "") || "").trim().toLowerCase();
     const category = selected("team-pack-category-page", "all");
     const visible = items.filter((item) => (!query || [item.name, item.description, item.category, ...(item.coworkerNames ?? []), ...(item.channelNames ?? []), ...(item.playbookNames ?? [])].join(" ").toLowerCase().includes(query)) && (category === "all" || item.category === category));
     for (const item of visible) {
-      const card = document.createElement("article"); card.className = "settings-card"; const title = document.createElement("h3"); title.textContent = item.name;
+      const card = document.createElement("article"); card.className = "settings-card"; card.dataset.teamPackId = item.id; const title = document.createElement("h3"); title.textContent = item.name;
       card.append(title, text("Category", item.category), text("Contents", `${item.coworkerNames?.length ?? 0} coworkers · ${item.channelNames?.length ?? 0} channels · ${item.playbookNames?.length ?? 0} playbooks`), text("Status", item.installed ? "Installed" : "Available"));
       const actions = document.createElement("div"); actions.className = "detail-actions";
       if (!item.installed) actions.append(button("Install / 安装", async () => { await api.teams.installPack({ packId: item.id }); await refreshHost(); await refresh(); }, root));
@@ -708,7 +801,7 @@
         card.insertBefore(panel, actions);
       }, root));
       actions.append(button("Export / 导出", () => exportPackToFile(item), root), button("Duplicate / 复制", async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); }, root));
-      if (item.custom) actions.append(button("Edit recipe / 编辑配方", async () => { const current = await api.teams.exportPackRecipe({ packId: item.id }); const edited = readJson("Edit declarative Team Pack JSON", current); if (!edited) return; await api.teams.editPack({ packId: item.id, patch: { name: edited.name, description: edited.description, coworkers: edited.coworkers, channels: edited.channels, playbooks: edited.playbooks } }); await refresh(); }, root));
+      if (item.custom) actions.append(button("Edit recipe / 编辑配方", () => openPackEditor(item), root));
       card.append(actions); root.append(card);
     }
     if (!visible.length) root.append(text("Team Packs", "No matching recipes."));
@@ -777,6 +870,36 @@
     $("skill-page-create")?.addEventListener("click", () => void createSkill().catch((reason) => showError(pageRoots.skills, reason)));
     $("skill-page-import")?.addEventListener("click", () => void (async () => { const skill = readJson("Paste safe Skill JSON"); if (skill) { await api.skills.import({ skill }); await refresh(); } })().catch((reason) => showError(pageRoots.skills, reason)));
     $("team-pack-page-import")?.addEventListener("click", () => void importPack().catch((reason) => showError(pageRoots.packs, reason)));
+    $("team-pack-editor-add-coworker")?.addEventListener("click", () => {
+      try {
+        const next = readPackEditor();
+        next.coworkers.push({ key: editorId("coworker"), name: "New coworker", role: "", instructions: "", modelBinding: { profile: "automatic" } });
+        renderPackEditor(next);
+      } catch (reason) { editorError(String(reason?.message ?? reason)); }
+    });
+    $("team-pack-editor-add-channel")?.addEventListener("click", () => {
+      try {
+        const next = readPackEditor();
+        next.channels.push({ key: editorId("channel"), name: "New channel", kind: "project", instructions: "", playbookId: next.playbooks[0]?.id });
+        renderPackEditor(next);
+      } catch (reason) { editorError(String(reason?.message ?? reason)); }
+    });
+    $("team-pack-editor-add-playbook")?.addEventListener("click", () => {
+      try {
+        const next = readPackEditor();
+        next.playbooks.push({ id: editorId("playbook"), name: "New playbook", description: "", steps: [next.coworkers[0]?.key].filter(Boolean) });
+        renderPackEditor(next);
+      } catch (reason) { editorError(String(reason?.message ?? reason)); }
+    });
+    $("team-pack-editor-form")?.addEventListener("submit", (event) => void (async () => {
+      event.preventDefault();
+      editorError();
+      const pack = readPackEditor();
+      await api.teams.editPack({ packId: editingPack.id, patch: { name: pack.name, description: pack.description, coworkers: pack.coworkers, channels: pack.channels, playbooks: pack.playbooks } });
+      $("team-pack-editor-dialog")?.close?.();
+      editingPack = undefined;
+      await refresh();
+    })().catch((reason) => editorError(String(reason?.message ?? reason).slice(0, 240))));
     $("team-pack-search-page")?.addEventListener("input", () => void refresh()); $("team-pack-category-page")?.addEventListener("change", () => void refresh());
     $("product-channel-create-page")?.addEventListener("click", () => { const teamId = $("product-channel-template-team-page")?.value || cache.teams[0]?.id; if (teamId) void openEditor(teamId).catch((reason) => showError(pageRoots.channels, reason)); });
     $("product-channel-template-add-page")?.addEventListener("click", () => void (async () => { const teamId = $("product-channel-template-team-page")?.value; const templateId = $("product-channel-template-page")?.value; if (!teamId || !templateId) return; await api.teams.createChannelFromTemplate({ teamId, templateId }); await refreshHost(); await refresh(); })().catch((reason) => showError(pageRoots.channels, reason)));
