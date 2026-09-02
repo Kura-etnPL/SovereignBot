@@ -133,6 +133,10 @@
       const [teams, coworkers, routines, attention] = await Promise.all([safeCall("listTeams"), safeCall("listCoworkers"), safeCall("listRoutines"), safeCall("getAttention")]);
       state = { ...state, connection: "trusted", teams: teams?.teams ?? [], coworkers: coworkers?.coworkers ?? [], routines: routines?.routines ?? [], attention: attention?.jobs ?? [], channels: [], artifacts: [] };
       for (const team of state.teams.slice(0, 24)) { const listed = await safeCall("listChannels", { teamId: team.id }); state.channels.push(...(listed?.channels ?? [])); }
+      state.conversations = {};
+      for (const channel of state.channels.slice(0, 12)) {
+        try { state.conversations[channel.id] = await safeCall("getConversation", { teamId: channel.teamId, channelId: channel.id }); } catch {}
+      }
       if (typeof bridge.getComputerTargets === "function") state.computerTargets = (await bridge.getComputerTargets()) ?? [];
       const artifactIds = [...new Set(state.channels.flatMap((channel) => (state.conversations?.[channel.id]?.messages ?? []).flatMap((message) => message.artifactIds ?? [])))].slice(0, 12);
       if (typeof bridge.getArtifacts === "function") for (const outcomeId of artifactIds) { try { state.artifacts.push(...((await safeCall("getArtifacts", { outcomeId }))?.artifacts ?? [])); } catch {} }

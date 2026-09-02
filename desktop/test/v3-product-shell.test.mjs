@@ -80,6 +80,12 @@ test("Product hubs expose governed Connected Apps assignment without raw authori
     assert.doesNotMatch(productHubs, /providerToken|sessionId|rawPath|capabilityGrant/);
 });
 
+test("Worker Nodes copy matches the authenticated pairing surface", () => {
+    assert.match(html, /Loopback discovery or authenticated LAN pairing/);
+    assert.match(html, /Remote controller relay pairing is managed separately below/);
+    assert.doesNotMatch(html, /Loopback only in V4\.5|Remote-network pairing is not enabled/);
+});
+
 test("Team activity consumes the safe collaboration ledger projection", () => {
     assert.match(productHubs, /flow\?\.activity/);
     assert.match(productHubs, /Owner/);

@@ -30,6 +30,9 @@ test("controller WebView/PWA entry is offline-first and has no direct network au
     assert.match(html, /connect-src 'none'/);
     assert.match(html, /Pairing and transport are provided by the trusted WebView\/native host/);
     assert.match(app, /sovereignbotRemoteBridge/);
+    assert.match(app, /for \(const channel of state\.channels\.slice\(0, 12\)\)/);
+    assert.match(app, /safeCall\("getConversation", \{ teamId: channel\.teamId, channelId: channel\.id \}\)/);
+    assert.match(app, /state\.conversations = \{\}/);
     assert.doesNotMatch(app, /fetch\s*\(|new\s+WebSocket|ipcRenderer|child_process|\.invoke\s*\(/);
     assert.doesNotMatch(worker, /fetch\s*\(/);
     for (const label of ["Team", "Activity", "Attention", "Artifacts", "Routines", "Computer"]) assert.match(app, new RegExp(label));
