@@ -670,6 +670,19 @@ test("controlled fanout runs independent children, required review, and original
             "Chief joined the approved specialist results.",
         ]);
         teams.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => ({ targetCoworkerId, agentId: coworkerAgentId(targetCoworkerId), workspaceId: workspaceId ?? teams.workspaceIdForConversation(conversationId) }));
+        const observedCoworkerMessages = [];
+        const unsubscribe = conversations.onMessage(({ message, options }) => {
+            if (message.senderId !== "user") {
+                observedCoworkerMessages.push({
+                    id: message.id,
+                    senderId: message.senderId,
+                    mentions: [...message.mentions],
+                    text: message.text,
+                    internal: options.internal,
+                    notifyChannelUnread: options.notifyChannelUnread,
+                });
+            }
+        });
         const notifications = fakeNotificationService(root);
         const unreadProducer = createChannelUnreadProducer({
             notifications,
@@ -696,6 +709,16 @@ test("controlled fanout runs independent children, required review, and original
         assert.ok(teams.activity({ conversationId: created.conversation.id }).events.some((event) => event.label === "Approved"), JSON.stringify(teams.activity({ conversationId: created.conversation.id }).events));
         assert.ok(teams.activity({ conversationId: created.conversation.id }).events.some((event) => event.label === "Completed"));
         assert.doesNotMatch(JSON.stringify(flow), /(?:request_|operation_|workspaceKey|task_)/i);
+        assert.equal(observedCoworkerMessages.length, 7);
+        const finalJoin = observedCoworkerMessages.find((entry) => entry.text === "Chief joined the approved specialist results.");
+        assert.ok(finalJoin, "fanout must emit the final owner join message");
+        assert.equal(finalJoin.notifyChannelUnread, true, "only the final owner join may opt in to channel-unread");
+        assert.equal(finalJoin.internal, false, "the final owner join is user-facing");
+        const intermediateMessages = observedCoworkerMessages.filter((entry) => entry !== finalJoin);
+        assert.equal(intermediateMessages.length, 6);
+        assert.ok(intermediateMessages.every((entry) => entry.notifyChannelUnread === false), "child, review, and protocol messages must opt out of channel-unread");
+        assert.ok(intermediateMessages.every((entry) => entry.internal === true), "child, review, and protocol messages must remain internal");
+        assert.equal(observedCoworkerMessages.filter((entry) => entry.notifyChannelUnread === true).length, 1, "fanout must have exactly one true unread intent");
         const fanoutNotifs = notifications.list();
         assert.equal(fanoutNotifs.totalCount, 1, "fanout join produces exactly 1 coalesced channel-unread notification");
         assert.equal(fanoutNotifs.unreadCount, 1);
@@ -703,6 +726,7 @@ test("controlled fanout runs independent children, required review, and original
         assert.equal(fanoutNotifs.notifications[0].title, "Project Channel · Chief");
         assert.equal(fanoutNotifs.notifications[0].body, "Chief joined the approved specialist results.");
         assert.equal(fanoutNotifs.notifications[0].read, false);
+        unsubscribe();
         unreadProducer.dispose?.();
     }
     finally { rmSync(root, { recursive: true, force: true }); }
