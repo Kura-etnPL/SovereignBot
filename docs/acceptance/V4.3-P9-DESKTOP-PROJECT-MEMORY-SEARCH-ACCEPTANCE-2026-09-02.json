@@ -1,0 +1,50 @@
+{
+  "schema": "sovereignbot.acceptance.v1",
+  "phase": "P9",
+  "area": "desktop-project-memory-search",
+  "acceptedAt": "2026-09-02",
+  "branch": "codex/v4-review-directed-handoff-protocol",
+  "sourceCommit": "519ca8fb53a9230c50dff4d4d05c11ff7b9ac0d1",
+  "publishEligible": false,
+  "signed": false,
+  "networkUsed": false,
+  "commands": [
+    "node scripts/verify-v46-project-memory-search.mjs",
+    "npm run check",
+    "npm test"
+  ],
+  "results": {
+    "hiddenElectronGate": {
+      "status": "passed",
+      "checks": 15,
+      "passed": 15,
+      "failed": 0,
+      "script": "desktop/scripts/verify-v46-project-memory-search.mjs",
+      "rawEvidence": "_evidence_v46_2026-09-02/verify-v46-project-memory-search.json"
+    },
+    "desktopSyntax": {
+      "status": "passed",
+      "files": 161
+    },
+    "desktopFullTests": {
+      "status": "passed",
+      "passed": 250,
+      "failed": 0
+    },
+    "focusedTests": {
+      "status": "passed",
+      "passed": 24,
+      "failed": 0
+    },
+    "diffCheck": "passed"
+  },
+  "scope": {
+    "projectMemoryFactWrite": "renderer form -> validated IPC -> existing local MemoryStore",
+    "search": "existing bounded local index with Project/type/status filters plus total/hasMore metadata",
+    "authority": "no new authority, provider, session, scheduler, workspace, or external integration"
+  },
+  "notes": [
+    "The gate uses the local Electron binary only and refuses to install or download dependencies.",
+    "This is an unsigned local RC evidence record; stable-channel publication is not eligible."
+  ]
+}
