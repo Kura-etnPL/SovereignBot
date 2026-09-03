@@ -193,6 +193,7 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         const channels = teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         const conversations = conversationStore.list().conversations ?? [];
         const conversationById = new Map(conversations.map((conversation) => [conversation.id, conversation]));
+        const hasFullConversationHistory = typeof conversationStore.searchRecords === "function";
         const coworkers = coworkerStore.list({ includeArchived: true }).coworkers ?? [];
         const artifacts = artifactStore?.indexRecords
             ? (artifactStore.indexRecords({ visibility: "all", limit: 5_000 }).artifacts ?? [])
@@ -249,9 +250,9 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         for (const conversation of conversations) {
             const conversationProjectsForRecord = conversationProjects.get(conversation.id);
             const conversationInternal = { conversationId: conversation.id, isConversationSummary: true };
-            emit("conversations", conversation, conversation.title, conversation.kind === "direct" ? "Conversation" : `${conversation.messageCount ?? 0} messages`, conversationProjectsForRecord, conversation.updatedAt, { view: "conversation", conversationId: conversation.id }, conversation.lastMessage?.textPreview, undefined, conversationInternal);
+            emit("conversations", conversation, conversation.title, conversation.kind === "direct" ? "Conversation" : `${conversation.messageCount ?? 0} messages`, conversationProjectsForRecord, conversation.updatedAt, { view: "conversation", conversationId: conversation.id }, hasFullConversationHistory ? "" : conversation.lastMessage?.textPreview, undefined, conversationInternal);
         }
-        for (const message of conversationStore.searchRecords?.() ?? []) {
+        for (const message of hasFullConversationHistory ? conversationStore.searchRecords() : []) {
             const conversation = conversationById.get(message?.conversationId);
             if (!conversation || !message?.messageId || typeof message.text !== "string") continue;
             const conversationProjectsForRecord = conversationProjects.get(conversation.id);

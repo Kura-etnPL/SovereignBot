@@ -25,7 +25,7 @@ const routineB = "routine_bbbbbbbbbbbbbbbb";
 const jobA = "job_aaaaaaaaaaaaaaaa";
 const historyA = "history_aaaaaaaaaaaaaaaa";
 
-function fixture({ fullScan = false, messageRecords = [], latestPreview, beforeBuild } = {}) {
+function fixture({ fullScan = false, messageRecords = [], latestPreview, beforeBuild, includeSearchRecords = true, conversationTitle = "Alpha Conversation" } = {}) {
     const projects = [
         { projectId: projectA, name: "Alpha Project", state: "active", available: true, updatedAt: "2026-09-02T00:00:02.000Z", teams: [{ id: teamA, name: "Alpha Team", channels: [{ id: channelA, name: "Alpha Channel", conversationId: conversationA }] }], coworkers: [{ id: coworkerA, name: "Alpha Coworker" }] },
         { projectId: projectB, name: "Beta Project", state: "active", available: true, updatedAt: "2026-09-02T00:00:01.000Z", teams: [{ id: teamB, name: "Beta Team", channels: [{ id: channelB, name: "Beta Channel", conversationId: conversationB }] }], coworkers: [{ id: coworkerB, name: "Beta Coworker" }] },
@@ -35,7 +35,7 @@ function fixture({ fullScan = false, messageRecords = [], latestPreview, beforeB
         { id: teamA, name: "Alpha Team", coworkerIds: [coworkerA], channels: [{ id: channelA, name: "Alpha Channel", conversationId: conversationA, updatedAt: "2026-09-02T00:00:02.000Z", archived: false }] },
         { id: teamB, name: "Beta Team", coworkerIds: [coworkerB], channels: [{ id: channelB, name: "Beta Channel", conversationId: conversationB, updatedAt: "2026-09-02T00:00:01.000Z", archived: false }] },
     ];
-    const conversations = [{ id: conversationA, title: "Alpha Conversation", kind: "team", messageCount: 2, updatedAt: "2026-09-02T00:00:02.000Z", ...(latestPreview ? { lastMessage: { id: "msg_ffffffffffffffff", senderId: coworkerA, textPreview: latestPreview, createdAt: "2026-09-02T00:00:02.000Z" } } : {}) }, { id: conversationB, title: "Beta Conversation", kind: "team", messageCount: 1, updatedAt: "2026-09-02T00:00:01.000Z" }];
+    const conversations = [{ id: conversationA, title: conversationTitle, kind: "team", messageCount: 2, updatedAt: "2026-09-02T00:00:02.000Z", ...(latestPreview ? { lastMessage: { id: "msg_ffffffffffffffff", senderId: coworkerA, textPreview: latestPreview, createdAt: "2026-09-02T00:00:02.000Z" } } : {}) }, { id: conversationB, title: "Beta Conversation", kind: "team", messageCount: 1, updatedAt: "2026-09-02T00:00:01.000Z" }];
     const coworkers = [{ id: coworkerA, name: "Alpha Coworker", role: "Alpha role", state: "active", updatedAt: "2026-09-02T00:00:02.000Z" }, { id: coworkerB, name: "Beta Coworker", role: "Beta role", state: "active", updatedAt: "2026-09-02T00:00:01.000Z" }, { id: "coworker_cccccccccccccccc", name: "Archived Coworker", role: "hidden", state: "archived", updatedAt: "2026-09-02T00:00:03.000Z" }];
     const skills = [{ id: skillA, name: "Alpha Skill", description: "Alpha method", state: "active", assignedTeamIds: [teamA], assignedCoworkerIds: [], updatedAt: "2026-09-02T00:00:02.000Z" }, { id: skillB, name: "Beta Skill", description: "Beta method", state: "active", assignedTeamIds: [teamB], assignedCoworkerIds: [], updatedAt: "2026-09-02T00:00:01.000Z" }];
     const playbooks = [{ id: playbookA, name: "Alpha Playbook", description: "Alpha method", state: "active", assignedTeams: [{ id: teamA }], assignedChannels: [], updatedAt: "2026-09-02T00:00:02.000Z" }, { id: playbookB, name: "Beta Playbook", description: "Beta method", state: "active", assignedTeams: [{ id: teamB }], assignedChannels: [], updatedAt: "2026-09-02T00:00:01.000Z" }];
@@ -48,7 +48,7 @@ function fixture({ fullScan = false, messageRecords = [], latestPreview, beforeB
     const service = createSearchService({
         projectService: projectsApi,
         teamService: { list: () => ({ teams }) },
-        conversationStore: { list: () => ({ conversations }), searchRecords: () => messageRecords },
+        conversationStore: { list: () => ({ conversations }), ...(includeSearchRecords ? { searchRecords: () => messageRecords } : {}) },
         coworkerStore: { list: () => ({ coworkers }) },
         artifactStore: { list: () => ({ artifacts: [{ id: artifactA, title: "Alpha Artifact", fileName: "alpha.txt", conversationId: conversationA, createdAt: "2026-09-02T00:00:02.000Z" }, { id: artifactB, title: "Beta Artifact", fileName: "beta.txt", conversationId: conversationB, createdAt: "2026-09-02T00:00:01.000Z" }] }) },
         skillStore: { list: () => ({ skills }) },
@@ -118,6 +118,23 @@ test("conversation title-exact results beat lower-scoring message content matche
     const alpha = result.results.find((entry) => entry.id === conversationA);
     assert.equal(alpha.matchReason.key, "title-exact");
     assert.equal(Object.hasOwn(alpha, "messageId"), false);
+});
+
+test("full-history Conversation Search keeps message content out of the summary projection", async () => {
+    const messageRecords = [{ conversationId: conversationA, messageId: "msg_summarydedupe0001", text: "P44 body unique", createdAt: "2026-09-02T00:00:03.000Z" }];
+    const { service } = fixture({ messageRecords, latestPreview: "P44 body unique", conversationTitle: "P44 History Search Team" });
+    const content = await service.query({ query: "P44 body unique", types: ["conversations"], limit: 10 });
+    assert.equal(content.results[0]?.messageId, "msg_summarydedupe0001");
+    const title = await service.query({ query: "P44 History Search Team", types: ["conversations"], limit: 10 });
+    assert.equal(title.results[0]?.id, conversationA);
+    assert.equal(Object.hasOwn(title.results[0], "messageId"), false);
+});
+
+test("conversation Search preserves last-message preview fallback without full-history records", async () => {
+    const { service } = fixture({ includeSearchRecords: false, latestPreview: "P44 fallback preview" });
+    const result = await service.query({ query: "P44 fallback preview", types: ["conversations"], limit: 10 });
+    assert.equal(result.results[0]?.id, conversationA);
+    assert.equal(Object.hasOwn(result.results[0], "messageId"), false);
 });
 
 test("conversation Search invalidation cannot let an old build clear the current build", async () => {
