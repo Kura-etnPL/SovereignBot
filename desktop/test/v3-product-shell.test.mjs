@@ -163,6 +163,8 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         "artifact-hub-filter-page",
         "artifact-hub-type-page",
         "computer-history-filter-page",
+        "product-artifacts-deeplink-status",
+        "product-computer-history-deeplink-status",
         "product-skills-page",
         "product-packs-page",
         "product-channels-page",
@@ -202,6 +204,9 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         /History \/ 历史/,
         /Go to conversation \/ 前往会话/,
         /computer\.history/,
+        /artifactScopeOverride/,
+        /historyScopeOverride/,
+        /event\.detail\?\.coworkerId/,
         /skills\.retest/,
         /Create Routine/,
         /create-routine-from-skill/,
@@ -262,6 +267,7 @@ test("This PC is a status-first Coworker surface with safe detail entry points",
         /No latest screen yet/,
         /No page details loaded/,
         /context\?\.label/,
+        /open-artifacts.*coworkerId/,
     ]) assert.match(thisPcUi, expression);
     for (const expression of [/sovereignbot:open-artifacts/, /sovereignbot:open-computer-history/]) assert.match(productHubs, expression);
     assert.doesNotMatch(thisPcUi, /Computer Node|WebDriver|driver|lease|profile path|absolute path|provider account|authority|session|token/i);

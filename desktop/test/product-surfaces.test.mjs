@@ -48,6 +48,9 @@ test("product surfaces provide safe playbook, artifact, computer, and pack proje
   const history = await service.computerHistory();
   assert.equal(history.history.length, 3);
   assert.equal(history.history.some((entry) => entry.eventType === "computer.action_failed" && entry.status === "failed" && entry.coworkerId === "coworker_1111111111111111"), true);
+  assert.equal((await service.computerHistory({ coworkerId: "coworker_1111111111111111" })).history.length, 1);
+  assert.equal((await service.computerHistory({ coworkerId: "coworker_1111111111111111" })).history[0].coworkerId, "coworker_1111111111111111");
+  await assert.rejects(() => service.computerHistory({ coworkerId: "C:\\private\\forged" }), /invalid/);
   assert.equal(JSON.stringify(history).includes("C:\\private"), false);
   assert.equal(JSON.stringify(history).includes("never-show"), false);
   const pack = service.duplicatePack("custom-team");

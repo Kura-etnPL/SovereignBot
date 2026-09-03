@@ -282,8 +282,9 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
         const channels = teamService.list().teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         return { artifacts: artifactStore.history(artifactId).history.map((artifact) => artifactView(artifact, channels)) };
     }
-    async function computerHistory({ limit = 100 } = {}) {
+    async function computerHistory({ limit = 100, coworkerId } = {}) {
         if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("computer history limit must be 1..500");
+        if (coworkerId !== undefined && !safeOpaqueId(coworkerId)) throw new Error("computer history coworkerId is invalid");
         const activeRuntime = resolveRuntime();
         if (!activeRuntime?.audit?.readAll) throw new Error("computer history audit is unavailable");
         const rows = await activeRuntime.audit.readAll(); const result = [];
@@ -295,12 +296,13 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
             // event name and a small data allowlist are used below.
             if (/secret|credential|auth|login|session|webdriver|continuity/i.test(type)) continue;
             const data = row?.data && typeof row.data === "object" && !Array.isArray(row.data) ? row.data : {};
+            const rowCoworkerId = safeOpaqueId(data.coworkerId) ?? safeOpaqueId(data.agentId) ?? safeOpaqueId(row?.actor);
+            if (coworkerId !== undefined && rowCoworkerId !== coworkerId) continue;
             const status = data.ok === false || /failed|error|rejected|denied/i.test(type) ? "failed" : /attention|takeover|paused|help_requested/i.test(type) ? "attention" : /requested/i.test(type) ? "requested" : "completed";
             const source = /computer/i.test(type) ? "computer" : /takeover/i.test(type) ? "takeover" : /task|job/i.test(type) ? "task" : "audit";
             const activity = data.activity ?? data.operation ?? data.action ?? type;
             const summary = data.summary ?? data.intent ?? data.title ?? data.action ?? data.operation ?? type;
-            const coworkerId = safeOpaqueId(data.coworkerId) ?? safeOpaqueId(data.agentId) ?? safeOpaqueId(row?.actor);
-            result.push({ id: safeOpaqueId(row?.id) ?? `history-${result.length + 1}`, eventType: safeHistoryText(type, 100), source, activity: safeHistoryText(activity), coworkerId, summary: safeHistoryText(summary), app: data.app ? safeHistoryText(data.app, 80) : undefined, site: data.site ? safeHistoryText(data.site, 180) : undefined, timestamp: typeof row?.at === "string" ? row.at : undefined, status });
+            result.push({ id: safeOpaqueId(row?.id) ?? `history-${result.length + 1}`, eventType: safeHistoryText(type, 100), source, activity: safeHistoryText(activity), coworkerId: rowCoworkerId, summary: safeHistoryText(summary), app: data.app ? safeHistoryText(data.app, 80) : undefined, site: data.site ? safeHistoryText(data.site, 180) : undefined, timestamp: typeof row?.at === "string" ? row.at : undefined, status });
             if (result.length >= limit) break;
         }
         return { history: result };

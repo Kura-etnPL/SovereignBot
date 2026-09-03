@@ -38,12 +38,12 @@ test("isAppUrl accepts only the app scheme+host", () => {
 });
 
 test("app protocol allowlists every product UI script referenced by the shell", () => {
-  for (const asset of ["product-hubs-ui.js", "memory-ui.js", "teach-ui.js"]) {
+  for (const asset of ["product-hubs-ui.js", "memory-ui.js", "teach-ui.js", "this-pc-ui.js", "this-pc.css"]) {
     assert.deepEqual(resolveAppAsset(`sovereignbot://app/${asset}`), {
       ok: true,
       pathname: `/${asset}`,
       file: asset,
-      type: "text/javascript; charset=utf-8",
+      type: asset.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8",
     });
   }
 });

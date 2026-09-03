@@ -104,7 +104,7 @@
       const summary = card.querySelector(".this-pc-snapshot-summary");
       if (summary) summary.textContent = `${snapshot.elements?.length ?? 0} page controls${snapshot.site ? ` · ${snapshot.site}` : ""}`;
     }));
-    if (computer.artifacts?.length) actions.append(button("Open artifacts / 查看成果", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-artifacts", { detail: { projectId } }))));
+    if (computer.artifacts?.length) actions.append(button("Open artifacts / 查看成果", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-artifacts", { detail: { projectId, coworkerId: computer.coworkerId } }))));
     actions.append(button("Open activity / 查看动态", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-computer-history", { detail: { projectId, coworkerId: computer.coworkerId } }))));
     card.append(actions);
 

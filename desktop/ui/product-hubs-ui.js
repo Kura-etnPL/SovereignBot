@@ -587,7 +587,13 @@
   function selected(id, fallback) { return $(id)?.value || fallback; }
   let focusedArtifactId;
   let pendingArtifactId;
+  let artifactScopeOverride = "";
+  let historyScopeOverride = "";
+  let artifactDeepLinkNotice = "";
+  let historyDeepLinkNotice = "";
   let artifactPreviewRequest = 0;
+  let refreshGeneration = 0;
+  const safeOpaqueId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value) ? value : "";
   async function openArtifactPreview(item) {
     const dialog = $("artifact-preview-dialog");
     if (!dialog) return;
@@ -1016,9 +1022,10 @@
   }
 
   async function refresh() {
+    const generation = ++refreshGeneration;
     const [teams, coworkers, workspaces] = await Promise.all([api.teams.list({}), api.coworkers.list({}), api.workspaces?.list ? api.workspaces.list({}) : Promise.resolve({ workspaces: [] })]);
     cache.teams = teams.teams ?? []; cache.coworkers = coworkers.coworkers ?? []; cache.workspaces = workspaces.workspaces ?? []; cache.templates = teams.channelTemplates ?? [];
-    const artifactScope = selected("artifact-hub-filter-page", "recent");
+    const artifactScope = artifactScopeOverride || selected("artifact-hub-filter-page", "recent");
     const artifactVisibility = selected("artifact-hub-visibility-page", "active");
     const artifactOptions = [{ value: "recent", label: "Recent / 最近" }, ...cache.teams.flatMap((team) => [{ value: `team:${team.id}`, label: `By Team / 团队: ${team.name}` }, ...(team.channels ?? []).map((channel) => ({ value: `channel:${channel.id}`, label: `By Channel / 频道: ${channel.name}` }))]), ...cache.coworkers.map((coworker) => ({ value: `coworker:${coworker.id}`, label: `By Coworker / 同事: ${coworker.name}` }))];
     populate("artifact-hub-filter-page", artifactOptions, artifactScope);
@@ -1028,8 +1035,10 @@
     const artifactType = selected("artifact-hub-type-page", "");
     populate("artifact-hub-type-page", [{ value: "", label: "All types / 全部类型" }, ...artifactTypes.map((value) => ({ value, label: value }))], artifactType);
     const artifactPayload = { limit: 100, visibility: selected("artifact-hub-visibility-page", artifactVisibility) }; const resolvedScope = selected("artifact-hub-filter-page", artifactScope); if (resolvedScope.startsWith("team:")) artifactPayload.teamId = resolvedScope.slice(5); if (resolvedScope.startsWith("channel:")) artifactPayload.channelId = resolvedScope.slice(8); if (resolvedScope.startsWith("coworker:")) artifactPayload.coworkerId = resolvedScope.slice(9); const resolvedType = selected("artifact-hub-type-page", artifactType); if (resolvedType) artifactPayload.type = resolvedType;
-    const historyScope = selected("computer-history-filter-page", "all"); populate("computer-history-filter-page", [{ value: "all", label: "All coworkers / 全部同事" }, ...cache.coworkers.map((coworker) => ({ value: coworker.id, label: `By Coworker / 同事: ${coworker.name}` }))], historyScope);
-    let [playbookResult, artifactResult, historyResult, skillResult, channelResult, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations?.list ? api.conversations.list({}) : Promise.resolve({ conversations: [] })]);
+    const historyScope = historyScopeOverride || selected("computer-history-filter-page", "all");
+    populate("computer-history-filter-page", [{ value: "all", label: "All coworkers / 全部同事" }, ...cache.coworkers.map((coworker) => ({ value: coworker.id, label: `By Coworker / 同事: ${coworker.name}` }))], historyScope);
+    const historyPayload = { limit: 100, ...(historyScope !== "all" && safeOpaqueId(historyScope) ? { coworkerId: historyScope } : {}) };
+    let [playbookResult, artifactResult, historyResult, skillResult, channelResult, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history(historyPayload), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations?.list ? api.conversations.list({}) : Promise.resolve({ conversations: [] })]);
     const requestedArtifactId = pendingArtifactId;
     pendingArtifactId = undefined;
     let requestedArtifactError = "";
@@ -1041,8 +1050,11 @@
         requestedArtifactError = "The requested artifact is unavailable or no longer published.";
       }
     }
+    if (generation !== refreshGeneration) return;
     cache.conversations = conversations.conversations ?? [];
     playbooks(playbookResult.playbooks ?? []); artifacts(artifactResult.artifacts ?? []); history(historyResult.history ?? []); skills(skillResult.skills ?? []); packs(teams.packs ?? []); channels(channelResult.channels ?? []);
+    const artifactNotice = $("product-artifacts-deeplink-status"); if (artifactNotice) artifactNotice.textContent = artifactDeepLinkNotice;
+    const historyNotice = $("product-computer-history-deeplink-status"); if (historyNotice) historyNotice.textContent = historyDeepLinkNotice;
     if (requestedArtifactError) showError(pageRoots.artifacts, requestedArtifactError);
   }
 
@@ -1106,13 +1118,23 @@
     $("team-pack-search-page")?.addEventListener("input", () => void refresh()); $("team-pack-category-page")?.addEventListener("change", () => void refresh());
     $("product-channel-create-page")?.addEventListener("click", () => { const teamId = $("product-channel-template-team-page")?.value || cache.teams[0]?.id; if (teamId) void openEditor(teamId).catch((reason) => showError(pageRoots.channels, reason)); });
     $("product-channel-template-add-page")?.addEventListener("click", () => void (async () => { const teamId = $("product-channel-template-team-page")?.value; const templateId = $("product-channel-template-page")?.value; if (!teamId || !templateId) return; await api.teams.createChannelFromTemplate({ teamId, templateId }); await refreshHost(); await refresh(); })().catch((reason) => showError(pageRoots.channels, reason)));
-    for (const id of ["artifact-hub-filter-page", "artifact-hub-visibility-page", "artifact-hub-type-page", "computer-history-filter-page", "product-channel-filter-page"]) $(id)?.addEventListener("change", () => void refresh());
+    for (const id of ["artifact-hub-filter-page", "artifact-hub-visibility-page", "artifact-hub-type-page", "computer-history-filter-page", "product-channel-filter-page"]) $(id)?.addEventListener("change", () => { if (id === "artifact-hub-filter-page") { artifactScopeOverride = ""; artifactDeepLinkNotice = ""; } if (id === "computer-history-filter-page") { historyScopeOverride = ""; historyDeepLinkNotice = ""; } void refresh(); });
     $("product-channel-switch-page")?.addEventListener("change", (event) => openConversationSafe(event.target.value));
     api.onNavigate?.((target) => { if (navViews.has("nav-" + target) || ["product-hubs", "playbooks", "artifacts", "computer-history", "skills", "team-packs", "channels"].includes(target)) nav(target); });
     document.addEventListener("sovereignbot:open-artifact", (event) => { const artifactId = event.detail?.artifactId; if (!artifactId) return; focusedArtifactId = String(artifactId); pendingArtifactId = focusedArtifactId; nav("artifacts"); });
     document.addEventListener("sovereignbot:open-artifact-preview", (event) => { if (event.detail?.item) void openArtifactPreview(event.detail.item); });
-    document.addEventListener("sovereignbot:open-artifacts", () => nav("artifacts"));
-    document.addEventListener("sovereignbot:open-computer-history", () => nav("computer-history"));
+    document.addEventListener("sovereignbot:open-artifacts", (event) => {
+      const coworkerId = safeOpaqueId(event.detail?.coworkerId);
+      artifactScopeOverride = coworkerId ? `coworker:${coworkerId}` : "recent";
+      artifactDeepLinkNotice = coworkerId ? "Showing artifacts created by this Coworker / 已显示此同事创建的成果" : "Showing recent artifacts / 已显示最近成果";
+      nav("artifacts");
+    });
+    document.addEventListener("sovereignbot:open-computer-history", (event) => {
+      const coworkerId = safeOpaqueId(event.detail?.coworkerId);
+      historyScopeOverride = coworkerId || "all";
+      historyDeepLinkNotice = coworkerId ? "Showing activity for this Coworker / 已显示此同事的动态" : "Showing all Coworker activity / 已显示全部同事动态";
+      nav("computer-history");
+    });
     window.refreshIndependentProductPages = refresh;
   }
   setup();
