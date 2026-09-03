@@ -15,3 +15,14 @@ test("large Coworker roster exposes bounded search, filters, counts, and progres
     assert.match(css, /\.sidebar-more/);
     assert.match(app, /item\.dataset\.coworkerId = coworker\.id/);
 });
+
+test("conversation refresh requests Team activity only for a known Team summary", () => {
+    const start = app.indexOf("async function refreshConversation(");
+    const end = app.indexOf("\nasync function loadOlderMessages", start);
+    const refresh = app.slice(start, end);
+    assert.match(refresh, /const conversationSummary = conversationById\(id\)/);
+    assert.match(refresh, /conversationSummary\?\.kind === "team"/);
+    assert.match(refresh, /Promise\.resolve\(\{ events: \[\] \}\)/);
+    assert.match(refresh, /window\.sovereignbot\.teams\.activity\(\{ conversationId: id, limit: 24 \}\)/);
+    assert.match(refresh, /Promise\.all\(\[/);
+});

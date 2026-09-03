@@ -1004,9 +1004,13 @@ async function refreshConversation(forceScroll = false) {
   if (state.conversationPage?.conversationId !== id) resetConversationPage(id);
   const requestId = ++state.conversationRefreshRequest;
   try {
+    const conversationSummary = conversationById(id) ?? (state.selectedConversation?.id === id ? state.selectedConversation : undefined);
+    const activityPromise = conversationSummary?.kind === "team"
+      ? window.sovereignbot.teams.activity({ conversationId: id, limit: 24 }).catch(() => ({ events: [] }))
+      : Promise.resolve({ events: [] });
     const [pageResponse, activity] = await Promise.all([
       window.sovereignbot.conversations.get({ conversationId: id, limit: CONVERSATION_PAGE_SIZE }),
-      window.sovereignbot.teams.activity({ conversationId: id, limit: 24 }).catch(() => ({ events: [] })),
+      activityPromise,
     ]);
     if (requestId !== state.conversationRefreshRequest || state.selectedConversationId !== id) return;
     const { messages, freshMessages } = mergeConversationPage(pageResponse, "latest");

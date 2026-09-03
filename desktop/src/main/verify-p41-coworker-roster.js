@@ -52,7 +52,7 @@ export async function runVerifyP41CoworkerRoster({ app } = {}) {
     const extras = [];
     for (let index = 0; index < 52; index += 1) {
       extras.push(fixture.coworkerStore.create({
-        name: index === 49 ? "P41 Remote Search Target" : `P41 Roster ${String(index).padStart(2, "0")}`,
+        name: index === 49 ? "ZZZ P41 Remote Search Target" : `P41 Roster ${String(index).padStart(2, "0")}`,
         role: index === 49 ? "Remote search specialist" : "Roster specialist",
         instructions: "Remain inside the local P41 fixture.",
         state: index === 51 ? "paused" : "active",
@@ -83,10 +83,11 @@ export async function runVerifyP41CoworkerRoster({ app } = {}) {
       rows:document.querySelectorAll("#coworker-list .nav-item").length,
       more:document.getElementById("coworker-show-more")?.textContent||"",
       summary:document.getElementById("coworker-roster-summary")?.textContent||"",
+      names:[...document.querySelectorAll("#coworker-list .nav-item strong")].map((node)=>node.textContent),
       controls:["coworker-search","coworker-status-filter","coworker-show-more"].every((id)=>Boolean(document.getElementById(id))),
       body:(document.body.innerText+" "+document.body.innerHTML).slice(0,30000),
     })`);
-    check("large roster starts bounded with visible controls and safe count", initial.rows >= 12 && initial.rows <= 16 && initial.controls && /Show .*more|显示其余/i.test(initial.more) && initial.summary.includes(`${expectedTotal} coworkers`) && !/(workspacePath|sessionId|agentId|workerId|providerAccount|accountSlot|accessToken|apiKey|secret)/i.test(initial.body), JSON.stringify({ rows: initial.rows, more: initial.more, summary: initial.summary, controls: initial.controls }));
+    check("large roster starts bounded with visible controls and safe count", initial.rows >= 12 && initial.rows <= 16 && initial.controls && /Show .*more|显示其余/i.test(initial.more) && initial.summary.includes(`${expectedTotal} coworkers`) && !initial.names.includes(target.name) && !/(workspacePath|sessionId|agentId|workerId|providerAccount|accountSlot|accessToken|apiKey|secret)/i.test(initial.body), JSON.stringify({ rows: initial.rows, more: initial.more, summary: initial.summary, controls: initial.controls }));
 
     await invoke(win, `async()=>{document.getElementById("coworker-show-more")?.click(); return true}`);
     await waitFor(async () => await invoke(win, `async()=>document.querySelectorAll("#coworker-list .nav-item").length===${expectedTotal}`), "expanded full roster");
