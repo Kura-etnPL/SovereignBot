@@ -6,6 +6,8 @@ const MAX_KEY = 200;
 const MAX_TAGS = 32;
 const MAX_TAG = 80;
 const MAX_VALUE_TEXT = 20_000;
+export const MAX_MEMORY_SEARCH_QUERY = 300;
+export const MAX_MEMORY_SEARCH_LIMIT = 100;
 const MEMORY_STATES = new Set(["active", "forgotten", "deleted"]);
 const SUGGESTION_STATES = new Set(["pending", "approved", "rejected"]);
 export const SOURCE_TYPES = new Set(["conversation", "artifact", "job", "correction", "fact"]);
@@ -104,19 +106,96 @@ function normalizeRecord(record) {
     };
 }
 
+function normalizeSearchText(value) {
+    return String(value ?? "").normalize("NFKC").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+function safeSearchQuery(query) {
+    if (query === undefined || query === null) return "";
+    if (typeof query !== "string") throw new Error("memory search query must be a string");
+    if (query.length > MAX_MEMORY_SEARCH_QUERY) throw new Error(`memory search query exceeds ${MAX_MEMORY_SEARCH_QUERY} characters`);
+    if ([...query].some((char) => char.charCodeAt(0) < 32 && !["\t", "\n"].includes(char))) throw new Error("memory search query contains control characters");
+    return normalizeSearchText(query);
+}
+
+function safeSearchLimit(limit) {
+    if (limit === undefined) return 50;
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_MEMORY_SEARCH_LIMIT) throw new Error(`memory search limit must be an integer from 1 to ${MAX_MEMORY_SEARCH_LIMIT}`);
+    return limit;
+}
+
+function searchableFields(record) {
+    const value = record.value && typeof record.value === "object" && !Array.isArray(record.value) ? record.value : {};
+    return {
+        key: normalizeSearchText(record.key),
+        title: normalizeSearchText(value.title),
+        content: normalizeSearchText(value.content ?? (record.value === undefined ? "" : JSON.stringify(record.value))),
+        tags: record.tags.map(normalizeSearchText).filter(Boolean),
+    };
+}
+
 function scoreRecord(record, query) {
-    if (!query) return 0;
-    const haystack = `${record.key} ${JSON.stringify(record.value ?? "")} ${record.tags.join(" ")}`.toLowerCase();
-    const key = record.key.toLowerCase();
+    if (!query) return { score: 0, key: "recent", fields: [], coverage: 1 };
+    const fields = searchableFields(record);
+    const queryTokens = query.split(" ").filter(Boolean);
+    const matchedFields = new Set();
     let score = 0;
-    for (const token of query.split(/\s+/).filter(Boolean)) {
-        if (key === token) score += 12;
-        else if (key.startsWith(token)) score += 8;
-        else if (key.includes(token)) score += 5;
-        else if (haystack.includes(token)) score += 2;
-        else return -1;
+    for (const token of queryTokens) {
+        const keyExact = fields.key === token;
+        const titleExact = fields.title === token;
+        const keyPrefix = fields.key.startsWith(token);
+        const titlePrefix = fields.title.startsWith(token);
+        const keyContains = fields.key.includes(token);
+        const titleContains = fields.title.includes(token);
+        const tagExact = fields.tags.some((tag) => tag === token);
+        const tagContains = fields.tags.some((tag) => tag.includes(token));
+        const contentContains = fields.content.includes(token);
+        if (!(keyContains || titleContains || tagContains || contentContains)) return null;
+        if (keyExact) { score += 240; matchedFields.add("key"); }
+        else if (keyPrefix) { score += 180; matchedFields.add("key"); }
+        else if (keyContains) { score += 110; matchedFields.add("key"); }
+        if (titleExact) { score += 220; matchedFields.add("title"); }
+        else if (titlePrefix) { score += 170; matchedFields.add("title"); }
+        else if (titleContains) { score += 100; matchedFields.add("title"); }
+        if (tagExact) { score += 190; matchedFields.add("tags"); }
+        else if (tagContains) { score += 130; matchedFields.add("tags"); }
+        if (contentContains) { score += 40; matchedFields.add("content"); }
     }
-    return score;
+    const phraseFields = ["key", "title", "tags", "content"].filter((field) => {
+        const value = fields[field];
+        return Array.isArray(value) ? value.some((entry) => entry.includes(query)) : value.includes(query);
+    });
+    for (const field of phraseFields) score += field === "title" ? 140 : field === "key" ? 100 : field === "tags" ? 90 : 70;
+    const coverage = queryTokens.length ? queryTokens.length / queryTokens.length : 1;
+    const key = fields.key === query ? "key-exact"
+        : fields.title === query ? "title-exact"
+            : fields.key.startsWith(query) ? "key-prefix"
+                : fields.title.startsWith(query) ? "title-prefix"
+                    : phraseFields.length && queryTokens.length > 1 ? "phrase"
+                        : matchedFields.has("tags") ? "tags"
+                            : matchedFields.has("content") ? "content" : "token";
+    return { score, key, fields: [...matchedFields].sort(), coverage: Number(coverage.toFixed(3)) };
+}
+
+export function rankMemoryRecords(records, { query, tags = [], limit, includeForgotten = false } = {}) {
+    const normalizedQuery = safeSearchQuery(query);
+    const safeLimit = safeSearchLimit(limit);
+    const filterTags = safeTags(tags).map(normalizeSearchText);
+    const ranked = records.map((record, index) => ({ record, index })).filter(({ record }) => {
+        if (!includeForgotten && record.state !== "active") return false;
+        return filterTags.every((tag) => record.tags.some((entry) => normalizeSearchText(entry) === tag));
+    }).map(({ record, index }) => {
+        const match = scoreRecord(record, normalizedQuery);
+        if (!match) return undefined;
+        return { record, index, ...match, score: match.score + (record.pinned === true ? 8 : 0), pinned: record.pinned === true, updatedAt: Date.parse(record.at) || 0 };
+    }).filter(Boolean);
+    ranked.sort((a, b) => b.score - a.score || Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt || b.index - a.index);
+    return ranked.slice(0, safeLimit).map(({ record, index, score, key, fields, coverage, pinned }) => ({
+        record: structuredClone(record),
+        score,
+        matchReason: { key, fields, coverage, pinned },
+        index,
+    }));
 }
 
 export class MemoryStore {
@@ -166,16 +245,13 @@ export class MemoryStore {
     }
 
     async search(input = {}) {
-        const query = input.query?.trim().toLowerCase() ?? "";
-        const tags = safeTags(input.tags ?? []);
-        const limit = input.limit === undefined ? 50 : Number.isInteger(input.limit) && input.limit >= 1 && input.limit <= 500 ? input.limit : (() => { throw new Error("memory search limit is invalid"); })();
-        const records = (await this.all()).filter((record) => {
-            if (input.scope && record.scope !== safeScope(input.scope)) return false;
-            if (tags.length && !tags.every((tag) => record.tags.includes(tag))) return false;
-            return true;
-        }).map((record, index) => ({ record, score: scoreRecord(record, query), index })).filter((entry) => entry.score >= 0);
-        records.sort((a, b) => b.score - a.score || b.index - a.index);
-        return records.slice(0, limit).map(({ record }) => structuredClone(record));
+        return (await this.searchDetailed(input)).map(({ record }) => record);
+    }
+
+    async searchDetailed(input = {}) {
+        const scope = input.scope ? safeScope(input.scope) : undefined;
+        const records = (await this.all({ includeForgotten: input.includeForgotten === true })).filter((record) => !scope || record.scope === scope);
+        return rankMemoryRecords(records, input);
     }
 
     async history(memoryId) {

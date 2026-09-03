@@ -44,6 +44,7 @@
         "verify:p37-settings": "node scripts/verify-p37-settings.mjs",
         "verify:p38-search-relevance": "node scripts/verify-p38-search-relevance.mjs",
         "verify:p39-conversation-pagination": "node scripts/verify-p39-conversation-pagination.mjs",
+        "verify:p40-memory-relevance": "node scripts/verify-p40-memory-relevance.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",

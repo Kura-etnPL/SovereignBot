@@ -112,3 +112,51 @@ test("Memory source and job boundaries fail closed", async () => {
         await assert.rejects(() => service.suggest({ scope: "team", ownerId: "team_a", draft: { title: "No", content: "No" }, source: { type: "conversation", sourceId: "conv_a", approved: true } }), /source/);
     } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("Memory relevance is scoped, deterministic, bounded, and shared by forgotten search", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sb-memory-relevance-"));
+    try {
+        const { memory, make } = harness(root);
+        const service = make();
+        const projectId = "project_aaaaaaaaaaaaaaaa";
+        const put = (title, content, tags = [], pinned = false) => memory.put({ scope: `project:${projectId}`, key: title.toLowerCase().replaceAll(" ", "-"), value: { title, content }, tags, pinned });
+        const exact = await put("Release Checklist", "Deploy safely after the release review.", ["operations", "release"]);
+        await put("Release Playbook", "A general release workflow.", ["release"]);
+        await put("Pinned Release Note", "A small operational reminder.", ["release"], true);
+        await put("发布说明", "中文检索内容。", ["中文"]);
+        const forgotten = await put("Forgotten Release Note", "Do not use this old note.", ["release"]);
+        await service.forget({ scope: "project", ownerId: projectId, memoryId: forgotten.memoryId });
+        await service.putFact({ scope: "coworker", ownerId: "coworker_a", draft: { title: "Release Checklist", content: "Private coworker copy", tags: ["operations"] } });
+
+        const exactResult = await service.list({ scope: "project", ownerId: projectId, query: "release checklist", limit: 10 });
+        assert.equal(exactResult.memories[0].id, exact.memoryId);
+        assert.equal(exactResult.memories[0].matchReason.key, "title-exact");
+        assert.deepEqual(exactResult.memories[0].matchReason.fields, ["content", "key", "tags", "title"]);
+        const tagResult = await service.list({ scope: "project", ownerId: projectId, query: "operations" });
+        assert.equal(tagResult.memories[0].matchReason.key, "tags");
+        const phraseResult = await service.list({ scope: "project", ownerId: projectId, query: "deploy safely" });
+        assert.equal(phraseResult.memories[0].id, exact.memoryId);
+        assert.equal(phraseResult.memories[0].matchReason.key, "phrase");
+        const chineseResult = await service.list({ scope: "project", ownerId: projectId, query: "发布" });
+        assert.ok(["key-prefix", "title-prefix"].includes(chineseResult.memories[0].matchReason.key));
+        const emptyResult = await service.list({ scope: "project", ownerId: projectId, query: "", limit: 3 });
+        assert.equal(emptyResult.memories[0].title, "Pinned Release Note");
+        assert.equal(emptyResult.memories[0].matchReason.key, "recent");
+        assert.equal(emptyResult.resultCount, 3);
+        assert.equal((await service.list({ scope: "project", ownerId: projectId, query: "release checklist" })).memories.some((entry) => entry.title === "Forgotten Release Note"), false);
+        const forgottenResult = await service.list({ scope: "project", ownerId: projectId, query: "forgotten release", includeForgotten: true });
+        assert.equal(forgottenResult.memories[0].id, forgotten.memoryId);
+        assert.equal(forgottenResult.memories[0].state, "forgotten");
+        assert.equal((await service.list({ scope: "project", ownerId: projectId, query: "release checklist" })).memories.length, 1);
+        assert.equal((await service.list({ scope: "coworker", ownerId: "coworker_a", query: "release checklist" })).memories.length, 1);
+        await assert.rejects(() => service.list({ scope: "project", ownerId: projectId, query: "x".repeat(301) }), /exceeds 300/);
+        await assert.rejects(() => service.list({ scope: "project", ownerId: projectId, query: "x", limit: 101 }), /from 1 to 100/);
+        await assert.rejects(() => service.list({ scope: "project", ownerId: projectId, query: 42 }), /must be a string/);
+        await assert.rejects(() => service.list({ scope: "project", ownerId: projectId, query: "x", includeForgotten: "yes" }), /includeForgotten/);
+        const restarted = make(new MemoryStore(join(root, "memory.jsonl")));
+        const firstOrder = await restarted.list({ scope: "project", ownerId: projectId, query: "release", limit: 10, includeForgotten: true });
+        const secondOrder = await restarted.list({ scope: "project", ownerId: projectId, query: "release", limit: 10, includeForgotten: true });
+        assert.deepEqual(firstOrder.memories, secondOrder.memories);
+        assert.ok(firstOrder.memories.every((entry) => entry.scope === "project" && !/(provider|session|credential|token|secret|password|cwd|path)/i.test(JSON.stringify(entry))));
+    } finally { rmSync(root, { recursive: true, force: true }); }
+});

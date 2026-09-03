@@ -73,7 +73,11 @@ function memoryTarget(value, { withMemoryId = false, withPatch = false, withPinn
         if (typeof input.pinned !== "boolean") throw new Error("pinned must be boolean");
         result.pinned = input.pinned;
     } else {
-        if (input.query !== undefined) result.query = string(input.query, "query", 300);
+        if (input.query !== undefined) {
+            const query = string(input.query, "query", 300);
+            if ([...query].some((char) => char.charCodeAt(0) < 32 && !["\t", "\n"].includes(char))) throw new Error("query contains control characters");
+            result.query = query.trim();
+        }
         result.limit = input.limit === undefined ? 50 : positiveInteger(input.limit, "limit", 1, 100);
         if (input.includeForgotten !== undefined && typeof input.includeForgotten !== "boolean") throw new Error("includeForgotten must be boolean");
         result.includeForgotten = input.includeForgotten === true;

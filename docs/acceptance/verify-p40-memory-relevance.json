@@ -1,0 +1,21 @@
+{
+  "schema": "sovereignbot.desktop.p40-memory-relevance-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "P40 hidden Memory gate completed": {
+      "ok": false,
+      "detail": "ERR_FAILED (-2) loading 'sovereignbot://app/'"
+    }
+  },
+  "notes": [
+    "PASS hidden Electron window stays hidden",
+    "FAIL P40 hidden Memory gate completed ERR_FAILED (-2) loading 'sovereignbot://app/'"
+  ],
+  "externalActions": [],
+  "error": "Error: ERR_FAILED (-2) loading 'sovereignbot://app/'\n    at rejectAndCleanup (node:electron/js2c/browser_init:2:94962)\n    at finishListener (node:electron/js2c/browser_init:2:95124)\n    at WebContents.stopLoadingListener (node:electron/js2c/browser_init:2:95511)\n    at WebContents.emit (node:events:509:28)",
+  "ok": false
+}

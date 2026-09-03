@@ -1,4 +1,6 @@
 export const DESKTOP_MEMORY_SCHEMA = "sovereignbot.desktop.memory.v1";
+const MAX_SEARCH_QUERY = 300;
+const MAX_SEARCH_LIMIT = 100;
 const SCOPE_TYPES = new Set(["coworker", "team", "project"]);
 const SOURCE_TYPES = new Set(["conversation", "artifact", "job", "correction", "fact"]);
 const FORBIDDEN_DRAFT_FIELDS = new Set(["scope", "scopeType", "ownerId", "source", "sourceRef", "provenance", "approved", "state", "pinned", "memoryId", "id"]);
@@ -13,6 +15,16 @@ function text(value, label, max, required = false) {
     if (required && !output) throw new Error(`${label} is required`);
     if (output.length > max) throw new Error(`${label} exceeds ${max} characters`);
     return output;
+}
+function searchInput(query, limit, includeForgotten) {
+    if (query !== undefined && typeof query !== "string") throw new Error("memory search query must be a string");
+    const normalizedQuery = query === undefined ? "" : query.trim();
+    if (normalizedQuery.length > MAX_SEARCH_QUERY) throw new Error(`memory search query exceeds ${MAX_SEARCH_QUERY} characters`);
+    if ([...normalizedQuery].some((char) => char.charCodeAt(0) < 32 && !["\t", "\n"].includes(char))) throw new Error("memory search query contains control characters");
+    const normalizedLimit = limit === undefined ? 50 : limit;
+    if (!Number.isInteger(normalizedLimit) || normalizedLimit < 1 || normalizedLimit > MAX_SEARCH_LIMIT) throw new Error(`memory search limit must be an integer from 1 to ${MAX_SEARCH_LIMIT}`);
+    if (includeForgotten !== undefined && typeof includeForgotten !== "boolean") throw new Error("includeForgotten must be boolean");
+    return { query: normalizedQuery, limit: normalizedLimit, includeForgotten: includeForgotten === true };
 }
 function tags(value) {
     if (value === undefined) return [];
@@ -186,7 +198,28 @@ export function createMemoryService({ runtime, getRuntime, services, coworkerSto
         const provenance = history.findLast((entry) => entry.provenance)?.provenance;
         return publicSource(provenance);
     }
-    async function publicMemory(record) {
+    function publicMatchReason(reason = { key: "recent", fields: [], coverage: 1, pinned: false }) {
+        const labels = {
+            "key-exact": "Exact key match / 键完全匹配",
+            "title-exact": "Exact title match / 标题完全匹配",
+            "key-prefix": "Key prefix match / 键前缀匹配",
+            "title-prefix": "Title prefix match / 标题前缀匹配",
+            phrase: "Phrase match / 短语匹配",
+            tags: "Tag match / 标签匹配",
+            content: "Content match / 内容匹配",
+            token: "Keyword match / 关键词匹配",
+            recent: "Recent memory / 最近记忆",
+        };
+        const key = labels[reason?.key] ? reason.key : "recent";
+        return {
+            key,
+            label: `${labels[key]}${reason?.pinned ? " · Pinned / 已置顶" : ""}`,
+            fields: Array.isArray(reason?.fields) ? reason.fields.filter((field) => ["key", "title", "tags", "content"].includes(field)) : [],
+            ...(Number.isFinite(reason?.coverage) ? { coverage: reason.coverage } : {}),
+            ...(reason?.pinned === true ? { pinned: true } : {}),
+        };
+    }
+    async function publicMemory(record, matchReason) {
         const history = await memoryStore().history(record.memoryId);
         const first = history[0] ?? record;
         const value = record.value && typeof record.value === "object" && !Array.isArray(record.value) ? record.value : { title: record.key, content: String(record.value ?? "") };
@@ -202,6 +235,7 @@ export function createMemoryService({ runtime, getRuntime, services, coworkerSto
             createdAt: first.at,
             updatedAt: record.at,
             source: await traceFor(record),
+            matchReason: publicMatchReason(matchReason),
         };
     }
     async function writeApproved(target, draft, source, pinned = false) {
@@ -245,8 +279,15 @@ export function createMemoryService({ runtime, getRuntime, services, coworkerSto
         schema: DESKTOP_MEMORY_SCHEMA,
         list: async ({ scope, ownerId, query, limit = 50, includeForgotten = false } = {}) => {
             const target = requireTarget(scope, ownerId);
-            const rows = includeForgotten ? (await memoryStore().all({ includeForgotten: true })).filter((entry) => entry.scope === target.scope && (!query || `${entry.key} ${JSON.stringify(entry.value)} ${entry.tags.join(" ")}`.toLowerCase().includes(String(query).trim().toLowerCase()))).slice(-Math.min(100, limit)).reverse() : await memoryStore().search({ scope: target.scope, query, limit: Math.min(100, limit) });
-            return { schema: DESKTOP_MEMORY_SCHEMA, scope: target.kind, memories: await Promise.all(rows.map(publicMemory)) };
+            const input = searchInput(query, limit, includeForgotten);
+            const rows = await memoryStore().searchDetailed({ scope: target.scope, ...input });
+            return {
+                schema: DESKTOP_MEMORY_SCHEMA,
+                scope: target.kind,
+                resultCount: rows.length,
+                returnedCount: rows.length,
+                memories: await Promise.all(rows.map(({ record, matchReason }) => publicMemory(record, matchReason))),
+            };
         },
         get: async ({ scope, ownerId, memoryId } = {}) => publicMemory(await internalById(memoryId, requireTarget(scope, ownerId))),
         update: async ({ scope, ownerId, memoryId, patch } = {}) => {

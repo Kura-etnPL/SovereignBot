@@ -133,10 +133,11 @@
       const title = document.createElement("h3"); title.textContent = `${memory.title}${memory.pinned ? " · pinned" : ""}`;
       const content = document.createElement("p"); content.textContent = memory.content;
       const meta = document.createElement("small"); meta.textContent = `${memory.state} · ${(memory.tags ?? []).join(", ") || "no tags"}`;
+      const reason = document.createElement("small"); reason.className = "memory-match-reason"; reason.textContent = `Match: ${memory.matchReason?.label ?? "Recent memory / 最近记忆"}`;
       const source = document.createElement("small"); source.textContent = `Source: ${memory.source?.label ?? "Unavailable"}`;
       const actions = document.createElement("div"); actions.className = "detail-actions";
       actions.append(button(memory.pinned ? "Unpin / 取消置顶" : "Pin / 置顶", async () => { await api.memory.pin({ ...scopeTarget(), memoryId: memory.id, pinned: !memory.pinned }); await refresh(); }), button("Edit / 编辑", () => openEditDialog(memory)), button("Forget / 忘记", async () => { if (memory.state === "forgotten") return; await api.memory.forget({ ...scopeTarget(), memoryId: memory.id }); await refresh(); }), button("Delete / 删除", async () => { if (!window.confirm("Delete this memory? / 删除这条记忆？")) return; await api.memory.delete({ ...scopeTarget(), memoryId: memory.id }); await refresh(); }), sourceAction(memory, source));
-      card.append(title, content, meta, source, actions); root.append(card);
+      card.append(title, content, meta, reason, source, actions); root.append(card);
     }
     if (!memories.length) { const empty = document.createElement("p"); empty.textContent = "No memories in this scope / 此归属暂无记忆"; root.append(empty); }
   }
@@ -164,7 +165,9 @@
         const result = await api.memory.list({ ...request, ...(selected("memory-search") ? { query: selected("memory-search") } : {}) });
         if (sequence !== refreshSequence) return;
         renderMemories(result.memories ?? []);
-        setResult(`${result.memories?.length ?? 0} memories · rebuilt locally / 条记忆 · 已在本地重建`);
+        const count = result.resultCount ?? result.memories?.length ?? 0;
+        const returned = result.returnedCount ?? result.memories?.length ?? 0;
+        setResult(`${count} matches${returned !== count ? ` · showing ${returned}` : ""} · rebuilt locally / ${count} 条匹配 · 已在本地重建`);
       }
       const suggestions = await api.memory.listSuggestions();
       if (sequence === refreshSequence) renderSuggestions(suggestions.suggestions ?? []);
