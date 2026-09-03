@@ -463,6 +463,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .apps-catalog-assignment { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .apps-catalog-assignment strong, .apps-catalog-assignment small { grid-column: 1 / -1; color: var(--text-3); font-size: 10px; }
 .apps-catalog-assignment select { min-width: 0; }
+.apps-catalog-assigned { display: grid; grid-column: 1 / -1; gap: 5px; }
+.apps-catalog-assigned-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-2); font-size: 10px; }
+.apps-catalog-assigned-row .quiet-action { padding: 4px 7px; font-size: 10px; }
 @media (max-width: 720px) { .apps-catalog-list { grid-template-columns: 1fr; } .apps-catalog-assignment { grid-template-columns: 1fr; } }
 /* Search and command palette stays renderer-only; result text is inserted via textContent. */
 

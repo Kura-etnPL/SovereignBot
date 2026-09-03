@@ -118,7 +118,7 @@ test("Routine cards keep Run now and Restore feedback in-product and guard pendi
 
 test("Apps Catalog is an independent user surface with honest lifecycle review", () => {
     for (const id of ["nav-apps", "view-apps", "apps-catalog-search", "apps-catalog-category", "apps-catalog-status", "apps-catalog-project", "apps-catalog-list"]) assert.match(html, new RegExp(`id="${id}"`), id);
-    for (const expression of [/connectedApps\.search/, /connectedApps\.review/, /connectedApps\.connect/, /connectedApps\.disconnect/, /connectedApps\.disable/, /Assign Team/, /Assign Coworker/, /trustedSource/, /installationState/, /metered/]) assert.match(appsCatalog, expression);
+    for (const expression of [/connectedApps\.search/, /connectedApps\.review/, /connectedApps\.connect/, /connectedApps\.disconnect/, /connectedApps\.disable/, /Assign Team/, /Assign Coworker/, /Unassign \$\{kind\}/, /enabled: false/, /trustedSource/, /installationState/, /metered/]) assert.match(appsCatalog, expression);
     assert.match(appsCatalog, /Review before connecting/);
     assert.doesNotMatch(appsCatalog, /providerToken|sessionId|rawPath|workspacePath|adapter|transport|credential/);
     assert.match(css, /\.apps-catalog-card/);

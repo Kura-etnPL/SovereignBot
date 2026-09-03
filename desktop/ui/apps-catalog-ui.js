@@ -62,7 +62,23 @@
       catch (error) { setFeedback(error?.message || error, true); button.disabled = false; }
     });
     section.append(team, assignTeam, coworker, assignCoworker);
-    const assigned = document.createElement("small"); assigned.textContent = `Assigned Teams: ${app.assignedTeamIds?.length ?? 0} · Coworkers: ${app.assignedCoworkerIds?.length ?? 0}`; section.append(assigned);
+    const assigned = document.createElement("div"); assigned.className = "apps-catalog-assigned";
+    const assignedTeams = (app.assignedTeamIds ?? []).map((id) => teams.find((item) => item.id === id)?.name ?? id);
+    const assignedCoworkers = (app.assignedCoworkerIds ?? []).map((id) => coworkers.find((item) => item.id === id)?.name ?? id);
+    const addUnassign = (kind, id, name) => {
+      const row = document.createElement("div"); row.className = "apps-catalog-assigned-row";
+      const label = document.createElement("span"); label.textContent = `${kind}: ${name}`;
+      const remove = action(`Unassign ${kind} / 解除${kind === "Team" ? "团队" : "同事"}`, async (button) => {
+        button.disabled = true;
+        try { await api.connectedApps.assign({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}), [kind === "Team" ? "teamId" : "coworkerId"]: id, enabled: false }); await refresh(); }
+        catch (error) { setFeedback(error?.message || error, true); button.disabled = false; }
+      });
+      row.append(label, remove); assigned.append(row);
+    };
+    for (const [index, id] of (app.assignedTeamIds ?? []).entries()) addUnassign("Team", id, assignedTeams[index]);
+    for (const [index, id] of (app.assignedCoworkerIds ?? []).entries()) addUnassign("Coworker", id, assignedCoworkers[index]);
+    if (!assigned.children.length) { const empty = document.createElement("small"); empty.textContent = "No assignments in this scope. / 此范围暂无分配。"; assigned.append(empty); }
+    section.append(assigned);
     return section;
   }
   function render(items) {

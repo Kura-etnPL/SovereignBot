@@ -32,7 +32,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function roster() { return { ready: true, mode: "local-gate", roles: { planner: "p15-local-supervisor" }, agents: [], providers: {}, coworkerBindings: {} }; }
 
-function makeFixture(dataDir) {
+export function makeFixture(dataDir) {
   const stateDir = join(dataDir, "desktop-state"); mkdirSync(stateDir, { recursive: true });
   const baseServices = createDesktopServices({ dataDir, dialog: {} });
   const shared = baseServices.createManagedWorkspace({ label: "P15 Command Center workspace", kind: "shared-project", idHint: "p15-shared" });
@@ -74,7 +74,7 @@ function makeFixture(dataDir) {
   return { services, rawServices: baseServices, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, connectedApps, productSurfaces, routines, eventTriggers, search, jobs, palette, chief, specialist, sharedWorkspaceId: shared.workspace.id };
 }
 
-function handlers(fixture) {
+export function handlers(fixture) {
   const { services, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, connectedApps, productSurfaces, routines, eventTriggers, search, jobs, palette } = fixture;
   return {
     "app:handshake": () => ({ ok: true, version: desktopVersion(), platform: process.platform, locale: "en-US", language: services.getSettings().language }),
@@ -94,8 +94,8 @@ function handlers(fixture) {
   };
 }
 
-async function loadWindow(win) { await win.loadURL(appOrigin()); await win.webContents.executeJavaScript("(async()=>document.readyState==='complete'?true:await new Promise(r=>window.addEventListener('load',()=>r(true),{once:true})))()"); await sleep(950); }
-async function invoke(win, expression) { return win.webContents.executeJavaScript(`(${expression})()`); }
+export async function loadWindow(win) { await win.loadURL(appOrigin()); await win.webContents.executeJavaScript("(async()=>document.readyState==='complete'?true:await new Promise(r=>window.addEventListener('load',()=>r(true),{once:true})))()"); await sleep(950); }
+export async function invoke(win, expression) { return win.webContents.executeJavaScript(`(${expression})()`); }
 
 export async function runVerifyP15ProjectCommandCenter({ app, projectCreateGate = false, routinePaletteGate = false }) {
   mkdirSync(EVIDENCE_DIR, { recursive: true }); const evidenceBase = routinePaletteGate ? "verify-p29-routine-selector" : projectCreateGate ? "verify-p28-project-create" : "verify-p15-project-command-center"; const checks = {}; const log = []; const note = (line) => { log.push(line); try { process.stderr.write(`${line}\n`); } catch {} }; const check = (name, ok, detail = "") => { checks[name] = Boolean(ok); note(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` ${detail}` : ""}`); };
