@@ -52,6 +52,7 @@
         "verify:p45-artifact-search": "node scripts/verify-p45-artifact-search.mjs",
         "verify:p46-trigger-workspace-label": "node scripts/verify-v44-event-triggers.mjs",
         "verify:p41-coworker-roster": "node scripts/verify-p41-coworker-roster.mjs",
+        "verify:p48-data-lifecycle": "node scripts/verify-p48-data-lifecycle.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",

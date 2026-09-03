@@ -2578,26 +2578,135 @@ function ensureDataLifecycleCard() {
   for (const [id, label] of [["data-lifecycle-backup", "Create backup"], ["data-lifecycle-export", "Export data"], ["data-lifecycle-reset", "Clean reset…"]]) { const button = document.createElement("button"); button.id = id; button.className = "quiet-action"; button.type = "button"; button.textContent = label; actions.append(button); }
   const backups = document.createElement("div"); backups.id = "data-lifecycle-backups"; backups.className = "workspace-cards";
   const result = document.createElement("p"); result.id = "data-lifecycle-result"; result.className = "setting-feedback";
-  card.append(heading, status, actions, backups, result);
+  const restoreDialog = document.createElement("dialog");
+  restoreDialog.id = "data-lifecycle-restore-dialog";
+  restoreDialog.className = "modal";
+  const restoreForm = document.createElement("form"); restoreForm.id = "data-lifecycle-restore-form"; restoreForm.method = "dialog"; restoreForm.className = "modal-card";
+  const restoreHeading = document.createElement("div"); restoreHeading.className = "modal-heading";
+  const restoreHeadingCopy = document.createElement("div"); const restoreEyebrow = document.createElement("span"); restoreEyebrow.className = "eyebrow"; restoreEyebrow.textContent = "BACKUP LIFECYCLE / 备份生命周期"; const restoreTitle = document.createElement("h2"); restoreTitle.textContent = "Restore backup? / 恢复备份？"; restoreHeadingCopy.append(restoreEyebrow, restoreTitle);
+  const restoreClose = document.createElement("button"); restoreClose.className = "modal-x"; restoreClose.dataset.closeDialog = "data-lifecycle-restore-dialog"; restoreClose.type = "button"; restoreClose.textContent = "×"; restoreHeading.append(restoreHeadingCopy, restoreClose);
+  const restoreName = document.createElement("p"); restoreName.id = "data-lifecycle-restore-name"; restoreName.className = "setting-feedback";
+  const restoreDescription = document.createElement("p"); restoreDescription.textContent = "Current product state will be backed up first. Protected credentials, browser profiles, leases, and private computer state stay local. / 当前产品状态会先备份；受保护的凭据、浏览器配置、租约和私有电脑状态会保留在本地。";
+  const restoreError = document.createElement("p"); restoreError.id = "data-lifecycle-restore-error"; restoreError.className = "inline-error hidden"; restoreError.setAttribute("role", "alert");
+  const restoreActions = document.createElement("div"); restoreActions.className = "modal-actions";
+  const restoreCancel = document.createElement("button"); restoreCancel.className = "quiet-action"; restoreCancel.dataset.closeDialog = "data-lifecycle-restore-dialog"; restoreCancel.type = "button"; restoreCancel.textContent = "Cancel / 取消";
+  const restoreConfirm = document.createElement("button"); restoreConfirm.id = "data-lifecycle-restore-confirm"; restoreConfirm.className = "hero-action"; restoreConfirm.type = "submit"; restoreConfirm.textContent = "Restore backup / 恢复备份"; restoreActions.append(restoreCancel, restoreConfirm);
+  restoreForm.append(restoreHeading, restoreName, restoreDescription, restoreError, restoreActions); restoreDialog.append(restoreForm);
+  const resetDialog = document.createElement("dialog");
+  resetDialog.id = "data-lifecycle-reset-dialog";
+  resetDialog.className = "modal";
+  const resetForm = document.createElement("form"); resetForm.id = "data-lifecycle-reset-form"; resetForm.method = "dialog"; resetForm.className = "modal-card";
+  const resetHeading = document.createElement("div"); resetHeading.className = "modal-heading";
+  const resetHeadingCopy = document.createElement("div"); const resetEyebrow = document.createElement("span"); resetEyebrow.className = "eyebrow"; resetEyebrow.textContent = "PRODUCT STATE / 产品状态"; const resetTitle = document.createElement("h2"); resetTitle.textContent = "Clean reset? / 清理重置？"; resetHeadingCopy.append(resetEyebrow, resetTitle);
+  const resetClose = document.createElement("button"); resetClose.className = "modal-x"; resetClose.dataset.closeDialog = "data-lifecycle-reset-dialog"; resetClose.type = "button"; resetClose.textContent = "×"; resetHeading.append(resetHeadingCopy, resetClose);
+  const resetDescription = document.createElement("p"); resetDescription.textContent = "This creates a fresh local backup, then removes product state and reloads the runtime surfaces. Protected credentials, browser profiles, leases, and private computer state stay local. / 此操作会先创建新的本地备份，再移除产品状态并重新加载运行时界面；受保护的凭据、浏览器配置、租约和私有电脑状态会保留在本地。";
+  const resetLabel = document.createElement("label"); const resetLabelText = document.createElement("span"); resetLabelText.textContent = "Type RESET to confirm / 输入 RESET 确认"; const resetPhrase = document.createElement("input"); resetPhrase.id = "data-lifecycle-reset-phrase"; resetPhrase.maxLength = 5; resetPhrase.autocomplete = "off"; resetPhrase.spellcheck = false; resetPhrase.setAttribute("aria-describedby", "data-lifecycle-reset-help"); resetLabel.append(resetLabelText, resetPhrase);
+  const resetHelp = document.createElement("p"); resetHelp.id = "data-lifecycle-reset-help"; resetHelp.className = "setting-feedback"; resetHelp.textContent = "The confirmation button activates only for the exact word RESET. / 只有精确输入 RESET 后，确认按钮才会启用。";
+  const resetError = document.createElement("p"); resetError.id = "data-lifecycle-reset-error"; resetError.className = "inline-error hidden"; resetError.setAttribute("role", "alert");
+  const resetActions = document.createElement("div"); resetActions.className = "modal-actions";
+  const resetCancel = document.createElement("button"); resetCancel.className = "quiet-action"; resetCancel.dataset.closeDialog = "data-lifecycle-reset-dialog"; resetCancel.type = "button"; resetCancel.textContent = "Cancel / 取消";
+  const resetConfirm = document.createElement("button"); resetConfirm.id = "data-lifecycle-reset-confirm"; resetConfirm.className = "hero-action"; resetConfirm.type = "submit"; resetConfirm.disabled = true; resetConfirm.textContent = "Clean reset / 清理重置"; resetActions.append(resetCancel, resetConfirm);
+  resetForm.append(resetHeading, resetDescription, resetLabel, resetHelp, resetError, resetActions); resetDialog.append(resetForm);
+  card.append(heading, status, actions, backups, result, restoreDialog, resetDialog);
   settingsGrid.prepend(card);
+  const pending = new Set();
+  let listedBackups = [];
+  let restoreCandidate;
+  const safeError = (error, fallback) => {
+    const message = String(error?.message || error).replace(/^.*Error:\s*/, "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/[A-Za-z]:\\[^\s,;)}]+/g, "selected local state").replace(/\\\\[^\s,;)}]+/g, "selected local state").replace(/\b[a-f0-9]{32,}\b/gi, "selected item").trim();
+    if (!message || /(?:nonce|confirmation|token|secret|password|credential|session|authorization|provider|cwd|workspacePath|storageRelativePath|sourceRelativePath)/i.test(message)) return fallback;
+    return message.slice(0, 240) || fallback;
+  };
+  const setResult = (message, kind = "success") => { result.textContent = message || ""; result.dataset.kind = message ? kind : ""; };
+  const setDialogError = (dialog, message) => { const error = dialog.querySelector("[role=alert]"); if (!error) return; error.textContent = message || ""; error.classList.toggle("hidden", !message); };
+  const setControls = () => {
+    const busy = pending.size > 0;
+    for (const id of ["data-lifecycle-backup", "data-lifecycle-export", "data-lifecycle-reset"]) $(id).disabled = busy;
+    for (const dialog of [restoreDialog, resetDialog]) for (const button of dialog.querySelectorAll("[data-close-dialog]")) button.disabled = busy;
+    const phrase = $("data-lifecycle-reset-phrase");
+    const resetConfirm = $("data-lifecycle-reset-confirm");
+    if (phrase && resetConfirm) { phrase.disabled = pending.has("reset"); resetConfirm.disabled = pending.has("reset") || phrase.value !== "RESET"; resetConfirm.textContent = pending.has("reset") ? "Resetting… / 重置中…" : "Clean reset / 清理重置"; }
+  };
+  const renderBackups = () => {
+    clearNode(backups);
+    for (const backup of listedBackups) {
+      const row = document.createElement("div"); row.className = "workspace-card";
+      const label = document.createElement("span"); label.textContent = `${backup.id} · ${backup.files} files · ${backup.createdAt}`;
+      const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = pending.has(`restore:${backup.id}`) ? "Restoring… / 恢复中…" : "Restore / 恢复"; restore.disabled = pending.size > 0; restore.addEventListener("click", () => openRestoreDialog(backup));
+      row.append(label, restore); backups.append(row);
+    }
+    setControls();
+  };
   const refresh = async () => {
     try {
-      const [status, listed] = await Promise.all([window.sovereignbot.dataLifecycle.status({}), window.sovereignbot.dataLifecycle.listBackups({})]);
-      $("data-lifecycle-status").textContent = `State V${status.stateVersion} · ${listed.backups.length} validated backup(s)`;
-      const root = $("data-lifecycle-backups"); clearNode(root);
-      for (const backup of listed.backups) {
-        const row = document.createElement("div"); row.className = "workspace-card";
-        const label = document.createElement("span"); label.textContent = `${backup.id} · ${backup.files} files · ${backup.createdAt}`;
-        const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = "Restore";
-        restore.addEventListener("click", async () => { if (!window.confirm("Restore this validated backup? Current product state will be backed up first.")) return; try { await window.sovereignbot.dataLifecycle.restore({ id: backup.id }); $("data-lifecycle-result").textContent = "Backup restored. Restarting runtime surfaces is required."; await refresh(); } catch (error) { $("data-lifecycle-result").textContent = text(error?.message || error); } });
-        row.append(label, restore); root.append(row);
-      }
-    } catch (error) { if ($("data-lifecycle-status")) $("data-lifecycle-status").textContent = text(error?.message || error); }
+      const [lifecycleStatus, listed] = await Promise.all([window.sovereignbot.dataLifecycle.status({}), window.sovereignbot.dataLifecycle.listBackups({})]);
+      status.textContent = `State V${lifecycleStatus.stateVersion} · ${listed.backups.length} validated backup(s)`;
+      listedBackups = listed.backups ?? [];
+      renderBackups();
+    } catch (error) { status.textContent = safeError(error, "Local lifecycle state is unavailable. Refresh and try again. / 本地生命周期状态不可用，请刷新后重试。"); }
   };
+  function openRestoreDialog(backup) {
+    if (pending.size > 0) return;
+    restoreCandidate = backup;
+    $("data-lifecycle-restore-name").textContent = `Validated backup: ${backup.id} · ${backup.files} files · ${backup.createdAt}`;
+    setDialogError(restoreDialog, "");
+    $("data-lifecycle-restore-confirm").disabled = false;
+    restoreDialog.showModal?.();
+  }
+  async function submitRestore(event) {
+    event.preventDefault();
+    const backup = restoreCandidate;
+    if (!backup || pending.size > 0) return;
+    const key = `restore:${backup.id}`;
+    pending.add(key); renderBackups();
+    $("data-lifecycle-restore-confirm").disabled = true;
+    try {
+      await window.sovereignbot.dataLifecycle.restore({ id: backup.id });
+      restoreDialog.close();
+      setResult("Backup restored. Restarting runtime surfaces is required. / 备份已恢复，需要重启运行时界面。", "success");
+      await refresh();
+    } catch (error) {
+      setDialogError(restoreDialog, safeError(error, "Backup could not be restored. No product state was changed; retry when ready. / 备份未恢复，产品状态未改变，请稍后重试。"));
+    } finally {
+      pending.delete(key); renderBackups();
+      if (restoreDialog.open) $("data-lifecycle-restore-confirm").disabled = false;
+    }
+  }
+  function openResetDialog() {
+    if (pending.size > 0) return;
+    $("data-lifecycle-reset-phrase").value = "";
+    setDialogError(resetDialog, "");
+    setControls();
+    resetDialog.showModal?.();
+  }
+  async function submitReset(event) {
+    event.preventDefault();
+    const phrase = $("data-lifecycle-reset-phrase");
+    if (phrase.value !== "RESET") { setDialogError(resetDialog, "Type RESET exactly to continue. / 必须精确输入 RESET 才能继续。"); setControls(); return; }
+    if (pending.size > 0) return;
+    pending.add("reset"); setControls();
+    try {
+      const prepared = await window.sovereignbot.dataLifecycle.prepareReset({});
+      if (!prepared?.confirmation || !prepared?.backupId) throw new Error("reset preparation did not return a valid confirmation");
+      await window.sovereignbot.dataLifecycle.reset({ confirmation: prepared.confirmation, backupId: prepared.backupId });
+      resetDialog.close();
+      setResult("Product state reset completed. / 产品状态已完成清理重置。", "success");
+      await refresh();
+    } catch (error) {
+      setDialogError(resetDialog, safeError(error, "Clean reset could not be completed. No reset was applied; retry when ready. / 清理重置未完成，未应用重置，请稍后重试。"));
+    } finally {
+      pending.delete("reset"); setControls();
+    }
+  }
+  restoreDialog.querySelector("#data-lifecycle-restore-form")?.addEventListener("submit", submitRestore);
+  restoreDialog.addEventListener("close", () => { restoreCandidate = undefined; });
+  for (const dialog of [restoreDialog, resetDialog]) for (const button of dialog.querySelectorAll("[data-close-dialog]")) button.addEventListener("click", () => dialog.close());
+  resetDialog.querySelector("#data-lifecycle-reset-form")?.addEventListener("submit", submitReset);
+  resetDialog.querySelector("#data-lifecycle-reset-phrase")?.addEventListener("input", () => { setDialogError(resetDialog, ""); setControls(); });
+  $("data-lifecycle-reset").addEventListener("click", openResetDialog);
   $("data-lifecycle-refresh").addEventListener("click", refresh);
-  $("data-lifecycle-backup").addEventListener("click", async () => { try { const result = await window.sovereignbot.dataLifecycle.backup({}); $("data-lifecycle-result").textContent = `Backup ${result.id} created.`; await refresh(); } catch (error) { $("data-lifecycle-result").textContent = text(error?.message || error); } });
-  $("data-lifecycle-export").addEventListener("click", async () => { try { const result = await window.sovereignbot.dataLifecycle.export({}); $("data-lifecycle-result").textContent = `Redacted export ${result.id} created.`; } catch (error) { $("data-lifecycle-result").textContent = text(error?.message || error); } });
-  $("data-lifecycle-reset").addEventListener("click", async () => { if (!window.confirm("Create a backup and prepare a confirmed clean reset? Protected credentials, browser profiles, and computer state are retained.")) return; try { const prepared = await window.sovereignbot.dataLifecycle.prepareReset({}); const phrase = window.prompt(`Type RESET to confirm clean reset. Backup: ${prepared.backupId}`); if (phrase !== "RESET") return; await window.sovereignbot.dataLifecycle.reset({ confirmation: prepared.confirmation, backupId: prepared.backupId }); $("data-lifecycle-result").textContent = "Product state reset completed."; await refresh(); } catch (error) { $("data-lifecycle-result").textContent = text(error?.message || error); } });
+  $("data-lifecycle-backup").addEventListener("click", async () => { try { const backup = await window.sovereignbot.dataLifecycle.backup({}); setResult(`Backup ${backup.id} created.`, "success"); await refresh(); } catch (error) { setResult(safeError(error, "Backup could not be created. Retry when ready. / 备份未创建，请稍后重试。"), "error"); } });
+  $("data-lifecycle-export").addEventListener("click", async () => { try { const exported = await window.sovereignbot.dataLifecycle.export({}); setResult(`Redacted export ${exported.id} created.`, "success"); } catch (error) { setResult(safeError(error, "Redacted export could not be created. Retry when ready. / 脱敏导出未创建，请稍后重试。"), "error"); } });
   void refresh();
 }
 
