@@ -111,6 +111,15 @@ test("conversation message candidates do not repeat titles and win content ties 
     assert.equal(fresh.results[0].messageId, "msg_defabcdefabcdefa");
 });
 
+test("conversation title-exact results beat lower-scoring message content matches", async () => {
+    const messageRecords = [{ conversationId: conversationA, messageId: "msg_efabcdefabcdefab", text: "Alpha Conversation", createdAt: "2026-09-02T00:00:03.000Z" }];
+    const { service } = fixture({ messageRecords, latestPreview: "Alpha Conversation" });
+    const result = await service.query({ query: "Alpha Conversation", types: ["conversations"], limit: 10 });
+    const alpha = result.results.find((entry) => entry.id === conversationA);
+    assert.equal(alpha.matchReason.key, "title-exact");
+    assert.equal(Object.hasOwn(alpha, "messageId"), false);
+});
+
 test("global search is bounded, typed, recent/relevant, and Project scoped", async () => {
     const { service, getProjectListCalls, memoryRows } = fixture();
     const result = await service.query({ query: "Alpha", limit: 100 });

@@ -326,7 +326,6 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
             const currentMessage = Boolean(current.messageId);
             const candidateContent = candidate.matchReason?.fields?.includes("content");
             const currentContent = current.matchReason?.fields?.includes("content");
-            if (candidateMessage && !currentMessage && candidateContent && currentContent && (candidate.matchReason?.coverage ?? 0) >= (current.matchReason?.coverage ?? 0)) return true;
             if (candidate.score !== current.score) return candidate.score > current.score;
             if (candidateMessage !== currentMessage) {
                 if (candidateMessage && candidateContent && currentContent) return true;
