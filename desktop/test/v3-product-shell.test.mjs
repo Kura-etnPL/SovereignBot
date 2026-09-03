@@ -12,6 +12,7 @@ const thisPcUi = read("../ui/this-pc-ui.js");
 const appsCatalog = read("../ui/apps-catalog-ui.js");
 const memoryUi = read("../ui/memory-ui.js");
 const paletteUi = read("../ui/search-palette-ui.js");
+const jobsUi = read("../ui/jobs-ui.js");
 const css = read("../ui/style.css");
 
 test("V3 default shell is coworker-first rather than Goal/Control-Center-first", () => {
@@ -99,6 +100,20 @@ test("Command Palette Run Routine uses a bounded selector instead of a prompt pi
     assert.match(paletteUi, /api\.palette\.execute\(\{ paletteId: "run-routine"/);
     assert.doesNotMatch(paletteUi, /window\.prompt/);
     assert.doesNotMatch(paletteUi, /window\.alert/);
+});
+
+test("Routine cards keep Run now and Restore feedback in-product and guard pending actions", () => {
+    assert.match(jobsUi, /routineActionPending/);
+    assert.match(jobsUi, /routineActionFeedback/);
+    assert.match(jobsUi, /runRoutineFromCard/);
+    assert.match(jobsUi, /restoreRoutineFromCard/);
+    assert.match(jobsUi, /routine-action-dismiss/);
+    assert.match(jobsUi, /routine\.canRun !== true/);
+    assert.match(jobsUi, /window\.sovereignbot\.routines\.runNow\(\{ routineId \}\)/);
+    assert.match(jobsUi, /window\.sovereignbot\.routines\.restore\(\{ routineId \}\)/);
+    assert.doesNotMatch(jobsUi, /window\.alert/);
+    assert.doesNotMatch(jobsUi, /window\.prompt/);
+    assert.doesNotMatch(jobsUi, /window\.confirm/);
 });
 
 test("Apps Catalog is an independent user surface with honest lifecycle review", () => {

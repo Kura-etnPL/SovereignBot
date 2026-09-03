@@ -19,6 +19,8 @@
   let routines = [];
   let routinePollTimer;
   let currentRoutineId;
+  const routineActionPending = new Set();
+  const routineActionFeedback = new Map();
   let workerNodes = [];
   let computerTargets = [];
   const ATTENTION_CATEGORIES = Object.freeze([
@@ -491,6 +493,93 @@
     return `${t("routines.type.weekly", "Weekly")} · ${t(`weekday.${schedule.weekday}`, schedule.weekday)} ${schedule.time}`;
   }
 
+  function routineActionError(error, fallback) {
+    const message = String(error?.message ?? error).replace(/^.*Error:\s*/, "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\b[a-z][a-z0-9-]*_[a-f0-9]{16}\b/gi, "selected item").trim();
+    if (!message || /(?:token|secret|password|credential|session|authorization|provider|cwd|workspacePath|storageRelativePath|sourceRelativePath)/i.test(message)) return fallback;
+    return message.slice(0, 240) || fallback;
+  }
+
+  function setRoutineActionFeedback(routineId, kind, message) {
+    if (!message) routineActionFeedback.delete(routineId);
+    else routineActionFeedback.set(routineId, { kind, message });
+  }
+
+  function appendRoutineActionFeedback(card, routineId) {
+    const feedback = routineActionFeedback.get(routineId);
+    if (!feedback) return;
+    const row = document.createElement("div");
+    row.className = "routine-action-feedback";
+    row.dataset.kind = feedback.kind;
+    const message = document.createElement("p");
+    message.className = feedback.kind === "error" ? "inline-error" : "setting-feedback";
+    message.setAttribute("role", "status");
+    message.setAttribute("aria-live", "polite");
+    message.textContent = feedback.message;
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "quiet-action routine-action-dismiss";
+    dismiss.textContent = "Dismiss / 消退";
+    dismiss.addEventListener("click", () => { setRoutineActionFeedback(routineId); renderRoutineList(); });
+    row.append(message, dismiss);
+    card.append(row);
+  }
+
+  async function runRoutineFromCard(routineId) {
+    if (routineActionPending.has(routineId)) return;
+    const routine = routines.find((entry) => entry.id === routineId);
+    if (!routine) {
+      setRoutineActionFeedback(routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      renderRoutineList();
+      return;
+    }
+    if (routine.canRun !== true) {
+      setRoutineActionFeedback(routineId, "error", "This Routine is not currently runnable. Refresh and try again. / 此例行任务当前不可运行，请刷新后重试。");
+      renderRoutineList();
+      return;
+    }
+    routineActionPending.add(routineId);
+    setRoutineActionFeedback(routineId);
+    renderRoutineList();
+    try {
+      await window.sovereignbot.routines.runNow({ routineId });
+      setRoutineActionFeedback(routineId, "success", `Routine started: ${routine.name} / 例行任务已启动：${routine.name}`);
+      await refreshRoutines();
+    } catch (error) {
+      setRoutineActionFeedback(routineId, "error", routineActionError(error, "Routine could not be started. Check its state and try again. / 例行任务未启动，请检查状态后重试。"));
+    } finally {
+      routineActionPending.delete(routineId);
+      renderRoutineList();
+    }
+  }
+
+  async function restoreRoutineFromCard(routineId) {
+    if (routineActionPending.has(routineId)) return;
+    const routine = routines.find((entry) => entry.id === routineId);
+    if (!routine) {
+      setRoutineActionFeedback(routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      renderRoutineList();
+      return;
+    }
+    if (routine.state !== "archived") {
+      setRoutineActionFeedback(routineId, "error", "This Routine is not archived. Refresh and try again. / 此例行任务未归档，请刷新后重试。");
+      renderRoutineList();
+      return;
+    }
+    routineActionPending.add(routineId);
+    setRoutineActionFeedback(routineId);
+    renderRoutineList();
+    try {
+      await window.sovereignbot.routines.restore({ routineId });
+      setRoutineActionFeedback(routineId, "success", `Routine restored: ${routine.name} / 例行任务已恢复：${routine.name}`);
+      await refreshRoutines();
+    } catch (error) {
+      setRoutineActionFeedback(routineId, "error", routineActionError(error, "Routine could not be restored. Check its state and try again. / 例行任务未恢复，请检查状态后重试。"));
+    } finally {
+      routineActionPending.delete(routineId);
+      renderRoutineList();
+    }
+  }
+
   function renderRoutineList() {
     const root = $("routine-list");
     if (!root) return;
@@ -510,18 +599,18 @@
       const actions = document.createElement("div"); actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
       const open = document.createElement("button"); open.className = "quiet-action"; open.type = "button"; open.textContent = t("routines.history", "History"); open.addEventListener("click", () => openRoutineDetail(routine.id));
       const remove = document.createElement("button"); remove.className = "quiet-action"; remove.type = "button"; remove.textContent = t("routines.remove", "Remove"); remove.addEventListener("click", async () => { await window.sovereignbot.routines.remove({ routineId: routine.id }); await refreshRoutines(); });
-      const runNow = document.createElement("button"); runNow.className = "hero-action"; runNow.type = "button"; runNow.textContent = "Run now / 立即运行"; runNow.disabled = routine.state === "archived" || !routine.enabled; runNow.addEventListener("click", async () => { try { await window.sovereignbot.routines.runNow({ routineId: routine.id }); await refreshRoutines(); } catch (error) { window.alert(String(error?.message ?? error).slice(0, 300)); } });
+      const runNow = document.createElement("button"); runNow.className = "hero-action"; runNow.type = "button"; runNow.textContent = routineActionPending.has(routine.id) ? "Starting… / 启动中…" : "Run now / 立即运行"; runNow.disabled = routineActionPending.has(routine.id) || routine.canRun !== true; runNow.addEventListener("click", () => void runRoutineFromCard(routine.id));
       const consumedOneTime = routine.schedule?.type === "one-time" && Boolean(routine.lastRunAt);
       actions.append(open, runNow);
       if (routine.state === "archived") {
-        const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = "Restore / 恢复"; restore.addEventListener("click", async () => { try { await window.sovereignbot.routines.restore({ routineId: routine.id }); await refreshRoutines(); } catch (error) { window.alert(String(error?.message ?? error).slice(0, 300)); } }); actions.append(restore);
+        const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = routineActionPending.has(routine.id) ? "Restoring… / 恢复中…" : "Restore / 恢复"; restore.disabled = routineActionPending.has(routine.id); restore.addEventListener("click", () => void restoreRoutineFromCard(routine.id)); actions.append(restore);
       } else if (!consumedOneTime) {
         const toggle = document.createElement("button"); toggle.className = "quiet-action"; toggle.type = "button"; toggle.textContent = routine.enabled ? t("routines.disable", "Disable") : t("routines.enable", "Enable"); toggle.addEventListener("click", async () => { await window.sovereignbot.routines.setEnabled({ routineId: routine.id, enabled: !routine.enabled }); await refreshRoutines(); });
         actions.append(toggle);
       }
       if (routine.state !== "archived") { const archive = document.createElement("button"); archive.className = "quiet-action"; archive.type = "button"; archive.textContent = "Archive / 归档"; archive.addEventListener("click", async () => { await window.sovereignbot.routines.archive({ routineId: routine.id }); await refreshRoutines(); }); actions.append(archive); }
       actions.append(remove);
-      card.append(head, meta, actions); root.append(card);
+      card.append(head, meta, actions); appendRoutineActionFeedback(card, routine.id); root.append(card);
     }
   }
 
