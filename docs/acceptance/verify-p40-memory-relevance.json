@@ -6,16 +6,60 @@
     "hidden Electron window stays hidden": {
       "ok": true
     },
-    "P40 hidden Memory gate completed": {
-      "ok": false,
-      "detail": "ERR_FAILED (-2) loading 'sovereignbot://app/'"
+    "real renderer exposes the Memory surface": {
+      "ok": true,
+      "detail": "{\"memoryList\":\"function\",\"nav\":true,\"list\":true,\"reason\":true}"
+    },
+    "exact key/title and phrase ranking stay scope-bound": {
+      "ok": true,
+      "detail": "{\"count\":1,\"id\":\"mem_9f51fe32-b442-4a43-be79-8f1e6c13abaa\",\"reason\":{\"key\":\"key-exact\",\"label\":\"Exact key match / 键完全匹配\",\"fields\":[\"key\",\"tags\",\"title\"],\"coverage\":1}}"
+    },
+    "tag and content phrase reasons are explicit": {
+      "ok": true,
+      "detail": "{\"tag\":{\"key\":\"tags\",\"label\":\"Tag match / 标签匹配\",\"fields\":[\"tags\"],\"coverage\":1},\"phrase\":{\"key\":\"phrase\",\"label\":\"Phrase match / 短语匹配\",\"fields\":[\"content\"],\"coverage\":1}}"
+    },
+    "empty query is bounded and pinned-first": {
+      "ok": true,
+      "detail": "{\"count\":2,\"titles\":[\"Pinned Release Note\",\"Release Playbook\"]}"
+    },
+    "coworker and Project memory remain isolated": {
+      "ok": true,
+      "detail": "{\"private\":[\"mem_e0c0bbfd-69f1-442c-8888-1ff2c5f01b6f\"],\"project\":[\"mem_9f51fe32-b442-4a43-be79-8f1e6c13abaa\"]}"
+    },
+    "forgotten and deleted records stay hidden by default": {
+      "ok": true,
+      "detail": "{\"hidden\":0,\"visible\":[{\"id\":\"mem_7a828f26-6f33-4cb9-8220-78c01dcb6319\",\"state\":\"forgotten\"}]}"
+    },
+    "query, limit, and includeForgotten boundaries fail closed": {
+      "ok": true,
+      "detail": "[true,true,true,true]"
+    },
+    "public Memory result contains only safe match metadata": {
+      "ok": true,
+      "detail": "[\"schema\",\"id\",\"title\",\"content\",\"tags\",\"scope\",\"state\",\"pinned\",\"createdAt\",\"updatedAt\",\"source\",\"matchReason\"]"
+    },
+    "Memory UI renders bilingual safe reason and result count": {
+      "ok": true,
+      "detail": "{\"result\":\"1 matches · rebuilt locally / 1 条匹配 · 已在本地重建\",\"reasons\":[\"Match: Tag match / 标签匹配\"],\"titles\":[\"Release Checklist\"]}"
+    },
+    "ranking, reasons, and forgotten visibility survive service restart": {
+      "ok": true,
+      "detail": "[{\"id\":\"mem_d1954131-7399-43d4-b5d8-6e21111ba570\",\"reason\":{\"key\":\"key-prefix\",\"label\":\"Key prefix match / 键前缀匹配\",\"fields\":[\"content\",\"key\",\"tags\",\"title\"],\"coverage\":1}},{\"id\":\"mem_9f51fe32-b442-4a43-be79-8f1e6c13abaa\",\"reason\":{\"key\":\"key-prefix\",\"label\":\"Key prefix match / 键前缀匹配\",\"fields\":[\"key\",\"tags\",\"title\"],\"coverage\":1}},{\"id\":\"mem_02026acc-fabf-4eef-bd47-c1dc74a42ee4\",\"reason\":{\"key\":\"tags\",\"label\":\"Tag match / 标签匹配 · Pinned / 已置顶\",\"fields\":[\"key\",\"tags\",\"title\"],\"coverage\":1,\"pinned\":true}},{\"id\":\"mem_7a828f26-6f33-4cb9-8220-78c01dcb6319\",\"reason\":{\"key\":\"tags\",\"label\":\"Tag match / 标签匹配\",\"fields\":[\"key\",\"tags\"],\"coverage\":1}}]"
     }
   },
   "notes": [
     "PASS hidden Electron window stays hidden",
-    "FAIL P40 hidden Memory gate completed ERR_FAILED (-2) loading 'sovereignbot://app/'"
+    "PASS real renderer exposes the Memory surface {\"memoryList\":\"function\",\"nav\":true,\"list\":true,\"reason\":true}",
+    "PASS exact key/title and phrase ranking stay scope-bound {\"count\":1,\"id\":\"mem_9f51fe32-b442-4a43-be79-8f1e6c13abaa\",\"reason\":{\"key\":\"key-exact\",\"label\":\"Exact key match / 键完全匹配\",\"fields\":[\"key\",\"tags\",\"title\"],\"coverage\":1}}",
+    "PASS tag and content phrase reasons are explicit {\"tag\":{\"key\":\"tags\",\"label\":\"Tag match / 标签匹配\",\"fields\":[\"tags\"],\"coverage\":1},\"phrase\":{\"key\":\"phrase\",\"label\":\"Phrase match / 短语匹配\",\"fields\":[\"content\"],\"coverage\":1}}",
+    "PASS empty query is bounded and pinned-first {\"count\":2,\"titles\":[\"Pinned Release Note\",\"Release Playbook\"]}",
+    "PASS coworker and Project memory remain isolated {\"private\":[\"mem_e0c0bbfd-69f1-442c-8888-1ff2c5f01b6f\"],\"project\":[\"mem_9f51fe32-b442-4a43-be79-8f1e6c13abaa\"]}",
+    "PASS forgotten and deleted records stay hidden by default {\"hidden\":0,\"visible\":[{\"id\":\"mem_7a828f26-6f33-4cb9-8220-78c01dcb6319\",\"state\":\"forgotten\"}]}",
+    "PASS query, limit, and includeForgotten boundaries fail closed [true,true,true,true]",
+    "PASS public Memory result contains only safe match metadata [\"schema\",\"id\",\"title\",\"content\",\"tags\",\"scope\",\"state\",\"pinned\",\"createdAt\",\"updatedAt\",\"source\",\"matchReason\"]",
+    "PASS Memory UI renders bilingual safe reason and result count {\"result\":\"1 matches · rebuilt locally / 1 条匹配 · 已在本地重建\",\"reasons\":[\"Match: Tag match / 标签匹配\"],\"titles\":[\"Release Checklist\"]}",
+    "PASS ranking, reasons, and forgotten visibility survive service restart [{\"id\":\"mem_d1954131-7399-43d4-b5d8-6e21111ba570\",\"reason\":{\"key\":\"key-prefix\",\"label\":\"Key prefix match / 键前缀匹配\",\"fields\":[\"content\",\"key\",\"tags\",\"title\"],\"coverage\":1}},{\"id\":\"mem_9f51fe32-b442-4a43-be79-8f1e6c13abaa\",\"reason\":{\"key\":\"key-prefix\",\"label\":\"Key prefix match / 键前缀匹配\",\"fields\":[\"key\",\"tags\",\"title\"],\"coverage\":1}},{\"id\":\"mem_02026acc-fabf-4eef-bd47-c1dc74a42ee4\",\"reason\":{\"key\":\"tags\",\"label\":\"Tag match / 标签匹配 · Pinned / 已置顶\",\"fields\":[\"key\",\"tags\",\"title\"],\"coverage\":1,\"pinned\":true}},{\"id\":\"mem_7a828f26-6f33-4cb9-8220-78c01dcb6319\",\"reason\":{\"key\":\"tags\",\"label\":\"Tag match / 标签匹配\",\"fields\":[\"key\",\"tags\"],\"coverage\":1}}]"
   ],
   "externalActions": [],
-  "error": "Error: ERR_FAILED (-2) loading 'sovereignbot://app/'\n    at rejectAndCleanup (node:electron/js2c/browser_init:2:94962)\n    at finishListener (node:electron/js2c/browser_init:2:95124)\n    at WebContents.stopLoadingListener (node:electron/js2c/browser_init:2:95511)\n    at WebContents.emit (node:events:509:28)",
-  "ok": false
+  "ok": true
 }
