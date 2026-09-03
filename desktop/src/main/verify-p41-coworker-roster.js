@@ -64,7 +64,12 @@ export async function runVerifyP41CoworkerRoster({ app } = {}) {
     const team = fixture.teamService.createTeam({ title: "P41 Roster Work Team", coworkerIds: [fixture.chief.id, fixture.specialist.id, extras[1].id], leadCoworkerId: fixture.chief.id });
     fixture.conversationStore.postUserMessage(team.conversation.id, { text: "P41 local roster work" });
     const providerRoster = { ready: true, mode: "local-gate", roles: {}, agents: [], providers: {}, coworkerBindings: { [readyId]: { ready: true } } };
-    const fixtureHandlers = { ...handlers(fixture), "provider:getRoster": () => providerRoster, "provider:refresh": () => ({ applied: false, roster: providerRoster }) };
+    const fixtureHandlers = {
+      ...handlers(fixture),
+      "provider:getRoster": () => providerRoster,
+      "provider:refresh": () => ({ applied: false, roster: providerRoster }),
+      "conversation:createDirect": ({ coworkerId }) => fixture.conversationStore.createDirect(coworkerId),
+    };
     const initialCoworkers = fixture.coworkerStore.list().coworkers;
     const expectedTotal = initialCoworkers.length;
     uninstallProtocol = installAppProtocolHandler();
