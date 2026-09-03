@@ -152,15 +152,15 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
     let index;
     let indexPromise;
     let generation = 0;
-    let lastQueryStats = { indexed: false, corpusCount: 0, candidateCount: 0, matchEvaluations: 0 };
+    let lastQueryStats = { indexed: false, corpusCount: 0, candidateCount: 0, matchEvaluations: 0, generation: 0, indexGeneration: null, buildingGeneration: null };
 
     function invalidate() {
         generation += 1;
         index = undefined;
-        indexPromise = undefined;
     }
 
-    async function buildIndex() {
+    async function buildIndex(indexGeneration) {
+        await internal?.beforeBuild?.({ generation: indexGeneration });
         const projects = (await projectService.list({ includeArchived: true, limit: 100 })).projects ?? [];
         const projectById = new Map(projects.map((project) => [project.projectId, project]));
         const projectWorkspace = new Map();
@@ -287,21 +287,31 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
                 });
             }
         }
-        return { records, projects, queryIndex: createQueryIndex(records), indexedAt: new Date().toISOString() };
+        return { records, projects, queryIndex: createQueryIndex(records), indexedAt: new Date().toISOString(), generation: indexGeneration };
     }
 
     async function getIndex() {
-        if (index) return index;
-        if (!indexPromise) {
+        while (true) {
+            if (index?.generation === generation) return index;
             const startedGeneration = generation;
-            indexPromise = buildIndex().then((value) => {
-                if (generation !== startedGeneration) { indexPromise = undefined; return getIndex(); }
-                index = value;
-                indexPromise = undefined;
-                return value;
-            }).catch((error) => { indexPromise = undefined; throw error; });
+            if (!indexPromise || indexPromise.generation !== startedGeneration) {
+                const state = { generation: startedGeneration, promise: null };
+                state.promise = buildIndex(startedGeneration).then((value) => {
+                    if (indexPromise === state) {
+                        if (generation === startedGeneration) index = value;
+                        indexPromise = undefined;
+                    }
+                    return value;
+                }, (error) => {
+                    if (indexPromise === state) indexPromise = undefined;
+                    throw error;
+                });
+                indexPromise = state;
+            }
+            const observed = indexPromise;
+            const built = await observed.promise;
+            if (built.generation === generation) return built;
         }
-        return indexPromise;
     }
 
     async function query(input = {}) {
@@ -371,6 +381,9 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
             corpusCount: records.length,
             candidateCount: candidateIndexes?.size ?? records.length,
             matchEvaluations,
+            generation,
+            indexGeneration: built.generation,
+            buildingGeneration: indexPromise?.generation ?? null,
         };
         result.sort((a, b) => b.score - a.score || String(b.updatedAt).localeCompare(String(a.updatedAt)) || String(a.title).localeCompare(String(b.title)) || String(a.id).localeCompare(String(b.id)));
         return { schema: SEARCH_SCHEMA, query: queryText, status, indexedAt, total: result.length, hasMore: result.length > limit, results: result.slice(0, limit) };
@@ -379,7 +392,12 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         schema: SEARCH_SCHEMA,
         query,
         invalidate,
-        diagnostics: () => clone(lastQueryStats),
+        diagnostics: () => clone({
+            ...lastQueryStats,
+            generation,
+            indexGeneration: index?.generation ?? lastQueryStats.indexGeneration,
+            buildingGeneration: indexPromise?.generation ?? null,
+        }),
         refresh: async () => { invalidate(); const built = await getIndex(); return { schema: SEARCH_SCHEMA, indexedAt: built.indexedAt, count: built.records.length }; },
     };
 }

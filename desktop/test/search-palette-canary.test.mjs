@@ -25,7 +25,7 @@ const routineB = "routine_bbbbbbbbbbbbbbbb";
 const jobA = "job_aaaaaaaaaaaaaaaa";
 const historyA = "history_aaaaaaaaaaaaaaaa";
 
-function fixture({ fullScan = false, messageRecords = [], latestPreview } = {}) {
+function fixture({ fullScan = false, messageRecords = [], latestPreview, beforeBuild } = {}) {
     const projects = [
         { projectId: projectA, name: "Alpha Project", state: "active", available: true, updatedAt: "2026-09-02T00:00:02.000Z", teams: [{ id: teamA, name: "Alpha Team", channels: [{ id: channelA, name: "Alpha Channel", conversationId: conversationA }] }], coworkers: [{ id: coworkerA, name: "Alpha Coworker" }] },
         { projectId: projectB, name: "Beta Project", state: "active", available: true, updatedAt: "2026-09-02T00:00:01.000Z", teams: [{ id: teamB, name: "Beta Team", channels: [{ id: channelB, name: "Beta Channel", conversationId: conversationB }] }], coworkers: [{ id: coworkerB, name: "Beta Coworker" }] },
@@ -57,7 +57,7 @@ function fixture({ fullScan = false, messageRecords = [], latestPreview } = {}) 
         memoryService: { indexRecords: async () => memoryRows },
         getJobs: () => ({ listJobs: () => ({ jobs }) }),
         getHistory: async () => ({ history }),
-        internal: fullScan ? { fullScan: true } : undefined,
+        internal: fullScan || beforeBuild ? { ...(fullScan ? { fullScan: true } : {}), ...(beforeBuild ? { beforeBuild } : {}) } : undefined,
     });
     return { service, projectsApi, routines, memoryRows, getProjectListCalls: () => projectListCalls };
 }
@@ -118,6 +118,54 @@ test("conversation title-exact results beat lower-scoring message content matche
     const alpha = result.results.find((entry) => entry.id === conversationA);
     assert.equal(alpha.matchReason.key, "title-exact");
     assert.equal(Object.hasOwn(alpha, "messageId"), false);
+});
+
+test("conversation Search invalidation cannot let an old build clear the current build", async () => {
+    const deferred = () => {
+        let release;
+        const promise = new Promise((resolve) => { release = resolve; });
+        return { promise, release };
+    };
+    const firstBuild = deferred();
+    const currentBuild = deferred();
+    const buildStarts = [];
+    const buildStartWaiters = [];
+    let observedBuilds = 0;
+    const nextBuildStart = () => buildStarts.length > observedBuilds
+        ? Promise.resolve()
+        : new Promise((resolve) => buildStartWaiters.push(resolve));
+    const messageRecords = [];
+    const { service } = fixture({
+        messageRecords,
+        beforeBuild: ({ generation }) => {
+            const barrier = buildStarts.length === 0 ? firstBuild : currentBuild;
+            buildStarts.push({ generation, barrier });
+            buildStartWaiters.shift()?.();
+            return barrier.promise;
+        },
+    });
+
+    const initialQuery = service.query({ query: "P44 race fresh", types: ["conversations"], limit: 10 });
+    await nextBuildStart();
+    observedBuilds = buildStarts.length;
+    const fresh = { conversationId: conversationA, messageId: "msg_racefresh000001", text: "P44 race fresh", createdAt: "2026-09-02T00:00:05.000Z" };
+    messageRecords.push(fresh);
+    // The real store observer calls invalidate synchronously after append; this
+    // test models that exact ordering while the first build is still blocked.
+    service.invalidate();
+    const currentQuery = service.query({ query: "P44 race fresh", types: ["conversations"], limit: 10 });
+    await nextBuildStart();
+    observedBuilds = buildStarts.length;
+    assert.deepEqual(buildStarts.map(({ generation }) => generation), [0, 1]);
+    firstBuild.release();
+    await Promise.resolve();
+    currentBuild.release();
+    const [initial, current] = await Promise.all([initialQuery, currentQuery]);
+    assert.equal(initial.results[0]?.messageId, fresh.messageId);
+    assert.equal(current.results[0]?.messageId, fresh.messageId);
+    assert.equal(initial.indexedAt, current.indexedAt);
+    assert.equal(service.diagnostics().indexGeneration, service.diagnostics().generation);
+    assert.equal(buildStarts.length, 2);
 });
 
 test("global search is bounded, typed, recent/relevant, and Project scoped", async () => {

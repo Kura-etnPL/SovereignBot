@@ -17,6 +17,24 @@ async function waitFor(check, label, timeout = 20_000) {
     while (Date.now() - started < timeout) { if (await check()) return; await sleep(100); }
     throw new Error(`timed out waiting for ${label}`);
 }
+async function waitForFreshSearch(win, fixture, input, messageId, timeout = 20_000) {
+    const started = Date.now();
+    let lastQueryResult;
+    let lastQueryError;
+    let lastDiagnostics;
+    while (Date.now() - started < timeout) {
+        try {
+            lastQueryResult = await invoke(win, `async()=>window.sovereignbot.search.query(${JSON.stringify(input)})`);
+            lastQueryError = undefined;
+        } catch (error) {
+            lastQueryError = String(error?.message ?? error);
+        }
+        try { lastDiagnostics = fixture.search?.diagnostics?.(); } catch (error) { lastDiagnostics = { diagnosticsError: String(error?.message ?? error) }; }
+        if (lastQueryResult?.results?.[0]?.messageId === messageId) return lastQueryResult;
+        await sleep(100);
+    }
+    throw new Error(`timed out waiting for new message Search invalidation: ${JSON.stringify({ lastQueryResult, lastQueryError, lastDiagnostics })}`);
+}
 
 export async function runVerifyP44ConversationSearch({ app } = {}) {
     mkdirSync(EVIDENCE_DIR, { recursive: true });
@@ -64,8 +82,11 @@ export async function runVerifyP44ConversationSearch({ app } = {}) {
         const uiAnchor = await invoke(win, `async()=>{const targetId=${JSON.stringify(targetMessage.id)}; const target=document.querySelector('[data-message-id="'+targetId+'"]'); return {view:!!document.querySelector("#view-conversation")&&!document.querySelector("#view-conversation").classList.contains("hidden"), rows:document.querySelectorAll("#conversation-messages [data-message-id]").length, highlighted:target?.classList.contains("conversation-message-highlight")===true||target?.getAttribute("aria-current")==="true", targetText:target?.textContent||""}}`);
         check("Search UI opens the conversation and highlights the historical message", uiAnchor.view && uiAnchor.rows <= 300 && uiAnchor.highlighted && /quartz needle/i.test(uiAnchor.targetText), uiAnchor);
 
+        const beforeAppendDiagnostics = fixture.search.diagnostics();
         const fresh = fixture.conversationStore.postUserMessage(conversationId, { text: "P44 Fresh Tail Invalidation" });
-        await waitFor(async () => (await invoke(win, `async()=>window.sovereignbot.search.query({query:"P44 Fresh Tail Invalidation",types:["conversations"],status:"active",limit:10})`)).results?.[0]?.messageId === fresh.id, "new message Search invalidation");
+        const afterAppendDiagnostics = fixture.search.diagnostics();
+        check("canonical Conversation observer invalidates the authoritative fixture Search", afterAppendDiagnostics.generation > beforeAppendDiagnostics.generation, { before: beforeAppendDiagnostics, after: afterAppendDiagnostics });
+        await waitForFreshSearch(win, fixture, { query: "P44 Fresh Tail Invalidation", types: ["conversations"], status: "active", limit: 10 }, fresh.id);
         const afterAppend = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P44 Fresh Tail Invalidation",types:["conversations"],status:"active",limit:10})`);
         check("new messages invalidate the historical Search index", afterAppend.results?.length === 1 && afterAppend.results[0].messageId === fresh.id, { id: afterAppend.results?.[0]?.id, messageId: afterAppend.results?.[0]?.messageId });
 
