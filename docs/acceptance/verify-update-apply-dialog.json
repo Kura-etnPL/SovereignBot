@@ -1,0 +1,35 @@
+{
+  "schema": "sovereignbot.desktop.update-apply-dialog-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "Settings opens the in-product Update Apply confirmation": {
+      "ok": true,
+      "detail": "{\"open\":true,\"summary\":\"Version 4.0.1 is staged with backup fixture-backup. / 版本 4.0.1 已暂存，备份为 fixture-backup。\",\"native\":1}"
+    },
+    "Cancel closes Update Apply without IPC or write": {
+      "ok": true,
+      "detail": "{\"cancel\":{\"open\":false},\"applyCalls\":0}"
+    },
+    "Apply failure is visible, single-call, and retryable": {
+      "ok": true,
+      "detail": "{\"pending\":{\"open\":true,\"disabled\":true},\"failure\":{\"open\":true,\"error\":\"Injected update apply failure; safe to retry.\",\"feedback\":\"The staged update remains available to retry. / 已暂存更新仍可重试。\",\"retryDisabled\":false},\"applyCalls\":1}"
+    },
+    "Successful Apply closes dialog and clearly reports restart required": {
+      "ok": true,
+      "detail": "{\"open\":false,\"status\":\"Update 4.0.1 requested; restart required. / 更新 4.0.1 已请求应用，需要重启。\",\"statusKind\":\"success\",\"applyCalls\":2}"
+    }
+  },
+  "notes": [
+    "PASS hidden Electron window stays hidden",
+    "PASS Settings opens the in-product Update Apply confirmation {\"open\":true,\"summary\":\"Version 4.0.1 is staged with backup fixture-backup. / 版本 4.0.1 已暂存，备份为 fixture-backup。\",\"native\":1}",
+    "PASS Cancel closes Update Apply without IPC or write {\"cancel\":{\"open\":false},\"applyCalls\":0}",
+    "PASS Apply failure is visible, single-call, and retryable {\"pending\":{\"open\":true,\"disabled\":true},\"failure\":{\"open\":true,\"error\":\"Injected update apply failure; safe to retry.\",\"feedback\":\"The staged update remains available to retry. / 已暂存更新仍可重试。\",\"retryDisabled\":false},\"applyCalls\":1}",
+    "PASS Successful Apply closes dialog and clearly reports restart required {\"open\":false,\"status\":\"Update 4.0.1 requested; restart required. / 更新 4.0.1 已请求应用，需要重启。\",\"statusKind\":\"success\",\"applyCalls\":2}"
+  ],
+  "externalActions": [],
+  "ok": true
+}
