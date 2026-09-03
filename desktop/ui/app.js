@@ -885,7 +885,7 @@ function renderMessage(conversation, message) {
   return row;
 }
 
-function renderMessages(conversation, forceScroll = false, { voiceMessages = conversation.messages ?? [], preserveScroll = false } = {}) {
+function renderMessages(conversation, forceScroll = false, { voiceMessages = conversation.messages ?? [], preserveScroll = false, preserveAnchor } = {}) {
   const list = $("conversation-messages");
   const scroller = $("message-scroller");
   const beforeHeight = scroller?.scrollHeight ?? 0;
@@ -921,12 +921,22 @@ function renderMessages(conversation, forceScroll = false, { voiceMessages = con
     $("typing-label").textContent = names.length > 1 ? `${names.join(" & ")} are working…` : `${names[0] || "Coworker"} is working…`;
   }
   updateConversationPageControls();
-  if (!changed && !forceScroll && !preserveScroll) return;
-  requestAnimationFrame(() => {
-    if (!scroller) return;
-    if (preserveScroll) scroller.scrollTop = Math.max(0, beforeTop + scroller.scrollHeight - beforeHeight);
-    else if (nearBottom) scroller.scrollTop = scroller.scrollHeight;
-  });
+  if (!changed && !forceScroll && !preserveScroll) return Promise.resolve();
+  return new Promise((resolve) => requestAnimationFrame(() => {
+    if (!scroller) { resolve(); return; }
+    if (preserveScroll) {
+      const anchor = preserveAnchor?.messageId
+        ? [...list.querySelectorAll("[data-message-id]")].find((row) => row.dataset.messageId === preserveAnchor.messageId)
+        : undefined;
+      if (anchor) {
+        const delta = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top - preserveAnchor.offset;
+        scroller.scrollTop = Math.max(0, scroller.scrollTop + delta);
+      } else {
+        scroller.scrollTop = Math.max(0, beforeTop + scroller.scrollHeight - beforeHeight);
+      }
+    } else if (nearBottom) scroller.scrollTop = scroller.scrollHeight;
+    resolve();
+  }));
 }
 
 async function refreshConversation(forceScroll = false) {
@@ -969,6 +979,13 @@ async function loadOlderMessages() {
   const page = state.conversationPage;
   const id = state.selectedConversationId;
   if (!page || page.conversationId !== id || !page.hasOlder || page.loadingOlder || !page.nextBeforeMessageId) return;
+  const scroller = $("message-scroller");
+  const viewportTop = scroller?.getBoundingClientRect().top ?? 0;
+  const viewportBottom = viewportTop + (scroller?.clientHeight ?? 0);
+  const anchor = [...$("conversation-messages")?.querySelectorAll("[data-message-id]") ?? []]
+    .map((row) => ({ row, rect: row.getBoundingClientRect() }))
+    .find(({ rect }) => rect.bottom > viewportTop + 72 && rect.top < viewportBottom - 72);
+  const preserveAnchor = anchor ? { messageId: anchor.row.dataset.messageId, offset: anchor.rect.top - viewportTop } : undefined;
   page.loadingOlder = true;
   updateConversationPageControls();
   try {
@@ -978,7 +995,7 @@ async function loadOlderMessages() {
     const conversation = { ...response, messages, pageInfo: response.pageInfo };
     state.selectedConversation = conversation;
     renderConversationHeader(conversation);
-    renderMessages(conversation, false, { voiceMessages: [], preserveScroll: true });
+    await renderMessages(conversation, false, { voiceMessages: [], preserveScroll: true, preserveAnchor });
     if (state.selectedConversation) renderDetails(state.selectedConversation);
   } catch (error) {
     if (state.selectedConversationId === id) {

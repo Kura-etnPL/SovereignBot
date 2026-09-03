@@ -53,6 +53,8 @@ test("V3 conversation UX supports durable polling, team mentions, details and pr
     assert.match(app, /MAX_RENDERED_MESSAGES = 300/);
     assert.match(app, /historyMode/);
     assert.match(app, /jumpToLatestMessages/);
+    assert.match(app, /await renderMessages\(conversation, false, \{ voiceMessages: \[\], preserveScroll: true, preserveAnchor \}\)/);
+    assert.match(app, /return new Promise\(\(resolve\) => requestAnimationFrame/);
     assert.match(app, /@everyone/);
     assert.match(app, /state\.mentionIds/);
     assert.match(app, /pendingUserRecipients/);
