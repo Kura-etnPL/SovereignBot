@@ -13,6 +13,7 @@ import { createMainWindow, appOrigin } from "./window.js";
 import { installAppProtocolHandler } from "./protocol.js";
 import { bindIpcChannels } from "./ipc.js";
 import { EVENT_TRIGGERS_SCHEMA } from "./event-trigger-controller.js";
+import { coworkerAgentId } from "./provider-roster.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const evidenceDir = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR;
@@ -150,7 +151,7 @@ export async function runVerifyP50JobActions({ app }) {
     const conversationStore = createConversationStore({ persistPath: join(stateDir, "conversations.json"), coworkerStore });
     const skillStore = createSkillStore({ persistPath: join(stateDir, "skills.json") });
     const runtimeHarness = fakeRuntime();
-    const roster = { ready: true, mode: "p50-local-fixture", roles: { planner: "p50-supervisor" }, agents: [], providers: { fake: { usable: true, present: true, version: "p50" } }, coworkerBindings: Object.fromEntries(coworkers.map((entry) => [entry.id, { ready: true, agentId: `p50-agent-${entry.id}`, provider: "fake" }])) };
+    const roster = { ready: true, mode: "p50-local-fixture", roles: { planner: "p50-supervisor" }, agents: [], providers: { fake: { usable: true, present: true, version: "p50" } }, coworkerBindings: Object.fromEntries(coworkers.map((entry) => [entry.id, { ready: true, agentId: coworkerAgentId(entry.id), provider: "fake" }])) };
     const ids = { cardRetry: "job-p50-card-retry", cardPeer: "job-p50-card-peer", detailApprove: "job-p50-detail-approve", detailDismiss: "job-p50-detail-dismiss", detailPause: "job-p50-detail-pause", detailResume: "job-p50-detail-resume", worker: "job-p50-worker-label" };
     const attentionState = { reason: "A bounded operator retry is required.", category: "real-blocker", at: "2026-09-03T00:00:00.000Z" };
     const workerNodeId = "worker_0123456789abcdef";
@@ -184,7 +185,8 @@ export async function runVerifyP50JobActions({ app }) {
     check("Work Retry failure is visible, retryable, single-call, and isolated to its Job", retryFailure.failed && !retryFailure.button && !retryFailure.cross && counts.approve === 1, JSON.stringify({ ...retryFailure, approveCalls: counts.approve }));
     await invoke(win, `async()=>{const retry=[...document.querySelector('[data-job-id="${ids.cardRetry}"]').querySelectorAll("button")].find((button)=>button.textContent.includes("Retry")); retry?.click(); return true}`);
     await waitForRenderer(win, `async()=>Boolean(document.querySelector('[data-job-id="${ids.cardRetry}"] [data-job-feedback]')?.textContent.includes("Retry requested"))`, "retry success feedback");
-    check("Work Retry succeeds through existing Job authority after retry", counts.approve === 2 && jobs.getJob(ids.cardRetry).status !== "needs_attention", JSON.stringify({ approveCalls: counts.approve, status: jobs.getJob(ids.cardRetry).status }));
+    await jobs.flush();
+    check("Work Retry reaches completed state through the existing Job authority", counts.approve === 2 && jobs.getJob(ids.cardRetry).status === "completed", JSON.stringify({ approveCalls: counts.approve, status: jobs.getJob(ids.cardRetry).status }));
     await invoke(win, `async()=>{const card=document.querySelector('[data-job-id="${ids.cardPeer}"]'); const dismiss=[...card.querySelectorAll("button")].find((button)=>button.textContent.includes("Dismiss attention")); dismiss?.click(); return Boolean(dismiss)}`);
     await sleep(250);
     check("Work Dismiss clearly clears Attention without affecting another Job", jobs.getJob(ids.cardPeer).status === "failed" && counts.dismiss === 1, JSON.stringify({ status: jobs.getJob(ids.cardPeer).status, dismissCalls: counts.dismiss }));
@@ -213,11 +215,13 @@ export async function runVerifyP50JobActions({ app }) {
       }
     };
     await detailAction(ids.detailApprove, "P50 Detail Approve", "job-detail-approve", "Approve", "Retry requested");
-    check("Job Details Approve uses the shared pending action path", counts.approve === 3 && jobs.getJob(ids.detailApprove).status !== "needs_attention", JSON.stringify({ approveCalls: counts.approve, status: jobs.getJob(ids.detailApprove).status }));
+    await jobs.flush();
+    check("Job Details Approve reaches completed state through the shared pending path", counts.approve === 3 && jobs.getJob(ids.detailApprove).status === "completed", JSON.stringify({ approveCalls: counts.approve, status: jobs.getJob(ids.detailApprove).status }));
     await detailAction(ids.detailPause, "P50 Detail Pause", "job-detail-pause", "Pause", "Job paused");
     check("Job Details Pause is available only for a legal queued nonterminal state", counts.pause === 1 && jobs.getJob(ids.detailPause).status === "waiting", JSON.stringify({ pauseCalls: counts.pause, status: jobs.getJob(ids.detailPause).status }));
     await detailAction(ids.detailResume, "P50 Detail Resume", "job-detail-resume", "Resume", "Job resumed");
-    check("Job Details Resume is available only for a legal waiting state", counts.resume === 1 && jobs.getJob(ids.detailResume).status !== "waiting", JSON.stringify({ resumeCalls: counts.resume, status: jobs.getJob(ids.detailResume).status }));
+    await jobs.flush();
+    check("Job Details Resume reaches completed state from a legal waiting state", counts.resume === 1 && jobs.getJob(ids.detailResume).status === "completed", JSON.stringify({ resumeCalls: counts.resume, status: jobs.getJob(ids.detailResume).status }));
     await detailAction(ids.detailDismiss, "P50 Detail Dismiss", "job-detail-dismiss", "Dismiss", "Attention dismissed");
     check("Job Details Dismiss clears Attention with scoped feedback", counts.dismiss === 2 && jobs.getJob(ids.detailDismiss).status === "failed", JSON.stringify({ dismissCalls: counts.dismiss, status: jobs.getJob(ids.detailDismiss).status }));
     const detailText = await invoke(win, `async()=>({meta:document.getElementById("job-detail-meta")?.textContent||"",feedback:document.getElementById("job-detail-feedback")?.textContent||"",body:document.getElementById("job-detail-body")?.textContent||""})`);
