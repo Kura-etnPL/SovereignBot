@@ -159,12 +159,15 @@ export async function runVerifyP50JobActions({ app }) {
       seedJob({ id: ids.cardPeer, title: "P50 Peer Dismiss", ownerCoworkerId: peer.id, status: "needs_attention", workspaceId: workspace.id, attentionState }),
       seedJob({ id: ids.detailApprove, title: "P50 Detail Approve", ownerCoworkerId: owner.id, status: "needs_attention", workspaceId: workspace.id, attentionState }),
       seedJob({ id: ids.detailDismiss, title: "P50 Detail Dismiss", ownerCoworkerId: owner.id, status: "needs_attention", workspaceId: workspace.id, attentionState }),
-      seedJob({ id: ids.detailPause, title: "P50 Detail Pause", ownerCoworkerId: owner.id, status: "queued", workspaceId: workspace.id }),
-      seedJob({ id: ids.detailResume, title: "P50 Detail Resume", ownerCoworkerId: owner.id, status: "waiting", workspaceId: workspace.id, nextActionAt: "2099-01-01T00:00:00.000Z" }),
       seedJob({ id: ids.worker, title: "P50 Worker Label", ownerCoworkerId: peer.id, status: "completed", workspaceId: workspace.id, executionTarget: { kind: "worker-node", nodeId: workerNodeId, workspaceId: workspace.id }, workerNodeName: "Remote Builder", workerWorkspaceName: "Builder workspace" }),
     ];
     await writeFile(join(stateDir, "jobs.json"), `${JSON.stringify({ schema: JOBS_SCHEMA, jobs: initialJobs }, null, 2)}\n`, "utf8");
     const jobs = createJobController({ dataDir, runtime: runtimeHarness.runtime, roster: () => roster, coworkerStore, services, skillStore, supervisorAgentId: "p50-supervisor", readiness: () => ({ allowed: true }) });
+    const pauseJob = jobs.submitJob({ title: "P50 Detail Pause", objective: "P50 queued pause fixture", ownerCoworkerId: owner.id, internalContext: { workspaceId: workspace.id, deferSchedule: true } });
+    const resumeJob = jobs.submitJob({ title: "P50 Detail Resume", objective: "P50 waiting resume fixture", ownerCoworkerId: owner.id, internalContext: { workspaceId: workspace.id, deferSchedule: true } });
+    ids.detailPause = pauseJob.id;
+    ids.detailResume = resumeJob.id;
+    await jobs.pause(ids.detailResume);
     const failures = { approve: true };
     const counts = { approve: 0, dismiss: 0, pause: 0, resume: 0 };
     uninstallProtocol = installAppProtocolHandler();
@@ -185,7 +188,8 @@ export async function runVerifyP50JobActions({ app }) {
     await invoke(win, `async()=>{const card=document.querySelector('[data-job-id="${ids.cardPeer}"]'); const dismiss=[...card.querySelectorAll("button")].find((button)=>button.textContent.includes("Dismiss attention")); dismiss?.click(); return Boolean(dismiss)}`);
     await sleep(250);
     check("Work Dismiss clearly clears Attention without affecting another Job", jobs.getJob(ids.cardPeer).status === "failed" && counts.dismiss === 1, JSON.stringify({ status: jobs.getJob(ids.cardPeer).status, dismissCalls: counts.dismiss }));
-    check("P50 Pause fixture remains queued before its detail action", jobs.getJob(ids.detailPause).status === "queued", JSON.stringify({ status: jobs.getJob(ids.detailPause).status }));
+    check("P50 Pause fixture remains queued before its detail action", jobs.getJob(ids.detailPause).status === "queued", JSON.stringify({ status: jobs.getJob(ids.detailPause).status, source: "controller.submitJob" }));
+    check("P50 Resume fixture is waiting before its detail action", jobs.getJob(ids.detailResume).status === "waiting", JSON.stringify({ status: jobs.getJob(ids.detailResume).status, source: "controller.submitJob+pause" }));
     const detailAction = async (jobId, title, buttonId, label, feedbackText) => {
       let openClicked = false;
       const diagnose = async (stage) => {
