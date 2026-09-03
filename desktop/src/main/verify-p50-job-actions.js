@@ -115,13 +115,17 @@ async function loadWindow(win) {
 
 async function invoke(win, expression) { return win.webContents.executeJavaScript(`(${expression})()`); }
 
-async function waitForRenderer(win, expression, label, timeoutMs = 8_000) {
+async function waitForRenderer(win, expression, label, timeoutMs = 8_000, diagnose) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await invoke(win, expression)) return;
     await sleep(100);
   }
-  throw new Error(`Timed out waiting for ${label}`);
+  let detail = "";
+  if (diagnose) {
+    try { detail = `; ${JSON.stringify(await diagnose())}`; } catch (error) { detail = `; diagnostics unavailable: ${error?.message ?? error}`; }
+  }
+  throw new Error(`Timed out waiting for ${label}${detail}`);
 }
 
 export async function runVerifyP50JobActions({ app }) {
@@ -181,13 +185,28 @@ export async function runVerifyP50JobActions({ app }) {
     await invoke(win, `async()=>{const card=document.querySelector('[data-job-id="${ids.cardPeer}"]'); const dismiss=[...card.querySelectorAll("button")].find((button)=>button.textContent.includes("Dismiss attention")); dismiss?.click(); return Boolean(dismiss)}`);
     await sleep(250);
     check("Work Dismiss clearly clears Attention without affecting another Job", jobs.getJob(ids.cardPeer).status === "failed" && counts.dismiss === 1, JSON.stringify({ status: jobs.getJob(ids.cardPeer).status, dismissCalls: counts.dismiss }));
+    check("P50 Pause fixture remains queued before its detail action", jobs.getJob(ids.detailPause).status === "queued", JSON.stringify({ status: jobs.getJob(ids.detailPause).status }));
     const detailAction = async (jobId, title, buttonId, label, feedbackText) => {
-      await invoke(win, `async()=>{document.getElementById("job-detail-dialog")?.close(); return true}`);
-      await invoke(win, `async()=>{const card=document.querySelector('[data-job-id="${jobId}"]'); const open=[...card.querySelectorAll("button")].find((button)=>button.textContent.includes("Open")); open?.click(); return Boolean(open)}`);
-      await waitForRenderer(win, `async()=>document.getElementById("job-detail-dialog")?.open===true && document.getElementById("job-detail-title")?.textContent===${JSON.stringify(title)} && !document.getElementById("${buttonId}")?.classList.contains("hidden") && document.getElementById("${buttonId}")?.disabled===false`, `${label} detail open`);
-      await invoke(win, `async()=>{document.getElementById("${buttonId}")?.click(); return true}`);
-      await waitForRenderer(win, `async()=>Boolean(document.getElementById("job-detail-feedback")?.textContent.includes(${JSON.stringify(feedbackText)}))`, `${label} detail feedback`);
-      await invoke(win, `async()=>{document.getElementById("job-detail-dialog")?.close(); return true}`);
+      let openClicked = false;
+      const diagnose = async (stage) => {
+        const job = jobs.getJob(jobId);
+        const ui = await invoke(win, `async()=>{const card=document.querySelector('[data-job-id="${jobId}"]'); const button=document.getElementById("${buttonId}"); const dialog=document.getElementById("job-detail-dialog"); return {cardText:card?.textContent||"",openPresent:[...card?.querySelectorAll("button")||[]].some((entry)=>entry.textContent.includes("Open")),dialogOpen:dialog?.open===true,displayedTitle:document.getElementById("job-detail-title")?.textContent||"",buttonClassName:button?.className||"",buttonDisabled:button?.disabled===true,feedback:document.getElementById("job-detail-feedback")?.textContent||""}}`).catch((error) => ({ rendererError: String(error?.message ?? error) }));
+        return { stage, jobStatus: job?.status, openClicked, ...ui };
+      };
+      try {
+        await waitForRenderer(win, `async()=>document.getElementById("job-detail-dialog")?.open===false`, `${label} dialog closed`);
+        openClicked = await invoke(win, `async()=>{const card=document.querySelector('[data-job-id="${jobId}"]'); const open=[...card?.querySelectorAll("button")||[]].find((button)=>button.textContent.includes("Open")); if (!open) return false; open.click(); return true}`);
+        await waitForRenderer(win, `async()=>document.getElementById("job-detail-dialog")?.open===true`, `${label} detail dialog open`, 8_000, () => diagnose("dialog-open"));
+        await waitForRenderer(win, `async()=>document.getElementById("job-detail-title")?.textContent===${JSON.stringify(title)}`, `${label} exact detail title`, 8_000, () => diagnose("exact-title"));
+        const buttonState = await invoke(win, `async()=>{const button=document.getElementById("${buttonId}"); return {exists:Boolean(button),hidden:button?.classList.contains("hidden")===true,className:button?.className||"",disabled:button?.disabled===true}}`);
+        if (!buttonState?.exists || buttonState.hidden || buttonState.disabled) throw new Error(`detail action button unavailable ${JSON.stringify(buttonState)}`);
+        await invoke(win, `async()=>{document.getElementById("${buttonId}")?.click(); return true}`);
+        await waitForRenderer(win, `async()=>Boolean(document.getElementById("job-detail-feedback")?.textContent.includes(${JSON.stringify(feedbackText)}))`, `${label} detail feedback`, 8_000, () => diagnose("feedback"));
+      } catch (error) {
+        throw new Error(`${label} detail action failed: ${error?.message ?? error}; P50 detail diagnostics ${JSON.stringify(await diagnose("failure"))}`);
+      } finally {
+        await invoke(win, `async()=>{document.getElementById("job-detail-dialog")?.close(); return true}`).catch(() => {});
+      }
     };
     await detailAction(ids.detailApprove, "P50 Detail Approve", "job-detail-approve", "Approve", "Retry requested");
     check("Job Details Approve uses the shared pending action path", counts.approve === 3 && jobs.getJob(ids.detailApprove).status !== "needs_attention", JSON.stringify({ approveCalls: counts.approve, status: jobs.getJob(ids.detailApprove).status }));
