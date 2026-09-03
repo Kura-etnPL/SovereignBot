@@ -1,0 +1,147 @@
+PASS hidden Electron window stays hidden
+PASS real preload exposes Project command-center surface {"projects":"function","projectNav":true,"workbench":true,"ready":"complete"}
+PASS Command Palette opens a bounded Routine selector by keyboard {"open":true,"search":true,"list":true,"confirm":true}
+PASS selector exposes safe Routine names and fail-closed lifecycle states [{"id":"routine_20c5e27c94c965d3","name":"P29 Runnable","disabled":false,"text":"P29 RunnableCustom · every 60 min · Ready / 可运行 · Next: 2026-09-03T03:22:20.829Z"},{"id":"routine_63fa36c8700130f3","name":"P29 Disabled","disabled":true,"text":"P29 DisabledCustom · every 60 min · Disabled / 已停用"},{"id":"routine_b451c5863ba1022a","name":"P29 Archived","disabled":true,"text":"P29 ArchivedCustom · every 60 min · Archived / 已归档"},{"id":"routine_f031ed07a0909e52","name":"P29 Unavailable","disabled":true,"text":"P29 UnavailableCustom · every 60 min · Unavailable / 不可用 · Next: 2026-09-03T03:22:20.834Z"},{"id":"routine_8f3d24ee259102ba","name":"P29 Stale","disabled":false,"text":"P29 StaleCustom · every 60 min · Ready / 可运行 · Next: 2026-09-03T03:22:20.835Z"}]
+PASS selector cancellation performs no governed run {"jobsBefore":0,"jobsAfter":0}
+PASS no Routine selection stays in-dialog and performs no run {"open":true,"error":"Choose a ready Routine first. / 请先选择一个可运行的例行任务。"}
+PASS selected Routine reuses palette IPC and creates one governed Job {"success":{"dialogOpen":false,"paletteStatus":"Routine started: P29 Runnable / 已启动"},"jobs":1}
+PASS stale Routine ids fail closed with an in-product error and no Job {"open":true,"error":"unknown routine id: routine_8f3d24ee259102ba"}
+PASS forged Routine id is rejected by the governed palette service {"jobs":1}
+PASS renderer creates canonical Project {"projectId":"project_ecfdc524f49d1e53","name":"P15 Command Center"}
+PASS Project public projection contains all bounded command-center groups ["teams","channels","coworkers","files","artifacts","skills","playbooks","routines","triggers","memory","connectedApps"]
+PASS all associated canonical entities are scoped into the Project {"teams":1,"channels":1,"coworkers":2,"files":1,"artifacts":1,"skills":1,"playbooks":1,"routines":4,"triggers":1,"memory":1,"connectedApps":1}
+PASS Project projection is bounded and authority-free {"groupTotals":{"teams":1,"channels":1,"coworkers":2,"files":1,"artifacts":1,"skills":1,"playbooks":1,"routines":4,"triggers":1,"memory":1,"connectedApps":1},"sample":{"id":"artifact_77816778bb61a6a6","title":"P15 Report","fileName":"p15-report.md","mimeType":"text/markdown","size":17,"state":"active","createdAt":"2026-09-03T02:22:23.881Z","conversationId":"conv_8be0f6dfb3cf011d","summary":"p15-report.md · text/markdown","navigation":{"view":"artifacts","artifactId":"artifact_77816778bb61a6a6","conversationId":"conv_8be0f6dfb3cf011d"}}}
+PASS Project switcher selects the workbench without jumping to a conversation {"active":true,"selected":"project_ecfdc524f49d1e53","conversation":null}
+PASS workbench renders every grouped section and associated labels P15 Command Center
+
+Active / 活跃 · Available / 可用 · 1 Teams · 1 Channels · 2 Coworkers
+
+Recent activity / 最近活动: 2026-09-03T02:22:23.702Z
+
+Teams / 团队 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Command Team
+
+active · available · 1 channel
+
+Open Team / 打开团队
+Channels / 频道 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+Project Channel
+
+active · Channel in P15 Command Team
+
+Open Channel / 打开频道
+Coworkers / 同事 / 2
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Chief
+
+active · active · Project member
+
+Open Coworker / 打开同事
+P15 Specialist
+
+active · active · Project member
+
+Open Coworker / 打开同事
+Files / 文件 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+p15-report.md
+
+active · text/markdown · 17 bytes
+
+Open File / 打开文件
+Source conversation / 来源会话
+Artifacts / 成果 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Report
+
+active · p15-report.md · text/markdown
+
+Open Artifact / 打开成果
+Source conversation / 来源会话
+Skills / 技能 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Skill
+
+active · active · Project-scoped skill
+
+Open Skill / 打开技能
+Playbooks / 工作方法 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+Team Collaboration
+
+active · active · The current owner delegates bounded work to the next teammate and returns the result to the user.
+
+Open Playbook / 打开工作方法
+Routines / 例行任务 / 4
+
+Bounded Project contents / 已按项目范围限制
+
+P29 Runnable
+
+active · queued · Disabled Routine
+
+Open Routine / 打开例行任务
+P29 Disabled
+
+active · disabled · Disabled Routine
+
+Open Routine / 打开例行任务
+P29 Unavailable
+
+active · disabled · Disabled Routine
+
+Open Routine / 打开例行任务
+P15 Routine
+
+active · disabled · Disabled Routine
+
+Open Routine / 打开例行任务
+Triggers / 触发器 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Trigger
+
+disabled · disabled · Event trigger
+
+Open Trigger / 打开触发器
+Memory / 记忆 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Memory
+
+active
+
+Open Memory / 打开记忆
+Connected Apps / 已连接应用 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+Project workspace / 项目工作区
+
+connected · connected · Read and write within the trusted shared or private workspace selected by the Governor.
+
+Open Connected Apps / 打开已连接应用
+PASS Connected Apps navigation opens the existing Apps surface {"clicked":true,"visible":true,"title":"Apps Catalog / 应用目录"}
+PASS canonical Channel navigation opens only the selected Project conversation {"title":"P15 Command Team","dom":true}
+PASS archived Project remains inspectable and labeled {"state":"archived","teams":1}
+PASS Project and grouped contents survive a real service restart {"state":"active","counts":{"teams":1,"channels":1,"coworkers":2,"files":1,"artifacts":1,"skills":1,"playbooks":1,"routines":4,"triggers":1,"memory":1,"connectedApps":1}}
+PASS unavailable workspace remains visible with fail-closed read-only projection {"projectId":"project_ecfdc524f49d1e53","name":"P15 Command Center","state":"active","available":false,"createdAt":"2026-09-03T02:22:23.702Z","updatedAt":"2026-09-03T02:22:27.062Z","summary":"Project workspace is unavailable; contents are read-only.","contents":{"teams":{"items":[],"total":0,"truncated":false},"channels":{"items":[],"total":0,"truncated":false},"coworkers":{"items":[],"total":0,"truncated":false},"files":{"items":[],"total":0,"truncated":false},"artifacts":{"items":[],"total":0,"truncated":false},"skills":{"items":[],"total":0,"truncated":false},"playbooks":{"items":[],"total":0,"truncated":false},"routines":{"items":[],"total":0,"truncated":false},"triggers":{"items":[],"total":0,"truncated":false},"memory":{"items":[],"total":0,"truncated":false},"connectedApps":{"items":[],"total":0,"truncated":false}},"counts":{"teams":0,"channels":0,"coworkers":0,"files":0,"artifacts":0,"skills":0,"playbooks":0,"routines":0,"triggers":0,"memory":0,"connectedApps":0},"teams":[],"coworkers":[],"connectedApps":[],"memory":[]}
+[summary] 20/20 PASS
