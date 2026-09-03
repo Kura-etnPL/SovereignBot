@@ -37,6 +37,7 @@ test("P31 dedicated Team Pack entry keeps first-party read-only and custom Dupli
 
 test("P31 verifier uses bounded native input for the older-gallery Duplicate control", () => {
   assert.match(verifier, /async function clickVisibleElementWithInput\(win, selector, label\)/);
+  assert.match(verifier, /scrollIntoView\(\{block:"center",inline:"center"\}\)/);
   assert.match(verifier, /getBoundingClientRect\(\)/);
   assert.match(verifier, /values\.every\(Number\.isFinite\)/);
   assert.match(verifier, /sendInputEvent\(\{ type: "mouseMove"/);

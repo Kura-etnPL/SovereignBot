@@ -14,6 +14,9 @@ const EVIDENCE_DIR = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR ?? join(WORKT
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function clickVisibleElementWithInput(win, selector, label) {
+  const scrolled = await invoke(win, `async()=>{const element=document.querySelector(${JSON.stringify(selector)}); if(!element) return false; element.scrollIntoView({block:"center",inline:"center"}); return true;}`);
+  if (!scrolled) throw new Error(`${label} is unavailable`);
+  await sleep(150);
   const geometry = await invoke(win, `async()=>{const element=document.querySelector(${JSON.stringify(selector)}); if(!element) return {found:false}; const rect=element.getBoundingClientRect(); const style=getComputedStyle(element); const viewport={width:document.documentElement.clientWidth,height:document.documentElement.clientHeight}; return {found:true,x:rect.left+rect.width/2,y:rect.top+rect.height/2,left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height,display:style.display,visibility:style.visibility,opacity:style.opacity,viewport};}`);
   const values = [geometry?.x, geometry?.y, geometry?.left, geometry?.top, geometry?.right, geometry?.bottom, geometry?.width, geometry?.height, geometry?.viewport?.width, geometry?.viewport?.height];
   if (!geometry?.found) throw new Error(`${label} is unavailable`);
