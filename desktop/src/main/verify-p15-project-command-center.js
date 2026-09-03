@@ -17,6 +17,7 @@ import { createMemoryService } from "./memory-service.js";
 import { createSearchService } from "./search-service.js";
 import { createConnectedAppsService } from "./connected-apps.js";
 import { createProductSurfaceService } from "./product-surface-service.js";
+import { createCommandPaletteService } from "./command-palette-service.js";
 import { createJobController } from "./job-controller.js";
 import { createRoutineController } from "./routine-controller.js";
 import { createEventTriggerController } from "./event-trigger-controller.js";
@@ -69,11 +70,12 @@ function makeFixture(dataDir) {
   const memoryService = createMemoryService({ runtime: { memory: new MemoryStore(join(stateDir, "memory.jsonl")) }, services, coworkerStore, teamService, conversationStore, artifactStore, projectResolver: (id) => projectService.resolveProject(id), onChanged: () => search?.invalidate() });
   projectService.setMemoryService(memoryService);
   search = createSearchService({ teamService, conversationStore, coworkerStore, projectService, artifactStore, skillStore, productSurfaces, getRoutines: () => routines?.list(), memoryService, getJobs: () => jobs, getHistory: (payload) => productSurfaces.computerHistory(payload) });
-  return { services, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, connectedApps, productSurfaces, routines, eventTriggers, search, jobs, chief, specialist, sharedWorkspaceId: shared.workspace.id };
+  const palette = createCommandPaletteService({ runRoutine: (routineId) => routines.runNow(routineId) });
+  return { services, rawServices: baseServices, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, connectedApps, productSurfaces, routines, eventTriggers, search, jobs, palette, chief, specialist, sharedWorkspaceId: shared.workspace.id };
 }
 
 function handlers(fixture) {
-  const { services, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, connectedApps, productSurfaces, routines, eventTriggers, search, jobs } = fixture;
+  const { services, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, connectedApps, productSurfaces, routines, eventTriggers, search, jobs, palette } = fixture;
   return {
     "app:handshake": () => ({ ok: true, version: desktopVersion(), platform: process.platform, locale: "en-US", language: services.getSettings().language }),
     "firstrun:getStatus": () => ({ browsers: [] }), "workspace:list": () => services.listWorkspaces(), "workspace:addViaDialog": () => ({ added: false }), "settings:get": () => services.getSettings(), "settings:update": (patch) => services.updateSettings(patch),
@@ -88,15 +90,15 @@ function handlers(fixture) {
     "routine:list": (payload) => routines.list(payload), "routine:get": ({ routineId }) => routines.get(routineId), "routine:create": (payload) => routines.create(payload), "routine:setEnabled": ({ routineId, enabled }) => routines.setEnabled(routineId, enabled), "routine:archive": ({ routineId }) => routines.archive(routineId), "routine:restore": ({ routineId }) => routines.restore(routineId), "routine:history": ({ routineId }) => routines.history(routineId), "routine:runNow": ({ routineId }) => routines.runNow(routineId), "routine:remove": ({ routineId }) => routines.remove(routineId),
     "eventTrigger:list": () => eventTriggers.list(), "eventTrigger:get": ({ triggerId }) => eventTriggers.get(triggerId), "eventTrigger:create": (payload) => eventTriggers.create(payload), "eventTrigger:setEnabled": ({ triggerId, enabled }) => eventTriggers.setEnabled(triggerId, enabled), "eventTrigger:remove": ({ triggerId }) => eventTriggers.remove(triggerId),
     "connectedApps:list": (payload) => connectedApps.list(payload), "connectedApps:search": (payload) => connectedApps.search(payload), "connectedApps:assign": (payload) => connectedApps.setAssignment(payload), "connectedApps:health": (payload) => connectedApps.health(payload),
-    "search:query": (payload) => search.query(payload), "palette:list": () => ({ commands: [] }), "palette:execute": () => ({ ok: true }), "job:list": () => jobs.listJobs(), "job:attention": (payload) => jobs.attentionJobs(payload), "thisPc:list": () => ({ items: [] }), "data:status": () => ({ backups: [] }), "data:listBackups": () => ({ backups: [] }), "update:status": () => ({ available: false }), "notification:list": () => ({ notifications: [], totalCount: 0, unreadCount: 0 }),
+    "search:query": (payload) => search.query(payload), "palette:list": () => palette.list(), "palette:execute": (payload) => palette.execute({ commandId: payload.paletteId, args: payload.args }), "job:list": () => jobs.listJobs(), "job:attention": (payload) => jobs.attentionJobs(payload), "thisPc:list": () => ({ items: [] }), "data:status": () => ({ backups: [] }), "data:listBackups": () => ({ backups: [] }), "update:status": () => ({ available: false }), "notification:list": () => ({ notifications: [], totalCount: 0, unreadCount: 0 }),
   };
 }
 
 async function loadWindow(win) { await win.loadURL(appOrigin()); await win.webContents.executeJavaScript("(async()=>document.readyState==='complete'?true:await new Promise(r=>window.addEventListener('load',()=>r(true),{once:true})))()"); await sleep(950); }
 async function invoke(win, expression) { return win.webContents.executeJavaScript(`(${expression})()`); }
 
-export async function runVerifyP15ProjectCommandCenter({ app, projectCreateGate = false }) {
-  mkdirSync(EVIDENCE_DIR, { recursive: true }); const evidenceBase = projectCreateGate ? "verify-p28-project-create" : "verify-p15-project-command-center"; const checks = {}; const log = []; const note = (line) => { log.push(line); try { process.stderr.write(`${line}\n`); } catch {} }; const check = (name, ok, detail = "") => { checks[name] = Boolean(ok); note(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` ${detail}` : ""}`); };
+export async function runVerifyP15ProjectCommandCenter({ app, projectCreateGate = false, routinePaletteGate = false }) {
+  mkdirSync(EVIDENCE_DIR, { recursive: true }); const evidenceBase = routinePaletteGate ? "verify-p29-routine-selector" : projectCreateGate ? "verify-p28-project-create" : "verify-p15-project-command-center"; const checks = {}; const log = []; const note = (line) => { log.push(line); try { process.stderr.write(`${line}\n`); } catch {} }; const check = (name, ok, detail = "") => { checks[name] = Boolean(ok); note(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` ${detail}` : ""}`); };
   let dataDir; let fixture; let win; let unbind; let uninstallProtocol; let fatal; let projectId; let uiProjectId; let teamId; let conversationId; let artifactId; let memoryId; let routineId; let triggerId;
   try {
     dataDir = mkdtempSync(join(tmpdir(), "sovereign-p15-")); fixture = makeFixture(dataDir); uninstallProtocol = installAppProtocolHandler(); win = createMainWindow({ smoke: true }); unbind = bindIpcChannels({ win, handlers: handlers(fixture) });
@@ -121,6 +123,38 @@ export async function runVerifyP15ProjectCommandCenter({ app, projectCreateGate 
       const uiProject = createdFromUi.projects?.find((entry)=>entry.name === "P28 Projects UX"); uiProjectId = uiProject?.projectId;
       const closed = await invoke(win, `async()=>document.getElementById("project-create-dialog")?.open===false`);
       check("Project create follows the real UI → IPC → service path", /^project_[a-f0-9]{16}$/i.test(uiProjectId ?? "") && closed, JSON.stringify({ projectId: uiProjectId, count: createdFromUi.projects?.length, closed }));
+    }
+    if (routinePaletteGate) {
+      const runnable = fixture.routines.create({ name: "P29 Runnable", coworkerId: fixture.chief.id, workspaceId: fixture.sharedWorkspaceId, instruction: "Run the P29 local selector check.", schedule: { type: "custom", intervalMinutes: 60 } });
+      const disabled = fixture.routines.create({ name: "P29 Disabled", coworkerId: fixture.chief.id, workspaceId: fixture.sharedWorkspaceId, instruction: "Remain disabled during the P29 check.", schedule: { type: "custom", intervalMinutes: 60 } }); fixture.routines.setEnabled(disabled.id, false);
+      const archived = fixture.routines.create({ name: "P29 Archived", coworkerId: fixture.chief.id, workspaceId: fixture.sharedWorkspaceId, instruction: "Remain archived during the P29 check.", schedule: { type: "custom", intervalMinutes: 60 } }); fixture.routines.archive(archived.id);
+      const unavailableWorkspace = fixture.rawServices.createManagedWorkspace({ label: "P29 unavailable", kind: "shared-project", idHint: "p29-unavailable" });
+      const unavailable = fixture.routines.create({ name: "P29 Unavailable", coworkerId: fixture.chief.id, workspaceId: unavailableWorkspace.workspace.id, instruction: "Become unavailable before selection.", schedule: { type: "custom", intervalMinutes: 60 } }); fixture.services.removeWorkspace(unavailableWorkspace.workspace.id);
+      const stale = fixture.routines.create({ name: "P29 Stale", coworkerId: fixture.chief.id, workspaceId: fixture.sharedWorkspaceId, instruction: "Be removed after selection.", schedule: { type: "custom", intervalMinutes: 60 } });
+      const openSelector = async (keyboard = false) => { if (keyboard) await invoke(win, `async()=>{document.dispatchEvent(new KeyboardEvent("keydown",{key:"k",ctrlKey:true,bubbles:true})); return true}`); else await invoke(win, `async()=>{document.getElementById("open-command-palette")?.click(); return true}`); await sleep(250); await invoke(win, `async()=>{const item=[...document.querySelectorAll("#palette-results button")].find((node)=>node.textContent.includes("Run Routine")); item?.click(); return Boolean(item)}`); await sleep(180); };
+      await openSelector(true);
+      const selector = await invoke(win, `async()=>({open:document.getElementById("routine-run-dialog")?.open===true,search:!!document.getElementById("routine-run-search"),list:!!document.getElementById("routine-run-list"),confirm:!!document.getElementById("routine-run-confirm")})`);
+      check("Command Palette opens a bounded Routine selector by keyboard", selector.open && selector.search && selector.list && selector.confirm, JSON.stringify(selector));
+      const options = await invoke(win, `async()=>[...document.querySelectorAll("#routine-run-list [data-routine-id]")].map((node)=>({id:node.dataset.routineId,name:node.querySelector("strong")?.textContent||"",disabled:node.disabled,text:node.textContent||""}))`);
+      const optionByName = new Map(options.map((entry)=>[entry.name, entry]));
+      check("selector exposes safe Routine names and fail-closed lifecycle states", optionByName.get("P29 Runnable")?.disabled === false && optionByName.get("P29 Disabled")?.disabled === true && optionByName.get("P29 Archived")?.disabled === true && optionByName.get("P29 Unavailable")?.disabled === true && /Ready/.test(optionByName.get("P29 Runnable")?.text ?? "") && /Disabled/.test(optionByName.get("P29 Disabled")?.text ?? "") && /Archived/.test(optionByName.get("P29 Archived")?.text ?? "") && /Unavailable/.test(optionByName.get("P29 Unavailable")?.text ?? ""), JSON.stringify(options));
+      const jobsBefore = fixture.jobs.listJobs().jobs.length;
+      await invoke(win, `async()=>{document.querySelector('[data-close-dialog="routine-run-dialog"]')?.click(); return true}`); await sleep(100);
+      check("selector cancellation performs no governed run", fixture.jobs.listJobs().jobs.length === jobsBefore, JSON.stringify({ jobsBefore, jobsAfter: fixture.jobs.listJobs().jobs.length }));
+      await openSelector(); await invoke(win, `async()=>{document.getElementById("routine-run-confirm")?.click(); return true}`); await sleep(100);
+      const noSelection = await invoke(win, `async()=>({open:document.getElementById("routine-run-dialog")?.open===true,error:document.getElementById("routine-run-form-error")?.textContent||""})`);
+      check("no Routine selection stays in-dialog and performs no run", noSelection.open && /Choose.*Routine|选择.*例行/i.test(noSelection.error) && fixture.jobs.listJobs().jobs.length === jobsBefore, JSON.stringify(noSelection));
+      await invoke(win, `async()=>{document.querySelector('[data-close-dialog="routine-run-dialog"]')?.click(); return true}`); await sleep(100);
+      await openSelector(); await invoke(win, `async()=>{document.querySelector('[data-routine-id="${runnable.id}"]')?.click(); document.getElementById("routine-run-confirm")?.click(); return true}`); await sleep(450);
+      const success = await invoke(win, `async()=>({dialogOpen:document.getElementById("routine-run-dialog")?.open===true,paletteStatus:document.getElementById("palette-status")?.textContent||""})`);
+      check("selected Routine reuses palette IPC and creates one governed Job", fixture.jobs.listJobs().jobs.length === jobsBefore + 1 && !success.dialogOpen && /Routine started|已启动/.test(success.paletteStatus), JSON.stringify({ success, jobs: fixture.jobs.listJobs().jobs.length }));
+      await openSelector(); await invoke(win, `async()=>{document.querySelector('[data-routine-id="${stale.id}"]')?.click(); return true}`); fixture.routines.remove(stale.id); await invoke(win, `async()=>{document.getElementById("routine-run-confirm")?.click(); return true}`); await sleep(150);
+      const staleResult = await invoke(win, `async()=>({open:document.getElementById("routine-run-dialog")?.open===true,error:document.getElementById("routine-run-form-error")?.textContent||""})`);
+      check("stale Routine ids fail closed with an in-product error and no Job", staleResult.open && /unknown routine|not runnable|未启动/i.test(staleResult.error) && fixture.jobs.listJobs().jobs.length === jobsBefore + 1, JSON.stringify(staleResult));
+      await invoke(win, `async()=>{document.querySelector('[data-close-dialog="routine-run-dialog"]')?.click(); return true}`); await sleep(100);
+      await assertReject(win, `window.sovereignbot.palette.execute({paletteId:"run-routine",args:{routineId:"routine_ffffffffffffffff"}})`, "unknown routine id");
+      check("forged Routine id is rejected by the governed palette service", fixture.jobs.listJobs().jobs.length === jobsBefore + 1, JSON.stringify({ jobs: fixture.jobs.listJobs().jobs.length }));
+      fixture.routines.setEnabled(runnable.id, false); fixture.routines.setEnabled(unavailable.id, false);
     }
     const team = fixture.teamService.createTeam({ title: "P15 Command Team", coworkerIds: [fixture.chief.id, fixture.specialist.id], leadCoworkerId: fixture.chief.id }); teamId = team.team.id; conversationId = team.team.channels[0].conversationId;
     const created = await invoke(win, `async()=>window.sovereignbot.projects.create({name:"P15 Command Center"})`); projectId = created.projectId;

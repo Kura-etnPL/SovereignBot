@@ -7,12 +7,47 @@
   const make = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
   const COMMAND_LABELS = new Map([["new-coworker", "New Coworker"], ["new-team", "New Team"], ["new-channel", "New Channel"], ["run-routine", "Run Routine"], ["teach-skill", "Teach Skill"], ["open-computer", "Open Computer"], ["search", "Search"]]);
   let overlay, input, results, opener, mode = "commands", selected = 0, commandList = [];
+  let routineDialog, routineForm, routineSearch, routineList, routineStatus, routineError, routineConfirm, routineOptions = [], selectedRoutineId;
   let searchTypes = new Set(["conversations", "channels", "coworkers", "projects", "artifacts", "skills", "playbooks", "routines", "memory", "jobs", "history"]);
   let projectId;
   let status = "active";
   let refreshSequence = 0;
   const close = () => { if (overlay) overlay.classList.add("hidden"); input?.blur(); opener?.focus?.(); opener = undefined; };
   const setStatus = (value) => { const status = $("palette-status"); if (status) status.textContent = value ?? ""; };
+  const routineStateLabel = (routine) => routine.runState === "archived" ? "Archived / 已归档" : routine.runState === "disabled" ? "Disabled / 已停用" : routine.runState === "unavailable" ? "Unavailable / 不可用" : "Ready / 可运行";
+  const routineScheduleLabel = (schedule) => { if (!schedule) return "No schedule"; if (schedule.type === "one-time") return `One-time · ${schedule.at}`; if (schedule.type === "custom") return `Custom · every ${schedule.intervalMinutes} min`; if (schedule.type === "hourly") return `Hourly · :${String(schedule.minute).padStart(2, "0")}`; if (schedule.type === "daily") return `Daily · ${schedule.time}`; return `Weekly · day ${schedule.weekday} · ${schedule.time}`; };
+  function ensureRoutineDialog() {
+    if (routineDialog) return routineDialog;
+    routineDialog = $("routine-run-dialog"); routineForm = $("routine-run-form"); routineSearch = $("routine-run-search"); routineList = $("routine-run-list"); routineStatus = $("routine-run-status"); routineError = $("routine-run-form-error"); routineConfirm = $("routine-run-confirm");
+    routineSearch?.addEventListener("input", renderRoutineOptions); routineForm?.addEventListener("submit", runSelectedRoutine);
+    return routineDialog;
+  }
+  function setRoutineError(value = "") { if (!routineError) return; routineError.textContent = value; routineError.classList.toggle("hidden", !value); }
+  function renderRoutineOptions() {
+    if (!routineList) return; routineList.textContent = ""; const query = routineSearch?.value.trim().toLowerCase() ?? "";
+    const visible = routineOptions.filter((routine) => !query || [routine.name, routineScheduleLabel(routine.schedule), routineStateLabel(routine)].join(" ").toLowerCase().includes(query));
+    if (!visible.length) { routineList.append(make("p", "setting-feedback", routineOptions.length ? "No matching Routines / 没有匹配的例行任务" : "No Routines available / 没有可用例行任务")); if (routineConfirm) routineConfirm.disabled = true; return; }
+    for (const routine of visible) {
+      const option = make("button", "routine-run-option"); option.type = "button"; option.dataset.routineId = routine.id; option.disabled = routine.canRun !== true; option.setAttribute("role", "option"); option.setAttribute("aria-selected", routine.id === selectedRoutineId ? "true" : "false"); option.classList.toggle("selected", routine.id === selectedRoutineId);
+      option.append(make("strong", "", routine.name), make("span", "", `${routineScheduleLabel(routine.schedule)} · ${routineStateLabel(routine)}${routine.lastStatus ? ` · Last: ${routine.lastStatus}` : ""}${routine.nextRunAt ? ` · Next: ${routine.nextRunAt}` : ""}`));
+      option.addEventListener("click", () => { selectedRoutineId = routine.id; setRoutineError(); renderRoutineOptions(); }); routineList.append(option);
+    }
+    if (routineConfirm) routineConfirm.disabled = false;
+  }
+  async function loadRoutineOptions() {
+    ensureRoutineDialog(); selectedRoutineId = undefined; setRoutineError(); if (routineStatus) routineStatus.textContent = "Loading Routines… / 正在加载例行任务…";
+    try { const listed = await api.routines.list({ includeArchived: true }); routineOptions = (listed?.routines ?? []).map((routine) => ({ ...routine, canRun: routine.canRun === true, runState: routine.runState ?? (routine.state !== "active" ? "archived" : routine.enabled ? "ready" : "disabled") })); if (routineStatus) routineStatus.textContent = "Select one ready Routine to continue. / 请选择一个可运行的例行任务。"; renderRoutineOptions(); }
+    catch (error) { routineOptions = []; renderRoutineOptions(); setRoutineError(String(error?.message ?? error).slice(0, 240)); if (routineStatus) routineStatus.textContent = "Routine list unavailable. / 例行任务列表不可用。"; }
+  }
+  async function openRoutineSelector() { ensureRoutineDialog(); routineSearch.value = ""; routineDialog?.showModal?.(); routineSearch?.focus(); await loadRoutineOptions(); routineSearch?.focus(); }
+  async function runSelectedRoutine(event) {
+    event.preventDefault(); const selectedRoutine = routineOptions.find((routine) => routine.id === selectedRoutineId);
+    if (!selectedRoutine) { setRoutineError("Choose a ready Routine first. / 请先选择一个可运行的例行任务。"); return; }
+    if (selectedRoutine.canRun !== true) { setRoutineError("This Routine is no longer runnable. Refresh and choose another. / 此例行任务已不可运行，请刷新后重新选择。"); return; }
+    if (routineConfirm) routineConfirm.disabled = true; setRoutineError(); if (routineStatus) routineStatus.textContent = "Starting Routine… / 正在启动例行任务…";
+    try { await api.palette.execute({ paletteId: "run-routine", args: { routineId: selectedRoutine.id } }); if (routineStatus) routineStatus.textContent = `Routine started: ${selectedRoutine.name} / 已启动`; routineDialog?.close(); setStatus(`Routine started: ${selectedRoutine.name} / 已启动`); }
+    catch (error) { setRoutineError(String(error?.message ?? error).replace(/^.*Error: /, "").slice(0, 240)); if (routineStatus) routineStatus.textContent = "Routine was not started. / 例行任务未启动。"; if (routineConfirm) routineConfirm.disabled = false; }
+  }
   function ensureOverlay() {
     if (overlay) return overlay;
     overlay = make("section", "command-palette hidden"); overlay.id = "command-palette"; overlay.setAttribute("role", "dialog"); overlay.setAttribute("aria-modal", "true"); overlay.setAttribute("aria-label", "Search and command palette");
@@ -51,7 +86,7 @@
     }
     if (commandId === "search") { mode = "search"; input.value = ""; await refresh(); input.focus(); return; }
     if (commandId === "open-computer") { close(); const button = $("open-computer"); if (button) return button.click(); const coworkers = (await api.coworkers.list({})).coworkers ?? []; const coworker = coworkers[0]; if (coworker) await api.palette.execute({ paletteId: commandId, args: { coworkerId: coworker.id } }); return; }
-    if (commandId === "run-routine") { const routines = (await api.routines.list({})).routines ?? []; if (!routines.length) return setStatus("No routines available / 没有可用 Routine"); const labels = routines.map((entry, index) => `${index + 1}. ${entry.name}`).join("\n"); const choice = Number(window.prompt(`Choose a routine / 选择 Routine:\n${labels}`, "1")); const selectedRoutine = routines[choice - 1]; if (selectedRoutine) { await api.palette.execute({ paletteId: commandId, args: { routineId: selectedRoutine.id } }); setStatus(`Routine started: ${selectedRoutine.name}`); } return; }
+    if (commandId === "run-routine") return openRoutineSelector();
     if (commandId === "teach-skill") { close(); const button = document.querySelector("#details-teach-section button"); if (button) return button.click(); setStatus("Open a coworker conversation to start Teach Skill / 请先打开同事会话再开始教学"); return; }
   }
   async function refresh() {

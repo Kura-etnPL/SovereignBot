@@ -188,10 +188,17 @@ export function createRoutineController({ dataDir, jobController, coworkerStore,
     if (workspaceId !== undefined && !services.workspacePath(workspaceId)) throw new Error(`unknown trusted workspace: ${workspaceId}`);
   }
   function publicRoutine(routine, withHistory = false) {
+    const readiness = routine.state !== "active"
+      ? { canRun: false, runState: "archived" }
+      : !routine.enabled
+        ? { canRun: false, runState: "disabled" }
+        : (() => { try { validateRefs(routine); return { canRun: true, runState: "ready" }; } catch { return { canRun: false, runState: "unavailable" }; } })();
     return {
       id: routine.id,
       name: routine.name,
       enabled: routine.enabled,
+      canRun: readiness.canRun,
+      runState: readiness.runState,
       coworkerId: routine.coworkerId,
       instruction: routine.instruction,
       skillId: routine.skillId,

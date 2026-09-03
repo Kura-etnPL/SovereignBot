@@ -11,6 +11,7 @@ const productHubs = read("../ui/product-hubs-ui.js");
 const thisPcUi = read("../ui/this-pc-ui.js");
 const appsCatalog = read("../ui/apps-catalog-ui.js");
 const memoryUi = read("../ui/memory-ui.js");
+const paletteUi = read("../ui/search-palette-ui.js");
 const css = read("../ui/style.css");
 
 test("V3 default shell is coworker-first rather than Goal/Control-Center-first", () => {
@@ -90,6 +91,14 @@ test("Projects create uses a bounded form rather than a blocking browser prompt"
     assert.match(productHubs, /project-create-form/);
     assert.match(productHubs, /project-create-form-error/);
     assert.doesNotMatch(productHubs, /window\.prompt\("Project name/);
+});
+
+test("Command Palette Run Routine uses a bounded selector instead of a prompt picker", () => {
+    for (const id of ["routine-run-dialog", "routine-run-form", "routine-run-search", "routine-run-list", "routine-run-confirm"]) assert.match(html, new RegExp(`id="${id}"`), id);
+    assert.match(paletteUi, /api\.routines\.list\(\{ includeArchived: true \}\)/);
+    assert.match(paletteUi, /api\.palette\.execute\(\{ paletteId: "run-routine"/);
+    assert.doesNotMatch(paletteUi, /window\.prompt/);
+    assert.doesNotMatch(paletteUi, /window\.alert/);
 });
 
 test("Apps Catalog is an independent user surface with honest lifecycle review", () => {
