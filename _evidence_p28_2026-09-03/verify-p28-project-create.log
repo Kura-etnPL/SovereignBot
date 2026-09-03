@@ -1,0 +1,130 @@
+PASS hidden Electron window stays hidden
+PASS real preload exposes Project command-center surface {"projects":"function","projectNav":true,"workbench":true,"ready":"complete"}
+PASS Project create uses a bounded in-product dialog {"open":true,"name":"","save":true}
+PASS blank Project names stay in-dialog and perform no write {"open":true,"error":"Enter a Project name / 请输入项目名称","count":1}
+PASS Project create cancellation closes without writing {"open":false,"count":1}
+PASS Project create follows the real UI → IPC → service path {"projectId":"project_362c90eb5dd21610","count":2,"closed":true}
+PASS renderer creates canonical Project {"projectId":"project_02762abb0b170b4a","name":"P15 Command Center"}
+PASS Project public projection contains all bounded command-center groups ["teams","channels","coworkers","files","artifacts","skills","playbooks","routines","triggers","memory","connectedApps"]
+PASS all associated canonical entities are scoped into the Project {"teams":1,"channels":1,"coworkers":2,"files":1,"artifacts":1,"skills":1,"playbooks":1,"routines":1,"triggers":1,"memory":1,"connectedApps":1}
+PASS Project projection is bounded and authority-free {"groupTotals":{"teams":1,"channels":1,"coworkers":2,"files":1,"artifacts":1,"skills":1,"playbooks":1,"routines":1,"triggers":1,"memory":1,"connectedApps":1},"sample":{"id":"artifact_1d10fbbabb13bd37","title":"P15 Report","fileName":"p15-report.md","mimeType":"text/markdown","size":17,"state":"active","createdAt":"2026-09-03T02:04:06.904Z","conversationId":"conv_dc0d868487f602a7","summary":"p15-report.md · text/markdown","navigation":{"view":"artifacts","artifactId":"artifact_1d10fbbabb13bd37","conversationId":"conv_dc0d868487f602a7"}}}
+PASS Project switcher selects the workbench without jumping to a conversation {"active":true,"selected":"project_02762abb0b170b4a","conversation":null}
+PASS workbench renders every grouped section and associated labels P15 Command Center
+
+Active / 活跃 · Available / 可用 · 1 Teams · 1 Channels · 2 Coworkers
+
+Recent activity / 最近活动: 2026-09-03T02:04:06.887Z
+
+Teams / 团队 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Command Team
+
+active · available · 1 channel
+
+Open Team / 打开团队
+Channels / 频道 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+Project Channel
+
+active · Channel in P15 Command Team
+
+Open Channel / 打开频道
+Coworkers / 同事 / 2
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Chief
+
+active · active · Project member
+
+Open Coworker / 打开同事
+P15 Specialist
+
+active · active · Project member
+
+Open Coworker / 打开同事
+Files / 文件 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+p15-report.md
+
+active · text/markdown · 17 bytes
+
+Open File / 打开文件
+Source conversation / 来源会话
+Artifacts / 成果 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Report
+
+active · p15-report.md · text/markdown
+
+Open Artifact / 打开成果
+Source conversation / 来源会话
+Skills / 技能 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Skill
+
+active · active · Project-scoped skill
+
+Open Skill / 打开技能
+Playbooks / 工作方法 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+Team Collaboration
+
+active · active · The current owner delegates bounded work to the next teammate and returns the result to the user.
+
+Open Playbook / 打开工作方法
+Routines / 例行任务 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Routine
+
+active · disabled · Disabled Routine
+
+Open Routine / 打开例行任务
+Triggers / 触发器 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Trigger
+
+disabled · disabled · Event trigger
+
+Open Trigger / 打开触发器
+Memory / 记忆 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+P15 Memory
+
+active
+
+Open Memory / 打开记忆
+Connected Apps / 已连接应用 / 1
+
+Bounded Project contents / 已按项目范围限制
+
+Project workspace / 项目工作区
+
+connected · connected · Read and write within the trusted shared or private workspace selected by the Governor.
+
+Open Connected Apps / 打开已连接应用
+PASS Connected Apps navigation opens the existing Apps surface {"clicked":true,"visible":true,"title":"Apps Catalog / 应用目录"}
+PASS canonical Channel navigation opens only the selected Project conversation {"title":"P15 Command Team","dom":true}
+PASS archived Project remains inspectable and labeled {"state":"archived","teams":1}
+PASS Project and grouped contents survive a real service restart {"state":"active","counts":{"teams":1,"channels":1,"coworkers":2,"files":1,"artifacts":1,"skills":1,"playbooks":1,"routines":1,"triggers":1,"memory":1,"connectedApps":1}}
+PASS UI-created Project survives a real restart {"projectId":"project_362c90eb5dd21610","name":"P28 Projects UX","state":"active","available":true,"createdAt":"2026-09-03T02:04:06.171Z","updatedAt":"2026-09-03T02:04:06.171Z","summary":"1 Teams · 1 Channels · 2 Coworkers","contents":{"teams":{"items":[{"id":"team_dd7ad4da35657dca","name":"P15 Command Team","state":"active","status":"available","summary":"1 channel","navigation":{"view":"work","teamId":"team_dd7ad4da35657dca"},"channels":[{"id":"channel_2da1da2c5309a7ed","teamId":"team_dd7ad4da35657dca","name":"Project Channel","state":"active","summary":"Channel in P15 Command Team","conversationId":"conv_dc0d868487f602a7","navigation":{"view":"conversation","conversationId":"conv_dc0d868487f602a7"}}]}],"total":1,"truncated":false},"channels":{"items":[{"id":"channel_2da1da2c5309a7ed","teamId":"team_dd7ad4da35657dca","name":"Project Channel","state":"active","summary":"Channel in P15 Command Team","conversationId":"conv_dc0d868487f602a7","navigation":{"view":"conversation","conversationId":"conv_dc0d868487f602a7"}}],"total":1,"truncated":false},"coworkers":{"items":[{"id":"coworker_805baa7366f1b5e8","name":"P15 Chief","state":"active","status":"active","summary":"Project member","navigation":{"view":"settings","coworkerId":"coworker_805baa7366f1b5e8"}},{"id":"coworker_79ca94a66ae77e0f","name":"P15 Specialist","state":"active","status":"active","summary":"Project member","navigation":{"view":"settings","coworkerId":"coworker_79ca94a66ae77e0f"}}],"total":2,"truncated":false},"files":{"items":[{"id":"artifact_1d10fbbabb13bd37","name":"p15-report.md","artifactId":"artifact_1d10fbbabb13bd37","mimeType":"text/markdown","size":17,"state":"active","summary":"text/markdown · 17 bytes","conversationId":"conv_dc0d868487f602a7","navigation":{"view":"artifacts","artifactId":"artifact_1d10fbbabb13bd37","conversationId":"conv_dc0d868487f602a7"}}],"total":1,"truncated":false},"artifacts":{"items":[{"id":"artifact_1d10fbbabb13bd37","title":"P15 Report","fileName":"p15-report.md","mimeType":"text/markdown","size":17,"state":"active","createdAt":"2026-09-03T02:04:06.904Z","conversationId":"conv_dc0d868487f602a7","summary":"p15-report.md · text/markdown","navigation":{"view":"artifacts","artifactId":"artifact_1d10fbbabb13bd37","conversationId":"conv_dc0d868487f602a7"}}],"total":1,"truncated":false},"skills":{"items":[{"id":"skill_657b581c21a51e8a","name":"P15 Skill","state":"active","status":"active","summary":"Project-scoped skill","assignedTeamIds":["team_dd7ad4da35657dca"],"assignedCoworkerIds":[],"navigation":{"view":"skills","skillId":"skill_657b581c21a51e8a"}}],"total":1,"truncated":false},"playbooks":{"items":[{"id":"team-collaboration","name":"Team Collaboration","state":"active","status":"active","summary":"The current owner delegates bounded work to the next teammate and returns the result to the user.","navigation":{"view":"playbooks","playbookId":"team-collaboration"}}],"total":1,"truncated":false},"routines":{"items":[{"id":"routine_2978aa7a218fa3d7","name":"P15 Routine","state":"active","status":"disabled","summary":"Disabled Routine","teamId":"team_dd7ad4da35657dca","coworkerId":"coworker_805baa7366f1b5e8","skillId":"skill_657b581c21a51e8a","navigation":{"view":"routines","routineId":"routine_2978aa7a218fa3d7"}}],"total":1,"truncated":false},"triggers":{"items":[{"id":"trigger_dae6fdfad5ef5571","name":"P15 Trigger","state":"disabled","status":"disabled","summary":"Event trigger","routineId":"routine_2978aa7a218fa3d7","navigation":{"view":"triggers","triggerId":"trigger_dae6fdfad5ef5571"}}],"total":1,"truncated":false},"memory":{"items":[],"total":0,"truncated":false},"connectedApps":{"items":[],"total":0,"truncated":false}},"counts":{"teams":1,"channels":1,"coworkers":2,"files":1,"artifacts":1,"skills":1,"playbooks":1,"routines":1,"triggers":1,"memory":0,"connectedApps":0},"teams":[{"id":"team_dd7ad4da35657dca","name":"P15 Command Team","channels":[{"id":"channel_2da1da2c5309a7ed","name":"Project Channel","conversationId":"conv_dc0d868487f602a7"}]}],"coworkers":[{"id":"coworker_805baa7366f1b5e8","name":"P15 Chief"},{"id":"coworker_79ca94a66ae77e0f","name":"P15 Specialist"}],"connectedApps":[],"memory":[]}
+PASS unavailable workspace remains visible with fail-closed read-only projection {"projectId":"project_02762abb0b170b4a","name":"P15 Command Center","state":"active","available":false,"createdAt":"2026-09-03T02:04:06.887Z","updatedAt":"2026-09-03T02:04:10.098Z","summary":"Project workspace is unavailable; contents are read-only.","contents":{"teams":{"items":[],"total":0,"truncated":false},"channels":{"items":[],"total":0,"truncated":false},"coworkers":{"items":[],"total":0,"truncated":false},"files":{"items":[],"total":0,"truncated":false},"artifacts":{"items":[],"total":0,"truncated":false},"skills":{"items":[],"total":0,"truncated":false},"playbooks":{"items":[],"total":0,"truncated":false},"routines":{"items":[],"total":0,"truncated":false},"triggers":{"items":[],"total":0,"truncated":false},"memory":{"items":[],"total":0,"truncated":false},"connectedApps":{"items":[],"total":0,"truncated":false}},"counts":{"teams":0,"channels":0,"coworkers":0,"files":0,"artifacts":0,"skills":0,"playbooks":0,"routines":0,"triggers":0,"memory":0,"connectedApps":0},"teams":[],"coworkers":[],"connectedApps":[],"memory":[]}
+[summary] 18/18 PASS
