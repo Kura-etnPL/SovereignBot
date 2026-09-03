@@ -75,7 +75,11 @@
     if (nav.view === "memory") return void document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: nav }));
     if (nav.view === "projects") return void document.dispatchEvent(new CustomEvent("sovereignbot:open-project", { detail: nav }));
     if (nav.view === "artifacts" && nav.artifactId) return void document.dispatchEvent(new CustomEvent("sovereignbot:open-artifact", { detail: nav }));
+    if (nav.coworkerId && typeof openDirect === "function") return void openDirect(nav.coworkerId);
     if (nav.conversationId && typeof openConversation === "function") return void openConversation(nav.conversationId);
+    if (nav.view === "skills" && nav.skillId) { if (typeof switchView === "function") switchView("skills"); return void document.dispatchEvent(new CustomEvent("sovereignbot:open-skill-editor", { detail: { item: { id: nav.skillId } } })); }
+    if (nav.view === "playbooks" && nav.playbookId) { if (typeof switchView === "function") switchView("playbooks"); return void document.dispatchEvent(new CustomEvent("sovereignbot:open-playbook-editor", { detail: { item: { id: nav.playbookId } } })); }
+    if (nav.view === "routines" && nav.routineId) return void document.dispatchEvent(new CustomEvent("sovereignbot:open-routine", { detail: nav }));
     if (nav.view === "projects" && typeof switchView === "function") return void switchView("projects");
     const allowedViews = new Set(["conversation", "projects", "artifacts", "skills", "playbooks", "routines", "channels", "memory", "work", "computer-history"]);
     if (typeof switchView === "function" && allowedViews.has(nav.view)) switchView(nav.view);

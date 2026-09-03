@@ -850,6 +850,7 @@
     });
     document.addEventListener("sovereignbot:create-routine-from-source", (event) => { void createRoutineFromSource(event.detail); });
     document.addEventListener("sovereignbot:navigate-routines", () => { ensureRoutineSurface(); showRoutinesView(); });
+    document.addEventListener("sovereignbot:open-routine", (event) => { const routineId = event.detail?.routineId; if (!routineId) return; ensureRoutineSurface(); showRoutinesView(); void openRoutineDetail(routineId); });
     for (const b of document.querySelectorAll("[data-close-dialog]")) b.addEventListener("click", () => $(b.dataset.closeDialog)?.close());
   }
 

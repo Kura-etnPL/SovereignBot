@@ -102,6 +102,10 @@ test("Command Palette Run Routine uses a bounded selector instead of a prompt pi
     assert.doesNotMatch(paletteUi, /window\.alert/);
 });
 
+test("Global Search result navigation opens the exact ordinary target", () => {
+    for (const expression of [/nav\.coworkerId.*openDirect/, /open-skill-editor/, /open-playbook-editor/, /open-routine/, /nav\.skillId/, /nav\.playbookId/, /nav\.routineId/]) assert.match(paletteUi, expression);
+});
+
 test("Routine cards keep Run now and Restore feedback in-product and guard pending actions", () => {
     assert.match(jobsUi, /routineActionPending/);
     assert.match(jobsUi, /routineActionFeedback/);
