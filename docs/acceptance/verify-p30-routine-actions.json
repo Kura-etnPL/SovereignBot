@@ -1,0 +1,191 @@
+{
+  "at": "2026-09-03T12:53:47.606Z",
+  "dataDir": "C:\\Users\\Eternal\\AppData\\Local\\Temp\\sovereign-v42-18neV3",
+  "routineId": "routine_4ebe16bb9af091e4",
+  "failedRoutineId": "routine_3d544e9691c3ebcc",
+  "jobId": "job_cbc15abdf59c7031",
+  "checks": {
+    "routine created through renderer IPC": true,
+    "due routine creates exactly one Job": true,
+    "Routine never executes provider directly": true,
+    "Job carries Routine identity": true,
+    "Job remains queued until existing Chief path wakes it": true,
+    "nextRunAt pre-advanced past now": true,
+    "Chief loop executes existing Job path": true,
+    "trusted Routine workspace reaches delegateTrusted execution context": true,
+    "Routine metadata reaches governed Job task": true,
+    "Routine history links completed Job": true,
+    "restart does not duplicate prior firing": true,
+    "disabled routine does not fire": true,
+    "re-enable schedules future occurrence": true,
+    "Routine lifecycle actions use a product dialog instead of window confirm or prompt": true,
+    "real Routines UI Run now creates one governed Job and visible success": true,
+    "Run now success remains bound to the selected Routine after refresh": true,
+    "Run now disables pending card and suppresses duplicate clicks": true,
+    "disabled Routine remains visibly fail-closed": true,
+    "unavailable Run now stays in-card with sanitized failure and no Job": true,
+    "real Routines UI Restore reactivates the Routine without a Job": true,
+    "Restore disables pending card and suppresses duplicate clicks": true,
+    "unavailable Restore stays archived with in-card sanitized failure": true,
+    "stale Routine card fails closed without creating a Job": true,
+    "Routine action states and Job count remain isolated after controller restart": true,
+    "real Routines UI Disable then Enable keeps one card bound and shows success": true,
+    "real Routines UI Archive then Restore keeps existing recoverable semantics": true,
+    "Remove cancel leaves the selected Routine unchanged": true,
+    "Remove confirm permanently removes only the selected Routine with visible success": true,
+    "injected Enable-state IPC failure is visible and retry succeeds": true,
+    "injected Remove IPC failure preserves the card and retry removes it": true,
+    "double-clicking Remove confirmation issues one IPC call": true,
+    "invalid trusted workspace fails Routine before Job creation": true,
+    "failed Routine history is durable and explicit": true,
+    "failed one-time Routine is consumed": true,
+    "consumed one-time Routine cannot be re-enabled": true,
+    "consumed one-time UI offers no Enable action": true,
+    "zh-CN Routines UI": true,
+    "English Routines UI": true,
+    "real product window keeps V4.1 navigation and opens Routines": true,
+    "real Routines editor exposes only supported schedules and fields": true,
+    "real window visual evidence captured": true
+  },
+  "visualEvidence": {
+    "method": "BrowserWindow.capturePage",
+    "attempts": [],
+    "captured": true
+  },
+  "productSurface": {
+    "work": true,
+    "attention": true,
+    "routines": true,
+    "settings": true,
+    "routinesVisible": true,
+    "title": "Routines"
+  },
+  "routineEditor": {
+    "open": true,
+    "options": [
+      "one-time",
+      "hourly",
+      "daily",
+      "weekly",
+      "custom"
+    ],
+    "fields": true,
+    "states": {
+      "one-time": {
+        "at": false,
+        "minute": true,
+        "time": true,
+        "weekday": true
+      },
+      "hourly": {
+        "at": true,
+        "minute": false,
+        "time": true,
+        "weekday": true
+      },
+      "daily": {
+        "at": true,
+        "minute": true,
+        "time": false,
+        "weekday": true
+      },
+      "weekly": {
+        "at": true,
+        "minute": true,
+        "time": false,
+        "weekday": false
+      }
+    }
+  },
+  "routine": {
+    "id": "routine_4ebe16bb9af091e4",
+    "name": "V4.2 gate hourly",
+    "enabled": true,
+    "canRun": false,
+    "runState": "unavailable",
+    "coworkerId": "coworker_5db0f31eae154882",
+    "instruction": "Write a harmless V4.2 routine gate result.",
+    "workspaceId": "ws_94d0f2e918a5a2a0",
+    "state": "active",
+    "schedule": {
+      "type": "hourly",
+      "minute": 21
+    },
+    "createdAt": "2026-08-29T02:20:00.000Z",
+    "updatedAt": "2026-08-29T11:21:00.000Z",
+    "lastRunAt": "2026-08-29T02:21:01.000Z",
+    "nextRunAt": "2026-08-29T12:21:00.000Z",
+    "lastStatus": "completed",
+    "failureCount": 0,
+    "history": [
+      {
+        "id": "run_8d52d69f299ad6a0",
+        "scheduledFor": "2026-08-29T02:21:00.000Z",
+        "startedAt": "2026-08-29T02:21:01.000Z",
+        "finishedAt": "2026-08-29T02:21:01.000Z",
+        "jobId": "job_cbc15abdf59c7031",
+        "status": "completed",
+        "source": "schedule"
+      }
+    ]
+  },
+  "failedRoutine": {
+    "id": "routine_3d544e9691c3ebcc",
+    "name": "V4.2 gate one-time failure",
+    "enabled": false,
+    "canRun": false,
+    "runState": "disabled",
+    "coworkerId": "coworker_5db0f31eae154882",
+    "instruction": "This run must fail closed before provider execution.",
+    "workspaceId": "ws_94d0f2e918a5a2a0",
+    "state": "active",
+    "schedule": {
+      "type": "one-time",
+      "at": "2026-08-29T11:20:59.000Z"
+    },
+    "createdAt": "2026-08-29T11:21:00.000Z",
+    "updatedAt": "2026-08-29T11:21:00.000Z",
+    "lastRunAt": "2026-08-29T11:21:00.000Z",
+    "lastStatus": "failed",
+    "failureCount": 1,
+    "history": [
+      {
+        "id": "run_91b8b7568642d059",
+        "scheduledFor": "2026-08-29T11:20:59.000Z",
+        "startedAt": "2026-08-29T11:21:00.000Z",
+        "status": "failed",
+        "source": "schedule",
+        "error": "unknown trusted workspace: ws_94d0f2e918a5a2a0",
+        "finishedAt": "2026-08-29T11:21:00.000Z"
+      }
+    ]
+  },
+  "job": {
+    "id": "job_cbc15abdf59c7031",
+    "title": "V4.2 gate hourly",
+    "objective": "Write a harmless V4.2 routine gate result.",
+    "status": "completed",
+    "priority": "normal",
+    "ownerCoworkerId": "coworker_5db0f31eae154882",
+    "parentJobId": null,
+    "workspaceId": "ws_94d0f2e918a5a2a0",
+    "executionTarget": {
+      "kind": "local"
+    },
+    "workerNodeName": "—",
+    "workerWorkspaceName": "—",
+    "routineId": "routine_4ebe16bb9af091e4",
+    "scheduledFor": "2026-08-29T02:21:00.000Z",
+    "nextActionAt": null,
+    "attempt": 0,
+    "depth": 0,
+    "childJobIds": [],
+    "outcomeSummary": "routine gate completed: V4.2 gate hourly",
+    "createdAt": "2026-09-03T12:53:37.491Z",
+    "updatedAt": "2026-09-03T12:53:37.497Z",
+    "conversationId": "job-conv-job_cbc15abdf59c7031",
+    "taskIds": [
+      "task_1"
+    ]
+  }
+}
