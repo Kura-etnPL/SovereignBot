@@ -1,0 +1,64 @@
+{
+  "schema": "sovereignbot.desktop.p38-search-relevance-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "title phrase ranks the exact local Project": {
+      "ok": true,
+      "detail": "{\"id\":\"project_01404681442a84b8\",\"matchReason\":{\"key\":\"title-exact\",\"fields\":[\"content\",\"subtitle\",\"title\"],\"coverage\":1}}"
+    },
+    "Memory tags rank as structured tag matches": {
+      "ok": true,
+      "detail": "{\"id\":\"mem_40150afa-71d8-4af0-887f-a430ddd4d023\",\"matchReason\":{\"key\":\"tags\",\"fields\":[\"tags\"],\"coverage\":1}}"
+    },
+    "public result strips internal search fields": {
+      "ok": true,
+      "detail": "{\"type\":\"memory\",\"id\":\"mem_40150afa-71d8-4af0-887f-a430ddd4d023\",\"title\":\"P38 Tag Memory\",\"subtitle\":\"project memory · P38 approved local fact\",\"projectId\":\"project_01404681442a84b8\",\"status\":\"active\",\"updatedAt\":\"2026-09-03T08:22:39.815Z\",\"navigation\":{\"view\":\"memory\",\"memoryId\":\"mem_40150afa-71d8-4af0-887f-a430ddd4d023\",\"scope\":\"project\",\"ownerId\":\"project_01404681442a84b8\",\"projectId\":\"project_01404681442a84b8\"},\"score\":730,\"matchReason\":{\"key\":\"tags\",\"fields\":[\"tags\"],\"coverage\":1},\"action\":\"open\"}"
+    },
+    "status filtering keeps archived artifacts out of active results": {
+      "ok": true,
+      "detail": "{\"active\":0,\"archived\":\"artifact_7b60f511598277d0\",\"store\":[{\"id\":\"artifact_7b60f511598277d0\",\"title\":\"P38 Archived Artifact\",\"archived\":true}]}"
+    },
+    "weak partial content matches are filtered": {
+      "ok": true,
+      "detail": "{\"total\":0}"
+    },
+    "ranking and match reasons are deterministic": {
+      "ok": true,
+      "detail": "[{\"id\":\"mem_40150afa-71d8-4af0-887f-a430ddd4d023\",\"score\":1805,\"matchReason\":{\"key\":\"title-prefix\",\"fields\":[\"content\",\"subtitle\",\"tags\",\"title\"],\"coverage\":1}},{\"id\":\"project_01404681442a84b8\",\"score\":1230,\"matchReason\":{\"key\":\"title-prefix\",\"fields\":[\"content\",\"title\"],\"coverage\":1}}]"
+    },
+    "bounded pagination contract remains intact": {
+      "ok": true,
+      "detail": "{\"total\":2,\"count\":2,\"hasMore\":false}"
+    },
+    "UI renders the safe bilingual tag match reason": {
+      "ok": true,
+      "detail": "{\"title\":\"P38 Tag Memory\",\"subtitle\":\"memory · project memory · P38 approved local fact · active · Tag match / 标签匹配\"}"
+    },
+    "keyboard Enter preserves exact search navigation": {
+      "ok": true
+    },
+    "local search index rebuilds after a real renderer/service restart": {
+      "ok": true,
+      "detail": "{\"id\":\"mem_40150afa-71d8-4af0-887f-a430ddd4d023\",\"matchReason\":{\"key\":\"tags\",\"fields\":[\"tags\"],\"coverage\":1}}"
+    }
+  },
+  "notes": [
+    "PASS hidden Electron window stays hidden",
+    "PASS title phrase ranks the exact local Project {\"id\":\"project_01404681442a84b8\",\"matchReason\":{\"key\":\"title-exact\",\"fields\":[\"content\",\"subtitle\",\"title\"],\"coverage\":1}}",
+    "PASS Memory tags rank as structured tag matches {\"id\":\"mem_40150afa-71d8-4af0-887f-a430ddd4d023\",\"matchReason\":{\"key\":\"tags\",\"fields\":[\"tags\"],\"coverage\":1}}",
+    "PASS public result strips internal search fields {\"type\":\"memory\",\"id\":\"mem_40150afa-71d8-4af0-887f-a430ddd4d023\",\"title\":\"P38 Tag Memory\",\"subtitle\":\"project memory · P38 approved local fact\",\"projectId\":\"project_01404681442a84b8\",\"status\":\"active\",\"updatedAt\":\"2026-09-03T08:22:39.815Z\",\"navigation\":{\"view\":\"memory\",\"memoryId\":\"mem_40150afa-71d8-4af0-887f-a430ddd4d023\",\"scope\":\"project\",\"ownerId\":\"project_01404681442a84b8\",\"projectId\":\"project_01404681442a84b8\"},\"score\":730,\"matchReason\":{\"key\":\"tags\",\"fields\":[\"tags\"],\"coverage\":1},\"action\":\"open\"}",
+    "PASS status filtering keeps archived artifacts out of active results {\"active\":0,\"archived\":\"artifact_7b60f511598277d0\",\"store\":[{\"id\":\"artifact_7b60f511598277d0\",\"title\":\"P38 Archived Artifact\",\"archived\":true}]}",
+    "PASS weak partial content matches are filtered {\"total\":0}",
+    "PASS ranking and match reasons are deterministic [{\"id\":\"mem_40150afa-71d8-4af0-887f-a430ddd4d023\",\"score\":1805,\"matchReason\":{\"key\":\"title-prefix\",\"fields\":[\"content\",\"subtitle\",\"tags\",\"title\"],\"coverage\":1}},{\"id\":\"project_01404681442a84b8\",\"score\":1230,\"matchReason\":{\"key\":\"title-prefix\",\"fields\":[\"content\",\"title\"],\"coverage\":1}}]",
+    "PASS bounded pagination contract remains intact {\"total\":2,\"count\":2,\"hasMore\":false}",
+    "PASS UI renders the safe bilingual tag match reason {\"title\":\"P38 Tag Memory\",\"subtitle\":\"memory · project memory · P38 approved local fact · active · Tag match / 标签匹配\"}",
+    "PASS keyboard Enter preserves exact search navigation",
+    "PASS local search index rebuilds after a real renderer/service restart {\"id\":\"mem_40150afa-71d8-4af0-887f-a430ddd4d023\",\"matchReason\":{\"key\":\"tags\",\"fields\":[\"tags\"],\"coverage\":1}}"
+  ],
+  "externalActions": [],
+  "ok": true
+}

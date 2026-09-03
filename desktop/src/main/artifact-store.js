@@ -252,7 +252,7 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
         list({ conversationId, coworkerId, visibility = "active", limit = 100 } = {}) {
             if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact list limit must be 1..500");
             if (!["active", "archived", "all"].includes(visibility)) throw new Error("artifact visibility must be active, archived, or all");
-            let result = artifacts.filter((entry) => entry.published !== false && (visibility === "all" || visibility === "archived" ? entry.archived === (visibility === "archived") : entry.archived !== true));
+            let result = artifacts.filter((entry) => entry.published !== false && (visibility === "all" ? true : visibility === "archived" ? entry.archived === true : entry.archived !== true));
             if (conversationId !== undefined) result = result.filter((entry) => entry.conversationId === conversationId);
             if (coworkerId !== undefined) result = result.filter((entry) => entry.createdByCoworkerId === coworkerId);
             return { schema: ARTIFACTS_SCHEMA, artifacts: result.slice(-limit).reverse().map(publicView) };

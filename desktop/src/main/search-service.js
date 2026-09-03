@@ -3,11 +3,13 @@ const TYPES = new Set(["conversations", "channels", "coworkers", "projects", "ar
 const STATUSES = new Set(["active", "archived", "all"]);
 const MAX_QUERY = 300;
 const MAX_LIMIT = 100;
+const SEARCH_MATCH_REASONS = Object.freeze(["title-exact", "title-prefix", "title-contains", "phrase", "tags", "subtitle", "content", "token"]);
 
 function clone(value) { return structuredClone(value); }
 function safeText(value, max = 240) {
     return String(value ?? "").slice(0, max)
         .replace(/[A-Za-z]:[\\/][^\s"'<>|?\r\n]+/g, "[redacted-path]")
+        .replace(/(?:file:\/\/|\\\\|\/(?:Users|home|tmp|var|private|mnt|workspace|opt|etc)\/)[^\s"'<>|?\r\n]*/gi, "[redacted-path]")
         .replace(/(?:bearer\s+|token\s*[:=]\s*|cookie\s*[:=]\s*|secret\s*[:=]\s*|password\s*[:=]\s*)[^\s,;]+/gi, "[redacted-secret]")
         .replace(/https?:\/\/[^\s"'<>]+/gi, "[redacted-url]");
 }
@@ -29,15 +31,64 @@ function normalizeStatus(value) {
     return value;
 }
 function tokens(query) { return query.toLocaleLowerCase().split(/\s+/).filter(Boolean).slice(0, 12); }
-function scoreFor(record, query) {
-    const haystack = [record.title, record.subtitle, record.searchText].join(" ").toLocaleLowerCase();
-    if (!query) return 0;
+function normalized(value) { return String(value ?? "").trim().toLocaleLowerCase(); }
+function matchFor(record, query) {
+    if (!query) return { score: 0, key: "token", fields: [] };
+    const normalizedQuery = normalized(query);
+    const queryTokens = tokens(query);
+    const title = normalized(record.title);
+    const subtitle = normalized(record.subtitle);
+    const content = normalized(record.searchText);
+    const tags = (record.tags ?? []).map(normalized).filter(Boolean);
+    const fields = new Set();
+    const phraseFields = new Set();
+    const titleExact = title === normalizedQuery;
+    const titlePrefix = title.startsWith(normalizedQuery);
+    const titleContains = title.includes(normalizedQuery);
+    if (titleContains) fields.add("title");
+    if (tags.some((tag) => tag === normalizedQuery || tag.includes(normalizedQuery))) fields.add("tags");
+    if (subtitle.includes(normalizedQuery)) { fields.add("subtitle"); phraseFields.add("subtitle"); }
+    if (content.includes(normalizedQuery)) { fields.add("content"); phraseFields.add("content"); }
+    if (titleContains) phraseFields.add("title");
+
+    let matchedTokenCount = 0;
     let score = 0;
-    for (const token of tokens(query)) {
-        if (!haystack.includes(token)) return -1;
-        score += record.title.toLocaleLowerCase().startsWith(token) ? 50 : haystack === token ? 100 : 20;
+    for (const token of queryTokens) {
+        const titleHit = title.includes(token);
+        const tagHit = tags.some((tag) => tag === token || tag.includes(token));
+        const subtitleHit = subtitle.includes(token);
+        const contentHit = content.includes(token);
+        if (titleHit || tagHit || subtitleHit || contentHit) matchedTokenCount += 1;
+        if (titleHit) { fields.add("title"); score += title.startsWith(token) ? 125 : 100; }
+        if (tagHit) { fields.add("tags"); score += 90; }
+        if (subtitleHit) { fields.add("subtitle"); score += 45; }
+        if (contentHit) { fields.add("content"); score += 25; }
     }
-    return score;
+    if (!matchedTokenCount) return null;
+    const coverage = matchedTokenCount / Math.max(1, queryTokens.length);
+    const strongField = fields.has("title") || fields.has("tags") || phraseFields.has("title");
+    if (queryTokens.length > 1 && matchedTokenCount < Math.ceil(queryTokens.length / 2)) return null;
+    if (queryTokens.length > 1 && matchedTokenCount < queryTokens.length && !strongField) return null;
+
+    if (titleExact) score += 1000;
+    else if (titlePrefix) score += 700;
+    else if (titleContains) score += 500;
+    if (tags.some((tag) => tag === normalizedQuery)) score += 460;
+    else if (fields.has("tags")) score += 300;
+    if (phraseFields.has("title")) score += queryTokens.length > 1 ? 300 : 100;
+    if (phraseFields.has("subtitle")) score += 140;
+    if (phraseFields.has("content")) score += 100;
+    score += Math.round(coverage * 180);
+    if (matchedTokenCount < queryTokens.length) score -= (queryTokens.length - matchedTokenCount) * 35;
+
+    const key = titleExact ? "title-exact"
+        : titlePrefix ? "title-prefix"
+            : titleContains ? "title-contains"
+                : queryTokens.length > 1 && phraseFields.size ? "phrase"
+                    : fields.has("tags") ? "tags"
+                        : phraseFields.has("subtitle") ? "subtitle"
+                            : phraseFields.has("content") ? "content" : "token";
+    return { score, key, fields: [...fields].sort(), coverage: Number(coverage.toFixed(3)) };
 }
 function add(map, id, projectId) {
     if (!id || !projectId) return;
@@ -92,7 +143,7 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         const channels = teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         const conversations = conversationStore.list().conversations ?? [];
         const coworkers = coworkerStore.list({ includeArchived: true }).coworkers ?? [];
-        const artifacts = artifactStore?.list ? (artifactStore.list({ limit: 500 }).artifacts ?? []) : [];
+        const artifacts = artifactStore?.list ? (artifactStore.list({ visibility: "all", limit: 500 }).artifacts ?? []) : [];
         const skills = skillStore?.list ? (skillStore.list({ includeArchived: true }).skills ?? []) : [];
         const playbooks = productSurfaces?.listPlaybooks ? (productSurfaces.listPlaybooks({ includeArchived: true }).playbooks ?? []) : [];
         const routines = getRoutines?.()?.routines ?? [];
@@ -122,7 +173,7 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
             if (projectIds?.size && ![...projectIds].some((id) => projectById.get(id)?.state === "active" && projectById.get(id)?.available !== false)) return "archived";
             return "active";
         };
-        const emit = (type, entry, title, subtitle, projectIds, updatedAt, navigation = {}, searchText = "", explicitStatus) => {
+        const emit = (type, entry, title, subtitle, projectIds, updatedAt, navigation = {}, searchText = "", explicitStatus, internal = {}) => {
             const status = explicitStatus ?? statusFor(entry, projectIds);
             const ids = projectIds ?? new Set();
             const projectId = onlyProject(ids);
@@ -137,6 +188,7 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
                 updatedAt: safeText(updatedAt, 64),
                 navigation: clone(navigation),
                 searchText: safeText(searchText, 20_000),
+                ...internal,
             });
         };
         for (const project of projects) emit("projects", project, project.name, "Project", new Set([project.projectId]), project.updatedAt, { view: "projects", projectId: project.projectId }, project.name, project.state === "active" && project.available !== false ? "active" : "archived");
@@ -162,7 +214,9 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
                     scope: memory.scope,
                     ownerId: memory.ownerId,
                     ...(onlyProject(projectIds) ? { projectId: onlyProject(projectIds) } : {}),
-                }, `${memory.content} ${(memory.tags ?? []).join(" ")} ${memory.source?.label ?? ""}`, memory.state === "active" ? undefined : "archived");
+                }, `${memory.content} ${memory.source?.label ?? ""}`, memory.state === "active" ? undefined : "archived", {
+                    tags: (memory.tags ?? []).filter((tag) => typeof tag === "string").map((tag) => safeText(tag, 80)),
+                });
             }
         }
         return { records, projects, indexedAt: new Date().toISOString() };
@@ -199,16 +253,16 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         for (const record of records) {
             if (!selectedTypes.has(record.type) || (status !== "all" && record.status !== status)) continue;
             if (scopeProjectId && !record.projectIds.includes(scopeProjectId)) continue;
-            const score = scoreFor(record, queryText);
-            if (score < 0) continue;
-            const { searchText: _searchText, projectIds: _projectIds, ...publicRecord } = record;
+            const match = matchFor(record, queryText);
+            if (!match) continue;
+            const { searchText: _searchText, projectIds: _projectIds, tags: _tags, ...publicRecord } = record;
             if (scopeProjectId && !publicRecord.projectId) publicRecord.projectId = scopeProjectId;
-            result.push({ ...publicRecord, score, action: "open" });
+            result.push({ ...publicRecord, score: match.score, matchReason: { key: match.key, fields: match.fields, coverage: match.coverage }, action: "open" });
         }
-        result.sort((a, b) => b.score - a.score || String(b.updatedAt).localeCompare(String(a.updatedAt)) || String(a.title).localeCompare(String(b.title)));
+        result.sort((a, b) => b.score - a.score || String(b.updatedAt).localeCompare(String(a.updatedAt)) || String(a.title).localeCompare(String(b.title)) || String(a.id).localeCompare(String(b.id)));
         return { schema: SEARCH_SCHEMA, query: queryText, status, indexedAt, total: result.length, hasMore: result.length > limit, results: result.slice(0, limit) };
     }
     return { schema: SEARCH_SCHEMA, query, invalidate, refresh: async () => { invalidate(); const built = await getIndex(); return { schema: SEARCH_SCHEMA, indexedAt: built.indexedAt, count: built.records.length }; } };
 }
 
-export { SEARCH_SCHEMA, TYPES as SEARCH_TYPES, STATUSES as SEARCH_STATUSES };
+export { SEARCH_SCHEMA, TYPES as SEARCH_TYPES, STATUSES as SEARCH_STATUSES, SEARCH_MATCH_REASONS };

@@ -42,6 +42,7 @@
         "verify:p35-this-pc": "node scripts/verify-p35-this-pc-deep-links.mjs",
         "verify:p36-first-run": "node scripts/verify-p36-first-run.mjs",
         "verify:p37-settings": "node scripts/verify-p37-settings.mjs",
+        "verify:p38-search-relevance": "node scripts/verify-p38-search-relevance.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",

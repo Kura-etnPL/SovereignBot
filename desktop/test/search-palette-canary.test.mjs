@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createSearchService } from "../src/main/search-service.js";
+import { createSearchService, SEARCH_MATCH_REASONS } from "../src/main/search-service.js";
 import { createCommandPaletteService } from "../src/main/command-palette-service.js";
 import { validateV3IpcRequest } from "../src/main/lib/v3-ipc-schema.js";
 
@@ -104,6 +104,43 @@ test("search treats path, URL, and shell-looking input as data and never exposes
     assert.equal(result.results.length, 0);
     assert.doesNotThrow(() => JSON.stringify(result));
     await assert.rejects(() => service.query({ query: "\u0000" }), /control characters/);
+});
+
+test("search relevance is field-aware, tolerant of useful partial phrases, and stable", async () => {
+    const { service, memoryRows } = fixture();
+    memoryRows.push({ id: "mem_cccccccccccccccc", title: "Reference note", content: "Unrelated body", tags: ["launch"], scope: "project", ownerId: projectA, state: "active", updatedAt: "2026-09-02T00:00:05.000Z", source: { type: "fact", label: "Approved fact" } });
+    memoryRows.push({ id: "mem_dddddddddddddddd", title: "项目复盘记忆", content: "发布检查清单", tags: ["发布"], scope: "project", ownerId: projectA, state: "active", updatedAt: "2026-09-02T00:00:06.000Z", source: { type: "fact", label: "已批准事实" } });
+    service.invalidate();
+
+    const exact = await service.query({ query: "Alpha Project", types: ["projects"], limit: 10 });
+    assert.equal(exact.results[0].matchReason.key, "title-exact");
+    assert.ok(exact.results[0].matchReason.fields.includes("title"));
+    assert.equal(exact.results[0].matchReason.coverage, 1);
+
+    const phrase = await service.query({ query: "release checklist", types: ["memory"], limit: 10 });
+    assert.equal(phrase.results[0].matchReason.key, "phrase");
+    assert.ok(phrase.results[0].matchReason.fields.includes("content"));
+
+    const tag = await service.query({ query: "launch", types: ["memory"], limit: 10 });
+    assert.equal(tag.results[0].id, "mem_cccccccccccccccc");
+    assert.equal(tag.results[0].matchReason.key, "tags");
+    assert.deepEqual(tag.results[0].matchReason.fields, ["tags"]);
+    assert.ok(SEARCH_MATCH_REASONS.includes(tag.results[0].matchReason.key));
+    assert.equal(Object.hasOwn(tag.results[0], "tags"), false);
+    assert.equal(Object.hasOwn(tag.results[0], "searchText"), false);
+
+    const chinese = await service.query({ query: "发布", types: ["memory"], limit: 10 });
+    assert.equal(chinese.results[0].id, "mem_dddddddddddddddd");
+    assert.ok(["tags", "title-contains", "content"].includes(chinese.results[0].matchReason.key));
+
+    const partial = await service.query({ query: "Alpha missing", types: ["projects"], limit: 10 });
+    assert.equal(partial.results[0].id, projectA);
+    assert.equal(partial.results[0].matchReason.coverage, 0.5);
+    const weak = await service.query({ query: "workspace missing", types: ["history"], limit: 10 });
+    assert.deepEqual(weak.results, []);
+
+    const again = await service.query({ query: "Alpha", types: ["projects", "memory"], limit: 100 });
+    assert.deepEqual(again.results.map(({ id, score, matchReason }) => ({ id, score, matchReason })), (await service.query({ query: "Alpha", types: ["projects", "memory"], limit: 100 })).results.map(({ id, score, matchReason }) => ({ id, score, matchReason })));
 });
 
 test("palette exposes only seven fixed actions and delegates to trusted callbacks", async () => {
