@@ -303,13 +303,18 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         },
         list() { return { schema: CONVERSATIONS_SCHEMA, conversations: conversations.map(summarize) }; },
         get(id) { const conversation = requireConversation(id); return { ...summarize(conversation), messages: clone(conversation.messages) }; },
-        searchRecords() {
-            return conversations.flatMap((conversation) => conversation.messages.map((message) => ({
-                conversationId: conversation.id,
-                messageId: message.id,
-                text: message.text,
-                createdAt: message.createdAt,
-            })));
+        *searchRecords() {
+            // This iterator is deliberately bounded by the canonical store's
+            // existing MAX_CONVERSATIONS/MAX_MESSAGES_PER_CONVERSATION caps;
+            // it does not create a second durable source or an unbounded array.
+            for (const conversation of conversations) {
+                for (const message of conversation.messages) yield {
+                    conversationId: conversation.id,
+                    messageId: message.id,
+                    text: message.text,
+                    createdAt: message.createdAt,
+                };
+            }
         },
         getPage,
         createDirect(coworkerId) {

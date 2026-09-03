@@ -84,6 +84,19 @@ test("conversation Search indexes retained message history and returns one safe 
     assert.ok(stats.matchEvaluations <= stats.candidateCount);
 });
 
+test("conversation Search redacts sensitive message patterns before indexing while preserving ordinary text", async () => {
+    const messageRecords = [
+        { conversationId: conversationA, messageId: "msg_abcdefabcdefabcd", text: "token=P44HiddenSecretValue C:\\Users\\Eternal\\private\\note.txt", createdAt: "2026-09-02T00:00:01.000Z" },
+        { conversationId: conversationA, messageId: "msg_bcdefabcdefabcde", text: "P44 ordinary history phrase remains searchable", createdAt: "2026-09-02T00:00:02.000Z" },
+    ];
+    const { service } = fixture({ messageRecords });
+    const secret = await service.query({ query: "P44HiddenSecretValue", types: ["conversations"], limit: 10 });
+    assert.deepEqual(secret.results, []);
+    const ordinary = await service.query({ query: "ordinary history phrase", types: ["conversations"], limit: 10 });
+    assert.equal(ordinary.results[0].messageId, "msg_bcdefabcdefabcde");
+    assert.match(ordinary.results[0].matchSnippet, /ordinary history phrase/i);
+});
+
 test("global search is bounded, typed, recent/relevant, and Project scoped", async () => {
     const { service, getProjectListCalls, memoryRows } = fixture();
     const result = await service.query({ query: "Alpha", limit: 100 });

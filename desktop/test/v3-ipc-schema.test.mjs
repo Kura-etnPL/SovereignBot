@@ -43,6 +43,7 @@ test("conversation:get accepts only bounded pagination inputs", () => {
     assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", sessionId: "provider-session" }), /not accepted from the renderer/);
     assert.deepEqual(validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", limit: 25, aroundMessageId: "msg_1234567890abcdef" }), { conversationId: "conv_1234567890abcdef", limit: 25, aroundMessageId: "msg_1234567890abcdef" });
     assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", aroundMessageId: "msg_not-an-anchor" }), /message identifier/);
+    assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", beforeMessageId: "msg_1234567890abcdef", aroundMessageId: "msg_abcdefabcdefabcd" }), /ambiguous/);
 });
 
 test("parallel Team requests accept only bounded specialist tasks and a separate reviewer", () => {

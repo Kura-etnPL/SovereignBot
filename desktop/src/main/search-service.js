@@ -48,7 +48,7 @@ function createQueryIndex(records) {
         byGram.get(gram).add(recordIndex);
     };
     records.forEach((record, recordIndex) => {
-        const fields = [record.title, record.subtitle, record.searchText, record.messageText, ...(record.tags ?? [])];
+        const fields = [record.title, record.subtitle, record.searchText, ...(record.tags ?? [])];
         const recordGrams = new Set();
         for (const field of fields) for (const gram of grams(field)) recordGrams.add(gram);
         for (const gram of recordGrams) add(gram, recordIndex);
@@ -192,9 +192,8 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         const teams = teamService.list({ includeArchived: true })?.teams ?? [];
         const channels = teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         const conversations = conversationStore.list().conversations ?? [];
-        const messageRecords = conversationStore.searchRecords?.() ?? [];
         const messagesByConversation = new Map();
-        for (const message of messageRecords) {
+        for (const message of conversationStore.searchRecords?.() ?? []) {
             if (!message?.conversationId || !message?.messageId || typeof message.text !== "string") continue;
             if (!messagesByConversation.has(message.conversationId)) messagesByConversation.set(message.conversationId, []);
             messagesByConversation.get(message.conversationId).push(message);
@@ -260,7 +259,6 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
                 emit("conversations", { ...conversation, id: `${conversation.id}:${message.messageId}` }, conversation.title, conversation.kind === "direct" ? "Conversation" : `${conversation.messageCount ?? 0} messages`, conversationProjectsForRecord, message.createdAt ?? conversation.updatedAt, { view: "conversation", conversationId: conversation.id, messageId: message.messageId }, message.text, undefined, {
                     conversationId: conversation.id,
                     messageId: message.messageId,
-                    messageText: message.text,
                     isMessageRecord: true,
                 });
             }
@@ -344,11 +342,11 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
             matchEvaluations += 1;
             const match = matchFor(record, queryText);
             if (!match) continue;
-            const { searchText: _searchText, messageText: _messageText, projectIds: _projectIds, tags: _tags, conversationId: _conversationId, messageId: _messageId, isConversationSummary: _isConversationSummary, isMessageRecord: _isMessageRecord, ...publicRecord } = record;
+            const { searchText: _searchText, projectIds: _projectIds, tags: _tags, conversationId: _conversationId, messageId: _messageId, isConversationSummary: _isConversationSummary, isMessageRecord: _isMessageRecord, ...publicRecord } = record;
             if (scopeProjectId && !publicRecord.projectId) publicRecord.projectId = scopeProjectId;
             const publicResult = { ...publicRecord, score: match.score, matchReason: { key: match.key, fields: match.fields, coverage: match.coverage }, action: "open" };
             if (record.isMessageRecord && record.messageId) {
-                const source = safeText(record.messageText, 12_000);
+                const source = record.searchText;
                 const normalizedSource = normalized(source);
                 const positions = tokens(queryText).map((token) => normalizedSource.indexOf(normalized(token))).filter((position) => position >= 0);
                 const hit = positions.length ? Math.min(...positions) : 0;

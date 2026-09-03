@@ -249,3 +249,20 @@ test("conversation pages are bounded, ordered, cursor-safe, and durable", () => 
         rmSync(root, { recursive: true, force: true });
     }
 });
+
+test("conversation Search projection follows the canonical retention bound", () => {
+    const { root, conversations, coder } = fixture();
+    try {
+        const direct = conversations.createDirect(coder.id);
+        for (let index = 0; index < 5_005; index += 1) conversations.postUserMessage(direct.id, { text: `Bounded message ${index}` });
+        const retained = conversations.get(direct.id).messages;
+        const indexed = [...conversations.searchRecords()].filter((entry) => entry.conversationId === direct.id);
+        assert.equal(retained.length, 5_000);
+        assert.equal(indexed.length, 5_000);
+        assert.equal(retained[0].text, "Bounded message 5");
+        assert.equal(indexed[0].text, "Bounded message 5");
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
