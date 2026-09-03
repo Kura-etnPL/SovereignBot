@@ -42,6 +42,11 @@ test("P31 verifier uses bounded native input for the older-gallery Duplicate con
   assert.match(verifier, /const DUPLICATE_STATE_PROBE_EXPRESSION = "async/);
   assert.match(verifier, /const wrapped = `\(\$\{expression\}\)\(\)`/);
   assert.match(verifier, /new Function\(`return \$\{wrapped\}`\)/);
+  assert.match(verifier, /for \(const \[label, expression\] of Object\.entries/);
+  assert.match(verifier, /import \{ makeFixture, handlers, loadWindow, invoke as rawInvoke, waitFor \}/);
+  assert.match(verifier, /async function invokeChecked\(win, label, expression\)/);
+  assert.doesNotMatch(verifier, /await invoke\(win,/);
+  assert.match(verifier, /legacy gallery after duplicate snapshot", "async\(\)=>[\s\S]*\}\}\"\)/);
   assert.match(verifier, /preflightInvokeExpression\(DUPLICATE_STATE_PROBE_EXPRESSION\)/);
   assert.doesNotMatch(verifier, /DUPLICATE_STATE_PROBE_EXPRESSION = [^;]+}\(\)"/);
   assert.match(verifier, /async function probeDuplicateState\(win\)/);
