@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-03T06:15:46.883Z",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "ordinary This PC entry exposes the bounded public surface": true,
+    "This PC renders safe status, app/site, context, and artifact/activity actions": true,
+    "This PC renderer projection contains no raw Computer internals": true,
+    "This PC activity deep link preserves the Coworker filter and visible scope": true,
+    "Computer History receives only the selected opaque Coworker id": true,
+    "This PC artifact deep link preserves the Coworker filter and visible scope": true,
+    "Artifact Hub receives the selected opaque Coworker id": true,
+    "This PC empty state is understandable and non-destructive": true,
+    "This PC failure state stays in-product": true,
+    "ordinary This PC entry survives a renderer/service restart": true
+  }
+}
