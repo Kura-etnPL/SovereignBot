@@ -734,7 +734,10 @@
       card.append(title, text("Type", item.mimeType), text("Version", item.version ? `v${item.version}` : "Original"), text("Creator", item.creator?.name), text("Team", item.team?.name), text("Channel", item.channel?.name), text("Created", item.createdAt), text("History", item.history?.map((entry) => `${entry.event} · ${entry.timestamp}`).join(", ")), text("Status", item.status));
       const actions = document.createElement("div"); actions.className = "detail-actions";
       const exportStatus = document.createElement("p"); exportStatus.className = "setting-feedback"; exportStatus.setAttribute("role", "status");
-      actions.append(button("Preview / 预览", () => openArtifactPreview(item), root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root), button("Export copy / 导出副本", async () => {
+      actions.append(button("Preview / 预览", () => openArtifactPreview(item), root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root), button(item.archived ? "Restore / 恢复" : "Archive / 归档", async () => {
+        await (item.archived ? api.artifacts.restore : api.artifacts.archive)({ artifactId: item.id });
+        await refresh();
+      }, root), button("Export copy / 导出副本", async () => {
         const result = await api.artifacts.exportViaDialog({ artifactId: item.id });
         exportStatus.textContent = result?.canceled ? "Export canceled / 已取消导出" : `Exported ${result.fileName} / 已导出副本`;
       }, root), button("History / 历史", async () => {
@@ -984,13 +987,15 @@
     const [teams, coworkers, workspaces] = await Promise.all([api.teams.list({}), api.coworkers.list({}), api.workspaces?.list ? api.workspaces.list({}) : Promise.resolve({ workspaces: [] })]);
     cache.teams = teams.teams ?? []; cache.coworkers = coworkers.coworkers ?? []; cache.workspaces = workspaces.workspaces ?? []; cache.templates = teams.channelTemplates ?? [];
     const artifactScope = selected("artifact-hub-filter-page", "recent");
+    const artifactVisibility = selected("artifact-hub-visibility-page", "active");
     const artifactOptions = [{ value: "recent", label: "Recent / 最近" }, ...cache.teams.flatMap((team) => [{ value: `team:${team.id}`, label: `By Team / 团队: ${team.name}` }, ...(team.channels ?? []).map((channel) => ({ value: `channel:${channel.id}`, label: `By Channel / 频道: ${channel.name}` }))]), ...cache.coworkers.map((coworker) => ({ value: `coworker:${coworker.id}`, label: `By Coworker / 同事: ${coworker.name}` }))];
     populate("artifact-hub-filter-page", artifactOptions, artifactScope);
-    const artifactCatalog = await api.artifacts.hub({ limit: 500 });
+    populate("artifact-hub-visibility-page", [{ value: "active", label: "Active / 活跃" }, { value: "archived", label: "Archived / 已归档" }, { value: "all", label: "All / 全部" }], artifactVisibility);
+    const artifactCatalog = await api.artifacts.hub({ limit: 500, visibility: artifactVisibility });
     const artifactTypes = [...new Set((artifactCatalog.artifacts ?? []).map((entry) => entry.mimeType).filter(Boolean))].sort();
     const artifactType = selected("artifact-hub-type-page", "");
     populate("artifact-hub-type-page", [{ value: "", label: "All types / 全部类型" }, ...artifactTypes.map((value) => ({ value, label: value }))], artifactType);
-    const artifactPayload = { limit: 100 }; const resolvedScope = selected("artifact-hub-filter-page", artifactScope); if (resolvedScope.startsWith("team:")) artifactPayload.teamId = resolvedScope.slice(5); if (resolvedScope.startsWith("channel:")) artifactPayload.channelId = resolvedScope.slice(8); if (resolvedScope.startsWith("coworker:")) artifactPayload.coworkerId = resolvedScope.slice(9); const resolvedType = selected("artifact-hub-type-page", artifactType); if (resolvedType) artifactPayload.type = resolvedType;
+    const artifactPayload = { limit: 100, visibility: selected("artifact-hub-visibility-page", artifactVisibility) }; const resolvedScope = selected("artifact-hub-filter-page", artifactScope); if (resolvedScope.startsWith("team:")) artifactPayload.teamId = resolvedScope.slice(5); if (resolvedScope.startsWith("channel:")) artifactPayload.channelId = resolvedScope.slice(8); if (resolvedScope.startsWith("coworker:")) artifactPayload.coworkerId = resolvedScope.slice(9); const resolvedType = selected("artifact-hub-type-page", artifactType); if (resolvedType) artifactPayload.type = resolvedType;
     const historyScope = selected("computer-history-filter-page", "all"); populate("computer-history-filter-page", [{ value: "all", label: "All coworkers / 全部同事" }, ...cache.coworkers.map((coworker) => ({ value: coworker.id, label: `By Coworker / 同事: ${coworker.name}` }))], historyScope);
     let [playbookResult, artifactResult, historyResult, skillResult, channelResult, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations?.list ? api.conversations.list({}) : Promise.resolve({ conversations: [] })]);
     const requestedArtifactId = pendingArtifactId;
@@ -1069,7 +1074,7 @@
     $("team-pack-search-page")?.addEventListener("input", () => void refresh()); $("team-pack-category-page")?.addEventListener("change", () => void refresh());
     $("product-channel-create-page")?.addEventListener("click", () => { const teamId = $("product-channel-template-team-page")?.value || cache.teams[0]?.id; if (teamId) void openEditor(teamId).catch((reason) => showError(pageRoots.channels, reason)); });
     $("product-channel-template-add-page")?.addEventListener("click", () => void (async () => { const teamId = $("product-channel-template-team-page")?.value; const templateId = $("product-channel-template-page")?.value; if (!teamId || !templateId) return; await api.teams.createChannelFromTemplate({ teamId, templateId }); await refreshHost(); await refresh(); })().catch((reason) => showError(pageRoots.channels, reason)));
-    for (const id of ["artifact-hub-filter-page", "artifact-hub-type-page", "computer-history-filter-page", "product-channel-filter-page"]) $(id)?.addEventListener("change", () => void refresh());
+    for (const id of ["artifact-hub-filter-page", "artifact-hub-visibility-page", "artifact-hub-type-page", "computer-history-filter-page", "product-channel-filter-page"]) $(id)?.addEventListener("change", () => void refresh());
     $("product-channel-switch-page")?.addEventListener("change", (event) => openConversationSafe(event.target.value));
     api.onNavigate?.((target) => { if (navViews.has("nav-" + target) || ["product-hubs", "playbooks", "artifacts", "computer-history", "skills", "team-packs", "channels"].includes(target)) nav(target); });
     document.addEventListener("sovereignbot:open-artifact", (event) => { const artifactId = event.detail?.artifactId; if (!artifactId) return; focusedArtifactId = String(artifactId); pendingArtifactId = focusedArtifactId; nav("artifacts"); });

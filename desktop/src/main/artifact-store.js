@@ -35,6 +35,10 @@ function validId(value, prefix) {
     return typeof value === "string" && new RegExp(`^${prefix}_[A-Za-z0-9][\\w:-]{0,127}$`).test(value);
 }
 
+function isValidIsoTimestamp(value) {
+    return typeof value === "string" && value.length <= 64 && Number.isFinite(Date.parse(value));
+}
+
 function boundedText(value, label, max, required = false) {
     if (value === undefined || value === null) {
         if (required) throw new Error(`${label} is required`);
@@ -143,6 +147,8 @@ function sanitizePersisted(entry) {
             version,
             ...(parentArtifactId ? { parentArtifactId } : {}),
             ...(protocolLineage ? { protocolLineage } : {}),
+            archived: entry.archived === true,
+            ...(isValidIsoTimestamp(entry.archivedAt) ? { archivedAt: entry.archivedAt } : {}),
             published: entry.published !== false,
         };
     } catch {
@@ -243,9 +249,10 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
     return {
         schema: ARTIFACTS_SCHEMA,
 
-        list({ conversationId, coworkerId, limit = 100 } = {}) {
+        list({ conversationId, coworkerId, visibility = "active", limit = 100 } = {}) {
             if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact list limit must be 1..500");
-            let result = artifacts.filter((entry) => entry.published !== false);
+            if (!["active", "archived", "all"].includes(visibility)) throw new Error("artifact visibility must be active, archived, or all");
+            let result = artifacts.filter((entry) => entry.published !== false && (visibility === "all" || visibility === "archived" ? entry.archived === (visibility === "archived") : entry.archived !== true));
             if (conversationId !== undefined) result = result.filter((entry) => entry.conversationId === conversationId);
             if (coworkerId !== undefined) result = result.filter((entry) => entry.createdByCoworkerId === coworkerId);
             return { schema: ARTIFACTS_SCHEMA, artifacts: result.slice(-limit).reverse().map(publicView) };
@@ -285,6 +292,32 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
                 .slice(0, limit)
                 .map(publicView);
             return { schema: ARTIFACTS_SCHEMA, artifactId: source.id, artifactFamilyId: familyId, history };
+        },
+
+        archive(id) {
+            const source = requirePublicArtifact(id);
+            const familyId = source.artifactFamilyId ?? source.id;
+            const archivedAt = new Date().toISOString();
+            const changed = artifacts.filter((entry) => entry.published !== false && (entry.artifactFamilyId ?? entry.id) === familyId);
+            for (const entry of changed) {
+                entry.archived = true;
+                entry.archivedAt = archivedAt;
+            }
+            if (changed.length) save();
+            return publicView(requireArtifact(source.id));
+        },
+
+        restore(id) {
+            const source = requireArtifact(id);
+            if (source.published === false) throw new Error("artifact is not published");
+            const familyId = source.artifactFamilyId ?? source.id;
+            const changed = artifacts.filter((entry) => entry.published !== false && (entry.artifactFamilyId ?? entry.id) === familyId);
+            for (const entry of changed) {
+                entry.archived = false;
+                delete entry.archivedAt;
+            }
+            if (changed.length) save();
+            return publicView(requireArtifact(source.id));
         },
 
         restoreAsNewVersion(id) {

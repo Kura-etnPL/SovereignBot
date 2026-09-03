@@ -235,6 +235,8 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
             channel: channel ? { id: safeOpaqueId(channel.id), name: safeHistoryText(channel.name, 120) } : undefined,
             conversationId: safeOpaqueId(artifact.conversationId),
             sourceMessageId: safeOpaqueId(artifact.sourceMessageId),
+            archived: artifact.archived === true,
+            archivedAt: typeof artifact.archivedAt === "string" ? artifact.archivedAt : undefined,
         };
         if (eventOnly) {
             return {
@@ -248,9 +250,10 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
         }
         return view;
     }
-    function artifactHub({ limit = 100, teamId, channelId, coworkerId, type } = {}) {
+    function artifactHub({ limit = 100, teamId, channelId, coworkerId, type, visibility = "active" } = {}) {
         if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact hub limit must be 1..500");
         if (type !== undefined && (typeof type !== "string" || !type.trim() || type.length > 120)) throw new Error("artifact hub type must be a bounded string");
+        if (!["active", "archived", "all"].includes(visibility)) throw new Error("artifact hub visibility must be active, archived, or all");
         const normalizedType = type?.trim();
         const teams = teamService.list().teams; const channels = teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         const allowedConversationIds = new Set(channels.filter((channel) => (!teamId || channel.teamId === teamId) && (!channelId || channel.id === channelId)).map((channel) => channel.conversationId));
@@ -259,7 +262,7 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
         // recent unrelated artifact must not hide an older result from the selected
         // Team or Channel merely because the store sliced first.
         const latestByFamily = new Map();
-        for (const artifact of artifactStore.list({ limit: 500, coworkerId }).artifacts) {
+        for (const artifact of artifactStore.list({ limit: 500, coworkerId, visibility }).artifacts) {
             const familyId = artifact.artifactFamilyId ?? artifact.id;
             const current = latestByFamily.get(familyId);
             if (!current || (Number.isInteger(artifact.version) ? artifact.version : 1) > (Number.isInteger(current.version) ? current.version : 1)) latestByFamily.set(familyId, artifact);
@@ -270,7 +273,7 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
             .slice(0, limit).map((artifact) => ({
                 ...artifactView(artifact, channels),
                 history: [artifactView(artifact, channels, { eventOnly: true })],
-                status: "available",
+                status: artifact.archived ? "archived" : "available",
             }));
         return { artifacts: result };
     }

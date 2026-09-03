@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -132,6 +132,38 @@ test("artifact restore creates an immutable durable version lineage", () => {
         ]);
         assert.equal(Object.hasOwn(restored, "storageRelativePath"), false);
         assert.equal(Object.hasOwn(restored, "sourceRelativePath"), false);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("artifact archive hides a whole family without deleting bytes or history, and restore survives restart", () => {
+    const { root, workspace, store } = fixture();
+    try {
+        const sourcePath = join(workspace, "reports", "retention.md");
+        writeFileSync(sourcePath, "# Retained\n", "utf8");
+        const source = store.ingestWorkspaceFile({ workspaceId: "workspace_project", workspacePath: workspace, relativePath: "reports/retention.md", title: "Retention report" });
+        const revisionPath = join(workspace, "reports", "retention-v2.md");
+        writeFileSync(revisionPath, "# Retained v2\n", "utf8");
+        const revised = store.reviseFromPickedFile({ artifactId: source.id, sourcePath: revisionPath });
+        const managedSource = store.managedPath(source.id);
+        const beforeHistory = store.history(revised.id).history.map((entry) => entry.id);
+        const archived = store.archive(revised.id);
+        assert.equal(archived.archived, true);
+        assert.equal(store.list().artifacts.length, 0);
+        assert.equal(store.list({ visibility: "archived" }).artifacts.length, 2);
+        assert.deepEqual(store.history(revised.id).history.map((entry) => entry.id), beforeHistory);
+        assert.equal(readFileSync(managedSource, "utf8"), "# Retained\n");
+        assert.equal(statSync(managedSource).isFile(), true);
+        assert.equal(store.get(revised.id).archived, true);
+        const reloaded = createArtifactStore({ dataDir: join(root, "data") });
+        assert.equal(reloaded.list().artifacts.length, 0);
+        assert.equal(reloaded.list({ visibility: "archived" }).artifacts.length, 2);
+        const restored = reloaded.restore(revised.id);
+        assert.equal(restored.archived, false);
+        assert.equal(reloaded.list().artifacts.length, 2);
+        assert.deepEqual(reloaded.history(revised.id).history.map((entry) => entry.id), beforeHistory);
     }
     finally {
         rmSync(root, { recursive: true, force: true });

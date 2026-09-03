@@ -815,6 +815,8 @@ async function main() {
                 "artifact:get": ({ artifactId }) => artifactStore.get(artifactId),
                 "artifact:preview": ({ artifactId }) => artifactStore.previewText(artifactId),
                 "artifact:history": ({ artifactId }) => productSurfaces.artifactHistory({ artifactId }),
+                "artifact:archive": ({ artifactId }) => artifactStore.archive(artifactId),
+                "artifact:restore": ({ artifactId }) => artifactStore.restore(artifactId),
                 "artifact:restoreAsNewVersion": ({ artifactId }) => artifactStore.restoreAsNewVersion(artifactId),
                 "artifact:reviseViaDialog": ({ artifactId }) => pickArtifactRevision({ win, dialog, artifactStore, artifactId }),
                 "artifact:exportViaDialog": ({ artifactId }) => exportArtifactViaDialog({ parentWindow: win, dialog, artifactStore, artifactId }),
@@ -931,7 +933,7 @@ async function main() {
         };
         const searchMutationChannels = new Set([
             "conversation:createDirect", "conversation:createTeam", "conversation:send", "conversation:redirect",
-            "artifact:attachViaDialog", "artifact:restoreAsNewVersion", "artifact:reviseViaDialog", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
+            "artifact:attachViaDialog", "artifact:archive", "artifact:restore", "artifact:restoreAsNewVersion", "artifact:reviseViaDialog", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
             "team:requestCollaboration", "team:requestParallel", "team:installPack", "team:importPack", "team:importPlaybook", "team:createChannelFromTemplate",
             "playbook:create", "playbook:update", "playbook:archive", "playbook:restore", "playbook:duplicate", "playbook:import", "playbook:assign",
             "channel:create", "channel:update", "channel:archive", "channel:restore",
