@@ -14,6 +14,8 @@ const runner = read("../scripts/verify-channels-product-path.mjs");
 test("Channels product page exposes lifecycle, template, and quick-switch controls", () => {
   for (const id of ["view-channels", "product-channel-filter-page", "product-channel-switch-page", "product-channel-create-page", "product-channel-template-team-page", "product-channel-template-page", "product-channel-template-add-page", "product-channels-page"]) assert.match(html, new RegExp(`id=\\"${id}\\"`), id);
   for (const expression of [/api\.channels\.archive/, /api\.channels\.restore/, /api\.teams\.createChannelFromTemplate/, /product-channel-switch-page/, /includeArchived: true/]) assert.match(productHubs, expression);
+  const standaloneChannels = productHubs.slice(productHubs.indexOf("  function channels(items)"), productHubs.indexOf("  function openEditor", productHubs.indexOf("  function channels(items)")));
+  for (const expression of [/unread\(conversation\)/, /soft-pill/, /Unread \/ 未读/]) assert.match(standaloneChannels, expression);
   for (const expression of [/team-archive-channel/, /team-restore-channel/, /addChannelFromTemplate/]) assert.match(app, expression);
   assert.match(main, /isArchivedConversation/);
   for (const expression of [/Project Channel/, /neutral conversation before unread fixture/]) assert.match(gate, expression);

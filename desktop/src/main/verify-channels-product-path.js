@@ -104,6 +104,32 @@ async function loadChannels(win) {
   await waitFor(win, "async()=>!document.getElementById('view-channels')?.classList.contains('hidden') && document.getElementById('product-channel-template-team-page')?.options.length > 0", "Channels page");
 }
 
+async function captureChannelsDiagnostics(win, fixture, channel) {
+  const conversations = fixture?.conversations?.list?.().conversations ?? [];
+  const conversation = conversations.find((entry) => entry.id === channel?.conversationId);
+  const fixtureSnapshot = conversation ? {
+    title: conversation.title,
+    messageCount: conversation.messageCount,
+    updatedAt: conversation.updatedAt,
+    lastMessage: conversation.lastMessage ? {
+      senderId: conversation.lastMessage.senderId,
+      createdAt: conversation.lastMessage.createdAt,
+      textPreview: conversation.lastMessage.textPreview,
+    } : undefined,
+  } : undefined;
+  const readMarkerSnapshot = await invoke(win, `async()=>{ try { const parsed=JSON.parse(localStorage.getItem('sovereignbot.conversation-read-v1')||'{}'); return { markerPresent:Boolean(parsed[${JSON.stringify(channel?.conversationId ?? "")}]), markerCount:Object.keys(parsed).length }; } catch(error) { return { error:String(error?.message||error) }; } }`).catch((error) => ({ error: String(error?.message ?? error) }));
+  const rendererSnapshot = () => invoke(win, `async()=>({ filter:document.getElementById('product-channel-filter-page')?.value||'', conversationTitle:document.getElementById('conversation-title')?.textContent||'', pageText:document.getElementById('product-channels-page')?.innerText||'', cards:[...document.querySelectorAll('#product-channels-page article')].map((card)=>card.innerText), switchValue:document.getElementById('product-channel-switch-page')?.value||'', switchOptions:[...document.getElementById('product-channel-switch-page')?.options||[]].map((option)=>({value:option.value,text:option.textContent})) })`);
+  const before = await rendererSnapshot().catch((error) => ({ error: String(error?.message ?? error) }));
+  let explicitRefresh;
+  try {
+    explicitRefresh = await invoke(win, "async()=>{ if(typeof window.refreshIndependentProductPages!=='function') return { available:false }; await window.refreshIndependentProductPages(); return { available:true }; }");
+  } catch (error) {
+    explicitRefresh = { available: true, error: String(error?.message ?? error) };
+  }
+  const after = await rendererSnapshot().catch((error) => ({ error: String(error?.message ?? error) }));
+  return { fixture: fixtureSnapshot, readMarkers: readMarkerSnapshot, before, explicitRefresh, after };
+}
+
 export async function runVerifyChannelsProductPath({ app } = {}) {
   const checks = {};
   const notes = [];
@@ -111,6 +137,7 @@ export async function runVerifyChannelsProductPath({ app } = {}) {
   let dataDir;
   let fixture;
   let win;
+  let targetChannel;
   let unbind;
   let uninstallProtocol;
   try {
@@ -132,6 +159,7 @@ export async function runVerifyChannelsProductPath({ app } = {}) {
     await waitFor(win, `async()=>document.getElementById('product-channels-page')?.innerText.includes('Work Channel')`, "template-created channel");
     let catalog = await fixture.teams.listChannels({ teamId: team.id, includeArchived: true });
     const workChannel = catalog.channels.find((entry) => entry.name === "Work Channel");
+    targetChannel = workChannel;
     const templateCreated = await invoke(win, `async()=>({ card:document.getElementById('product-channels-page')?.innerText.includes('Work Channel'), hiddenId:document.getElementById('product-channels-page')?.innerText.includes(${JSON.stringify(workChannel.id)}), templateValue:document.getElementById('product-channel-template-page')?.value||'' })`);
     check("From template creates a real channel through the product page", Boolean(workChannel?.id) && templateCreated.card && !templateCreated.hiddenId && templateCreated.templateValue === "work", JSON.stringify(templateCreated));
 
@@ -186,7 +214,11 @@ export async function runVerifyChannelsProductPath({ app } = {}) {
     await waitFor(win, `async()=>{ const listed=await window.sovereignbot.channels.list({teamId:${JSON.stringify(team.id)},includeArchived:true}); return listed.channels.some((entry)=>entry.id===${JSON.stringify(workChannel.id)}&&entry.archived===false); }`, "restored channel state");
     check("Restore click re-enables the channel", (await fixture.teams.listChannels({ teamId: team.id, includeArchived: false })).channels.some((entry) => entry.id === workChannel.id), "Work Channel active");
   } catch (error) {
-    check("Channels product hidden gate completed", false, String(error?.message ?? error).slice(0, 700));
+    let detail = String(error?.message ?? error).slice(0, 700);
+    if (win && targetChannel) {
+      try { detail += ` diagnostics=${JSON.stringify(await captureChannelsDiagnostics(win, fixture, targetChannel)).slice(0, 6_000)}`; } catch (diagnosticError) { detail += ` diagnosticsError=${String(diagnosticError?.message ?? diagnosticError).slice(0, 500)}`; }
+    }
+    check("Channels product hidden gate completed", false, detail);
   } finally {
     try { unbind?.(); } catch {}
     try { uninstallProtocol?.(); } catch {}
