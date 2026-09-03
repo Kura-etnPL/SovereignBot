@@ -37,6 +37,7 @@ const state = {
   inlineAttentionRequest: 0,
   activityScopeTeamId: undefined,
   activityRequestId: 0,
+  coworkerRoster: { query: "", filter: "all", expanded: false },
 };
 
 let voiceController;
@@ -318,7 +319,7 @@ function clearNode(node) {
   if (node) node.textContent = "";
 }
 
-function makeNavItem({ avatar, title, subtitle, meta, status, unread, active, compact, onClick }) {
+function makeNavItem({ avatar, title, subtitle, meta, status, statusLabel, unread, active, compact, onClick }) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `nav-item${active ? " active" : ""}${compact ? " compact" : ""}`;
@@ -336,6 +337,8 @@ function makeNavItem({ avatar, title, subtitle, meta, status, unread, active, co
   if (status) {
     right = document.createElement("span");
     right.className = `nav-status ${status}`;
+    right.setAttribute("aria-label", statusLabel ?? status);
+    right.title = statusLabel ?? status;
   } else {
     right = document.createElement("span");
     right.className = "nav-meta";
@@ -356,22 +359,78 @@ function makeNavItem({ avatar, title, subtitle, meta, status, unread, active, co
 function renderCoworkers() {
   const list = $("coworker-list");
   clearNode(list);
-  const visible = state.coworkers.filter((entry) => entry.state !== "archived");
-  $("coworker-count").textContent = `${visible.length} persistent coworker${visible.length === 1 ? "" : "s"}`;
-  $("coworker-empty").classList.toggle("hidden", visible.length > 0);
-
-  for (const coworker of visible) {
-    const binding = bindingFor(coworker.id);
-    const direct = state.conversations.find((entry) => entry.kind === "direct" && entry.participants?.includes(coworker.id));
-    list.append(makeNavItem({
+  const roster = state.coworkerRoster;
+  const query = text(roster.query).trim().toLocaleLowerCase();
+  const directByCoworker = new Map();
+  for (const conversation of state.conversations) {
+    if (conversation.kind !== "direct") continue;
+    for (const id of conversation.participants ?? []) if (id !== "user" && !directByCoworker.has(id)) directByCoworker.set(id, conversation);
+  }
+  const attentionIds = new Set();
+  const workingIds = new Set();
+  for (const team of state.teams) {
+    const flow = team.flow ?? {};
+    for (const id of flow.attentionCoworkerIds ?? []) attentionIds.add(id);
+    if (flow.status === "active" && flow.currentOwnerId) workingIds.add(flow.currentOwnerId);
+  }
+  if (state.selectedConversation?.kind === "direct") for (const id of pendingUserRecipients(state.selectedConversation)) workingIds.add(id);
+  const statusFor = (coworker) => {
+    if (coworker.state === "paused") return "paused";
+    if (attentionIds.has(coworker.id)) return "attention";
+    if (workingIds.has(coworker.id)) return "working";
+    if (bindingFor(coworker.id)?.ready === true) return "available";
+    return "active";
+  };
+  const statusLabel = { active: "Active / 活跃", working: "Working / 工作中", available: "Available / 可用", attention: "Attention / 需关注", paused: "Paused / 已暂停" };
+  const priority = { attention: 0, working: 1, available: 2, active: 3, paused: 4 };
+  const all = state.coworkers.filter((entry) => entry.state !== "archived").map((coworker, index) => ({ coworker, index, status: statusFor(coworker) }));
+  const filtered = all.filter(({ coworker, status }) => {
+    const matchesQuery = !query || `${coworker.name} ${coworker.role}`.toLocaleLowerCase().includes(query);
+    const matchesFilter = roster.filter === "all"
+      ? true
+      : roster.filter === "active"
+        ? coworker.state === "active"
+        : status === roster.filter;
+    return matchesQuery && matchesFilter;
+  }).sort((a, b) => priority[a.status] - priority[b.status] || a.coworker.name.localeCompare(b.coworker.name, undefined, { sensitivity: "base" }) || a.index - b.index);
+  const counts = { active: all.filter(({ coworker }) => coworker.state === "active").length, paused: all.filter(({ coworker }) => coworker.state === "paused").length, working: all.filter(({ status }) => status === "working").length, attention: all.filter(({ status }) => status === "attention").length, available: all.filter(({ status }) => status === "available").length };
+  const total = all.length;
+  const count = $("coworker-count");
+  if (count) count.textContent = `${total} persistent coworker${total === 1 ? "" : "s"} · ${counts.active} active · ${counts.available} available`;
+  const summary = $("coworker-roster-summary");
+  if (summary) summary.textContent = `${total} coworkers / ${total} 位同事 · ${counts.working} working / 工作中 · ${counts.attention} attention / 需关注 · ${counts.paused} paused / 已暂停`;
+  const selectedCoworkerId = [...directByCoworker.entries()].find(([, conversation]) => conversation.id === state.selectedConversationId)?.[0];
+  const renderLimit = roster.expanded ? filtered.length : 14;
+  const shown = filtered.slice(0, renderLimit);
+  if (!roster.expanded && selectedCoworkerId) {
+    const selected = filtered.find((entry) => entry.coworker.id === selectedCoworkerId);
+    if (selected && !shown.some((entry) => entry.coworker.id === selectedCoworkerId)) shown.push(selected);
+  }
+  for (const { coworker, status } of shown) {
+    const direct = directByCoworker.get(coworker.id);
+    const item = makeNavItem({
       avatar: avatarFor(coworker),
       title: coworker.name,
-      subtitle: coworker.role,
-      status: coworker.state === "paused" ? "offline" : binding?.ready ? "ready" : "offline",
+      subtitle: `${coworker.role} · ${statusLabel[status]}`,
+      status: status === "available" ? "ready" : status === "paused" ? "offline" : status,
+      statusLabel: statusLabel[status],
       unread: conversationUnread(direct),
       active: direct?.id === state.selectedConversationId,
       onClick: () => openDirect(coworker.id),
-    }));
+    });
+    item.dataset.coworkerId = coworker.id;
+    list.append(item);
+  }
+  const more = $("coworker-show-more");
+  if (more) {
+    const hiddenCount = Math.max(0, filtered.length - shown.length);
+    more.classList.toggle("hidden", filtered.length <= 14);
+    more.textContent = roster.expanded ? "Collapse / 收起" : `Show ${hiddenCount} more / 显示其余 ${hiddenCount} 位`;
+  }
+  const empty = $("coworker-empty");
+  if (empty) {
+    empty.classList.toggle("hidden", filtered.length > 0);
+    empty.textContent = total === 0 ? "Create your first coworker / 请先创建同事" : "No coworkers match this search / 没有匹配的同事";
   }
 }
 
@@ -2823,6 +2882,9 @@ function bindEvents() {
   $("new-coworker").addEventListener("click", openNewCoworker);
   $("welcome-create-coworker")?.addEventListener("click", openNewCoworker);
   $("refresh-coworkers").addEventListener("click", () => Promise.all([refreshCoworkers(), refreshConversations(), refreshRoster()]));
+  $("coworker-search")?.addEventListener("input", (event) => { state.coworkerRoster.query = text(event.target.value); state.coworkerRoster.expanded = false; renderCoworkers(); });
+  $("coworker-status-filter")?.addEventListener("change", (event) => { state.coworkerRoster.filter = text(event.target.value) || "all"; state.coworkerRoster.expanded = false; renderCoworkers(); });
+  $("coworker-show-more")?.addEventListener("click", () => { state.coworkerRoster.expanded = !state.coworkerRoster.expanded; renderCoworkers(); });
   $("new-team").addEventListener("click", () => { populateTeamPicker(); openDialog("team-dialog"); });
   $("welcome-create-team").addEventListener("click", () => { populateTeamPicker(); openDialog("team-dialog"); });
   $("welcome-install-software-team")?.addEventListener("click", installSoftwareTeam);
