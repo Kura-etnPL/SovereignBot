@@ -2204,14 +2204,35 @@ function ensureVoiceSettingsCard() {
 function ensureSettingsPreferences() {
   const appearance = $("setting-notifications")?.closest(".settings-card");
   const advanced = document.querySelector("#view-settings .advanced-card");
+  const providerCard = $("provider-cards")?.closest(".settings-card");
+  const workspaceCard = $("workspace-manager-list")?.closest(".settings-card");
+  const mark = (element, key) => { if (element) element.dataset.i18n = key; };
+  const settingsView = $("view-settings");
+  mark(settingsView?.querySelector(".page-header h1"), "settings.title");
+  mark(settingsView?.querySelector(".page-header p"), "settings.subtitle");
+  mark(providerCard?.querySelector("h2"), "settings.providers");
+  mark(providerCard?.querySelector("p"), "settings.providersDesc");
+  mark(providerCard?.querySelector("#settings-refresh-providers"), "action.refresh");
+  mark(workspaceCard?.querySelector("h2"), "settings.workspaces");
+  mark(workspaceCard?.querySelector("p"), "settings.workspacesDesc");
+  mark(workspaceCard?.querySelector("#add-workspace"), "action.addFolder");
+  mark(appearance?.querySelector("h2"), "settings.appearance");
+  mark($("setting-close")?.closest(".settings-card")?.querySelector("h2"), "settings.window");
+  const computerCard = $("provision-driver")?.closest(".settings-card");
+  mark(computerCard?.querySelector("h2"), "settings.computer");
+  mark(computerCard?.querySelector("p"), "settings.computerDesc");
+  mark($("provision-driver"), "action.provisionBrowser");
+  mark(advanced?.querySelector("summary"), "settings.advanced");
+  mark([...advanced?.children ?? []].find((element) => element.tagName === "P"), "settings.advancedDesc");
   if (advanced && !advanced.dataset.grouped) {
-    const advancedContent = document.createElement("div");
-    advancedContent.className = "advanced-settings-content";
-    for (const anchor of [$("provider-cards"), $("workspace-manager-list")]) {
-      const card = anchor?.closest(".settings-card");
-      if (card) advancedContent.append(card);
+    const cards = [providerCard, workspaceCard].filter(Boolean);
+    const alreadyGrouped = cards.length > 0 && cards.every((card) => advanced.contains(card));
+    if (!alreadyGrouped && cards.length) {
+      const advancedContent = document.createElement("div");
+      advancedContent.className = "advanced-settings-content";
+      for (const card of cards) advancedContent.append(card);
+      advanced.querySelector("#advanced-roster")?.before(advancedContent);
     }
-    advanced.querySelector("#advanced-roster")?.before(advancedContent);
     advanced.dataset.grouped = "true";
   }
   if (!appearance || $("setting-default-model-profile")) return;
