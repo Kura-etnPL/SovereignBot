@@ -136,17 +136,28 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         if (!Number.isInteger(value) || value < 1 || value > MAX_PAGE_LIMIT) throw new Error(`conversation page limit must be between 1 and ${MAX_PAGE_LIMIT}`);
         return value;
     }
-    function getPage(id, { limit = DEFAULT_PAGE_LIMIT, beforeMessageId } = {}) {
+    function getPage(id, { limit = DEFAULT_PAGE_LIMIT, beforeMessageId, aroundMessageId } = {}) {
         const conversation = requireConversation(id);
         const pageSize = pageLimit(limit);
+        if (beforeMessageId !== undefined && aroundMessageId !== undefined) throw new Error("conversation page cursor is ambiguous");
         let end = conversation.messages.length;
+        let start;
         if (beforeMessageId !== undefined) {
             if (!validMessageId(beforeMessageId)) throw new Error("invalid conversation page cursor");
             const cursorIndex = conversation.messages.findIndex((message) => message.id === beforeMessageId);
             if (cursorIndex < 0) throw new Error("invalid conversation page cursor");
             end = cursorIndex;
+            start = Math.max(0, end - pageSize);
+        } else if (aroundMessageId !== undefined) {
+            if (!validMessageId(aroundMessageId)) throw new Error("invalid conversation anchor");
+            const anchorIndex = conversation.messages.findIndex((message) => message.id === aroundMessageId);
+            if (anchorIndex < 0) throw new Error("invalid conversation anchor");
+            start = Math.max(0, anchorIndex - Math.floor(pageSize / 2));
+            end = Math.min(conversation.messages.length, start + pageSize);
+            start = Math.max(0, end - pageSize);
+        } else {
+            start = Math.max(0, end - pageSize);
         }
-        const start = Math.max(0, end - pageSize);
         const messages = conversation.messages.slice(start, end);
         return {
             ...summarize(conversation),
@@ -292,6 +303,14 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         },
         list() { return { schema: CONVERSATIONS_SCHEMA, conversations: conversations.map(summarize) }; },
         get(id) { const conversation = requireConversation(id); return { ...summarize(conversation), messages: clone(conversation.messages) }; },
+        searchRecords() {
+            return conversations.flatMap((conversation) => conversation.messages.map((message) => ({
+                conversationId: conversation.id,
+                messageId: message.id,
+                text: message.text,
+                createdAt: message.createdAt,
+            })));
+        },
         getPage,
         createDirect(coworkerId) {
             const existing = conversations.find((entry) => entry.kind === "direct" && entry.participants.length === 2 && entry.participants.includes(coworkerId));

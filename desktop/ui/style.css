@@ -192,6 +192,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .chat-messages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .chat-row { display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 10px; padding: 9px 2px; }
 .chat-row.user { grid-template-columns: minmax(0,1fr); justify-items: end; padding-top: 12px; }
+.chat-row.conversation-message-highlight { outline: 2px solid var(--accent, #d5a85d); outline-offset: 4px; border-radius: 8px; background: color-mix(in srgb, var(--accent, #d5a85d) 16%, transparent); transition: background 180ms ease, outline-color 180ms ease; }
 .chat-avatar { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--panel-3); font-size: 13px; font-weight: 680; }
 .chat-content { min-width: 0; max-width: min(760px, 100%); }
 .chat-meta { display: flex; align-items: baseline; gap: 7px; margin-bottom: 4px; }

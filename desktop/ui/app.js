@@ -102,7 +102,7 @@ function conversationById(id) {
 const CONVERSATION_PAGE_SIZE = 100;
 const MAX_RENDERED_MESSAGES = 300;
 
-function resetConversationPage(conversationId) {
+function resetConversationPage(conversationId, { aroundMessageId } = {}) {
   state.conversationPage = {
     conversationId,
     messages: [],
@@ -115,6 +115,7 @@ function resetConversationPage(conversationId) {
     windowIncludesLatest: true,
     newMessagesAvailable: 0,
     latestMessageId: undefined,
+    aroundMessageId,
     seenMessageIds: new Set(),
   };
 }
@@ -664,7 +665,7 @@ async function openDirect(coworkerId) {
   }
 }
 
-async function openConversation(conversationId) {
+async function openConversation(conversationId, { messageId } = {}) {
   if (state.selectedConversationId && state.selectedConversationId !== conversationId) voiceController?.stop("conversation-switch");
   state.selectedConversationId = conversationId;
   state.mentionIds.clear();
@@ -672,7 +673,7 @@ async function openConversation(conversationId) {
   state.redirectMode = false;
   state.conversationSignature = undefined;
   state.conversationRefreshRequest += 1;
-  resetConversationPage(conversationId);
+  resetConversationPage(conversationId, { aroundMessageId: messageId });
   updateConversationPageControls();
   switchView("conversation");
   hide($("details-panel"));
@@ -998,18 +999,35 @@ function renderMessages(conversation, forceScroll = false, { voiceMessages = con
   }));
 }
 
+function highlightConversationMessage(messageId) {
+  if (typeof messageId !== "string" || !messageId) return;
+  requestAnimationFrame(() => {
+    const row = [...$("conversation-messages")?.querySelectorAll("[data-message-id]") ?? []]
+      .find((entry) => entry.dataset.messageId === messageId);
+    if (!row) return;
+    row.classList.add("conversation-message-highlight");
+    row.setAttribute("aria-current", "true");
+    row.scrollIntoView?.({ block: "center", behavior: "auto" });
+    window.setTimeout(() => {
+      row.classList.remove("conversation-message-highlight");
+      row.removeAttribute("aria-current");
+    }, 2400);
+  });
+}
+
 async function refreshConversation(forceScroll = false) {
   const id = state.selectedConversationId;
   if (!id || state.activeView !== "conversation") return;
   if (state.conversationPage?.conversationId !== id) resetConversationPage(id);
   const requestId = ++state.conversationRefreshRequest;
   try {
+    const aroundMessageId = state.conversationPage?.aroundMessageId;
     const conversationSummary = conversationById(id) ?? (state.selectedConversation?.id === id ? state.selectedConversation : undefined);
     const activityPromise = conversationSummary?.kind === "team"
       ? window.sovereignbot.teams.activity({ conversationId: id, limit: 24 }).catch(() => ({ events: [] }))
       : Promise.resolve({ events: [] });
     const [pageResponse, activity] = await Promise.all([
-      window.sovereignbot.conversations.get({ conversationId: id, limit: CONVERSATION_PAGE_SIZE }),
+      window.sovereignbot.conversations.get({ conversationId: id, limit: CONVERSATION_PAGE_SIZE, ...(aroundMessageId ? { aroundMessageId } : {}) }),
       activityPromise,
     ]);
     if (requestId !== state.conversationRefreshRequest || state.selectedConversationId !== id) return;
@@ -1020,6 +1038,10 @@ async function refreshConversation(forceScroll = false) {
     markConversationRead(conversation);
     renderConversationHeader(conversation);
     renderMessages(conversation, forceScroll, { voiceMessages: freshMessages });
+    if (aroundMessageId) {
+      state.conversationPage.aroundMessageId = undefined;
+      highlightConversationMessage(aroundMessageId);
+    }
     void refreshInlineAttention(id);
     await refreshConversations();
     if (state.teams.length) await refreshTeams();
@@ -3003,8 +3025,9 @@ function bindEvents() {
   window.sovereignbot?.onToggleActivity?.(async () => { const d = $("activity-drawer"); const hidden = d.classList.contains("hidden"); if (hidden) { show(d); await refreshActivity(); } else hide(d); });
   document.addEventListener("sovereignbot:navigate-conversation", (event) => {
     const conversationId = event?.detail?.conversationId;
+    const messageId = event?.detail?.messageId;
     if (typeof conversationId === "string" && conversationId.trim()) {
-      void openConversation(conversationId.trim());
+      void openConversation(conversationId.trim(), { messageId });
     }
   });
 }

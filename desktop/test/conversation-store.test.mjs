@@ -233,6 +233,13 @@ test("conversation pages are bounded, ordered, cursor-safe, and durable", () => 
         assert.throws(() => conversations.getPage(direct.id, { limit: 101 }), /page limit/);
         assert.throws(() => conversations.getPage(direct.id, { beforeMessageId: "msg_deadbeefdeadbeef" }), /invalid conversation page cursor/);
         assert.throws(() => conversations.getPage(direct.id, { beforeMessageId: foreignCursor }), /invalid conversation page cursor/);
+        const anchor = conversations.get(direct.id).messages[7].id;
+        const anchored = conversations.getPage(direct.id, { limit: 20, aroundMessageId: anchor });
+        assert.ok(anchored.messages.some((message) => message.id === anchor));
+        assert.ok(anchored.messages.length <= 20);
+        assert.throws(() => conversations.getPage(direct.id, { limit: 20, aroundMessageId: foreignCursor }), /invalid conversation anchor/);
+        assert.throws(() => conversations.getPage(direct.id, { aroundMessageId: "msg_deadbeefdeadbeef" }), /invalid conversation anchor/);
+        assert.throws(() => conversations.getPage(direct.id, { beforeMessageId: anchor, aroundMessageId: anchor }), /ambiguous/);
 
         const reloaded = createConversationStore({ persistPath: join(root, "conversations.json"), coworkerStore });
         const afterRestart = reloaded.getPage(direct.id, { limit: 10, beforeMessageId: latest.pageInfo.nextBeforeMessageId });

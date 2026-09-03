@@ -48,7 +48,7 @@ function createQueryIndex(records) {
         byGram.get(gram).add(recordIndex);
     };
     records.forEach((record, recordIndex) => {
-        const fields = [record.title, record.subtitle, record.searchText, ...(record.tags ?? [])];
+        const fields = [record.title, record.subtitle, record.searchText, record.messageText, ...(record.tags ?? [])];
         const recordGrams = new Set();
         for (const field of fields) for (const gram of grams(field)) recordGrams.add(gram);
         for (const gram of recordGrams) add(gram, recordIndex);
@@ -192,6 +192,13 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         const teams = teamService.list({ includeArchived: true })?.teams ?? [];
         const channels = teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         const conversations = conversationStore.list().conversations ?? [];
+        const messageRecords = conversationStore.searchRecords?.() ?? [];
+        const messagesByConversation = new Map();
+        for (const message of messageRecords) {
+            if (!message?.conversationId || !message?.messageId || typeof message.text !== "string") continue;
+            if (!messagesByConversation.has(message.conversationId)) messagesByConversation.set(message.conversationId, []);
+            messagesByConversation.get(message.conversationId).push(message);
+        }
         const coworkers = coworkerStore.list({ includeArchived: true }).coworkers ?? [];
         const artifacts = artifactStore?.indexRecords
             ? (artifactStore.indexRecords({ visibility: "all", limit: 5_000 }).artifacts ?? [])
@@ -245,7 +252,19 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         };
         for (const project of projects) emit("projects", project, project.name, "Project", new Set([project.projectId]), project.updatedAt, { view: "projects", projectId: project.projectId }, project.name, project.state === "active" && project.available !== false ? "active" : "archived");
         for (const channel of channels) emit("channels", channel, channel.name, `${channel.teamName} · Channel`, channelProjects.get(channel.id), channel.updatedAt, { view: "channels", channelId: channel.id, conversationId: channel.conversationId }, channel.instructions);
-        for (const conversation of conversations) emit("conversations", conversation, conversation.title, conversation.kind === "direct" ? "Conversation" : `${conversation.messageCount ?? 0} messages`, conversationProjects.get(conversation.id), conversation.updatedAt, { view: "conversation", conversationId: conversation.id }, conversation.lastMessage?.textPreview);
+        for (const conversation of conversations) {
+            const conversationProjectsForRecord = conversationProjects.get(conversation.id);
+            const conversationInternal = { conversationId: conversation.id, isConversationSummary: true };
+            emit("conversations", conversation, conversation.title, conversation.kind === "direct" ? "Conversation" : `${conversation.messageCount ?? 0} messages`, conversationProjectsForRecord, conversation.updatedAt, { view: "conversation", conversationId: conversation.id }, conversation.lastMessage?.textPreview, undefined, conversationInternal);
+            for (const message of messagesByConversation.get(conversation.id) ?? []) {
+                emit("conversations", { ...conversation, id: `${conversation.id}:${message.messageId}` }, conversation.title, conversation.kind === "direct" ? "Conversation" : `${conversation.messageCount ?? 0} messages`, conversationProjectsForRecord, message.createdAt ?? conversation.updatedAt, { view: "conversation", conversationId: conversation.id, messageId: message.messageId }, message.text, undefined, {
+                    conversationId: conversation.id,
+                    messageId: message.messageId,
+                    messageText: message.text,
+                    isMessageRecord: true,
+                });
+            }
+        }
         for (const coworker of coworkers) emit("coworkers", coworker, coworker.name, coworker.role, coworkerProjects.get(coworker.id), coworker.updatedAt, { view: "conversation", coworkerId: coworker.id }, coworker.role);
         for (const artifact of artifacts) emit("artifacts", artifact, artifact.title, artifact.fileName, artifactProjects.get(artifact.id), artifact.createdAt, { view: "artifacts", artifactId: artifact.id, conversationId: artifact.conversationId }, artifact.fileName);
         for (const skill of skills) emit("skills", skill, skill.name, skill.description, skillProjects.get(skill.id), skill.updatedAt, { view: "skills", skillId: skill.id }, skill.description);
@@ -303,6 +322,19 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         const { records, indexedAt, queryIndex } = built;
         const candidateIndexes = queryText && !forceFullScan ? queryIndex.candidates(queryText) : undefined;
         const result = [];
+        const bestConversationResults = new Map();
+        const isBetterConversationResult = (candidate, current) => {
+            if (!current) return true;
+            if (candidate.score !== current.score) return candidate.score > current.score;
+            const candidateMessage = Boolean(candidate.messageId);
+            const currentMessage = Boolean(current.messageId);
+            if (candidateMessage !== currentMessage) return !candidateMessage;
+            if (candidateMessage && currentMessage) {
+                return String(candidate.updatedAt).localeCompare(String(current.updatedAt)) > 0
+                    || (candidate.updatedAt === current.updatedAt && String(candidate.messageId).localeCompare(String(current.messageId)) < 0);
+            }
+            return String(candidate.id).localeCompare(String(current.id)) < 0;
+        };
         let matchEvaluations = 0;
         for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
             if (candidateIndexes && !candidateIndexes.has(recordIndex)) continue;
@@ -312,10 +344,26 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
             matchEvaluations += 1;
             const match = matchFor(record, queryText);
             if (!match) continue;
-            const { searchText: _searchText, projectIds: _projectIds, tags: _tags, ...publicRecord } = record;
+            const { searchText: _searchText, messageText: _messageText, projectIds: _projectIds, tags: _tags, conversationId: _conversationId, messageId: _messageId, isConversationSummary: _isConversationSummary, isMessageRecord: _isMessageRecord, ...publicRecord } = record;
             if (scopeProjectId && !publicRecord.projectId) publicRecord.projectId = scopeProjectId;
-            result.push({ ...publicRecord, score: match.score, matchReason: { key: match.key, fields: match.fields, coverage: match.coverage }, action: "open" });
+            const publicResult = { ...publicRecord, score: match.score, matchReason: { key: match.key, fields: match.fields, coverage: match.coverage }, action: "open" };
+            if (record.isMessageRecord && record.messageId) {
+                const source = safeText(record.messageText, 12_000);
+                const normalizedSource = normalized(source);
+                const positions = tokens(queryText).map((token) => normalizedSource.indexOf(normalized(token))).filter((position) => position >= 0);
+                const hit = positions.length ? Math.min(...positions) : 0;
+                const start = Math.max(0, Math.min(hit - 64, Math.max(0, source.length - 180)));
+                publicResult.messageId = record.messageId;
+                publicResult.matchSnippet = source.slice(start, start + 180);
+                publicResult.id = record.conversationId;
+            }
+            if (record.type === "conversations") {
+                const key = record.conversationId ?? record.id;
+                const current = bestConversationResults.get(key);
+                if (isBetterConversationResult(publicResult, current)) bestConversationResults.set(key, publicResult);
+            } else result.push(publicResult);
         }
+        result.push(...bestConversationResults.values());
         lastQueryStats = {
             indexed: Boolean(queryText),
             corpusCount: records.length,

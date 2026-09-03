@@ -25,7 +25,7 @@ const routineB = "routine_bbbbbbbbbbbbbbbb";
 const jobA = "job_aaaaaaaaaaaaaaaa";
 const historyA = "history_aaaaaaaaaaaaaaaa";
 
-function fixture({ fullScan = false } = {}) {
+function fixture({ fullScan = false, messageRecords = [] } = {}) {
     const projects = [
         { projectId: projectA, name: "Alpha Project", state: "active", available: true, updatedAt: "2026-09-02T00:00:02.000Z", teams: [{ id: teamA, name: "Alpha Team", channels: [{ id: channelA, name: "Alpha Channel", conversationId: conversationA }] }], coworkers: [{ id: coworkerA, name: "Alpha Coworker" }] },
         { projectId: projectB, name: "Beta Project", state: "active", available: true, updatedAt: "2026-09-02T00:00:01.000Z", teams: [{ id: teamB, name: "Beta Team", channels: [{ id: channelB, name: "Beta Channel", conversationId: conversationB }] }], coworkers: [{ id: coworkerB, name: "Beta Coworker" }] },
@@ -48,7 +48,7 @@ function fixture({ fullScan = false } = {}) {
     const service = createSearchService({
         projectService: projectsApi,
         teamService: { list: () => ({ teams }) },
-        conversationStore: { list: () => ({ conversations }) },
+        conversationStore: { list: () => ({ conversations }), searchRecords: () => messageRecords },
         coworkerStore: { list: () => ({ coworkers }) },
         artifactStore: { list: () => ({ artifacts: [{ id: artifactA, title: "Alpha Artifact", fileName: "alpha.txt", conversationId: conversationA, createdAt: "2026-09-02T00:00:02.000Z" }, { id: artifactB, title: "Beta Artifact", fileName: "beta.txt", conversationId: conversationB, createdAt: "2026-09-02T00:00:01.000Z" }] }) },
         skillStore: { list: () => ({ skills }) },
@@ -61,6 +61,28 @@ function fixture({ fullScan = false } = {}) {
     });
     return { service, projectsApi, routines, memoryRows, getProjectListCalls: () => projectListCalls };
 }
+
+test("conversation Search indexes retained message history and returns one safe anchored result", async () => {
+    const targetMessageId = "msg_1234567890abcdef";
+    const messageRecords = Array.from({ length: 450 }, (_, index) => ({
+        conversationId: conversationA,
+        messageId: index === 7 ? targetMessageId : `msg_${String(index + 1).padStart(16, "0")}`,
+        text: index === 7 ? "P44 ancient quartz needle" : `Unrelated retained conversation message ${index}`,
+        createdAt: `2026-09-02T00:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`,
+    }));
+    const { service } = fixture({ messageRecords });
+    const result = await service.query({ query: "P44 ancient quartz needle", types: ["conversations"], limit: 10 });
+    assert.equal(result.results.length, 1);
+    assert.equal(result.results[0].id, conversationA);
+    assert.equal(result.results[0].messageId, targetMessageId);
+    assert.match(result.results[0].matchSnippet, /quartz needle/i);
+    assert.equal(Object.hasOwn(result.results[0], "messageText"), false);
+    assert.equal(Object.hasOwn(result.results[0], "searchText"), false);
+    assert.equal(Object.hasOwn(result.results[0], "projectIds"), false);
+    const stats = service.diagnostics();
+    assert.ok(stats.candidateCount < stats.corpusCount);
+    assert.ok(stats.matchEvaluations <= stats.candidateCount);
+});
 
 test("global search is bounded, typed, recent/relevant, and Project scoped", async () => {
     const { service, getProjectListCalls, memoryRows } = fixture();

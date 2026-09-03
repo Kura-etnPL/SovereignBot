@@ -317,6 +317,7 @@ async function main() {
         getJobs: () => jobs,
         getHistory: (payload) => productSurfaces.computerHistory(payload),
     });
+    conversationStore.onMessage(() => search?.invalidate());
     teamService.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => {
         const binding = host.rosterSummary()?.coworkerBindings?.[targetCoworkerId];
         if (!binding?.ready || binding.agentId !== coworkerAgentId(targetCoworkerId)) throw new Error("target coworker provider binding is not ready");
@@ -796,7 +797,7 @@ async function main() {
                 "teach:save": ({ sessionId }) => teachOnce.save(sessionId),
                 "teach:cancel": ({ sessionId }) => teachOnce.cancel(sessionId),
                 "conversation:list": () => conversationStore.list(),
-                "conversation:get": ({ conversationId, limit, beforeMessageId }) => conversationStore.getPage(conversationId, { limit, beforeMessageId }),
+                "conversation:get": ({ conversationId, limit, beforeMessageId, aroundMessageId }) => conversationStore.getPage(conversationId, { limit, beforeMessageId, aroundMessageId }),
                 "conversation:acknowledge": ({ conversationId }) => notifications.resolveChannelUnread(conversationId),
                 "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
                 "conversation:createTeam": ({ title, coworkerIds, leadCoworkerId }) => teamService.createTeam({ title, coworkerIds, leadCoworkerId }).conversation,
