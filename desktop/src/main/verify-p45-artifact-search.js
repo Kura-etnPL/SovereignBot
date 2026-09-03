@@ -61,6 +61,9 @@ export async function runVerifyP45ArtifactSearch({ app } = {}) {
             "memory:list": () => ({ memories: [], total: 0 }),
             "thisPc:list": () => ({ items: [] }),
             "notification:list": () => ({ notifications: [], totalCount: 0, unreadCount: 0 }),
+            "artifact:archive": ({ artifactId }) => fixture.artifactStore.archive(artifactId),
+            "artifact:restore": ({ artifactId }) => fixture.artifactStore.restore(artifactId),
+            "artifact:discard": ({ artifactIds }) => fixture.artifactStore.discardArtifacts(artifactIds),
         };
         uninstallProtocol = installAppProtocolHandler();
         win = createMainWindow({ smoke: true });
@@ -108,9 +111,9 @@ export async function runVerifyP45ArtifactSearch({ app } = {}) {
         writeFileSync(discardedPath, "P45 discarded artifact body", "utf8");
         const discardedArtifact = fixture.artifactStore.ingestWorkspaceFile({ workspaceId: fixture.sharedWorkspaceId, workspacePath, relativePath: "p45-artifacts/discarded.md", title: "P45 Discarded", published: false });
         const beforeDiscard = fixture.search.diagnostics();
-        fixture.artifactStore.discardArtifacts([discardedArtifact.id]);
+        const discarded = fixtureHandlers["artifact:discard"]({ artifactIds: [discardedArtifact.id] });
         const afterDiscard = fixture.search.diagnostics();
-        check("discard invalidates the authoritative Artifact Search service", afterDiscard.generation > beforeDiscard.generation && !fixture.artifactStore.indexRecords({ visibility: "all", limit: 5_000 }).artifacts.some((entry) => entry.id === discardedArtifact.id), { before: beforeDiscard, after: afterDiscard });
+        check("discard invalidates the authoritative Artifact Search service", afterDiscard.generation > beforeDiscard.generation && discarded?.[0]?.id === discardedArtifact.id && !fixture.artifactStore.indexRecords({ visibility: "all", limit: 5_000 }).artifacts.some((entry) => entry.id === discardedArtifact.id), { before: beforeDiscard, after: afterDiscard, discardedId: discarded?.[0]?.id });
 
         const restartedStore = createArtifactStore({ dataDir });
         fixture.artifactStore = restartedStore;
