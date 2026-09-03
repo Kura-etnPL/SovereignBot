@@ -3,8 +3,7 @@
 // product surfaces. It deliberately does not start a provider or any external
 // runtime because this phase is a local product-surface expansion.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { desktopVersion } from "./lib/desktop-version.js";
@@ -23,7 +22,7 @@ import { installAppProtocolHandler } from "./protocol.js";
 import { bindIpcChannels } from "./ipc.js";
 
 const WORKTREE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const EVIDENCE_DIR = join(WORKTREE_ROOT, "_evidence_v46_2026-09-02");
+const EVIDENCE_DIR = process.env.SOVEREIGNBOT_MEMORY_EDITOR_EVIDENCE_DIR ? resolve(process.env.SOVEREIGNBOT_MEMORY_EDITOR_EVIDENCE_DIR) : join(WORKTREE_ROOT, "_evidence_v46_2026-09-02");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function roster() {
@@ -113,6 +112,7 @@ function handlers(fixture) {
     "memory:approveSuggestion": ({ suggestionId }) => memoryService.approveSuggestion(suggestionId),
     "memory:rejectSuggestion": ({ suggestionId }) => memoryService.rejectSuggestion(suggestionId),
     "search:query": (payload) => search.query(payload),
+    "notification:list": () => ({ notifications: [] }),
     "palette:list": () => ({ commands: [{ id: "search", risk: "read-only" }] }),
     "palette:execute": () => ({ ok: true }),
     "connectedApps:list": () => ({ apps: [] }),
@@ -155,6 +155,7 @@ export async function runVerifyV46ProjectMemorySearch({ app }) {
   let memoryId;
   let firstProjection;
   let firstSearch;
+  let editProjection;
   let restartProjection;
 
   try {
@@ -165,8 +166,8 @@ export async function runVerifyV46ProjectMemorySearch({ app }) {
     unbind = bindIpcChannels({ win, handlers: handlers(fixture) });
     check("gate window stays hidden", win.isVisible() === false);
     await loadWindow(win);
-    const rendererSurface = await invoke(win, `async()=>({putFact:typeof window.sovereignbot?.memory?.putFact, memoryDialog:!!document.getElementById("memory-fact-dialog"), memoryScope:!!document.getElementById("memory-scope"), projectNav:!!document.getElementById("nav-projects")})`);
-    check("renderer exposes the P9 Memory surface", rendererSurface.putFact === "function" && rendererSurface.memoryDialog && rendererSurface.memoryScope && rendererSurface.projectNav, JSON.stringify(rendererSurface));
+    const rendererSurface = await invoke(win, `async()=>({putFact:typeof window.sovereignbot?.memory?.putFact, memoryDialog:!!document.getElementById("memory-fact-dialog"), memoryEditDialog:!!document.getElementById("memory-edit-dialog"), memoryScope:!!document.getElementById("memory-scope"), projectNav:!!document.getElementById("nav-projects")})`);
+    check("renderer exposes the P9 Memory surface", rendererSurface.putFact === "function" && rendererSurface.memoryDialog && rendererSurface.memoryEditDialog && rendererSurface.memoryScope && rendererSurface.projectNav, JSON.stringify(rendererSurface));
 
     const created = await invoke(win, `async()=>window.sovereignbot.projects.create({name:"P9 Local Project"})`);
     projectId = created.projectId;
@@ -188,6 +189,13 @@ export async function runVerifyV46ProjectMemorySearch({ app }) {
     check("approved Project fact appears in Memory UI and IPC projection", firstProjection.view && firstProjection.cards.some((text) => text.includes("P9 launch checklist")) && listed.memories?.length === 1 && listed.memories[0].source?.type === "fact", JSON.stringify({ result: firstProjection.result, memories: listed.memories }));
     check("public Project Memory stays authority-free", !JSON.stringify(listed).toLowerCase().match(/(?:workspacepath|session|provider|account|credential|bearer|token|cwd|authority)/), JSON.stringify(listed));
 
+    const editState = await invoke(win, `async()=>{const card=document.querySelector("#memory-list .memory-row"); const button=[...(card?.querySelectorAll("button")||[])].find((entry)=>entry.textContent.includes("Edit")); button?.click(); await new Promise((resolve)=>setTimeout(resolve,120)); return {open:!!document.getElementById("memory-edit-dialog")?.open,title:document.getElementById("memory-edit-title")?.value,content:document.getElementById("memory-edit-content")?.value,tags:document.getElementById("memory-edit-tags")?.value}}`);
+    check("Memory Edit opens a product dialog with existing values", editState.open && editState.title === "P9 launch checklist" && editState.content.includes("local release checklist") && editState.tags.includes("release"), JSON.stringify(editState));
+    await invoke(win, `async()=>{document.getElementById("memory-edit-content").value="Edited local release checklist in Project Memory."; document.getElementById("memory-edit-tags").value="release, edited"; document.getElementById("memory-edit-form").requestSubmit(); return true}`);
+    await sleep(500);
+    editProjection = await invoke(win, `async()=>({open:!!document.getElementById("memory-edit-dialog")?.open,cards:[...document.querySelectorAll("#memory-list .memory-row")].map((card)=>card.innerText),memory:await window.sovereignbot.memory.list({scope:"project",ownerId:${JSON.stringify(projectId)},limit:100})})`);
+    check("Memory Edit saves content and tags through typed IPC", !editProjection.open && editProjection.cards.some((text)=>text.includes("Edited local release checklist")) && editProjection.memory?.memories?.[0]?.tags?.includes("edited"), JSON.stringify(editProjection));
+
     const searchState = await invoke(win, `async()=>{document.getElementById("open-command-palette")?.click(); await new Promise((resolve)=>setTimeout(resolve,120)); const scope=document.getElementById("palette-project-scope"); scope.value=${JSON.stringify(projectId)}; scope.dispatchEvent(new Event("change",{bubbles:true})); const type=document.getElementById("palette-type-filter"); type.value="memory"; type.dispatchEvent(new Event("change",{bubbles:true})); const input=document.querySelector("#command-palette input[type=search]"); input.value="P9 launch checklist"; input.dispatchEvent(new Event("input",{bubbles:true})); await new Promise((resolve)=>setTimeout(resolve,350)); return {open:!document.getElementById("command-palette")?.classList.contains("hidden"), body:document.getElementById("palette-results")?.innerText||"", status:document.getElementById("palette-status")?.textContent||""}}`);
     firstSearch = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P9 launch checklist",types:["memory"],projectId:${JSON.stringify(projectId)},status:"active",limit:50})`);
     check("Project-scoped Search finds the approved fact", searchState.open && searchState.body.includes("P9 launch checklist") && firstSearch.results?.some((entry) => entry.id === memoryId && entry.projectId === projectId), JSON.stringify({ ui: searchState, api: firstSearch }));
@@ -205,7 +213,7 @@ export async function runVerifyV46ProjectMemorySearch({ app }) {
     await loadWindow(win);
     const restarted = await invoke(win, `async()=>({project:(await window.sovereignbot.projects.list({includeArchived:true,limit:100})).projects, memory:(await window.sovereignbot.memory.list({scope:"project",ownerId:${JSON.stringify(projectId)},limit:100})).memories, search:await window.sovereignbot.search.query({query:"P9 launch checklist",types:["memory"],projectId:${JSON.stringify(projectId)},status:"active",limit:50})})`);
     restartProjection = restarted;
-    check("Project and approved fact survive service restart", restarted.project?.some((entry) => entry.projectId === projectId) && restarted.memory?.length === 1 && restarted.memory[0].id === memoryId && restarted.memory[0].source?.type === "fact", JSON.stringify({ projectCount: restarted.project?.length, memoryCount: restarted.memory?.length }));
+    check("Project and approved fact survive service restart", restarted.project?.some((entry) => entry.projectId === projectId) && restarted.memory?.length === 1 && restarted.memory[0].id === memoryId && restarted.memory[0].content.includes("Edited local release checklist") && restarted.memory[0].source?.type === "fact", JSON.stringify({ projectCount: restarted.project?.length, memoryCount: restarted.memory?.length }));
     check("Search index rebuilds from durable Project Memory after restart", restarted.search.results?.some((entry) => entry.id === memoryId && entry.projectId === projectId) && restarted.search.total === 1 && restarted.search.hasMore === false, JSON.stringify(restarted.search));
     check("restart projection contains no raw paths or provider/session data", !JSON.stringify(restarted).toLowerCase().match(/(?:workspacepath|session|provider|account|credential|bearer|token|cwd|authority)/), JSON.stringify({ project: restarted.project, memory: restarted.memory, search: restarted.search }));
   } catch (error) {
@@ -223,6 +231,7 @@ export async function runVerifyV46ProjectMemorySearch({ app }) {
     memoryId,
     firstProjection,
     firstSearch,
+    editProjection,
     restartProjection,
     fatal: fatal ? String(fatal?.message ?? fatal) : undefined,
   };

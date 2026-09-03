@@ -4,7 +4,7 @@ import { runVerifyV46ProjectMemorySearch } from "./verify-v46-project-memory-sea
 
 registerAppSchemePrivileged();
 app.enableSandbox();
-app.setAppUserModelId("com.sovereignbot.desktop.verify-v46-project-memory-search");
+app.setAppUserModelId(process.env.SOVEREIGNBOT_MEMORY_EDITOR_EVIDENCE_DIR ? "com.sovereignbot.desktop.verify-p25-memory-editor" : "com.sovereignbot.desktop.verify-v46-project-memory-search");
 
 app.whenReady().then(async () => {
   try {
