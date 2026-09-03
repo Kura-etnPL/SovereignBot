@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-03T04:06:33.536Z",
+  "at": "2026-09-03T04:49:46.203Z",
   "checks": {
     "hidden Electron window stays hidden": true,
     "ordinary Product hubs navigation reaches the older Team Pack gallery": true,
@@ -8,24 +8,17 @@
     "older gallery Edit opens the P21 structured recipe editor": true,
     "older gallery edit writes through the shared typed Team Pack service": true,
     "older gallery editor Cancel performs no write": true,
-    "dedicated Team Pack page exposes the same editable recipe": false,
+    "dedicated Team Pack page exposes the same editable recipe": true,
     "both visible entries converge on one persisted recipe": true,
     "older gallery Export uses native bounded JSON IO without clipboard": true,
     "native import rejects authority-bearing Team Pack JSON in product UI": true,
     "restart preserves the single shared editor result": true,
     "restart shows the edited recipe in the older gallery entry": true
   },
-  "duplicateRecipeId": "custom-pack-146a579bf6ce",
-  "failureStage": "dedicated Team Pack page consistency assertion",
-  "failedCheck": {
-    "name": "dedicated Team Pack page exposes the same editable recipe",
-    "expectedTitle": "P31 Old Gallery Edited",
-    "observedTitle": "Product Discovery Team",
-    "observedButtons": ["Install", "Export / 导出", "Duplicate / 复制", "Edit recipe / 编辑配方"]
-  },
+  "duplicateRecipeId": "custom-pack-51af1095632d",
   "restart": {
     "schema": "sovereignbot.desktop.team-pack.v1",
-    "id": "custom-pack-146a579bf6ce",
+    "id": "custom-pack-51af1095632d",
     "name": "P31 Dedicated Gallery Edited",
     "description": "A product discovery team that frames user problems, shapes a decision-ready brief, reviews trade-offs, and reports next steps.",
     "coworkers": [
