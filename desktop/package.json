@@ -55,6 +55,7 @@
         "verify:p48-data-lifecycle": "node scripts/verify-p48-data-lifecycle.mjs",
         "verify:p49-memory-dialogs": "node scripts/verify-p49-memory-dialogs.mjs",
         "verify:p50-job-actions": "node scripts/verify-p50-job-actions.mjs",
+        "verify:p51-routine-history": "node scripts/verify-p51-routine-history.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",

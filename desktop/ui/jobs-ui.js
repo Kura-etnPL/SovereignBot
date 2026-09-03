@@ -19,8 +19,10 @@
   let routines = [];
   let routinePollTimer;
   let currentRoutineId;
+  let routineDetailRequest = 0;
   const routineActionPending = new Set();
   const routineActionFeedback = new Map();
+  const routineHistoryActionState = new Map();
   let routineRemoveCandidate;
   let workerNodes = [];
   let computerTargets = [];
@@ -593,7 +595,7 @@
 
   function routineActionError(error, fallback) {
     const message = String(error?.message ?? error).replace(/^.*Error:\s*/, "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\b[a-z][a-z0-9-]*_[a-f0-9]{16}\b/gi, "selected item").trim();
-    if (!message || /(?:token|secret|password|credential|session|authorization|provider|cwd|workspacePath|storageRelativePath|sourceRelativePath)/i.test(message)) return fallback;
+    if (!message || /(?:token|secret|password|credential|session|authorization|provider|cwd|workspacePath|storageRelativePath|sourceRelativePath|[A-Za-z]:[\\/]|\\\\|\/(?:Users|home|tmp|var|private|workspace|worktrees?)[\\/])/i.test(message)) return fallback;
     return message.slice(0, 240) || fallback;
   }
 
@@ -608,6 +610,51 @@
     status.textContent = message || "";
     status.dataset.kind = message ? kind : "";
     status.classList.toggle("hidden", !message);
+  }
+
+  function routineRunState(routineId, runId) {
+    let runs = routineHistoryActionState.get(routineId);
+    if (!runs) { runs = new Map(); routineHistoryActionState.set(routineId, runs); }
+    let state = runs.get(runId);
+    if (!state) { state = { pending: false, kind: "", message: "" }; runs.set(runId, state); }
+    return state;
+  }
+
+  function routineHistoryPending(routineId) {
+    return [...(routineHistoryActionState.get(routineId)?.values() ?? [])].some((state) => state.pending);
+  }
+
+  function setRoutineRunFeedback(routineId, runId, kind = "", message = "") {
+    const state = routineRunState(routineId, runId);
+    state.kind = message ? kind : "";
+    state.message = message || "";
+  }
+
+  function syncRoutineHistoryActionState() {
+    for (const button of document.querySelectorAll("[data-routine-history-retry]")) {
+      const state = routineRunState(button.dataset.routineId, button.dataset.runId);
+      button.disabled = routineActionPending.has(button.dataset.routineId) || state.pending;
+    }
+  }
+
+  function appendRoutineRunFeedback(card, routineId, runId) {
+    const state = routineRunState(routineId, runId);
+    if (!state.message) return;
+    const row = document.createElement("div");
+    row.className = "routine-action-feedback";
+    row.dataset.routineRunFeedback = "true";
+    const message = document.createElement("p");
+    message.className = state.kind === "error" ? "inline-error" : "setting-feedback";
+    message.setAttribute("role", "status");
+    message.setAttribute("aria-live", "polite");
+    message.textContent = state.message;
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "quiet-action routine-action-dismiss";
+    dismiss.textContent = "Dismiss / 消退";
+    dismiss.addEventListener("click", () => { setRoutineRunFeedback(routineId, runId); void openRoutineDetail(routineId); });
+    row.append(message, dismiss);
+    card.append(row);
   }
 
   function appendRoutineActionFeedback(card, routineId) {
@@ -782,6 +829,32 @@
     }
   }
 
+  async function retryRoutineRun(routineId, runId) {
+    const state = routineRunState(routineId, runId);
+    if (state.pending || routineActionPending.has(routineId)) return;
+    const routine = routines.find((entry) => entry.id === routineId);
+    if (!routine) {
+      setRoutineRunFeedback(routineId, runId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      if (currentRoutineId === routineId) await openRoutineDetail(routineId);
+      return;
+    }
+    state.pending = true;
+    setRoutineRunFeedback(routineId, runId);
+    renderRoutineList();
+    syncRoutineHistoryActionState();
+    try {
+      await window.sovereignbot.routines.retry({ routineId, runId });
+      setRoutineRunFeedback(routineId, runId, "success", `Routine run retry requested: ${routine.name} / 已请求重试例行运行：${routine.name}`);
+    } catch (error) {
+      setRoutineRunFeedback(routineId, runId, "error", routineActionError(error, "Routine run could not be retried. Check its state and try again. / 例行运行未能重试，请检查状态后重试。"));
+    } finally {
+      state.pending = false;
+      renderRoutineList();
+      if (currentRoutineId === routineId && $("routine-detail-dialog")?.open) await openRoutineDetail(routineId);
+      else syncRoutineHistoryActionState();
+    }
+  }
+
   function renderRoutineList() {
     const root = $("routine-list");
     if (!root) return;
@@ -799,7 +872,7 @@
       const next = routine.nextRunAt ? new Date(routine.nextRunAt).toLocaleString() : "—";
       meta.textContent = `${scheduleLabel(routine.schedule)} · ${t("routines.nextRun", "Next run")}: ${next}${routine.lastStatus ? ` · ${t("routines.lastStatus", "Last status")}: ${routine.lastStatus}` : ""}`;
       const actions = document.createElement("div"); actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      const actionPending = routineActionPending.has(routine.id);
+      const actionPending = routineActionPending.has(routine.id) || routineHistoryPending(routine.id);
       const open = document.createElement("button"); open.className = "quiet-action"; open.type = "button"; open.textContent = t("routines.history", "History"); open.disabled = actionPending; open.addEventListener("click", () => openRoutineDetail(routine.id));
       const remove = document.createElement("button"); remove.className = "quiet-action"; remove.type = "button"; remove.textContent = actionPending ? "Removing… / 移除中…" : t("routines.remove", "Remove"); remove.disabled = actionPending; remove.addEventListener("click", () => openRoutineRemoveDialog(routine.id));
       const runNow = document.createElement("button"); runNow.className = "hero-action"; runNow.type = "button"; runNow.textContent = actionPending ? "Working… / 处理中…" : "Run now / 立即运行"; runNow.disabled = actionPending || routine.canRun !== true; runNow.addEventListener("click", () => void runRoutineFromCard(routine.id));
@@ -823,23 +896,36 @@
 
   async function openRoutineDetail(routineId) {
     currentRoutineId = routineId;
+    const request = ++routineDetailRequest;
     try {
       const routine = await window.sovereignbot.routines.get({ routineId });
       const history = await window.sovereignbot.routines.history({ routineId });
+      if (request !== routineDetailRequest || currentRoutineId !== routineId) return;
       $("routine-detail-title").textContent = routine.name;
       $("routine-detail-meta").textContent = `${scheduleLabel(routine.schedule)} · ${routine.enabled ? t("routines.enabled", "Enabled") : t("routines.disabled", "Disabled")}`;
       const root = $("routine-history"); root.textContent = "";
       if (!(history.history ?? []).length) { const p = document.createElement("p"); p.className = "setting-feedback"; p.textContent = t("routines.historyEmpty", "No runs yet."); root.append(p); }
       for (const run of history.history ?? []) {
         const card = document.createElement("div"); card.className = "job-card";
-        const line = document.createElement("div"); line.textContent = `${new Date(run.scheduledFor).toLocaleString()} · ${run.status}${run.error ? ` · ${run.error}` : ""}`;
+        const runError = run.error ? routineActionError(run.error, "Run attention requires review.") : "";
+        card.dataset.routineHistoryCard = "true";
+        card.dataset.routineId = routineId;
+        card.dataset.runId = run.id;
+        const line = document.createElement("div"); line.textContent = `${new Date(run.scheduledFor).toLocaleString()} · ${run.status}${runError ? ` · ${runError}` : ""}`;
         card.append(line);
         if (run.jobId) { const btn = document.createElement("button"); btn.className = "quiet-action"; btn.type = "button"; btn.textContent = `${t("action.open", "Open")} ${t("routines.job", "Job")}`; btn.addEventListener("click", async () => { $("routine-detail-dialog")?.close(); await openDetail(run.jobId); }); card.append(btn); }
-        if (run.jobId && ["waiting", "needs_attention"].includes(run.status) && routine.state !== "archived") { const retry = document.createElement("button"); retry.className = "hero-action"; retry.type = "button"; retry.textContent = "Retry / 重试"; retry.addEventListener("click", async () => { await window.sovereignbot.routines.retry({ routineId, runId: run.id }); await openRoutineDetail(routineId); }); card.append(retry); }
+        if (run.jobId && ["waiting", "needs_attention"].includes(run.status) && routine.state !== "archived") { const retry = document.createElement("button"); retry.className = "hero-action"; retry.type = "button"; retry.textContent = routineRunState(routineId, run.id).pending ? "Retrying… / 重试中…" : "Retry / 重试"; retry.dataset.routineHistoryRetry = "true"; retry.dataset.routineId = routineId; retry.dataset.runId = run.id; retry.disabled = routineActionPending.has(routineId) || routineRunState(routineId, run.id).pending; retry.addEventListener("click", () => { void retryRoutineRun(routineId, run.id); }); card.append(retry); }
+        appendRoutineRunFeedback(card, routineId, run.id);
         root.append(card);
       }
       $("routine-detail-dialog")?.showModal?.();
-    } catch {}
+      syncRoutineHistoryActionState();
+    } catch (error) {
+      if (request === routineDetailRequest && currentRoutineId === routineId) {
+        const meta = $("routine-detail-meta");
+        if (meta) meta.textContent = routineActionError(error, "Routine history is unavailable. Refresh and try again. / 例行历史暂不可用，请刷新后重试。");
+      }
+    }
   }
 
   function showScheduleFields() {
