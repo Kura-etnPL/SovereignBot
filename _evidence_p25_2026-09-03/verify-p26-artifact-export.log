@@ -1,0 +1,17 @@
+PASS gate window stays hidden
+PASS renderer exposes product preview, export, and artifact APIs {"dialog":true,"preview":true,"artifactApi":"function","historyApi":"function","exportApi":"function"}
+PASS text artifact opens an in-product bounded preview
+PASS binary artifact has explicit non-previewable state
+PASS oversized text preview reports truncation
+PASS Recent/team/channel/coworker filters keep bounded correct results
+PASS type filter selects only the requested MIME
+PASS History and Restore create append-only lineage
+PASS Revise via native dialog appends a new version
+PASS Open and Reveal stay on the managed artifact handler boundary
+PASS Export copy writes the selected artifact bytes without exposing a raw path
+PASS Go to conversation remains a real source navigation
+PASS open-artifact navigates and focuses the exact artifact
+PASS Computer History is an allowlisted safe audit projection
+PASS Computer History Coworker filter is correct
+PASS artifact lineage and safe history survive restart
+[summary] 16/16 PASS
