@@ -191,7 +191,7 @@
       const card = document.createElement("article"); card.className = "settings-card memory-row"; if (memory.id === selectedMemoryId) card.classList.add("selected");
       const title = document.createElement("h3"); title.textContent = `${memory.title}${memory.pinned ? " · pinned" : ""}`;
       const content = document.createElement("p"); content.textContent = memory.content;
-      const meta = document.createElement("small"); meta.textContent = `${memory.state} · ${(memory.tags ?? []).join(", ") || "no tags"}`;
+      const meta = document.createElement("small"); const stateLabel = memory.state || "active"; meta.textContent = `${stateLabel}${memory.tags?.length ? " · " + memory.tags.join(", ") : ""}`;
       const reason = document.createElement("small"); reason.className = "memory-match-reason"; reason.textContent = `Match: ${memory.matchReason?.label ?? "Recent memory / 最近记忆"}`;
       const source = document.createElement("small"); source.textContent = `Source: ${memory.source?.label ?? "Unavailable"}`;
       const actions = document.createElement("div"); actions.className = "detail-actions";

@@ -15,7 +15,7 @@
     for (const item of items) {
       const card = document.createElement("article"); card.className = "settings-card";
       const h = document.createElement("h3"); h.textContent = item.name; card.append(h);
-      card.append(line("Description", item.description), line("Steps", item.steps.join(" → ")), line("Assigned teams", item.assignedTeams.map((x) => x.name).join(", ") || "None"), line("Assigned channels", item.assignedChannels.map((x) => x.name).join(", ") || "None"), line("Updated", item.updatedAt));
+      card.append(line("Description", item.description), line("Steps", (item.steps ?? []).join(" → ")), line("Assigned teams", (item.assignedTeams ?? []).map((x) => x.name).join(", ") || "None"), line("Assigned channels", (item.assignedChannels ?? []).map((x) => x.name).join(", ") || "None"), line("Updated", item.updatedAt));
       const actions = document.createElement("div"); actions.className = "detail-actions";
       actions.append(button("Export / 导出", async () => { const result = await api.playbooks.exportViaDialog({ playbookId: item.id }); const status = $("playbook-file-result"); if (status) status.textContent = result.canceled ? "Export canceled." : "Exported " + result.fileName + "."; }));
       actions.append(button("Create Routine / 创建例行", () => document.dispatchEvent(new CustomEvent("sovereignbot:create-routine-from-source", { detail: { name: `Routine · ${item.name}`, instruction: item.description || item.steps.join("; "), teamId: item.assignedTeams[0]?.id } }))));

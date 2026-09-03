@@ -542,3 +542,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .notification-card-title { font-size: 14px; font-weight: 600; color: var(--text, #f8fafc); margin: 0; }
 .notification-card-body { font-size: 12.5px; color: var(--text-2, #cbd5e1); line-height: 1.5; margin: 0; word-break: break-word; }
 .notification-card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--line, #252e3e); }
+
+/* Product Shell & Team Channel Navigation */
+.nav-team-group { margin-bottom: 6px; }
+.nav-channel-sublist { margin-left: 14px; padding-left: 8px; border-left: 1.5px solid var(--line); display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.nav-channel-sublist .nav-item { min-height: 30px; padding: 2px 6px; grid-template-columns: 18px minmax(0, 1fr) auto; }
+.nav-channel-sublist .nav-avatar { width: 18px; height: 18px; font-size: 11px; background: transparent; color: var(--text-3); }
+.shortcut-pill { margin-left: auto; font-size: 10px; color: var(--text-3); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--line); font-family: inherit; }
+.handoff-card { background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--accent); padding: 6px 10px; border-radius: 6px; font-size: 11px; margin: 6px 0; color: var(--text); font-weight: 560; display: flex; align-items: center; gap: 6px; }
+.handoff-card::before { content: "●"; color: var(--accent); font-size: 10px; }
+.coworker-role-pill { font-size: 10px; color: var(--text-3); background: var(--panel-2); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); font-weight: 450; }
+
+

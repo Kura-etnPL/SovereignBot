@@ -280,7 +280,10 @@ export function createMemoryService({ runtime, getRuntime, services, coworkerSto
         list: async ({ scope, ownerId, query, limit = 50, includeForgotten = false } = {}) => {
             const target = requireTarget(scope, ownerId);
             const input = searchInput(query, limit, includeForgotten);
-            const rows = await memoryStore().searchDetailed({ scope: target.scope, ...input });
+            const store = memoryStore();
+            const rows = typeof store.searchDetailed === "function"
+                ? await store.searchDetailed({ scope: target.scope, ...input })
+                : (await store.search({ scope: target.scope, ...input })).map((record) => ({ record, matchReason: { key: "recent", fields: [], coverage: 1, pinned: record.pinned === true } }));
             return {
                 schema: DESKTOP_MEMORY_SCHEMA,
                 scope: target.kind,

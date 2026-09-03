@@ -101,6 +101,18 @@
     mode = "search"; const response = await api.search.query({ query: value, types: [...searchTypes], ...(projectId ? { projectId } : {}), status, limit: 50 }); if (sequence !== refreshSequence) return; for (const item of response.results ?? []) { const reason = MATCH_REASON_LABELS.get(item.matchReason?.key) ?? "Match / 匹配"; const snippet = item.matchSnippet ? ` · ${item.matchSnippet}` : ""; addResult(item.title, `${item.type} · ${item.subtitle} · ${item.status} · ${reason}${snippet}`, () => navigate(item)); } if (!response.results?.length) { results.append(make("p", "setting-feedback", "No matching visible results / 没有匹配的可见结果")); setStatus(""); } else { setStatus(`${response.total ?? response.results.length} result${(response.total ?? response.results.length) === 1 ? "" : "s"}${response.hasMore ? " · refine filters to see more / 可继续缩小筛选" : ""}`); } paintSelection();
   }
   async function open() { ensureOverlay(); opener = document.activeElement; overlay.classList.remove("hidden"); mode = "commands"; input.value = ""; await loadProjects(); await refresh(); input.focus(); }
-  function installButton() { const button = make("button", "quiet-action", "⌘K Search / 搜索"); button.id = "open-command-palette"; button.type = "button"; button.setAttribute("aria-label", "Open search and command palette"); button.addEventListener("click", () => void open()); document.querySelector(".sidebar-top")?.append(button); }
+  function installButton() {
+    const existing = document.getElementById("open-command-palette");
+    if (existing) {
+      existing.addEventListener("click", () => void open());
+      return;
+    }
+    const button = make("button", "quiet-action", "⌘K Search / 搜索");
+    button.id = "open-command-palette";
+    button.type = "button";
+    button.setAttribute("aria-label", "Open search and command palette");
+    button.addEventListener("click", () => void open());
+    document.querySelector(".sidebar-top")?.append(button);
+  }
   window.addEventListener("DOMContentLoaded", () => { installButton(); document.addEventListener("keydown", (event) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); void open(); } else if (event.key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) { event.preventDefault(); void open(); } }); });
 })();

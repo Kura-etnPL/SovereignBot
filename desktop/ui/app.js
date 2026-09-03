@@ -82,10 +82,24 @@ function text(value) {
 }
 
 function initials(name) {
-  const parts = text(name).trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "✦";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0] ?? ""}${parts.at(-1)?.[0] ?? ""}`.toUpperCase();
+  const raw = text(name).trim();
+  if (!raw) return "✦";
+  const clean = raw.replace(/[([（【].*?[)\]）】]/g, "").trim() || raw;
+  const tokens = clean.match(/[\p{L}\p{N}]+/gu) ?? [];
+  if (!tokens.length) {
+    const fallback = raw.replace(/[^\p{L}\p{N}]/gu, "");
+    return fallback.slice(0, 1).toUpperCase() || "✦";
+  }
+  if (tokens.length === 1) {
+    const single = tokens[0];
+    if (/\p{Script=Han}/u.test(single)) {
+      return single.slice(0, 1);
+    }
+    return single.slice(0, Math.min(2, single.length)).toUpperCase();
+  }
+  const first = tokens[0].slice(0, 1);
+  const last = tokens.at(-1).slice(0, 1);
+  return `${first}${last}`.toUpperCase();
 }
 
 function avatarFor(coworker) {
@@ -441,23 +455,42 @@ function renderTeams() {
   clearNode(list);
   if (state.teams.length) {
     for (const team of state.teams) {
-      const channel = team.channels?.[0] ?? state.channels.find((entry) => entry.teamId === team.id);
-      const flow = team.flow;
-      const conversation = conversationById(channel?.conversationId);
-      const rosterSize = team.coworkerIds?.length ?? 0;
-      const activeCount = flow?.status === "active" && flow.currentOwner ? 1 : 0;
-      const attentionCount = flow?.attentionCoworkerIds?.length ?? 0;
-      const availableCount = Math.max(0, rosterSize - activeCount - attentionCount);
-      const counts = `${activeCount} active · ${availableCount} available${attentionCount ? ` · ${attentionCount} attention` : ""}`;
-      list.append(makeNavItem({
-        avatar: "#",
+      const container = document.createElement("div");
+      container.className = "nav-team-group";
+      const channels = (team.channels ?? []).filter((c) => !c.archived);
+      const isSelectedTeam = channels.some((c) => c.conversationId === state.selectedConversationId);
+      const teamItem = makeNavItem({
+        avatar: "👥",
         title: team.name,
-        subtitle: channel?.name ?? "Project Channel",
-        meta: counts,
-        unread: conversationUnread(conversation),
-        active: channel?.conversationId === state.selectedConversationId,
-        onClick: () => channel?.conversationId && openConversation(channel.conversationId),
-      }));
+        subtitle: `${team.coworkerIds?.length ?? 0} members · ${channels.length} channels`,
+        compact: true,
+        active: isSelectedTeam && !state.selectedConversationId,
+        onClick: () => {
+          const first = channels[0];
+          if (first?.conversationId) openConversation(first.conversationId);
+        },
+      });
+      container.append(teamItem);
+
+      if (channels.length) {
+        const sublist = document.createElement("div");
+        sublist.className = "nav-channel-sublist";
+        for (const channel of channels) {
+          const conversation = conversationById(channel.conversationId);
+          const isSelected = channel.conversationId === state.selectedConversationId;
+          sublist.append(makeNavItem({
+            avatar: "#",
+            title: channel.name,
+            subtitle: channel.kind === "work" ? "Work" : channel.kind === "project" ? "Project" : "",
+            unread: conversationUnread(conversation),
+            compact: true,
+            active: isSelected,
+            onClick: () => channel.conversationId && openConversation(channel.conversationId),
+          }));
+        }
+        container.append(sublist);
+      }
+      list.append(container);
     }
     return;
   }
@@ -482,35 +515,26 @@ function renderTeamPackActions() {
   if (!container) return;
   clearNode(container);
   for (const pack of state.teamPacks) {
-    const card = document.createElement("div");
-    card.className = "team-pack-card";
-    const title = document.createElement("strong");
-    title.textContent = pack.name;
-    const description = document.createElement("span");
-    description.textContent = pack.description ?? "";
-    const contents = document.createElement("small");
-    contents.textContent = `${pack.coworkerNames?.length ?? 0} coworkers · ${pack.channelNames?.length ?? 0} channels · ${pack.playbookNames?.length ?? 0} playbooks`;
-    card.append(title, description, contents);
+    if (pack.id === "software-team") continue;
     if (pack.installed) {
       const installed = document.createElement("span");
       installed.className = "soft-pill";
-      installed.textContent = "Installed / 已安装";
-      card.append(installed);
+      installed.textContent = `${pack.name} ✓`;
+      container.append(installed);
     } else {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "quiet-action";
-      button.textContent = `Install ${pack.name}`;
-      button.title = pack.description ?? "Install this team";
+      button.textContent = `+ ${pack.name}`;
+      button.title = `${pack.name}: ${pack.description ?? "Preset team recipe"}`;
       button.addEventListener("click", () => installTeamPack(pack.id, button));
-      card.append(button);
+      container.append(button);
     }
-    container.append(card);
   }
   const importButton = document.createElement("button");
   importButton.type = "button";
   importButton.className = "quiet-action";
-  importButton.textContent = "Import Team Pack / 导入团队包";
+  importButton.textContent = "Import recipe / 导入配方…";
   importButton.addEventListener("click", () => openTeamPackDialog());
   container.append(importButton);
 }
@@ -537,9 +561,39 @@ function renderRecent() {
   }
 }
 
+function renderProjects() {
+  const list = $("sidebar-project-list");
+  if (!list) return;
+  clearNode(list);
+  const activeProjects = (state.projects || []).filter((p) => p.state !== "archived");
+  if (!activeProjects.length) {
+    const empty = document.createElement("p");
+    empty.className = "sidebar-empty";
+    empty.textContent = "No projects yet / 暂无项目";
+    list.append(empty);
+    return;
+  }
+  for (const project of activeProjects) {
+    const isSelected = project.projectId === state.selectedProjectId;
+    list.append(makeNavItem({
+      avatar: "📁",
+      title: project.name,
+      subtitle: project.state === "active" ? "Active workspace" : project.state,
+      compact: true,
+      active: isSelected,
+      onClick: () => {
+        state.selectedProjectId = project.projectId;
+        switchView("projects");
+        document.dispatchEvent(new CustomEvent("sovereignbot:select-project", { detail: { projectId: project.projectId } }));
+      },
+    }));
+  }
+}
+
 function renderSidebar() {
   renderCoworkers();
   renderTeams();
+  renderProjects();
   renderRecent();
 }
 
@@ -893,9 +947,16 @@ function renderMessage(conversation, message) {
   meta.className = "chat-meta";
   const author = document.createElement("strong");
   author.textContent = user ? "You" : coworker?.name || "Coworker";
+  meta.append(author);
+  if (!user && coworker?.role) {
+    const role = document.createElement("span");
+    role.className = "coworker-role-pill";
+    role.textContent = coworker.role;
+    meta.append(role);
+  }
   const time = document.createElement("time");
   time.textContent = formatTime(message.createdAt);
-  meta.append(author, time);
+  meta.append(time);
   if (!user && conversation.kind === "team" && Array.isArray(message.mentions) && message.mentions.length === 1) {
     const target = coworkerById(message.mentions[0]);
     if (target) {
@@ -979,7 +1040,14 @@ function renderMessages(conversation, forceScroll = false, { voiceMessages = con
   $("typing-row").classList.toggle("hidden", pending.size === 0);
   if (pending.size) {
     const names = [...pending].map((id) => coworkerById(id)?.name).filter(Boolean);
-    $("typing-label").textContent = names.length > 1 ? `${names.join(" & ")} are working…` : `${names[0] || "Coworker"} is working…`;
+    const team = conversation.kind === "team" ? state.teams.find((t) => t.channels?.some((c) => c.conversationId === conversation.id)) : undefined;
+    const stage = team?.flow?.stage;
+    const currentOwner = team?.flow?.currentOwner;
+    if (currentOwner && stage && stage !== "complete") {
+      $("typing-label").textContent = `${currentOwner} is working (${stage})…`;
+    } else {
+      $("typing-label").textContent = names.length > 1 ? `${names.join(" & ")} are working…` : `${names[0] || "Coworker"} is working…`;
+    }
   }
   updateConversationPageControls();
   if (!changed && !forceScroll && !preserveScroll) return Promise.resolve();
@@ -3093,8 +3161,18 @@ function bindEvents() {
   $("conversation-latest-messages")?.addEventListener("click", () => { void jumpToLatestMessages(); });
   $("open-details").addEventListener("click", () => $("details-panel").classList.toggle("hidden"));
   $("close-details").addEventListener("click", () => hide($("details-panel")));
+  $("new-conversation-button")?.addEventListener("click", () => {
+    const chief = state.coworkers.find((c) => /chief/i.test(c.name)) ?? state.coworkers[0];
+    if (chief) openDirect(chief.id);
+    else switchView("welcome");
+  });
+  $("new-project")?.addEventListener("click", () => $("project-create-dialog")?.showModal());
+  $("nav-inbox")?.addEventListener("click", () => switchView("notifications"));
+  $("nav-search-palette")?.addEventListener("click", () => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+  });
   $("nav-settings").addEventListener("click", async () => { switchView("settings"); await refreshSettingsData(); });
-  $("nav-activity").addEventListener("click", async () => { show($("activity-drawer")); await refreshActivity(); });
+  $("nav-activity")?.addEventListener("click", async () => { show($("activity-drawer")); await refreshActivity(); });
   $("activity-refresh")?.addEventListener("click", () => { void refreshActivity(); });
   $("activity-team-select")?.addEventListener("change", (event) => {
     const context = activityContext();
