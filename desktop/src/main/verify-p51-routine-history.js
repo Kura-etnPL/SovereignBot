@@ -87,7 +87,7 @@ function makeHandlers({ services, coworkerStore, conversationStore, skillStore, 
     "job:cancel": ({ jobId }) => jobs.cancel(jobId),
     "routine:list": (payload) => routines.list(payload),
     "routine:get": ({ routineId }) => routines.get(routineId),
-    "routine:history": ({ routineId }) => routines.history(routineId),
+    "routine:history": ({ routineId }) => { counts.history += 1; return routines.history(routineId); },
     "routine:create": (payload) => routines.create(payload),
     "routine:runNow": ({ routineId }) => routines.runNow(routineId),
     "routine:setEnabled": ({ routineId, enabled }) => routines.setEnabled(routineId, enabled),
@@ -150,7 +150,7 @@ export async function runVerifyP51RoutineHistory({ app }) {
     await jobs.pause(runA.job.id);
     await jobs.pause(runB.job.id);
     const failures = { routineId: routineA.id, runId: runA.run.id, retry: true };
-    const counts = { retry: 0 };
+    const counts = { retry: 0, history: 0 };
     uninstallProtocol = installAppProtocolHandler();
     win = createMainWindow({ smoke: true });
     unbind = bindIpcChannels({ win, handlers: makeHandlers({ services, coworkerStore, conversationStore, skillStore, jobs, routines, roster, failures, counts }) });
@@ -175,9 +175,10 @@ export async function runVerifyP51RoutineHistory({ app }) {
     check("another Routine has no cross-routine retry feedback or lock", !peer.text.includes("Injected P51 history retry failure") && !peer.feedback.includes("Injected P51") && !peer.retryDisabled, JSON.stringify(peer));
     await invoke(win, `async()=>{document.getElementById("routine-detail-dialog")?.close(); const card=[...document.querySelectorAll("#routine-list .job-card")].find((entry)=>entry.querySelector("strong")?.textContent===${JSON.stringify(routineA.name)}); const button=[...card?.querySelectorAll("button")||[]].find((entry)=>entry.textContent.includes("History")); button?.click(); return Boolean(button)}`);
     await waitForRenderer(win, `async()=>document.getElementById("routine-detail-dialog")?.open===true && document.getElementById("routine-detail-title")?.textContent===${JSON.stringify(routineA.name)}`, "Alpha retry detail reopen");
+    const historyReadsBeforeSuccess = counts.history;
     await invoke(win, `async()=>{const button=document.querySelector("[data-routine-history-retry]"); button?.click(); return true}`);
-    await waitForRenderer(win, `async()=>document.querySelector("[data-routine-run-feedback]")?.textContent.includes("Routine run retry requested") && document.querySelector("[data-routine-history-retry]")?.disabled===false`, "successful Alpha retry feedback");
-    check("History Retry succeeds on the second attempt with one additional call", counts.retry === 2, JSON.stringify({ retryCalls: counts.retry }));
+    await waitForRenderer(win, `async()=>document.querySelector("[data-routine-run-feedback]")?.textContent.includes("Routine run retry requested")`, "successful Alpha retry feedback");
+    check("History Retry succeeds on the second attempt with one additional call and refreshes History", counts.retry === 2 && counts.history > historyReadsBeforeSuccess, JSON.stringify({ retryCalls: counts.retry, historyReadsBefore: historyReadsBeforeSuccess, historyReadsAfter: counts.history }));
     await jobs.flush();
     await invoke(win, `async()=>{document.getElementById("routine-detail-dialog")?.close(); document.dispatchEvent(new CustomEvent("sovereignbot:open-routine", { detail: { routineId: ${JSON.stringify(routineA.id)} } })); return true}`);
     await waitForRenderer(win, `async()=>document.getElementById("routine-detail-dialog")?.open===true && document.getElementById("routine-detail-title")?.textContent===${JSON.stringify(routineA.name)} && document.querySelector("[data-routine-history-card]")?.textContent.includes("completed")`, "completed Alpha history refresh");
