@@ -12,7 +12,7 @@
 - 本地缺失/证据不足：能力尚未实现，或当前允许的本地证据仍不足；不以“搜不到 TODO”代替判断。
 - 外部暂缓：本地实现或安全契约存在，但验收依赖用户明确禁止的账号、网络、设备、签名、Setup.exe、受保护 CI 或发布权限。
 
-本次 Node-only 复核：root `npm test` 为 234 total / 232 pass / 2 skipped / 0 failed；desktop `npm test` 为 343 total / 342 pass / 1 skipped / 0 failed；desktop `npm run check` 为 293 files；desktop `npm run secret-scan` clean；`git diff --check` clean。跳过项是环境能力（Docker/symlink），不是被伪装成通过的产品结果。P36–P51 的机器证据均为 `ok:true`；最新 P51 为 [`verify-p51-routine-history.json`](verify-p51-routine-history.json)。
+本次 Node-only 复核：root `npm test` 为 234 total / 232 pass / 2 skipped / 0 failed；desktop `npm test` 为 347 total / 346 pass / 1 skipped / 0 failed；desktop `npm run check` 为 301 files；desktop `npm run secret-scan` clean；`git diff --check` clean。跳过项是环境能力（Docker/symlink），不是被伪装成通过的产品结果。P36–P51 的机器证据均为 `ok:true`；最新 P51 为 [`verify-p51-routine-history.json`](verify-p51-routine-history.json)。
 
 ## 2) 已被当前证据证明完成的本地要求
 
@@ -23,7 +23,7 @@
 | §3 / P0 Computer Activity History | 已证实：复用 Audit/Computer/Task/Takeover events 的安全 projection，显示 Coworker/time/app/site/action/status，并过滤 secret/cookie/session/coordinates/WebDriver internals。 | [`V4.3-P24`](V4.3-P24-FILES-ARTIFACTS-COMPUTER-HISTORY-ACCEPTANCE-2026-09-03.md)、[`V4.3-P35`](V4.3-P35-THIS-PC-DEEP-LINKS-ACCEPTANCE-2026-09-03.md)、`desktop/src/main/product-surface-service.js`。 |
 | §3 / P0 Skill Library | 已证实：create/edit/Teach Once/test/retest/duplicate/archive/restore/import/export、Team/Coworker assignment、Create Routine；`requestedCapabilities` 不是 grant，导入不能 mint capability。 | [`V4.3-P23`](V4.3-P23-SKILL-LIBRARY-ACCEPTANCE-2026-09-03.md)、[`V4.3-P49`](V4.3-P49-MEMORY-DIALOGS-ACCEPTANCE-2026-09-03.md)、`desktop/src/main/skill-store.js`、`desktop/src/main/skill-file-io.js`。 |
 | §3 / P0 Team Pack Gallery | 已证实：Software/Research/Content/Operations 以及 Product/Revenue/Support first-party recipes；Install/Import/Export/Duplicate/custom Edit/Search/Filter，first-party read-only，普通 entity 创建且不带权限。 | [`V4.3-P11`](V4.3-P11-DESKTOP-FIRST-PARTY-TEAM-PACKS-ACCEPTANCE-2026-09-02.md)、[`V4.3-P20`](V4.3-P20-TEAM-PACK-FILE-FLOW-ACCEPTANCE-2026-09-03.md)、[`V4.3-P21`](V4.3-P21-TEAM-PACK-RECIPE-EDITOR-ACCEPTANCE-2026-09-03.md)、[`V4.3-P31`](V4.3-P31-TEAM-PACK-GALLERY-CONSISTENCY-ACCEPTANCE-2026-09-03.md)。 |
-| §3 / P0 Channels | New/Edit、kind/instructions/workspace/playbook、unread/last activity 的 service/UI/IPC 路径已证实；现有本地 gate 也覆盖 New/Edit、archive/restore 的服务调用和 quick-switch 的真实控件。archive/restore/template/quick-switch 的完整独立 UI click-path 证据仍需补齐，详见第 3 节。 | [`V4.3-P19`](V4.3-P19-PRODUCT-BURST-AUDIT-CHANNEL-EDITOR-ACCEPTANCE-2026-09-03.md)、`desktop/src/main/verify-software-team.js:331`、`desktop/src/main/team-service.js`、`desktop/ui/product-hubs-ui.js`。 |
+| §3 / P0 Channels | 已证实本地：New/Edit、archive/restore、template create/use、quick-switch、unread/last activity 均有现成产品控件、typed preload/IPC 和独立 hidden Electron click-path gate；archive/includeArchived、restart persistence、stale/archived fail-closed 与 public redaction 也纳入同一验收入口。 | [`V4.3-P19`](V4.3-P19-PRODUCT-BURST-AUDIT-CHANNEL-EDITOR-ACCEPTANCE-2026-09-03.md)、[`Channels 产品路径验收`](channels-product-path-acceptance-2026-09-04.md)、`desktop/src/main/verify-channels-product-path.js`、`desktop/src/main/team-service.js`、`desktop/ui/product-hubs-ui.js`。 |
 | §3 / P0 External Control | 已证实本地边界：bounded 14-operation legacy loopback + paired direct/opaque relay facade、scope/team/project binding、replay/tamper/downgrade/revoke/capacity denial、public projections 和生产 startup attach。 | [`V4.3-P1`](V4.3-P1-EXTERNAL-CONTROL-PLANE-ACCEPTANCE-2026-09-02.md)、`desktop/src/main/index.js:542`、`desktop/src/main/external-team-control.js`、`src/remote-controller-contract.js`。真实远程设备/relay 仍见第 4 节。 |
 | §4–§6 Coworker、Team、动态协作、ModelBinding | 已证实本地：durable Coworker/Team/Channel、owner routing、DM/@mention/reply、directed handoff、review、bounded parallel specialists、join/stop、stale lineage、每 Coworker 的 safe ModelBinding projection 和 no-downgrade 规则。 | [`V4.3-P13`](V4.3-P13-DESKTOP-DIRECTED-COLLABORATION-ACCEPTANCE-2026-09-02.md)、[`V4.3-P14`](V4.3-P14-DESKTOP-PARALLEL-SPECIALISTS-ACCEPTANCE-2026-09-02.md)、[`V4.3-P16`](V4.3-P16-DESKTOP-TEAM-ACTIVITY-ACCEPTANCE-2026-09-03.md)、`desktop/src/main/team-service.js`、`src/orchestrator.js`。真实 Provider useful work 不在本地证明范围。 |
 | §11–§12 Memory、Projects/Workspace | 已证实本地：Coworker/Team/Project scope、source trace、edit/delete/forget/pin、relevance/index、Project switcher/create/archive/restore/export/backup、bounded command center、restart persistence 和 unavailable fail-closed。 | [`V4.3-P25`](V4.3-P25-MEMORY-EDITOR-ACCEPTANCE-2026-09-03.md)、[`V4.3-P34`](V4.3-P34-PROJECTS-EXPORT-ACCEPTANCE-2026-09-03.md)、[`V4.3-P40`](V4.3-P40-MEMORY-RELEVANCE-ACCEPTANCE-2026-09-03.md)、`desktop/src/main/memory-service.js`、`desktop/src/main/project-service.js`。 |
@@ -39,16 +39,9 @@
 
 ## 3) 真正缺失或证据不足的本地要求
 
-以下只列当前 Windows-first V4 必须收口的本地项；它们不是第 4 节的账号/网络/签名/发布阻塞，也没有把历史 acceptance 的局部通过扩大解释成完成。当前源码核查表明 Channels 的控件和 handler 已存在，未发现需要另起产品实现的缺失。
+当前 Windows-first V4 本地产品收口缺口数量：0 项。Update Apply 与 Channels 的最后本地 UX/证据闭环均已实现，并分别提供了产品能力级验收入口；本结论不等同于正式 V4 release 完成。
 
-| 本地要求 | 缺口 | 权威文件/入口 | 最小真实验收 |
-|---|---|---|---|
-| Settings 的 Update Apply 产品对话框 | Update backend 的 channel/check/stage/apply/backup/rollback contract 已有；当前 renderer `ensureUpdateCard()` 仍使用 blocking `window.confirm`，且没有与 P48/P49/P50 同等级的当前 click-path cancel/no-write/failure gate。 | `desktop/ui/app.js:2736`；[`V4.2-P6.2`](V4.2-P6.2-RELEASE-UPDATE-LOCAL-RC-ACCEPTANCE-2026-09-02.md)；canonical §39–40。 | 用 in-product confirmation 覆盖 cancel、pending duplicate、apply failure、restart-required success，并通过既有 typed `updates.apply` 验证无额外 authority；不得把 update gate 拆成独立产品编号。 |
-| Channels archive/restore/template/quick-switch UI evidence | 这些功能的 service/IPC/test 路径存在，当前真实 UI gate 只覆盖 Channels New/Edit；不能仅凭 DOM 代码或 service canary 宣称完整 P0 UI。 | [`V4.3-P19`](V4.3-P19-PRODUCT-BURST-AUDIT-CHANNEL-EDITOR-ACCEPTANCE-2026-09-03.md)；`desktop/ui/product-hubs-ui.js`；`desktop/test/team-service.test.mjs`。 | 在真实本地 renderer/preload/IPC 上分别点击 archive/restore、template create/use、quick-switch，验证 unread/last activity、scope、restart 和 stale/archived fail-closed；仅补最小 click-path，不新增 authority。 |
-
-本节当前本地收口缺口数量：2 项，分别是 Update Apply 产品对话框，以及 Channels 生命周期/模板/快速切换的独立 UI click-path 证据。两项都属于现有 Windows V4 产品能力的最后 UX/证据闭环，不应拆成新的 P 编号。
-
-以下能力已在 canonical §42 或 P5 optional targets 中明确属于 post-V4 / optional expansion，记录于此仅为防止把范围误读为“未审计”：更完整 third-party Apps catalog、LocalIsolated Docker 的当前环境重跑、Native Android package、Cloud Computer runtime、Voice Call/telephony、macOS/Linux Desktop packaging。它们不是当前 Windows V4 本地阻塞，也不进入第 5 节清单。
+以下 post-V4 / optional 能力仍明确不计入当前本地 blocker：更完整 third-party Apps catalog、LocalIsolated Docker 的当前环境重跑、Native Android package、Cloud Computer runtime、Voice Call/telephony、macOS/Linux Desktop packaging。它们已在 canonical §42 或 P5 optional targets 中被划出当前 Windows V4 范围。
 
 ## 4) 用户明确暂缓的外部要求
 
@@ -66,9 +59,8 @@
 
 ## 5) 一个有上限的剩余本地工作清单
 
-为避免无限扩张，当前 Windows V4 本地工作上限为 2 个产品能力；不新增 P 编号，也不把 verifier/test script correction 拆成产品项。§42 的 post-V4 能力和 P5 optional targets 不计入本清单：
+当前 Windows V4 本地剩余工作上限为 0 个产品能力；不新增 P 编号，也不把 verifier/test script correction 拆成产品项。§42 的 post-V4 能力和 P5 optional targets 不计入本清单。
 
-1. Update Apply 产品对话框与 cancel/pending/failure/restart UX。
-2. Channels archive/restore/template/quick-switch UI click-path 证据闭环；若后续真实核查发现某个现有控件在入口上缺失，再在这一项内补最小产品路径，不另拆能力。
+无。当前本地产品收口已完成；剩余未验证事项仅属于第 4 节 external deferred，或属于明确的 post-V4 / optional expansion。
 
 达到这份清单的本地证据要求，仍不会自动完成第 4 节的真实账号、网络、设备、签名或发布事项；那些必须由用户另行解除限制并单独验收。

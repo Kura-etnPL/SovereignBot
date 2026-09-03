@@ -57,6 +57,7 @@
         "verify:p50-job-actions": "node scripts/verify-p50-job-actions.mjs",
         "verify:p51-routine-history": "node scripts/verify-p51-routine-history.mjs",
         "verify:update-apply-dialog": "node scripts/verify-update-apply-dialog.mjs",
+        "verify:channels-product-path": "node scripts/verify-channels-product-path.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",
