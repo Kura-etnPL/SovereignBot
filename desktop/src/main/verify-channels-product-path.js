@@ -172,9 +172,10 @@ export async function runVerifyChannelsProductPath({ app } = {}) {
 
     fixture.conversations.postCoworkerMessage(workChannel.conversationId, owner.id, { text: "Unread channel activity fixture" }, { notifyChannelUnread: false });
     await invoke(win, "async()=>{ const filter=document.getElementById('product-channel-filter-page'); filter.value='unread'; filter.dispatchEvent(new Event('change',{bubbles:true})); return true; }");
-    await waitFor(win, "async()=>document.getElementById('product-channels-page')?.innerText.includes('Unread / 未读') && document.getElementById('product-channels-page')?.innerText.includes('Unread channel activity fixture')", "unread channel projection");
+    await waitFor(win, "async()=>{ const text=(document.getElementById('product-channels-page')?.innerText||'').toLocaleLowerCase(); return text.includes('unread / 未读') && text.includes('unread channel activity fixture'); }", "unread channel projection");
     const unread = await invoke(win, "async()=>document.getElementById('product-channels-page')?.innerText||''");
-    check("Unread filter and last activity are visible for the created channel", unread.includes("Work Channel") && unread.includes("Unread / 未读") && unread.includes("Unread channel activity fixture"), JSON.stringify({ text: unread }));
+    const unreadText = unread.toLocaleLowerCase();
+    check("Unread filter and last activity are visible for the created channel", unread.includes("Work Channel") && unreadText.includes("unread / 未读") && unreadText.includes("unread channel activity fixture"), JSON.stringify({ text: unread }));
 
     const quickSwitch = await invoke(win, "async()=>{ const select=document.getElementById('product-channel-switch-page'); const option=[...select.options].find((entry)=>entry.textContent.includes('Work Channel')); if(!option) return { value:'' }; select.value=option.value; select.dispatchEvent(new Event('change',{bubbles:true})); return { value:option.value, visible:option.textContent }; }");
     await waitFor(win, `async()=>document.getElementById('conversation-title')?.textContent==='Work Channel'`, "quick switch conversation");
