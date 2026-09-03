@@ -327,6 +327,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .member-row .member-edit { margin-left: auto; }
 .member-row .member-status + .member-edit { margin-left: 8px; }
 .memory-row { display: grid; gap: 5px; padding: 8px 0; border-top: 1px solid var(--line); }
+.memory-action-status { color: var(--bad); }
 .memory-row:first-child { border-top: 0; }
 .memory-row strong { color: var(--text-2); font-size: 12px; }
 .memory-row span, .memory-row small { color: var(--muted); font-size: 11px; line-height: 1.4; }

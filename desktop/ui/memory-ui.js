@@ -7,12 +7,23 @@
   let selectedMemoryId;
   let pendingOwnerId;
   let editingMemory;
+  let deleteCandidate;
+  const pendingMemoryActions = new Set();
   let refreshSequence = 0;
   let owners = { coworker: [], team: [], project: [] };
   const text = (value) => String(value ?? "");
   const errorText = (reason) => text(reason?.message ?? reason).replace(/^.*Error: /, "").slice(0, 240);
   const setResult = (value) => { const node = $("memory-result"); if (node) node.textContent = value ?? ""; };
-  const button = (label, fn) => { const node = document.createElement("button"); node.type = "button"; node.className = "quiet-action"; node.textContent = label; node.addEventListener("click", () => Promise.resolve().then(fn).catch((reason) => setResult(errorText(reason)))); return node; };
+  const memoryActionKey = (memory, action, target = scopeTarget()) => `${target.scope}:${target.ownerId}:${memory.id}:${action}`;
+  const button = (label, fn, { key, busyLabel = "Working… / 处理中…" } = {}) => {
+    const node = document.createElement("button"); node.type = "button"; node.className = "quiet-action"; node.textContent = label;
+    node.addEventListener("click", () => {
+      if (key && pendingMemoryActions.has(key)) return;
+      if (key) { pendingMemoryActions.add(key); node.disabled = true; node.textContent = busyLabel; }
+      Promise.resolve().then(fn).catch((reason) => setResult(errorText(reason))).finally(() => { if (key) { pendingMemoryActions.delete(key); node.disabled = false; node.textContent = label; } });
+    });
+    return node;
+  };
   const selected = (id) => $(id)?.value || "";
   const scopeTarget = () => ({ scope: selected("memory-scope"), ownerId: selected("memory-owner") });
   const listTarget = () => ({ ...scopeTarget(), limit: 100, ...(selected("memory-state") === "all" ? { includeForgotten: true } : {}) });
@@ -52,10 +63,10 @@
       if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }
     }
   }
-  function openEditDialog(memory) {
+  function openEditDialog(memory, target = scopeTarget(), onSaved) {
     const dialog = $("memory-edit-dialog");
     if (!dialog?.showModal) return;
-    editingMemory = { id: memory.id, scope: memory.scope, ownerId: selected("memory-owner") };
+    editingMemory = { id: memory.id, scope: target.scope, ownerId: target.ownerId, onSaved };
     $("memory-edit-title").value = memory.title;
     $("memory-edit-content").value = memory.content;
     $("memory-edit-tags").value = (memory.tags ?? []).join(", ");
@@ -72,15 +83,63 @@
     const tags = text($("memory-edit-tags")?.value).split(",").map((entry) => entry.trim()).filter(Boolean);
     if (!title || !content) { if (error) { error.textContent = "Title and content are required / 标题和内容不能为空"; error.classList.remove("hidden"); } return; }
     if (tags.length > 16) { if (error) { error.textContent = "Use at most 16 tags / 最多使用 16 个标签"; error.classList.remove("hidden"); } return; }
+    const current = editingMemory;
+    const key = `${current.scope}:${current.ownerId}:${current.id}:edit`;
+    if (pendingMemoryActions.has(key)) return;
+    const submit = event.currentTarget?.querySelector("button[type=submit]");
+    pendingMemoryActions.add(key);
+    if (submit) { submit.disabled = true; submit.textContent = "Saving… / 保存中…"; }
     try {
-      const updated = await api.memory.update({ scope: editingMemory.scope, ownerId: editingMemory.ownerId, memoryId: editingMemory.id, patch: { title, content, tags } });
+      const updated = await api.memory.update({ scope: current.scope, ownerId: current.ownerId, memoryId: current.id, patch: { title, content, tags } });
       $("memory-edit-dialog")?.close();
       editingMemory = undefined;
       selectedMemoryId = updated?.id ?? selectedMemoryId;
       setResult("Memory updated / 记忆已更新");
       await refresh();
+      await current.onSaved?.(updated);
     } catch (reason) {
       if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }
+    } finally {
+      pendingMemoryActions.delete(key);
+      if (submit) { submit.disabled = false; submit.textContent = "Save changes / 保存修改"; }
+    }
+  }
+  function openDeleteDialog(memory, target = scopeTarget(), onDeleted) {
+    const dialog = $("memory-delete-dialog");
+    if (!dialog?.showModal) return;
+    const key = memoryActionKey(memory, "delete", target);
+    if (pendingMemoryActions.has(key)) return;
+    deleteCandidate = { id: memory.id, title: memory.title, content: memory.content, scope: target.scope, ownerId: target.ownerId, onDeleted, key };
+    $("memory-delete-scope").textContent = `Scope / 归属: ${target.scope}`;
+    $("memory-delete-summary").textContent = `${memory.title || "Untitled memory"} — ${text(memory.content).replace(/\s+/g, " ").trim().slice(0, 240)}${text(memory.content).length > 240 ? "…" : ""}`;
+    $("memory-delete-form-error")?.classList.add("hidden");
+    dialog.showModal();
+  }
+  async function confirmDelete(event) {
+    event.preventDefault();
+    const current = deleteCandidate;
+    const error = $("memory-delete-form-error");
+    if (!current) { if (error) { error.textContent = "Choose a memory to delete / 请选择要删除的记忆"; error.classList.remove("hidden"); } return; }
+    if (pendingMemoryActions.has(current.key)) return;
+    const submit = $("memory-delete-confirm");
+    const cancel = $("memory-delete-form")?.querySelector("[data-close-dialog]");
+    pendingMemoryActions.add(current.key);
+    if (submit) { submit.disabled = true; submit.textContent = "Deleting… / 删除中…"; }
+    if (cancel) cancel.disabled = true;
+    try {
+      await api.memory.delete({ scope: current.scope, ownerId: current.ownerId, memoryId: current.id });
+      $("memory-delete-dialog")?.close();
+      deleteCandidate = undefined;
+      if (selectedMemoryId === current.id) selectedMemoryId = undefined;
+      setResult("Memory deleted / 记忆已删除");
+      await refresh();
+      await current.onDeleted?.();
+    } catch (reason) {
+      if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }
+    } finally {
+      pendingMemoryActions.delete(current.key);
+      if (submit) { submit.disabled = false; submit.textContent = "Delete memory / 删除记忆"; }
+      if (cancel) cancel.disabled = false;
     }
   }
   function activate() {
@@ -136,7 +195,8 @@
       const reason = document.createElement("small"); reason.className = "memory-match-reason"; reason.textContent = `Match: ${memory.matchReason?.label ?? "Recent memory / 最近记忆"}`;
       const source = document.createElement("small"); source.textContent = `Source: ${memory.source?.label ?? "Unavailable"}`;
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button(memory.pinned ? "Unpin / 取消置顶" : "Pin / 置顶", async () => { await api.memory.pin({ ...scopeTarget(), memoryId: memory.id, pinned: !memory.pinned }); await refresh(); }), button("Edit / 编辑", () => openEditDialog(memory)), button("Forget / 忘记", async () => { if (memory.state === "forgotten") return; await api.memory.forget({ ...scopeTarget(), memoryId: memory.id }); await refresh(); }), button("Delete / 删除", async () => { if (!window.confirm("Delete this memory? / 删除这条记忆？")) return; await api.memory.delete({ ...scopeTarget(), memoryId: memory.id }); await refresh(); }), sourceAction(memory, source));
+      const target = scopeTarget();
+      actions.append(button(memory.pinned ? "Unpin / 取消置顶" : "Pin / 置顶", async () => { await api.memory.pin({ ...target, memoryId: memory.id, pinned: !memory.pinned }); await refresh(); }, { key: memoryActionKey(memory, "pin", target) }), button("Edit / 编辑", () => openEditDialog(memory, target)), button("Forget / 忘记", async () => { if (memory.state === "forgotten") return; await api.memory.forget({ ...target, memoryId: memory.id }); await refresh(); }, { key: memoryActionKey(memory, "forget", target) }), button("Delete / 删除", () => openDeleteDialog(memory, target), { key: memoryActionKey(memory, "delete", target) }), sourceAction(memory, source));
       card.append(title, content, meta, reason, source, actions); root.append(card);
     }
     if (!memories.length) { const empty = document.createElement("p"); empty.textContent = "No memories in this scope / 此归属暂无记忆"; root.append(empty); }
@@ -196,6 +256,9 @@
     $("memory-add-fact")?.addEventListener("click", openFactDialog);
     $("memory-fact-form")?.addEventListener("submit", (event) => void saveFact(event));
     $("memory-edit-form")?.addEventListener("submit", (event) => void saveEdit(event));
+    $("memory-delete-form")?.addEventListener("submit", (event) => void confirmDelete(event));
+    $("memory-delete-dialog")?.addEventListener("close", () => { if (!pendingMemoryActions.has(deleteCandidate?.key)) deleteCandidate = undefined; });
+    window.sovereignbotMemoryUi = Object.freeze({ openEditDialog, openDeleteDialog, refresh });
     void refresh();
   });
 })();
