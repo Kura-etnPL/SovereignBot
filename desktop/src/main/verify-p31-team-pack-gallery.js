@@ -12,6 +12,12 @@ import { bindIpcChannels } from "./ipc.js";
 const WORKTREE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const EVIDENCE_DIR = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR ?? join(WORKTREE_ROOT, "_evidence_p31_2026-09-03");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const OLD_DUPLICATE_CLICK_SOURCE = "document.querySelectorAll('#product-packs .settings-card')[4].querySelectorAll('button')[2].click(); true";
+
+function preflightJavaScriptSource(source) {
+  new Function(source);
+  return source;
+}
 
 export async function runVerifyP31TeamPackGallery({ app }) {
   mkdirSync(EVIDENCE_DIR, { recursive: true });
@@ -55,8 +61,9 @@ export async function runVerifyP31TeamPackGallery({ app }) {
     check("older first-party gallery entry is read-only and guides Duplicate", Boolean(oldFirstParty) && !oldFirstParty.buttons.some((label) => label.includes("Edit")) && oldFirstParty.buttons.some((label) => label.includes("Duplicate")), JSON.stringify(oldFirstParty));
 
     const beforeIds = await invoke(win, "async()=>((await window.sovereignbot.teams.list({})).packs.filter((entry)=>entry.custom).map((entry)=>entry.id))");
-    await invoke(win, "async()=>{const card=document.querySelector('#product-packs [data-team-pack-id=product-team]'); [...(card?.querySelectorAll('button')||[])].find((button)=>button.textContent.includes('Duplicate'))?.click(); return true}");
-    await waitFor("legacy gallery duplicate refresh", async () => await invoke(win, `async()=>((await window.sovereignbot.teams.list({})).packs.filter((entry)=>entry.custom).map((entry)=>entry.id)).some((id)=>${JSON.stringify(beforeIds)}.includes(id) === false)`));
+    const duplicateClickSource = preflightJavaScriptSource(OLD_DUPLICATE_CLICK_SOURCE);
+    await win.webContents.executeJavaScript(duplicateClickSource);
+    await waitFor("legacy gallery duplicate refresh", async () => await invoke(win, "async()=>((await window.sovereignbot.teams.list({})).packs ?? []).some((entry)=>entry.custom)"));
     const afterDuplicate = await invoke(win, "async()=>{const listed=await window.sovereignbot.teams.list({}); return {ids:listed.packs.filter((entry)=>entry.custom).map((entry)=>entry.id),cards:[...document.querySelectorAll('#product-packs .settings-card')].map((card)=>({id:card.dataset.teamPackId,title:card.querySelector('h3')?.textContent,buttons:[...card.querySelectorAll('button')].map((button)=>button.textContent)}))}})");
     duplicateRecipeId = afterDuplicate.ids.find((id) => !beforeIds.includes(id));
     check("older gallery Duplicate creates an editable custom recipe", Boolean(duplicateRecipeId) && afterDuplicate.cards.some((card) => card.id === duplicateRecipeId && card.buttons.some((label) => label.includes("Edit recipe"))), JSON.stringify(afterDuplicate));

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("../ui/product-hubs-ui.js", import.meta.url), "utf8");
+const verifier = readFileSync(new URL("../src/main/verify-p31-team-pack-gallery.js", import.meta.url), "utf8");
 const legacyStart = source.indexOf("function renderPacks(items)");
 const legacyEnd = source.indexOf("function renderWorkspaceSwitcher", legacyStart);
 const legacy = source.slice(legacyStart, legacyEnd);
@@ -32,4 +33,10 @@ test("P31 dedicated Team Pack entry keeps first-party read-only and custom Dupli
   assert.match(page, /button\("Duplicate \/ 复制"/);
   assert.match(page, /if \(item\.custom\).*Edit recipe \/ 编辑配方/);
   assert.match(page, /button\("Export \/ 导出", \(\) => exportPackToFile\(item\)/);
+});
+
+test("P31 verifier preflights the exact injected Duplicate click source", () => {
+  assert.match(verifier, /OLD_DUPLICATE_CLICK_SOURCE/);
+  assert.match(verifier, /new Function\(source\)/);
+  assert.match(verifier, /executeJavaScript\(duplicateClickSource\)/);
 });
