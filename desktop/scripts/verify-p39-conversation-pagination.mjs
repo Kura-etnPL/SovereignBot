@@ -11,7 +11,10 @@ if (!existsSync(electronExe)) { console.error("[verify-p39] local Electron binar
 const tempRoot = mkdtempSync(join(tmpdir(), "sovereign-p39-"));
 const evidenceDir = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR ?? join(desktopRoot, "..", "docs", "acceptance");
 mkdirSync(evidenceDir, { recursive: true });
-const child = spawn(electronExe, ["--disable-gpu", "--user-data-dir=" + join(tempRoot, "electron-user-data"), "src/main/verify-p39-conversation-pagination-entry.js"], { cwd: desktopRoot, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR: evidenceDir }, windowsHide: true });
+// Keep the host's forced accessibility debugging out of this large-DOM hidden gate.
+const childEnv = { ...process.env, SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR: evidenceDir };
+delete childEnv.ELECTRON_FORCE_RENDERER_ACCESSIBILITY;
+const child = spawn(electronExe, ["--disable-gpu", "--user-data-dir=" + join(tempRoot, "electron-user-data"), "src/main/verify-p39-conversation-pagination-entry.js"], { cwd: desktopRoot, stdio: ["ignore", "pipe", "pipe"], env: childEnv, windowsHide: true });
 let stderr = "";
 child.stdout?.on("data", (chunk) => { try { process.stdout.write(chunk); } catch {} });
 child.stderr?.on("data", (chunk) => { stderr += chunk; try { process.stderr.write(chunk); } catch {} });
