@@ -149,6 +149,7 @@ export async function runVerifyP50JobActions({ app }) {
     const roster = { ready: true, mode: "p50-local-fixture", roles: { planner: "p50-supervisor" }, agents: [], providers: { fake: { usable: true, present: true, version: "p50" } }, coworkerBindings: Object.fromEntries(coworkers.map((entry) => [entry.id, { ready: true, agentId: `p50-agent-${entry.id}`, provider: "fake" }])) };
     const ids = { cardRetry: "job-p50-card-retry", cardPeer: "job-p50-card-peer", detailApprove: "job-p50-detail-approve", detailDismiss: "job-p50-detail-dismiss", detailPause: "job-p50-detail-pause", detailResume: "job-p50-detail-resume", worker: "job-p50-worker-label" };
     const attentionState = { reason: "A bounded operator retry is required.", category: "real-blocker", at: "2026-09-03T00:00:00.000Z" };
+    const workerNodeId = "worker_0123456789abcdef";
     const initialJobs = [
       seedJob({ id: ids.cardRetry, title: "P50 Card Retry", ownerCoworkerId: owner.id, status: "needs_attention", workspaceId: workspace.id, attentionState }),
       seedJob({ id: ids.cardPeer, title: "P50 Peer Dismiss", ownerCoworkerId: peer.id, status: "needs_attention", workspaceId: workspace.id, attentionState }),
@@ -156,7 +157,7 @@ export async function runVerifyP50JobActions({ app }) {
       seedJob({ id: ids.detailDismiss, title: "P50 Detail Dismiss", ownerCoworkerId: owner.id, status: "needs_attention", workspaceId: workspace.id, attentionState }),
       seedJob({ id: ids.detailPause, title: "P50 Detail Pause", ownerCoworkerId: owner.id, status: "working", workspaceId: workspace.id }),
       seedJob({ id: ids.detailResume, title: "P50 Detail Resume", ownerCoworkerId: owner.id, status: "waiting", workspaceId: workspace.id, nextActionAt: "2099-01-01T00:00:00.000Z" }),
-      seedJob({ id: ids.worker, title: "P50 Worker Label", ownerCoworkerId: peer.id, status: "completed", workspaceId: workspace.id, executionTarget: { kind: "worker-node", nodeId: "node-p50-internal" }, workerNodeName: "Remote Builder", workerWorkspaceName: "Builder workspace" }),
+      seedJob({ id: ids.worker, title: "P50 Worker Label", ownerCoworkerId: peer.id, status: "completed", workspaceId: workspace.id, executionTarget: { kind: "worker-node", nodeId: workerNodeId, workspaceId: workspace.id }, workerNodeName: "Remote Builder", workerWorkspaceName: "Builder workspace" }),
     ];
     await writeFile(join(stateDir, "jobs.json"), `${JSON.stringify({ schema: JOBS_SCHEMA, jobs: initialJobs }, null, 2)}\n`, "utf8");
     const jobs = createJobController({ dataDir, runtime: runtimeHarness.runtime, roster: () => roster, coworkerStore, services, skillStore, supervisorAgentId: "p50-supervisor", readiness: () => ({ allowed: true }) });
@@ -168,8 +169,8 @@ export async function runVerifyP50JobActions({ app }) {
     await loadWindow(win);
     await invoke(win, `async()=>{document.getElementById("nav-work")?.click(); return true}`);
     await waitForRenderer(win, `async()=>document.querySelector("#view-work:not(.hidden)") !== null && document.querySelectorAll("#work-list .job-card").length >= 7`, "Work job cards");
-    const identity = await invoke(win, `async()=>{const body=document.querySelector("#work-list")?.textContent||""; return {body,worker:body.includes("Remote Builder")&&body.includes("Builder workspace"),owner:body.includes("Coding Lead")||body.includes("编程主管"),workspace:body.includes("P50 Trusted Workspace"),ids:body.includes("${workspace.id}")||body.includes("node-p50-internal")}}`);
-    check("Work cards use human-readable owner/workspace/Worker labels without opaque IDs", identity.worker && identity.owner && identity.workspace && !identity.ids, JSON.stringify({ worker: identity.worker, owner: identity.owner, workspace: identity.workspace, ids: identity.ids }));
+    const identity = await invoke(win, `async()=>{const body=document.querySelector("#work-list")?.textContent||""; const workerCard=document.querySelector('[data-job-id="${ids.worker}"]')?.textContent||""; return {body,workerCard,worker:workerCard.includes("Remote Builder")&&workerCard.includes("Builder workspace"),owner:body.includes("Coding Lead")||body.includes("编程主管"),workspace:body.includes("P50 Trusted Workspace"),ids:workerCard.includes("${workspace.id}")||workerCard.includes("${workerNodeId}")}}`);
+    check("Work cards use human-readable owner/workspace/Worker labels without opaque IDs", identity.worker && identity.owner && identity.workspace && !identity.ids, JSON.stringify({ worker: identity.worker, owner: identity.owner, workspace: identity.workspace, ids: identity.ids, workerCard: identity.workerCard }));
     await invoke(win, `async()=>{const card=document.querySelector('[data-job-id="${ids.cardRetry}"]'); const retry=[...card.querySelectorAll("button")].find((button)=>button.textContent.includes("Retry")); retry?.click(); retry?.click(); return Boolean(retry)}`);
     await waitForRenderer(win, `async()=>{const card=document.querySelector('[data-job-id="${ids.cardRetry}"]'); const feedback=card?.querySelector('[data-job-feedback]'); const retry=[...card?.querySelectorAll("button")||[]].find((button)=>button.textContent.includes("Retry")); return Boolean(feedback?.textContent.includes("Action failed") && retry && !retry.disabled)}`, "failed Work card retry feedback");
     const retryFailure = await invoke(win, `async()=>{const a=document.querySelector('[data-job-id="${ids.cardRetry}"] [data-job-feedback]')?.textContent||""; const b=document.querySelector('[data-job-id="${ids.cardPeer}"] [data-job-feedback]')?.textContent||""; return {failed:a.includes("Action failed"),cross:b.includes("Injected P50"),button:[...document.querySelectorAll('[data-job-id="${ids.cardRetry}"] button')].find((entry)=>entry.textContent.includes("Retry"))?.disabled}}`);
@@ -180,19 +181,21 @@ export async function runVerifyP50JobActions({ app }) {
     await invoke(win, `async()=>{const card=document.querySelector('[data-job-id="${ids.cardPeer}"]'); const dismiss=[...card.querySelectorAll("button")].find((button)=>button.textContent.includes("Dismiss attention")); dismiss?.click(); return Boolean(dismiss)}`);
     await sleep(250);
     check("Work Dismiss clearly clears Attention without affecting another Job", jobs.getJob(ids.cardPeer).status === "failed" && counts.dismiss === 1, JSON.stringify({ status: jobs.getJob(ids.cardPeer).status, dismissCalls: counts.dismiss }));
-    const detailAction = async (jobId, buttonId, label, feedbackText) => {
+    const detailAction = async (jobId, title, buttonId, label, feedbackText) => {
+      await invoke(win, `async()=>{document.getElementById("job-detail-dialog")?.close(); return true}`);
       await invoke(win, `async()=>{const card=document.querySelector('[data-job-id="${jobId}"]'); const open=[...card.querySelectorAll("button")].find((button)=>button.textContent.includes("Open")); open?.click(); return Boolean(open)}`);
-      await waitForRenderer(win, `async()=>document.getElementById("job-detail-dialog")?.open===true && document.getElementById("job-detail-title")?.textContent.includes("P50")`, `${label} detail open`);
+      await waitForRenderer(win, `async()=>document.getElementById("job-detail-dialog")?.open===true && document.getElementById("job-detail-title")?.textContent===${JSON.stringify(title)} && !document.getElementById("${buttonId}")?.classList.contains("hidden") && document.getElementById("${buttonId}")?.disabled===false`, `${label} detail open`);
       await invoke(win, `async()=>{document.getElementById("${buttonId}")?.click(); return true}`);
       await waitForRenderer(win, `async()=>Boolean(document.getElementById("job-detail-feedback")?.textContent.includes(${JSON.stringify(feedbackText)}))`, `${label} detail feedback`);
+      await invoke(win, `async()=>{document.getElementById("job-detail-dialog")?.close(); return true}`);
     };
-    await detailAction(ids.detailApprove, "job-detail-approve", "Approve", "Retry requested");
+    await detailAction(ids.detailApprove, "P50 Detail Approve", "job-detail-approve", "Approve", "Retry requested");
     check("Job Details Approve uses the shared pending action path", counts.approve === 3 && jobs.getJob(ids.detailApprove).status !== "needs_attention", JSON.stringify({ approveCalls: counts.approve, status: jobs.getJob(ids.detailApprove).status }));
-    await detailAction(ids.detailPause, "job-detail-pause", "Pause", "Job paused");
+    await detailAction(ids.detailPause, "P50 Detail Pause", "job-detail-pause", "Pause", "Job paused");
     check("Job Details Pause is available only for a legal working state", counts.pause === 1 && jobs.getJob(ids.detailPause).status === "waiting", JSON.stringify({ pauseCalls: counts.pause, status: jobs.getJob(ids.detailPause).status }));
-    await detailAction(ids.detailResume, "job-detail-resume", "Resume", "Job resumed");
+    await detailAction(ids.detailResume, "P50 Detail Resume", "job-detail-resume", "Resume", "Job resumed");
     check("Job Details Resume is available only for a legal waiting state", counts.resume === 1 && jobs.getJob(ids.detailResume).status !== "waiting", JSON.stringify({ resumeCalls: counts.resume, status: jobs.getJob(ids.detailResume).status }));
-    await detailAction(ids.detailDismiss, "job-detail-dismiss", "Dismiss", "Attention dismissed");
+    await detailAction(ids.detailDismiss, "P50 Detail Dismiss", "job-detail-dismiss", "Dismiss", "Attention dismissed");
     check("Job Details Dismiss clears Attention with scoped feedback", counts.dismiss === 2 && jobs.getJob(ids.detailDismiss).status === "failed", JSON.stringify({ dismissCalls: counts.dismiss, status: jobs.getJob(ids.detailDismiss).status }));
     const detailText = await invoke(win, `async()=>({meta:document.getElementById("job-detail-meta")?.textContent||"",feedback:document.getElementById("job-detail-feedback")?.textContent||"",body:document.getElementById("job-detail-body")?.textContent||""})`);
     check("Job Details feedback and identity text contain no opaque IDs or internal authority", ![owner.id, peer.id, workspace.id, "node-p50-internal", "provider", "session", "credential", "raw path"].some((value)=>String(detailText.meta + detailText.feedback + detailText.body).toLowerCase().includes(String(value).toLowerCase())), JSON.stringify(detailText));
