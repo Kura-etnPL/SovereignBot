@@ -1001,18 +1001,16 @@ function renderMessages(conversation, forceScroll = false, { voiceMessages = con
 
 function highlightConversationMessage(messageId) {
   if (typeof messageId !== "string" || !messageId) return;
-  requestAnimationFrame(() => {
-    const row = [...$("conversation-messages")?.querySelectorAll("[data-message-id]") ?? []]
-      .find((entry) => entry.dataset.messageId === messageId);
-    if (!row) return;
-    row.classList.add("conversation-message-highlight");
-    row.setAttribute("aria-current", "true");
-    row.scrollIntoView?.({ block: "center", behavior: "auto" });
-    window.setTimeout(() => {
-      row.classList.remove("conversation-message-highlight");
-      row.removeAttribute("aria-current");
-    }, 2400);
-  });
+  const row = [...$("conversation-messages")?.querySelectorAll("[data-message-id]") ?? []]
+    .find((entry) => entry.dataset.messageId === messageId);
+  if (!row) return;
+  row.classList.add("conversation-message-highlight");
+  row.setAttribute("aria-current", "true");
+  row.scrollIntoView?.({ block: "center", behavior: "auto" });
+  window.setTimeout(() => {
+    row.classList.remove("conversation-message-highlight");
+    row.removeAttribute("aria-current");
+  }, 5000);
 }
 
 async function refreshConversation(forceScroll = false) {
