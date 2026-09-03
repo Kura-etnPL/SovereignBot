@@ -4,7 +4,7 @@
 
 审计日期：2026-09-04（Asia/Shanghai）。权威目标是 canonical product plan：`C:\Users\Eternal\.codex\attachments\ddd527a5-594d-450b-b863-353be4c1161c\goal-objective.md`；权威 checkout 是 `E:\Eternal\Auto_Empire\projects\SovereignBot-luna-attention`，审计基线为 `0545d87bcd8f0541c7f2f15bb5a85c2d457c98a6`，工作树在提交前保持干净。
 
-范围覆盖 canonical §§1–45 及 P0–P6 优先级，重点复核 Product Burst #118、Coworker/Team 协作、Provider adapter 边界、Projects/Memory/Search/Apps/Live Computer/Skills/Playbooks/Routines、Worker/External Control、可靠性/安全/性能/首启/Settings/Release readiness。没有启动 Electron，没有访问网络、Cloudflare、GitHub、Setup.exe、真实 Provider、浏览器登录或用户 SovereignBot 数据。
+范围覆盖 canonical §§1–45 及 P0–P6 优先级，重点复核 Product Burst #118、Coworker/Team 协作、Provider adapter 边界、Projects/Memory/Search/Apps/Live Computer/Skills/Playbooks/Routines、Worker/External Control、可靠性/安全/性能/首启/Settings/Release readiness。本任务未启动 Electron；最终 HEAD 的两条 hidden Electron gate 由 Sol 在同一 local fixture 边界完成。全程没有访问网络、Cloudflare、GitHub、Setup.exe、真实 Provider、浏览器登录或用户 SovereignBot 数据。
 
 证据采用以下优先级：真实本地产品入口和 main/preload/IPC/schema 路径 > hidden Electron 或 packaged acceptance artifact > 真实 Core/Desktop canary 与 focused regression > 静态源码检查。`LOCAL_FIXTURE`、fake runtime、历史 acceptance 只能证明离线边界，不能升级为真实 Provider、真实账号、真实网络或正式发布证明。状态含义为：
 
@@ -12,7 +12,7 @@
 - 本地缺失/证据不足：能力尚未实现，或当前允许的本地证据仍不足；不以“搜不到 TODO”代替判断。
 - 外部暂缓：本地实现或安全契约存在，但验收依赖用户明确禁止的账号、网络、设备、签名、Setup.exe、受保护 CI 或发布权限。
 
-本次 Node-only 复核：root `npm test` 为 234 total / 232 pass / 2 skipped / 0 failed；desktop `npm test` 为 348 total / 347 pass / 1 skipped / 0 failed；desktop `npm run check` 为 301 files；desktop `npm run secret-scan` clean；`git diff --check` clean。跳过项是环境能力（Docker/symlink），不是被伪装成通过的产品结果。P36–P51 的机器证据均为 `ok:true`；最新 P51 为 [`verify-p51-routine-history.json`](verify-p51-routine-history.json)。
+本次 Node-only 复核：root `npm test` 为 234 total / 232 pass / 2 skipped / 0 failed；desktop `npm test` 为 348 total / 347 pass / 1 skipped / 0 failed；desktop `npm run check` 为 301 files；desktop `npm run secret-scan` clean；`git diff --check` clean。最终 HEAD 的两条 hidden Electron gates 均为 `gateExit=0` 且 JSON `ok:true`，对应已提交的 [`verify-update-apply-dialog.json`](verify-update-apply-dialog.json) 与 [`verify-channels-product-path.json`](verify-channels-product-path.json)。targeted Update/Channels Node tests 为 5/5。跳过项是环境能力（Docker/symlink），不是被伪装成通过的产品结果。P36–P51 的机器证据均为 `ok:true`；最新 P51 为 [`verify-p51-routine-history.json`](verify-p51-routine-history.json)。
 
 ## 2) 已被当前证据证明完成的本地要求
 
