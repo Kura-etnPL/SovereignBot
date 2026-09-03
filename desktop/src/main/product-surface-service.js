@@ -258,11 +258,19 @@ export function createProductSurfaceService({ dataDir, teamService, coworkerStor
         const teams = teamService.list().teams; const channels = teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         const allowedConversationIds = new Set(channels.filter((channel) => (!teamId || channel.teamId === teamId) && (!channelId || channel.id === channelId)).map((channel) => channel.conversationId));
         const locationScoped = teamId !== undefined || channelId !== undefined;
-        // Fetch the bounded store maximum before applying the location filter. A
-        // recent unrelated artifact must not hide an older result from the selected
-        // Team or Channel merely because the store sliced first.
+        // Constrain by the derived ArtifactStore index before selecting the
+        // latest family version. A recent unrelated artifact must not hide an
+        // older result from the selected Team or Channel.
         const latestByFamily = new Map();
-        for (const artifact of artifactStore.list({ limit: 500, coworkerId, visibility }).artifacts) {
+        const candidates = artifactStore.indexRecords
+            ? artifactStore.indexRecords({
+                ...(locationScoped ? { conversationIds: [...allowedConversationIds] } : {}),
+                ...(coworkerId ? { coworkerId } : {}),
+                visibility,
+                limit: 5_000,
+            }).artifacts
+            : artifactStore.list({ limit: 500, coworkerId, visibility }).artifacts;
+        for (const artifact of candidates) {
             const familyId = artifact.artifactFamilyId ?? artifact.id;
             const current = latestByFamily.get(familyId);
             if (!current || (Number.isInteger(artifact.version) ? artifact.version : 1) > (Number.isInteger(current.version) ? current.version : 1)) latestByFamily.set(familyId, artifact);

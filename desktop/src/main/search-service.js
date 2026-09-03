@@ -143,7 +143,9 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         const channels = teams.flatMap((team) => (team.channels ?? []).map((channel) => ({ ...channel, teamId: team.id, teamName: team.name })));
         const conversations = conversationStore.list().conversations ?? [];
         const coworkers = coworkerStore.list({ includeArchived: true }).coworkers ?? [];
-        const artifacts = artifactStore?.list ? (artifactStore.list({ visibility: "all", limit: 500 }).artifacts ?? []) : [];
+        const artifacts = artifactStore?.indexRecords
+            ? (artifactStore.indexRecords({ visibility: "all", limit: 5_000 }).artifacts ?? [])
+            : artifactStore?.list ? (artifactStore.list({ visibility: "all", limit: 500 }).artifacts ?? []) : [];
         const skills = skillStore?.list ? (skillStore.list({ includeArchived: true }).skills ?? []) : [];
         const playbooks = productSurfaces?.listPlaybooks ? (productSurfaces.listPlaybooks({ includeArchived: true }).playbooks ?? []) : [];
         const routines = getRoutines?.()?.routines ?? [];

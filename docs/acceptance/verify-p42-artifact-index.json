@@ -1,0 +1,14 @@
+{
+  "schema": "sovereignbot.desktop.p42-artifact-index-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "ok": false,
+  "status": "blocked",
+  "attemptedOnce": true,
+  "blockedBy": "Luna-host Electron Chromium ERR_FAILED (-2) loading sovereignbot://app/; child evidence write returned EPERM",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "P42 runtime index checks": "not reached"
+  },
+  "externalActions": []
+}

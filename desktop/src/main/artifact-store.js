@@ -164,13 +164,78 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
     const artifacts = loaded?.schema === ARTIFACTS_SCHEMA && Array.isArray(loaded.artifacts)
         ? loaded.artifacts.map(sanitizePersisted).filter(Boolean).slice(-MAX_ARTIFACTS)
         : [];
+    const derivedIndex = {
+        all: new Set(),
+        published: new Set(),
+        active: new Set(),
+        archived: new Set(),
+        order: new Map(),
+        byId: new Map(),
+        byConversation: new Map(),
+        byCoworker: new Map(),
+        byFamily: new Map(),
+        byMimeType: new Map(),
+    };
+    let nextOrder = 0;
+
+    function addToIndex(map, key, id) {
+        if (!key) return;
+        if (!map.has(key)) map.set(key, new Set());
+        map.get(key).add(id);
+    }
+
+    function removeFromIndex(map, key, id) {
+        if (!key) return;
+        const values = map.get(key);
+        if (!values) return;
+        values.delete(id);
+        if (!values.size) map.delete(key);
+    }
+
+    function refreshVisibility(entry) {
+        const id = entry.id;
+        derivedIndex.published.delete(id);
+        derivedIndex.active.delete(id);
+        derivedIndex.archived.delete(id);
+        if (entry.published === false) return;
+        derivedIndex.published.add(id);
+        (entry.archived === true ? derivedIndex.archived : derivedIndex.active).add(id);
+    }
+
+    function indexEntry(entry) {
+        const id = entry.id;
+        derivedIndex.all.add(id);
+        derivedIndex.byId.set(id, entry);
+        derivedIndex.order.set(id, nextOrder++);
+        addToIndex(derivedIndex.byConversation, entry.conversationId, id);
+        addToIndex(derivedIndex.byCoworker, entry.createdByCoworkerId, id);
+        addToIndex(derivedIndex.byFamily, entry.artifactFamilyId ?? entry.id, id);
+        addToIndex(derivedIndex.byMimeType, entry.mimeType, id);
+        refreshVisibility(entry);
+    }
+
+    function unindexEntry(entry) {
+        const id = entry.id;
+        derivedIndex.all.delete(id);
+        derivedIndex.published.delete(id);
+        derivedIndex.active.delete(id);
+        derivedIndex.archived.delete(id);
+        derivedIndex.byId.delete(id);
+        derivedIndex.order.delete(id);
+        removeFromIndex(derivedIndex.byConversation, entry.conversationId, id);
+        removeFromIndex(derivedIndex.byCoworker, entry.createdByCoworkerId, id);
+        removeFromIndex(derivedIndex.byFamily, entry.artifactFamilyId ?? entry.id, id);
+        removeFromIndex(derivedIndex.byMimeType, entry.mimeType, id);
+    }
+
+    for (const entry of artifacts) indexEntry(entry);
 
     function save() {
         saveJsonState(persistPath, { schema: ARTIFACTS_SCHEMA, artifacts });
     }
 
     function requireArtifact(id) {
-        const artifact = artifacts.find((entry) => entry.id === String(id));
+        const artifact = derivedIndex.byId.get(String(id));
         if (!artifact) throw new Error(`unknown artifact id: ${id}`);
         return artifact;
     }
@@ -188,11 +253,54 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
     }
 
     function nextVersionFor(familyId) {
-        const currentVersion = artifacts
-            .filter((entry) => (entry.artifactFamilyId ?? entry.id) === familyId)
+        const currentVersion = [...(derivedIndex.byFamily.get(familyId) ?? [])]
+            .map((id) => derivedIndex.byId.get(id))
+            .filter(Boolean)
             .reduce((highest, entry) => Math.max(highest, Number.isInteger(entry.version) ? entry.version : 1), 0);
         if (currentVersion >= MAX_ARTIFACT_VERSION) throw new Error("artifact version limit reached");
         return currentVersion + 1;
+    }
+
+    function normalizeIndexIds(value, label, prefix, max = 64) {
+        if (value === undefined) return undefined;
+        if (!Array.isArray(value) || value.length > max) throw new Error(`${label} must contain at most ${max} identifiers`);
+        const ids = [...new Set(value)];
+        if (ids.some((entry) => !validId(entry, prefix))) throw new Error(`${label} contains an invalid identifier`);
+        return ids;
+    }
+
+    function indexedEntries({ conversationId, conversationIds, coworkerId, coworkerIds, artifactFamilyId, mimeType, visibility = "active", limit = MAX_ARTIFACTS } = {}) {
+        if (!Number.isInteger(limit) || limit < 1 || limit > MAX_ARTIFACTS) throw new Error(`indexed artifact limit must be 1..${MAX_ARTIFACTS}`);
+        if (!Object.hasOwn({ active: true, archived: true, all: true }, visibility)) throw new Error("artifact visibility must be active, archived, or all");
+        const normalizedConversationIds = normalizeIndexIds(conversationIds, "conversationIds", "conv");
+        const normalizedCoworkerIds = normalizeIndexIds(coworkerIds, "coworkerIds", "coworker");
+        if (conversationId !== undefined && !validId(conversationId, "conv")) throw new Error("conversationId is invalid");
+        if (coworkerId !== undefined && !validId(coworkerId, "coworker")) throw new Error("coworkerId is invalid");
+        if (artifactFamilyId !== undefined && !isArtifactId(artifactFamilyId)) throw new Error("artifactFamilyId is invalid");
+        if (mimeType !== undefined && (typeof mimeType !== "string" || !mimeType.trim() || mimeType.length > 120)) throw new Error("mimeType is invalid");
+        const visibilitySet = visibility === "all" ? derivedIndex.published : derivedIndex[visibility];
+        const filterSets = [visibilitySet];
+        if (conversationId !== undefined) filterSets.push(derivedIndex.byConversation.get(conversationId) ?? new Set());
+        if (normalizedConversationIds !== undefined) {
+            const values = new Set();
+            for (const id of normalizedConversationIds) for (const artifactId of derivedIndex.byConversation.get(id) ?? []) values.add(artifactId);
+            filterSets.push(values);
+        }
+        if (coworkerId !== undefined) filterSets.push(derivedIndex.byCoworker.get(coworkerId) ?? new Set());
+        if (normalizedCoworkerIds !== undefined) {
+            const values = new Set();
+            for (const id of normalizedCoworkerIds) for (const artifactId of derivedIndex.byCoworker.get(id) ?? []) values.add(artifactId);
+            filterSets.push(values);
+        }
+        if (artifactFamilyId !== undefined) filterSets.push(derivedIndex.byFamily.get(artifactFamilyId) ?? new Set());
+        if (mimeType !== undefined) filterSets.push(derivedIndex.byMimeType.get(mimeType.trim()) ?? new Set());
+        const base = filterSets.reduce((smallest, values) => values.size < smallest.size ? values : smallest, filterSets[0]);
+        return [...base]
+            .filter((id) => filterSets.every((values) => values.has(id)))
+            .map((id) => derivedIndex.byId.get(id))
+            .filter(Boolean)
+            .sort((left, right) => (derivedIndex.order.get(right.id) ?? 0) - (derivedIndex.order.get(left.id) ?? 0))
+            .slice(0, limit);
     }
 
     function versionMetadata(source, { version, parentArtifactId, sourceKind = source.sourceKind } = {}) {
@@ -242,6 +350,7 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             createdAt: now(),
         };
         artifacts.push(entry);
+        indexEntry(entry);
         save();
         return publicView(entry);
     }
@@ -251,11 +360,13 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
 
         list({ conversationId, coworkerId, visibility = "active", limit = 100 } = {}) {
             if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact list limit must be 1..500");
-            if (!["active", "archived", "all"].includes(visibility)) throw new Error("artifact visibility must be active, archived, or all");
-            let result = artifacts.filter((entry) => entry.published !== false && (visibility === "all" ? true : visibility === "archived" ? entry.archived === true : entry.archived !== true));
-            if (conversationId !== undefined) result = result.filter((entry) => entry.conversationId === conversationId);
-            if (coworkerId !== undefined) result = result.filter((entry) => entry.createdByCoworkerId === coworkerId);
-            return { schema: ARTIFACTS_SCHEMA, artifacts: result.slice(-limit).reverse().map(publicView) };
+            return { schema: ARTIFACTS_SCHEMA, artifacts: indexedEntries({ conversationId, coworkerId, visibility, limit }).map(publicView) };
+        },
+
+        indexRecords({ conversationId, conversationIds, coworkerId, coworkerIds, artifactFamilyId, mimeType, visibility = "active", limit = MAX_ARTIFACTS } = {}) {
+            const allowed = new Set(["conversationId", "conversationIds", "coworkerId", "coworkerIds", "artifactFamilyId", "mimeType", "visibility", "limit"]);
+            for (const key of Object.keys(arguments[0] ?? {})) if (!allowed.has(key)) throw new Error(`unknown indexed artifact field: ${key}`);
+            return { schema: ARTIFACTS_SCHEMA, artifacts: indexedEntries({ conversationId, conversationIds, coworkerId, coworkerIds, artifactFamilyId, mimeType, visibility, limit }).map(publicView) };
         },
 
         get(id) {
@@ -286,11 +397,10 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact history limit must be 1..500");
             const source = requirePublicArtifact(id);
             const familyId = source.artifactFamilyId ?? source.id;
-            const history = artifacts
-                .filter((entry) => entry.published !== false && (entry.artifactFamilyId ?? entry.id) === familyId)
+            const history = indexedEntries({ artifactFamilyId: familyId, visibility: "all", limit: MAX_ARTIFACTS })
                 .sort((left, right) => (right.version - left.version) || String(right.createdAt).localeCompare(String(left.createdAt)) || right.id.localeCompare(left.id))
-                .slice(0, limit)
                 .map(publicView);
+            history.splice(limit);
             return { schema: ARTIFACTS_SCHEMA, artifactId: source.id, artifactFamilyId: familyId, history };
         },
 
@@ -298,10 +408,11 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             const source = requirePublicArtifact(id);
             const familyId = source.artifactFamilyId ?? source.id;
             const archivedAt = new Date().toISOString();
-            const changed = artifacts.filter((entry) => entry.published !== false && (entry.artifactFamilyId ?? entry.id) === familyId);
+            const changed = indexedEntries({ artifactFamilyId: familyId, visibility: "all", limit: MAX_ARTIFACTS });
             for (const entry of changed) {
                 entry.archived = true;
                 entry.archivedAt = archivedAt;
+                refreshVisibility(entry);
             }
             if (changed.length) save();
             return publicView(requireArtifact(source.id));
@@ -311,10 +422,11 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             const source = requireArtifact(id);
             if (source.published === false) throw new Error("artifact is not published");
             const familyId = source.artifactFamilyId ?? source.id;
-            const changed = artifacts.filter((entry) => entry.published !== false && (entry.artifactFamilyId ?? entry.id) === familyId);
+            const changed = indexedEntries({ artifactFamilyId: familyId, visibility: "all", limit: MAX_ARTIFACTS });
             for (const entry of changed) {
                 entry.archived = false;
                 delete entry.archivedAt;
+                refreshVisibility(entry);
             }
             if (changed.length) save();
             return publicView(requireArtifact(source.id));
@@ -429,13 +541,18 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
                 for (const entry of entries) {
                     if (!previous.has(entry.id)) previous.set(entry.id, entry.published !== false);
                     entry.published = true;
+                    refreshVisibility(entry);
                     published.push(publicView(entry));
                 }
                 if (ids.length) save();
                 return published;
             }
             catch (error) {
-                for (const [id, wasPublished] of previous) requireArtifact(id).published = wasPublished;
+                for (const [id, wasPublished] of previous) {
+                    const entry = requireArtifact(id);
+                    entry.published = wasPublished;
+                    refreshVisibility(entry);
+                }
                 throw error;
             }
         },
@@ -451,7 +568,11 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             });
             for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
             const removed = new Set(entries.map((entry) => entry.id));
-            for (let index = artifacts.length - 1; index >= 0; index -= 1) if (removed.has(artifacts[index].id)) artifacts.splice(index, 1);
+            for (let index = artifacts.length - 1; index >= 0; index -= 1) {
+                if (!removed.has(artifacts[index].id)) continue;
+                unindexEntry(artifacts[index]);
+                artifacts.splice(index, 1);
+            }
             if (entries.length) save();
             return entries.map(publicView);
         },
