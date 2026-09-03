@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-03T00:19:49.953Z",
+  "checks": {
+    "gate window stays hidden": true,
+    "renderer exposes structured Skill Library APIs": true,
+    "New Skill opens structured fields without raw JSON": true,
+    "Skill editor supports bounded inputs, steps, validators, and capability declarations": true,
+    "structured Skill persists through renderer IPC": true,
+    "Skill edit saves the complete form": true,
+    "Team and Coworker assign/unassign are explicit": true,
+    "Retest records Skill test metadata": true,
+    "Create Routine reaches existing Routine event boundary": true,
+    "archived Skill editor is read-only": true,
+    "Duplicate Archive Restore remain wired": true,
+    "native Skill export is safe declarative JSON": true,
+    "native Skill import reaches existing store boundary": true,
+    "Skill original duplicate import test metadata survive restart": true
+  },
+  "publishEligible": false
+}
