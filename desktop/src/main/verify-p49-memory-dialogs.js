@@ -51,7 +51,9 @@ function makeHandlers(fixture, failures) {
     "conversation:get": ({ conversationId }) => conversations.get(conversationId),
     "conversation:createDirect": ({ coworkerId }) => conversations.createDirect(coworkerId),
     "conversation:createTeam": ({ title, coworkerIds }) => conversations.createTeam({ title, coworkerIds }),
+    "conversation:acknowledge": () => ({ ok: true }),
     "team:list": () => teams.list(),
+    "team:activity": () => ({ events: [] }),
     "channel:list": (payload) => teams.listChannels(payload),
     "project:list": (payload) => projects.list(payload),
     "project:get": ({ projectId }) => projects.get(projectId),
@@ -85,6 +87,15 @@ async function loadWindow(win) {
 
 async function invoke(win, expression) { return win.webContents.executeJavaScript(`(${expression})()`); }
 
+async function waitForRenderer(win, expression, label, timeoutMs = 8_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await invoke(win, expression)) return;
+    await sleep(100);
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+}
+
 export async function runVerifyP49MemoryDialogs({ app }) {
   const checks = {};
   const notes = [];
@@ -107,33 +118,47 @@ export async function runVerifyP49MemoryDialogs({ app }) {
     const surface = await invoke(win, `async()=>({edit:!!document.getElementById("memory-edit-dialog"),del:!!document.getElementById("memory-delete-dialog"),prompt:String(document.body.innerHTML).includes("window.prompt"),confirm:String(document.body.innerHTML).includes("window.confirm")})`);
     check("hidden renderer exposes both Memory product dialogs", surface.edit && surface.del && !surface.prompt && !surface.confirm, JSON.stringify(surface));
 
-    await invoke(win, `async()=>{const button=[...document.querySelectorAll("#coworker-list button")].find((entry)=>entry.textContent.includes("Chief")) ?? document.querySelector("#coworker-list button"); button?.click(); return Boolean(button)}`);
-    await sleep(550);
+    const chiefId = JSON.stringify(chief.id);
+    await invoke(win, `async()=>{const button=document.querySelector('#coworker-list [data-coworker-id="${chief.id}"]'); button?.click(); return Boolean(button)}`);
+    await waitForRenderer(win, `async()=>Boolean(document.querySelector("#view-conversation:not(.hidden)") && document.querySelector('#coworker-list [data-coworker-id="${chief.id}"]')?.classList.contains("active"))`, "Chief conversation selection");
+    await waitForRenderer(win, `async()=>Boolean(document.querySelector("#view-conversation:not(.hidden)") && document.getElementById("conversation-title")?.textContent)`, "conversation refresh");
     await invoke(win, `async()=>{document.getElementById("nav-memory")?.click(); return true}`);
     await sleep(450);
     const mainEdit = await invoke(win, `async()=>{const card=document.querySelector("#memory-list .memory-row"); const button=[...(card?.querySelectorAll("button")||[])].find((entry)=>entry.textContent.includes("Edit")); button?.click(); await new Promise(r=>setTimeout(r,80)); return {open:!!document.getElementById("memory-edit-dialog")?.open,title:document.getElementById("memory-edit-title")?.value,content:document.getElementById("memory-edit-content")?.value}}`);
     check("main Memory edit keeps the existing product dialog regression", mainEdit.open && mainEdit.title === "P49 Memory" && mainEdit.content === "Before edit", JSON.stringify(mainEdit));
     await invoke(win, `async()=>{document.getElementById("memory-edit-dialog")?.close(); return true}`);
 
-    await invoke(win, `async()=>{document.querySelector("#coworker-list button")?.click(); return true}`);
-    await sleep(550);
+    await invoke(win, `async()=>{const button=document.querySelector('#coworker-list [data-coworker-id="${chief.id}"]'); button?.click(); return Boolean(button)}`);
+    await waitForRenderer(win, `async()=>Boolean(document.querySelector("#view-conversation:not(.hidden)") && document.querySelector('#coworker-list [data-coworker-id="${chief.id}"]')?.classList.contains("active"))`, "Chief conversation re-selection");
+    await waitForRenderer(win, `async()=>Boolean(document.querySelector("#view-conversation:not(.hidden)") && document.getElementById("conversation-title")?.textContent)`, "conversation refresh before Details");
     await invoke(win, `async()=>{document.getElementById("open-details")?.click(); return true}`);
-    await sleep(450);
-    const detailEdit = await invoke(win, `async()=>{const card=document.querySelector("#details-coworker-memory-list .memory-row"); const button=[...(card?.querySelectorAll("button")||[])].find((entry)=>entry.textContent.includes("Edit")); button?.click(); await new Promise(r=>setTimeout(r,80)); return {open:!!document.getElementById("memory-edit-dialog")?.open,content:document.getElementById("memory-edit-content")?.value}}`);
+    await waitForRenderer(win, `async()=>Boolean(!document.getElementById("details-panel")?.classList.contains("hidden") && document.querySelector("#details-coworker-memory-list .memory-row")?.textContent.includes("Before edit"))`, "Conversation Details Memory row");
+    await invoke(win, `async()=>{const card=document.querySelector("#details-coworker-memory-list .memory-row"); const button=[...(card?.querySelectorAll("button")||[])].find((entry)=>entry.textContent.includes("Edit")); button?.click(); return Boolean(button)}`);
+    await waitForRenderer(win, `async()=>document.getElementById("memory-edit-dialog")?.open===true`, "Conversation Details Edit dialog");
+    const detailEdit = await invoke(win, `async()=>({open:!!document.getElementById("memory-edit-dialog")?.open,content:document.getElementById("memory-edit-content")?.value})`);
     check("Conversation Details Edit reuses the shared Memory dialog", detailEdit.open && detailEdit.content === "Before edit", JSON.stringify(detailEdit));
     failures.edit = true;
     const editFailure = await invoke(win, `async()=>{document.getElementById("memory-edit-content").value="After edit"; const button=document.querySelector("#memory-edit-form button[type=submit]"); button?.click(); button?.click(); await new Promise(r=>setTimeout(r,180)); return {open:!!document.getElementById("memory-edit-dialog")?.open,error:document.getElementById("memory-edit-form-error")?.textContent||"",disabled:button?.disabled}}`);
     check("injected edit failure stays visible and suppresses duplicate submit", editFailure.open && editFailure.error.includes("Injected edit failure") && editFailure.disabled, JSON.stringify(editFailure));
-    const editRetry = await invoke(win, `async()=>{const button=document.querySelector("#memory-edit-form button[type=submit]"); button?.click(); await new Promise(r=>setTimeout(r,250)); return {open:!!document.getElementById("memory-edit-dialog")?.open,content:(await window.sovereignbot.memory.list({scope:"coworker",ownerId:${JSON.stringify(chief.id)},limit:20})).memories?.[0]?.content}}`);
+    await invoke(win, `async()=>{document.querySelector("#memory-edit-form button[type=submit]")?.click(); return true}`);
+    await waitForRenderer(win, `async()=>Boolean(document.getElementById("memory-edit-dialog")?.open===false && (await window.sovereignbot.memory.list({scope:"coworker",ownerId:${chiefId},limit:20})).memories?.[0]?.content === "After edit")`, "edit retry completion");
+    const editRetry = await invoke(win, `async()=>({open:!!document.getElementById("memory-edit-dialog")?.open,content:(await window.sovereignbot.memory.list({scope:"coworker",ownerId:${chiefId},limit:20})).memories?.[0]?.content})`);
     check("edit retry closes the dialog and persists through existing Memory authority", !editRetry.open && editRetry.content === "After edit", JSON.stringify(editRetry));
 
-    const cancel = await invoke(win, `async()=>{const card=document.querySelector("#details-coworker-memory-list .memory-row"); const button=[...(card?.querySelectorAll("button")||[])].find((entry)=>entry.textContent.includes("Delete")); button?.click(); await new Promise(r=>setTimeout(r,60)); const dialog=document.getElementById("memory-delete-dialog"); const open=dialog?.open===true; document.querySelector("#memory-delete-form [data-close-dialog]")?.click(); return {open,after:dialog?.open===true}}`);
+    await waitForRenderer(win, `async()=>Boolean(document.querySelector("#details-coworker-memory-list .memory-row")?.textContent.includes("After edit"))`, "Details row after edit retry");
+    await invoke(win, `async()=>{const card=document.querySelector("#details-coworker-memory-list .memory-row"); const button=[...(card?.querySelectorAll("button")||[])].find((entry)=>entry.textContent.includes("Delete")); button?.click(); return Boolean(button)}`);
+    await waitForRenderer(win, `async()=>document.getElementById("memory-delete-dialog")?.open===true`, "delete dialog before cancel");
+    const cancel = await invoke(win, `async()=>{const dialog=document.getElementById("memory-delete-dialog"); const open=dialog?.open===true; document.querySelector("#memory-delete-form [data-close-dialog]")?.click(); return {open,after:dialog?.open===true}}`);
     check("Delete cancel closes the product dialog without IPC", cancel.open && !cancel.after && failures.deleteCalls === 0, JSON.stringify(cancel));
 
     failures.delete = true;
-    const deleteFailure = await invoke(win, `async()=>{const card=document.querySelector("#details-coworker-memory-list .memory-row"); const button=[...(card?.querySelectorAll("button")||[])].find((entry)=>entry.textContent.includes("Delete")); button?.click(); await new Promise(r=>setTimeout(r,60)); const confirm=document.getElementById("memory-delete-confirm"); confirm?.click(); confirm?.click(); await new Promise(r=>setTimeout(r,180)); return {open:document.getElementById("memory-delete-dialog")?.open===true,error:document.getElementById("memory-delete-form-error")?.textContent||"",disabled:confirm?.disabled}}`);
+    await invoke(win, `async()=>{const card=document.querySelector("#details-coworker-memory-list .memory-row"); const button=[...(card?.querySelectorAll("button")||[])].find((entry)=>entry.textContent.includes("Delete")); button?.click(); return Boolean(button)}`);
+    await waitForRenderer(win, `async()=>document.getElementById("memory-delete-dialog")?.open===true`, "delete dialog before injected failure");
+    const deleteFailure = await invoke(win, `async()=>{const confirm=document.getElementById("memory-delete-confirm"); confirm?.click(); confirm?.click(); await new Promise(r=>setTimeout(r,180)); return {open:document.getElementById("memory-delete-dialog")?.open===true,error:document.getElementById("memory-delete-form-error")?.textContent||"",disabled:confirm?.disabled}}`);
     check("injected delete failure stays retryable and duplicate-safe", deleteFailure.open && deleteFailure.error.includes("Injected delete failure") && deleteFailure.disabled && failures.deleteCalls === 1, JSON.stringify(deleteFailure));
-    const deleteRetry = await invoke(win, `async()=>{document.getElementById("memory-delete-confirm")?.click(); await new Promise(r=>setTimeout(r,300)); return {open:document.getElementById("memory-delete-dialog")?.open===true,memories:(await window.sovereignbot.memory.list({scope:"coworker",ownerId:${JSON.stringify(chief.id)},limit:20})).memories}}`);
+    await invoke(win, `async()=>{document.getElementById("memory-delete-confirm")?.click(); return true}`);
+    await waitForRenderer(win, `async()=>Boolean(document.getElementById("memory-delete-dialog")?.open===false && (await window.sovereignbot.memory.list({scope:"coworker",ownerId:${chiefId},limit:20})).memories.length === 0)`, "delete retry completion");
+    const deleteRetry = await invoke(win, `async()=>({open:document.getElementById("memory-delete-dialog")?.open===true,memories:(await window.sovereignbot.memory.list({scope:"coworker",ownerId:${chiefId},limit:20})).memories})`);
     check("delete retry removes only the selected Memory and refreshes the scope", !deleteRetry.open && deleteRetry.memories.length === 0 && failures.deleteCalls === 2, JSON.stringify({ open: deleteRetry.open, memoryCount: deleteRetry.memories.length, deleteCalls: failures.deleteCalls }));
     check("Memory dialog text exposes no fixture path or internal authority", !String(deleteFailure.error).match(/(?:workspace|provider|credential|session|token|C:\\|\/tmp\/)/i), deleteFailure.error);
   } catch (error) {

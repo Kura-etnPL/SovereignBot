@@ -50,5 +50,9 @@ test("P49 hidden gate writes evidence before window teardown and exits nonzero o
     /"eventTrigger:list": \(\) => \(\{ triggers: \[\] \}\)/,
     /"notification:list": \(\) => \(\{ notifications: \[\] \}\)/,
     /"conversation:createTeam":/,
+    /"conversation:acknowledge": \(\) => \(\{ ok: true \}\)/,
+    /"team:activity": \(\) => \(\{ events: \[\] \}\)/,
   ]) assert.match(gate, expression);
+  assert.match(gate, /waitForRenderer\(win,/);
+  assert.match(gate, /Details Memory row/);
 });
