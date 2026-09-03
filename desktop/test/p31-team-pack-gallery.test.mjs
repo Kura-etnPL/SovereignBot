@@ -35,6 +35,11 @@ test("P31 dedicated Team Pack entry keeps first-party read-only and custom Dupli
   assert.match(page, /button\("Export \/ 导出", \(\) => exportPackToFile\(item\)/);
 });
 
+test("P31 dedicated gallery probes stay scoped to the dedicated page root", () => {
+  assert.match(verifier, /document\.querySelector\('#product-packs-page \[data-team-pack-id=\"\$\{duplicateRecipeId\}\"\]'\)/);
+  assert.match(verifier, /#product-packs-page \[data-team-pack-id=\"\$\{duplicateRecipeId\}\"\] button:last-child/);
+});
+
 test("P31 verifier uses bounded native input for the older-gallery Duplicate control", () => {
   assert.match(verifier, /async function clickVisibleElementWithInput\(win, selector, label\)/);
   assert.match(verifier, /console-message/);
