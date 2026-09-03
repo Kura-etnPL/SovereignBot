@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld("sovereignbot", Object.freeze({
     handshake: invoke("app:handshake"),
     firstRun: Object.freeze({ getStatus: invoke("firstrun:getStatus") }),
     workspaces: Object.freeze({ addViaDialog: invoke("workspace:addViaDialog"), list: invoke("workspace:list"), setDefault: invoke("workspace:setDefault"), remove: invoke("workspace:remove") }),
-    projects: Object.freeze({ list: invoke("project:list"), get: invoke("project:get"), create: invoke("project:create"), open: invoke("project:open"), archive: invoke("project:archive"), restore: invoke("project:restore"), export: invoke("project:export"), backup: invoke("project:backup") }),
+    projects: Object.freeze({ list: invoke("project:list"), get: invoke("project:get"), create: invoke("project:create"), open: invoke("project:open"), archive: invoke("project:archive"), restore: invoke("project:restore"), export: invoke("project:export"), exportViaDialog: invoke("project:exportViaDialog"), backup: invoke("project:backup") }),
     search: Object.freeze({ query: invoke("search:query") }),
     palette: Object.freeze({ list: invoke("palette:list"), execute: invoke("palette:execute") }),
     settings: Object.freeze({ get: invoke("settings:get"), update: invoke("settings:update") }),

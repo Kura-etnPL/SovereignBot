@@ -22,6 +22,7 @@ import { createConversationStore } from "./conversation-store.js";
 import { createArtifactStore } from "./artifact-store.js";
 import { createAttachmentAwareConversationStore, pickArtifactRevision, pickConversationAttachments } from "./attachment-integration.js";
 import { exportArtifactViaDialog } from "./artifact-file-io.js";
+import { exportProjectViaDialog } from "./project-file-io.js";
 import { createSkillStore } from "./skill-store.js";
 import { createSkillAwareConversationStore, createSkillHandlers } from "./skill-integration.js";
 import { createTeachOnceController } from "./teach-once-controller.js";
@@ -609,6 +610,7 @@ async function main() {
                 "project:archive": ({ projectId }) => projectService.archive(projectId),
                 "project:restore": ({ projectId }) => projectService.restore(projectId),
                 "project:export": ({ projectId }) => projectService.export(projectId),
+                "project:exportViaDialog": ({ projectId }) => exportProjectViaDialog({ parentWindow: win, dialog, targetName: projectId, resolveProject: () => projectService.export(projectId) }),
                 "project:backup": ({ projectId }) => projectService.backup(projectId),
                 "search:query": (payload) => search.query(payload),
                 "palette:list": () => palette.list(),

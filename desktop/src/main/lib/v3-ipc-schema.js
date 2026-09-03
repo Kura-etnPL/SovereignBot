@@ -380,6 +380,7 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "project:archive": spec(1024, (payload) => projectTarget(payload)),
     "project:restore": spec(1024, (payload) => projectTarget(payload)),
     "project:export": spec(1024, (payload) => projectTarget(payload)),
+    "project:exportViaDialog": spec(1024, (payload) => projectTarget(payload)),
     "project:backup": spec(1024, (payload) => projectTarget(payload)),
     "search:query": spec(4096, (payload) => searchTarget(payload)),
     "palette:list": spec(1024, empty),

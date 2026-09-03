@@ -38,6 +38,7 @@
     "verify:p31-team-pack-gallery": "node scripts/verify-p31-team-pack-gallery.mjs",
         "verify:p32-apps-catalog": "node scripts/verify-p32-apps-catalog.mjs",
         "verify:p33-search-palette": "node scripts/verify-p33-search-palette.mjs",
+        "verify:p34-projects": "node scripts/verify-p34-projects.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",

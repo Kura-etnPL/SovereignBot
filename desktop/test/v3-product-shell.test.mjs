@@ -91,6 +91,7 @@ test("Projects create uses a bounded form rather than a blocking browser prompt"
     assert.match(html, /id="project-create-form"/);
     assert.match(productHubs, /project-create-form/);
     assert.match(productHubs, /project-create-form-error/);
+    assert.match(productHubs, /exportViaDialog/);
     assert.doesNotMatch(productHubs, /window\.prompt\("Project name/);
 });
 

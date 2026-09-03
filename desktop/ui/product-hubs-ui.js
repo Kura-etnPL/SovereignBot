@@ -430,7 +430,7 @@
   const setResult = (value) => { const node = $("project-result"); if (node) node.textContent = value; };
   const button = (label, fn, { disabled = false, className = "quiet-action" } = {}) => { const node = document.createElement("button"); node.type = "button"; node.className = className; node.textContent = label; node.disabled = disabled; if (!disabled) node.addEventListener("click", () => Promise.resolve().then(fn).catch(error)); return node; };
   const element = (tag, textContent) => { const node = document.createElement(tag); if (textContent !== undefined) node.textContent = textContent; return node; };
-  async function copy(value) { try { await navigator.clipboard.writeText(JSON.stringify(value, null, 2)); setResult("Project export copied / 项目导出已复制"); } catch { setResult("Clipboard is unavailable / 剪贴板不可用"); } }
+  async function exportProject(projectId) { const result = await api.projects.exportViaDialog({ projectId }); setResult(result.canceled ? "Project export canceled / 已取消项目导出" : `Project exported: ${result.fileName} / 项目已导出`); }
   function navigateCanonical(kind, entry) {
     if (kind === "channels" && entry.conversationId && typeof openConversation === "function") { void openConversation(entry.conversationId); return; }
     if (kind === "memory") { document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: state.selectedProjectId, memoryId: entry.id } })); return; }
@@ -521,7 +521,7 @@
       actions.append(button("Inspect / 查看", () => selectProject(project.projectId), { className: "hero-action" }));
       actions.append(button("Open / 打开", async () => { await api.projects.open({ projectId: project.projectId }); setResult(`Opened ${project.name} / 已打开`); await refresh(project.projectId); }, { disabled: project.state === "archived" || !project.available }));
       actions.append(button(project.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (project.state === "archived" ? api.projects.restore : api.projects.archive)({ projectId: project.projectId }); await refresh(project.projectId); }, { disabled: !project.available }));
-      actions.append(button("Export / 导出", async () => copy(await api.projects.export({ projectId: project.projectId })), { disabled: !project.available }));
+      actions.append(button("Export / 导出", () => exportProject(project.projectId), { disabled: !project.available }));
       actions.append(button("Backup / 备份", async () => { await api.projects.backup({ projectId: project.projectId }); setResult("Portable Project backup created / 可移植项目备份已创建"); }, { disabled: !project.available }));
       actions.append(button("Memory / 记忆", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId } }))));
       actions.append(button("Add fact / 添加事实", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId, addFact: true } })), { disabled: project.state === "archived" || !project.available }));
