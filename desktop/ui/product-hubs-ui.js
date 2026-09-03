@@ -465,6 +465,18 @@
     for (const [kind, label] of groups) renderContentSection(root, kind, label, contents[kind] ?? { items: [], total: 0, truncated: false });
   }
   function selectProject(projectId, message = true) { state.selectedProjectId = projectId || ""; const project = state.projects.find((entry) => entry.projectId === state.selectedProjectId); renderDetail(project); const switcher = $("project-switcher"); if (switcher) switcher.value = state.selectedProjectId; if (message && project) setResult(`Selected ${project.name} / 已选择项目`); }
+  function openProjectCreateDialog() { const form = $("project-create-form"); const errorNode = $("project-create-form-error"); form?.reset(); if (errorNode) { errorNode.textContent = ""; errorNode.classList.add("hidden"); } const dialog = $("project-create-dialog"); if (dialog?.showModal) { dialog.showModal(); $("project-create-name")?.focus(); } }
+  async function createProjectFromDialog(event) {
+    event.preventDefault();
+    const name = $("project-create-name")?.value.trim() ?? "";
+    const errorNode = $("project-create-form-error");
+    if (!name) { if (errorNode) { errorNode.textContent = "Enter a Project name / 请输入项目名称"; errorNode.classList.remove("hidden"); } return; }
+    if (errorNode) { errorNode.textContent = ""; errorNode.classList.add("hidden"); }
+    const saveButton = $("project-create-save"); if (saveButton) saveButton.disabled = true;
+    try { const created = await api.projects.create({ name }); $("project-create-dialog")?.close(); $("project-create-form")?.reset(); setResult("Project created / 项目已创建"); await refresh(created?.projectId); }
+    catch (reason) { if (errorNode) { errorNode.textContent = String(reason?.message ?? reason).replace(/^.*Error: /, "").slice(0, 240); errorNode.classList.remove("hidden"); } }
+    finally { if (saveButton) saveButton.disabled = false; }
+  }
   function ensureView() {
     if ($("nav-projects") && $("view-projects")) return;
     const nav = document.createElement("button"); nav.id = "nav-projects"; nav.type = "button"; nav.className = "utility-nav"; nav.textContent = "◈ Projects / 项目";
@@ -480,7 +492,8 @@
     $("view-product-hubs")?.parentElement?.insertBefore(view, $("view-product-hubs"));
     $("project-switcher")?.addEventListener("change", (event) => selectProject(event.target.value));
     $("project-refresh")?.addEventListener("click", () => void refresh());
-    $("project-create")?.addEventListener("click", async () => { const name = window.prompt("Project name / 项目名称"); if (!name) return; try { await api.projects.create({ name }); setResult("Project created / 项目已创建"); await refresh(); } catch (reason) { error(reason); } });
+    $("project-create")?.addEventListener("click", openProjectCreateDialog);
+    $("project-create-form")?.addEventListener("submit", createProjectFromDialog);
   }
   function render(projects, preferredProjectId = state.selectedProjectId) {
     state.projects = Array.isArray(projects) ? projects : [];

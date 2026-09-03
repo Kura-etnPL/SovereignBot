@@ -84,6 +84,14 @@ test("Product hubs expose governed Connected Apps assignment without raw authori
     assert.doesNotMatch(productHubs, /providerToken|sessionId|rawPath|capabilityGrant/);
 });
 
+test("Projects create uses a bounded form rather than a blocking browser prompt", () => {
+    assert.match(html, /id="project-create-dialog"/);
+    assert.match(html, /id="project-create-form"/);
+    assert.match(productHubs, /project-create-form/);
+    assert.match(productHubs, /project-create-form-error/);
+    assert.doesNotMatch(productHubs, /window\.prompt\("Project name/);
+});
+
 test("Apps Catalog is an independent user surface with honest lifecycle review", () => {
     for (const id of ["nav-apps", "view-apps", "apps-catalog-search", "apps-catalog-category", "apps-catalog-status", "apps-catalog-project", "apps-catalog-list"]) assert.match(html, new RegExp(`id="${id}"`), id);
     for (const expression of [/connectedApps\.search/, /connectedApps\.review/, /connectedApps\.connect/, /connectedApps\.disconnect/, /connectedApps\.disable/, /Assign Team/, /Assign Coworker/, /trustedSource/, /installationState/, /metered/]) assert.match(appsCatalog, expression);
