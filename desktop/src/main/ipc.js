@@ -15,7 +15,9 @@ const SKILL_CHANNELS = Object.freeze({
     "skill:restore": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:assign": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
     "skill:export": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "skill:exportViaDialog": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:import": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 24_000 }),
+    "skill:importViaDialog": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:duplicate": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:retest": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
@@ -270,12 +272,49 @@ function integerField(min, max) {
     };
 }
 
-function validateSkillDocument(value, { patch = false } = {}) {
-    exactKeys(value, patch ? new Set(["name", "description", "instructions", "state"]) : new Set(["name", "description", "instructions"]), "skill");
+function validateSkillDocument(value, { patch = false, imported = false } = {}) {
+    const allowed = new Set(["name", "description", "instructions", "inputs", "steps", "expectedOutput", "requestedCapabilities", "validators", "source"]);
+    if (patch) allowed.add("state");
+    if (imported) allowed.add("schema");
+    exactKeys(value, allowed, imported ? "skill import" : "skill");
     const out = {};
     if (!patch || Object.hasOwn(value, "name")) out.name = boundedString(value.name, "skill name", 100, !patch);
     if (!patch || Object.hasOwn(value, "description")) out.description = boundedString(value.description ?? "", "skill description", 280) ?? "";
     if (!patch || Object.hasOwn(value, "instructions")) out.instructions = boundedString(value.instructions, "skill instructions", 16_000, !patch);
+    const content = (child, label, max, required = false) => {
+        const result = boundedString(child, label, max, required);
+        if (result && /(?:[A-Za-z]:[\\/]|\\\\|file:\/\/|https?:\/\/|(?:^|\s)\/(?:Users|home|tmp|var|private|workspace)[\\/]|(?:bearer|api[_-]?key|access[_-]?token|refresh[_-]?token|cookie|password|secret|credential)\s*[:=]|(?:session[_ -]?id|provider[_ -]?(?:id|session|account)|webdriver|backendRef|rawPath|\bcwd\b)|(?:\bcoordinate(?:s)?\b|screen\s+position|click\s+at|\bx\s*[:=]\s*\d+\b|\by\s*[:=]\s*\d+\b))/i.test(result))
+            throw new Error(`${label} contains a private path, credential, runtime handle, or coordinate`);
+        return result;
+    };
+    const stringArray = (child, label, max, itemMax) => {
+        if (child === undefined) return [];
+        if (!Array.isArray(child) || child.length > max) throw new Error(`${label} must be an array of at most ${max} entries`);
+        return child.map((entry, index) => content(entry, `${label}[${index}]`, itemMax, true));
+    };
+    const inputs = (child) => {
+        if (child === undefined) return [];
+        if (!Array.isArray(child) || child.length > 16) throw new Error("skill inputs must be an array of at most 16 entries");
+        return child.map((entry, index) => {
+            exactKeys(entry, new Set(["name", "type", "description", "required"]), `skill input ${index}`);
+            const name = content(entry.name, `skill input ${index} name`, 80, true);
+            if (!/^[A-Za-z][A-Za-z0-9 _-]{0,79}$/.test(name)) throw new Error(`skill input ${index} name is invalid`);
+            if (entry.required !== undefined && typeof entry.required !== "boolean") throw new Error(`skill input ${index} required must be boolean`);
+            return { name, type: content(entry.type ?? "string", `skill input ${index} type`, 40, true), description: content(entry.description ?? "", `skill input ${index} description`, 240) ?? "", required: entry.required !== false };
+        });
+    };
+    if (!patch || Object.hasOwn(value, "inputs")) out.inputs = inputs(value.inputs);
+    if (!patch || Object.hasOwn(value, "steps")) out.steps = stringArray(value.steps, "skill steps", 64, 800);
+    if (!patch || Object.hasOwn(value, "expectedOutput")) out.expectedOutput = content(value.expectedOutput ?? "", "skill expectedOutput", 1_000) ?? "";
+    if (!patch || Object.hasOwn(value, "validators")) out.validators = stringArray(value.validators, "skill validators", 24, 500);
+    if (!patch || Object.hasOwn(value, "requestedCapabilities")) {
+        if (value.requestedCapabilities !== undefined && (!Array.isArray(value.requestedCapabilities) || value.requestedCapabilities.length > 2 || value.requestedCapabilities.some((entry) => !["computer", "workspace"].includes(entry)))) throw new Error("skill requestedCapabilities is invalid");
+        out.requestedCapabilities = [...new Set(value.requestedCapabilities ?? [])];
+    }
+    if (!patch || Object.hasOwn(value, "source")) {
+        if (value.source !== undefined && !["manual", "taught", "imported"].includes(value.source)) throw new Error("skill source is invalid");
+        out.source = value.source ?? "manual";
+    }
     if (patch && Object.hasOwn(value, "state")) {
         if (!["active", "archived"].includes(value.state)) throw new Error("skill state must be active or archived");
         out.state = value.state;
@@ -283,7 +322,7 @@ function validateSkillDocument(value, { patch = false } = {}) {
     return out;
 }
 
-function validateSkillRequest(channel, payload) {
+export function validateSkillRequest(channel, payload) {
     const bytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
     if (bytes > SKILL_CHANNELS[channel].maxPayloadBytes) throw new Error(`${channel} payload is too large`);
     switch (channel) {
@@ -295,6 +334,7 @@ function validateSkillRequest(channel, payload) {
         case "skill:archive":
         case "skill:restore":
         case "skill:export":
+        case "skill:exportViaDialog":
         case "skill:duplicate":
         case "skill:retest":
             exactKeys(payload, new Set(["skillId"]), channel);
@@ -312,11 +352,12 @@ function validateSkillRequest(channel, payload) {
             return { skillId: skillId(payload.skillId), patch: validateSkillDocument(payload.patch, { patch: true }) };
         case "skill:import": {
             exactKeys(payload, new Set(["skill"]), channel);
-            const value = payload.skill;
-            exactKeys(value, new Set(["schema", "name", "description", "instructions", "inputs", "steps", "expectedOutput", "requestedCapabilities", "validators", "source"]), "skill import");
-            if (value.schema !== "sovereignbot.desktop.skill.v1") throw new Error("skill import schema is invalid");
-            return { skill: structuredClone(value) };
+            if (payload.skill?.schema !== "sovereignbot.desktop.skill.v1") throw new Error("skill import schema is invalid");
+            return { skill: { schema: payload.skill.schema, ...validateSkillDocument(payload.skill, { imported: true }) } };
         }
+        case "skill:importViaDialog":
+            exactKeys(payload, new Set(), channel);
+            return {};
         default:
             throw new Error(`unknown skill IPC channel: ${channel}`);
     }

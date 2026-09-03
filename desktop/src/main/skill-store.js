@@ -309,7 +309,9 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
         },
         update(id, input) {
             const skill = requireSkill(id);
-            Object.assign(skill, normalizePatch(input), { updatedAt: now() });
+            const patch = normalizePatch(input);
+            if (skill.state === "archived" && (patch.state !== "active" || Object.keys(patch).length !== 1)) throw new Error("archived Skill is read-only; restore it before editing");
+            Object.assign(skill, patch, { updatedAt: now() });
             save();
             return publicSkill(skill);
         },
@@ -371,6 +373,9 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
             if (retestRunner) {
                 const result = retestRunner(publicSkill(skill));
                 if (!result || typeof result !== "object") throw new Error("governed Skill retest did not return a Job");
+                skill.lastTestedAt = now();
+                skill.updatedAt = skill.lastTestedAt;
+                save();
                 return { tested: true, mode: "governed-job", job: clone(result), skill: publicSkill(skill) };
             }
             skill.lastTestedAt = now();

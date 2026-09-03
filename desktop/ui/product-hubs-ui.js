@@ -136,7 +136,7 @@
   function renderSkills(items) {
     const root = $("product-skills"); clear(root);
     for (const item of items) { const card = document.createElement("article"); card.className = "settings-card"; const h = document.createElement("h3"); h.textContent = item.name; card.append(h, line("Status", item.state), line("Assigned", item.assignedTeamIds.length ? "Team" : "Not assigned")); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(button("Export", async () => copy(await api.skills.export({ skillId: item.id })))); actions.append(button("Duplicate", async () => { await api.skills.duplicate({ skillId: item.id }); await refresh(); })); card.append(actions); root.append(card); }
-    root.append(button("Import skill / 导入技能", async () => { const raw = window.prompt("Paste safe Skill JSON"); if (!raw) return; await api.skills.import({ skill: JSON.parse(raw) }); await refresh(); }));
+    root.append(button("Import skill / 导入技能", async () => { await api.skills.importViaDialog({}); await refresh(); }));
   }
   function renderConnectedApps(items, teams, coworkers, projects) {
     const root = $("product-connected-apps"); if (!root) return; clear(root);
@@ -734,31 +734,52 @@
     if (!visible.length) root.append(text("Computer History", coworkerId === "all" ? "No safe Computer activity recorded yet." : "No activity for this coworker."));
   }
 
+  let editingSkill;
+  const skillEditorClone = (value) => structuredClone(value);
+  const skillEditorList = (value) => String(value ?? "").split("\n").map((entry) => entry.trim()).filter(Boolean);
+  const skillEditorError = (message = "") => { const node = $("skill-form-error"); if (node) { node.textContent = message; node.classList.toggle("hidden", !message); } };
+  const skillEditorField = (label, value, className, { textarea = false, maxLength = 0 } = {}) => { const wrapper = document.createElement("label"); wrapper.className = "setting-field"; const caption = document.createElement("span"); caption.textContent = label; wrapper.append(caption); const field = document.createElement(textarea ? "textarea" : "input"); field.className = className; field.value = value ?? ""; if (maxLength) field.maxLength = maxLength; wrapper.append(field); return wrapper; };
+  const skillEditorButton = (label, handler) => { const node = document.createElement("button"); node.type = "button"; node.className = "quiet-action"; node.textContent = label; node.addEventListener("click", () => void handler()); return node; };
+  function readSkillEditor() {
+    if (!editingSkill) throw new Error("Skill editor is not open.");
+    const skill = skillEditorClone(editingSkill);
+    skill.name = $("skill-editor-name")?.value.trim() ?? ""; skill.description = $("skill-editor-description")?.value.trim() ?? ""; skill.instructions = $("skill-editor-instructions")?.value.trim() ?? ""; skill.source = $("skill-editor-source")?.value || "manual"; skill.expectedOutput = $("skill-editor-output")?.value.trim() ?? "";
+    skill.inputs = [...($("skill-editor-inputs")?.children ?? [])].map((row) => ({ name: row.querySelector(".skill-editor-input-name")?.value.trim() ?? "", type: row.querySelector(".skill-editor-input-type")?.value.trim() ?? "string", description: row.querySelector(".skill-editor-input-description")?.value.trim() ?? "", required: row.querySelector(".skill-editor-input-required")?.checked !== false }));
+    skill.steps = [...($("skill-editor-steps")?.children ?? [])].map((row) => row.querySelector(".skill-editor-step-value")?.value.trim() ?? "").filter(Boolean); skill.validators = [...($("skill-editor-validators")?.children ?? [])].map((row) => row.querySelector(".skill-editor-validator-value")?.value.trim() ?? "").filter(Boolean); skill.requestedCapabilities = [...document.querySelectorAll(".skill-editor-capability:checked")].map((field) => field.value); return skill;
+  }
+  function moveSkillEditorEntry(collection, index, delta) { const next = readSkillEditor(); const list = next[collection] ?? []; const target = index + delta; if (target < 0 || target >= list.length) return; [list[index], list[target]] = [list[target], list[index]]; next[collection] = list; renderSkillEditor(next); }
+  function renderSkillEditor(skill) {
+    editingSkill = skillEditorClone(skill); const archived = editingSkill.state === "archived"; $("skill-editor-id").value = editingSkill.id ?? ""; $("skill-editor-title").textContent = editingSkill.id ? "Edit skill / 编辑技能" : "New skill / 新建技能"; $("skill-editor-name").value = editingSkill.name ?? ""; $("skill-editor-description").value = editingSkill.description ?? ""; $("skill-editor-instructions").value = editingSkill.instructions ?? ""; $("skill-editor-source").value = editingSkill.source ?? "manual"; $("skill-editor-output").value = editingSkill.expectedOutput ?? "";
+    for (const field of document.querySelectorAll("#skill-form input, #skill-form textarea, #skill-form select")) field.disabled = archived; $("skill-save").disabled = archived; $("skill-editor-readonly").classList.toggle("hidden", !archived); skillEditorError(); for (const field of document.querySelectorAll(".skill-editor-capability")) field.checked = (editingSkill.requestedCapabilities ?? []).includes(field.value);
+    const inputsRoot = $("skill-editor-inputs"); clear(inputsRoot); for (const [index, entry] of (editingSkill.inputs ?? []).entries()) { const row = document.createElement("article"); row.className = "skill-editor-row"; row.append(skillEditorField("Name / 名称", entry.name, "skill-editor-input-name", { maxLength: 80 }), skillEditorField("Type / 类型", entry.type, "skill-editor-input-type", { maxLength: 40 }), skillEditorField("Description / 描述", entry.description, "skill-editor-input-description", { maxLength: 240 })); const required = document.createElement("label"); required.textContent = "Required / 必填 "; const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.className = "skill-editor-input-required"; checkbox.checked = entry.required !== false; required.append(checkbox); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(skillEditorButton("↑", () => moveSkillEditorEntry("inputs", index, -1)), skillEditorButton("↓", () => moveSkillEditorEntry("inputs", index, 1)), skillEditorButton("Remove / 删除", () => { const next = readSkillEditor(); next.inputs.splice(index, 1); renderSkillEditor(next); })); row.append(required, actions); inputsRoot.append(row); }
+    const stepsRoot = $("skill-editor-steps"); clear(stepsRoot); for (const [index, value] of (editingSkill.steps ?? []).entries()) { const row = document.createElement("div"); row.className = "skill-editor-row"; row.append(skillEditorField("Step " + (index + 1) + " / 步骤", value, "skill-editor-step-value", { maxLength: 800 })); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(skillEditorButton("↑", () => moveSkillEditorEntry("steps", index, -1)), skillEditorButton("↓", () => moveSkillEditorEntry("steps", index, 1)), skillEditorButton("Remove / 删除", () => { const next = readSkillEditor(); next.steps.splice(index, 1); renderSkillEditor(next); })); row.append(actions); stepsRoot.append(row); }
+    const validatorsRoot = $("skill-editor-validators"); clear(validatorsRoot); for (const [index, value] of (editingSkill.validators ?? []).entries()) { const row = document.createElement("div"); row.className = "skill-editor-row"; row.append(skillEditorField("Validator " + (index + 1) + " / 验证器", value, "skill-editor-validator-value", { maxLength: 500 })); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(skillEditorButton("↑", () => moveSkillEditorEntry("validators", index, -1)), skillEditorButton("↓", () => moveSkillEditorEntry("validators", index, 1)), skillEditorButton("Remove / 删除", () => { const next = readSkillEditor(); next.validators.splice(index, 1); renderSkillEditor(next); })); row.append(actions); validatorsRoot.append(row); }
+    $("skill-dialog")?.showModal?.(); $("skill-editor-name")?.focus();
+  }
+  function newSkill() { renderSkillEditor({ name: "", description: "", instructions: "", inputs: [], steps: [], validators: [], expectedOutput: "", requestedCapabilities: [], source: "manual" }); }
+  async function editSkill(item) { renderSkillEditor(await api.skills.get({ skillId: item.id })); }
+
   function skills(items) {
     const root = pageRoots.skills; if (!root) return; clear(root);
     for (const item of items) {
-      const card = document.createElement("article"); card.className = "settings-card";
+      const card = document.createElement("article"); card.className = "settings-card"; card.dataset.skillId = item.id;
       const title = document.createElement("h3"); title.textContent = item.name;
       const assigned = [...(item.assignedTeamIds ?? []).map((id) => `Team: ${cache.teams.find((entry) => entry.id === id)?.name ?? id}`), ...(item.assignedCoworkerIds ?? []).map((id) => `Coworker: ${cache.coworkers.find((entry) => entry.id === id)?.name ?? id}`)];
       card.append(title, text("Description", item.description), text("Source", item.source), text("Status", item.state), text("Assigned", assigned.join(", ") || "Not assigned"), text("Last definition test", item.lastTestedAt));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Export / 导出", () => api.skills.export({ skillId: item.id }).then(copy), root), button("Duplicate / 复制", async () => { await api.skills.duplicate({ skillId: item.id }); await refresh(); }, root), button("Retest definition / 重测定义", async () => { await api.skills.retest({ skillId: item.id }); await refresh(); }, root), button(item.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (item.state === "archived" ? api.skills.restore : api.skills.archive)({ skillId: item.id }); await refresh(); }, root), button("Edit / 编辑", async () => {
-        const name = window.prompt("Skill name", item.name); if (!name) return;
-        const description = window.prompt("Description", item.description); if (description === null) return;
-        const instructions = window.prompt("Instructions", item.instructions); if (instructions === null) return;
-        await api.skills.update({ skillId: item.id, patch: { name, description, instructions } }); await refresh();
-      }, root));
+      actions.append(button("Edit / 编辑", () => editSkill(item), root));
+      actions.append(button("Export / 导出", () => api.skills.exportViaDialog({ skillId: item.id }), root), button("Duplicate / 复制", async () => { await api.skills.duplicate({ skillId: item.id }); await refresh(); }, root), button("Retest definition / 重测定义", async () => { await api.skills.retest({ skillId: item.id }); await refresh(); }, root), button(item.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (item.state === "archived" ? api.skills.restore : api.skills.archive)({ skillId: item.id }); await refresh(); }, root));
       if (item.state === "active") actions.append(button("Create Routine / 创建例行任务", () => {
         document.dispatchEvent(new CustomEvent("sovereignbot:create-routine-from-skill", { detail: { skillId: item.id } }));
       }, root));
       const teamSelect = select("Team for skill " + item.name); for (const team of cache.teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = `Team: ${team.name}`; teamSelect.append(option); }
-      if (teamSelect.options.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.skills.assign({ skillId: item.id, targetKind: "team", targetId: teamSelect.value, enabled: !(item.assignedTeamIds ?? []).includes(teamSelect.value) }); await refresh(); }, root));
+      if (item.state === "active" && teamSelect.options.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.skills.assign({ skillId: item.id, targetKind: "team", targetId: teamSelect.value, enabled: !(item.assignedTeamIds ?? []).includes(teamSelect.value) }); await refresh(); }, root));
       const coworkerSelect = select("Coworker for skill " + item.name); for (const coworker of cache.coworkers) { const option = document.createElement("option"); option.value = coworker.id; option.textContent = `Coworker: ${coworker.name}`; coworkerSelect.append(option); }
-      if (coworkerSelect.options.length) actions.append(coworkerSelect, button("Assign Coworker / 分配同事", async () => { await api.skills.assign({ skillId: item.id, targetKind: "coworker", targetId: coworkerSelect.value, enabled: !(item.assignedCoworkerIds ?? []).includes(coworkerSelect.value) }); await refresh(); }, root));
+      if (item.state === "active" && coworkerSelect.options.length) actions.append(coworkerSelect, button("Assign Coworker / 分配同事", async () => { await api.skills.assign({ skillId: item.id, targetKind: "coworker", targetId: coworkerSelect.value, enabled: !(item.assignedCoworkerIds ?? []).includes(coworkerSelect.value) }); await refresh(); }, root));
       card.append(actions); root.append(card);
     }
     if (!items.length) root.append(text("Skills", "No skills yet. Create a declarative skill."));
-    root.append(button("Import skill / 导入技能", async () => { const skill = readJson("Paste safe Skill JSON"); if (skill) { await api.skills.import({ skill }); await refresh(); } }, root));
+    root.append(button("Import skill / 导入技能", async () => { await api.skills.importViaDialog({}); await refresh(); }, root));
   }
 
   let editingPack;
@@ -904,7 +925,7 @@
     return window.openProductChannelEditor({ teamId, channelId });
   }
   async function createPlaybook() { newPlaybook(); }
-  async function createSkill() { const name = window.prompt("Skill name"); if (!name) return; const description = window.prompt("Description", "") ?? ""; const instructions = window.prompt("Instructions"); if (!instructions) return; await api.skills.create({ skill: { name, description, instructions } }); await refresh(); }
+    async function createSkill() { newSkill(); }
   async function exportPackToFile(item) {
     const team = cache.teams.find((entry) => entry.packId === item.id || entry.packId === `imported:${item.id}`);
     const result = team
@@ -958,8 +979,13 @@
       await refresh();
     })().catch((reason) => playbookEditorError(String(reason?.message ?? reason).slice(0, 240))));
     document.addEventListener("sovereignbot:open-playbook-editor", (event) => { if (event.detail?.item) void editPlaybook(event.detail.item).catch((reason) => showError(pageRoots.playbooks, reason)); else newPlaybook(); });
-    $("skill-page-create")?.addEventListener("click", () => void createSkill().catch((reason) => showError(pageRoots.skills, reason)));
-    $("skill-page-import")?.addEventListener("click", () => void (async () => { const skill = readJson("Paste safe Skill JSON"); if (skill) { await api.skills.import({ skill }); await refresh(); } })().catch((reason) => showError(pageRoots.skills, reason)));
+    $("skill-page-create")?.addEventListener("click", () => newSkill());
+    $("skill-page-import")?.addEventListener("click", () => void (async () => { const result = await api.skills.importViaDialog({}); if (!result.canceled) await refresh(); })().catch((reason) => showError(pageRoots.skills, reason)));
+    $("skill-editor-add-input")?.addEventListener("click", () => { try { const next = readSkillEditor(); next.inputs.push({ name: "input", type: "string", description: "", required: true }); renderSkillEditor(next); } catch (reason) { skillEditorError(String(reason?.message ?? reason)); } });
+    $("skill-editor-add-step")?.addEventListener("click", () => { try { const next = readSkillEditor(); next.steps.push("New step"); renderSkillEditor(next); } catch (reason) { skillEditorError(String(reason?.message ?? reason)); } });
+    $("skill-editor-add-validator")?.addEventListener("click", () => { try { const next = readSkillEditor(); next.validators.push("New validator"); renderSkillEditor(next); } catch (reason) { skillEditorError(String(reason?.message ?? reason)); } });
+    $("skill-form")?.addEventListener("submit", (event) => void (async () => { event.preventDefault(); skillEditorError(); if (editingSkill?.state === "archived") return; const skill = readSkillEditor(); const payload = { name: skill.name, description: skill.description, instructions: skill.instructions, inputs: skill.inputs, steps: skill.steps, expectedOutput: skill.expectedOutput, validators: skill.validators, requestedCapabilities: skill.requestedCapabilities, source: skill.source }; if (skill.id) await api.skills.update({ skillId: skill.id, patch: payload }); else await api.skills.create({ skill: payload }); $("skill-dialog")?.close?.(); await refresh(); })().catch((reason) => skillEditorError(String(reason?.message ?? reason).slice(0, 240))));
+    document.addEventListener("sovereignbot:open-skill-editor", (event) => { if (event.detail?.item) void editSkill(event.detail.item).catch((reason) => showError(pageRoots.skills, reason)); else newSkill(); });
     $("team-pack-page-import")?.addEventListener("click", () => void importPack().catch((reason) => showError(pageRoots.packs, reason)));
     $("team-pack-editor-add-coworker")?.addEventListener("click", () => {
       try {

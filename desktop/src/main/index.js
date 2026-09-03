@@ -7,6 +7,7 @@ import { createMainWindow, appOrigin } from "./window.js";
 import { bindIpcChannels } from "./ipc.js";
 import { exportTeamPackViaDialog, importTeamPackViaDialog } from "./team-pack-file-io.js";
 import { exportPlaybookViaDialog, importPlaybookViaDialog } from "./playbook-file-io.js";
+import { exportSkillViaDialog, importSkillViaDialog } from "./skill-file-io.js";
 import { createOperatorBridge } from "./operator-bridge.js";
 import { startRuntimeHost } from "./runtime-host.js";
 import { createDesktopServices } from "./services.js";
@@ -779,6 +780,8 @@ async function main() {
                     dispatchMessage: (conversationId, messageId) => coworkerDispatcher.dispatchMessage(conversationId, messageId),
                     isConversationArchived: (conversationId) => teamService.isArchivedConversation(conversationId),
                 }),
+                "skill:exportViaDialog": ({ skillId }) => exportSkillViaDialog({ parentWindow: win, dialog, targetName: skillId, resolveSkill: () => skillStore.exportSkill(skillId) }),
+                "skill:importViaDialog": () => importSkillViaDialog({ parentWindow: win, dialog, importSkill: (skill) => skillStore.importSkill(skill) }),
                 "teach:list": () => teachOnce.list(),
                 "teach:start": (payload) => teachOnce.start(payload),
                 "teach:get": ({ sessionId }) => teachOnce.get(sessionId),
