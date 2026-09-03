@@ -36,5 +36,8 @@ test("P48 hidden Electron gate covers confirmation, cancellation, duplicate, and
     "Clean Reset prepare IPC failure is visible, non-destructive, and duplicate-safe",
     "Clean Reset exact RESET uses opaque backend confirmation and refreshes safely",
   ]) assert.match(gate, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(gate, /const exitCode = failed\.length \? 1 : 0/);
+  assert.match(gate, /app\.exit\(exitCode\)/);
+  assert.doesNotMatch(gate, /finally \{[\s\S]*win\?\.destroy\(\)/);
   assert.equal(packageJson.scripts["verify:p48-data-lifecycle"], "node scripts/verify-p48-data-lifecycle.mjs");
 });

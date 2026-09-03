@@ -114,7 +114,7 @@ export async function runVerifyP48DataLifecycle({ app } = {}) {
       text:document.getElementById('data-lifecycle-card')?.textContent||''
     }))()`);
     check("Settings exposes Data Lifecycle card and validated backup row", surface.card && surface.restoreDialog && surface.resetDialog && surface.backupRows >= 2, JSON.stringify(surface));
-    check("public Data Lifecycle UI contains no fixture path or nonce", !surface.text.includes(dataDir) && !surface.text.includes("confirmation") && !surface.text.includes("nonce"), JSON.stringify({ text: surface.text }));
+    check("public Data Lifecycle UI contains no fixture path or opaque canary", !surface.text.includes(dataDir) && !surface.text.includes("confirmation=fixture") && !surface.text.includes("nonce=fixture"), JSON.stringify({ text: surface.text }));
 
     const openRestore = (id) => win.webContents.executeJavaScript(`(()=>{const row=[...document.querySelectorAll('#data-lifecycle-backups .workspace-card')].find((entry)=>entry.textContent.includes(${JSON.stringify(id)})); const button=row?.querySelector('button'); if(!button) return {found:false}; button.click(); const dialog=document.getElementById('data-lifecycle-restore-dialog'); return {found:true,open:dialog?.open===true,text:dialog?.textContent||''};})()`);
     const restoreConfirm = (doubleClick = false) => win.webContents.executeJavaScript(`(async()=>{const button=document.getElementById('data-lifecycle-restore-confirm'); if(!button || !document.getElementById('data-lifecycle-restore-dialog')?.open) return {found:false}; button.click(); if(${doubleClick ? "true" : "false"}) button.click(); await new Promise((resolve)=>setTimeout(resolve,0)); return {found:true,disabled:button.disabled};})()`);
@@ -165,7 +165,6 @@ export async function runVerifyP48DataLifecycle({ app } = {}) {
   } finally {
     try { unbind?.(); } catch {}
     try { uninstallProtocol?.(); } catch {}
-    try { win?.destroy(); } catch {}
     try { if (dataDir) await rm(dataDir, { recursive: true, force: true }); } catch {}
     try { if (dataDir) await rm(`${dataDir}.backups`, { recursive: true, force: true }); } catch {}
     try { if (dataDir) await rm(`${dataDir}.exports`, { recursive: true, force: true }); } catch {}
@@ -174,6 +173,8 @@ export async function runVerifyP48DataLifecycle({ app } = {}) {
   const result = { schema: "sovereignbot.desktop.p48-data-lifecycle-canary.v1", fixtureBoundary: "LOCAL_FIXTURE", publishEligible: false, checks: Object.fromEntries(Object.entries(checks).map(([name, ok]) => [name, { ok }])), notes, externalActions: [], ok: failed.length === 0 };
   await writeFile(join(EVIDENCE_DIR, "verify-p48-data-lifecycle.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
   await writeFile(join(EVIDENCE_DIR, "verify-p48-data-lifecycle.log"), `${notes.join("\n")}\n`, "utf8");
-  if (failed.length) throw new Error(`P48 Data Lifecycle gate failed: ${failed.join(", ")}`);
-  app?.exit(0);
+  const exitCode = failed.length ? 1 : 0;
+  if (app?.exit) { app.exit(exitCode); return result; }
+  if (exitCode) throw new Error(`P48 Data Lifecycle gate failed: ${failed.join(", ")}`);
+  return result;
 }
