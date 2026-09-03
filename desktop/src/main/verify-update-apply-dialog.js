@@ -129,6 +129,5 @@ export async function runVerifyUpdateApplyDialog({ app } = {}) {
   const result = { schema: "sovereignbot.desktop.update-apply-dialog-canary.v1", fixtureBoundary: "LOCAL_FIXTURE", publishEligible: false, checks, notes, externalActions: [], ok: Object.values(checks).every((entry) => entry.ok) };
   if (evidenceDir) { await mkdir(evidenceDir, { recursive: true }); await writeFile(join(evidenceDir, "verify-update-apply-dialog.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8"); await writeFile(join(evidenceDir, "verify-update-apply-dialog.log"), `${notes.join("\n")}\n`, "utf8"); }
   if (!result.ok) throw new Error(`Update Apply gate failed: ${Object.entries(checks).filter(([, entry]) => !entry.ok).map(([name]) => name).join(", ")}`);
-  app?.exit?.(0);
   return result;
 }

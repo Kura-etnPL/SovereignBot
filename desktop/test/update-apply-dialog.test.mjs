@@ -5,6 +5,9 @@ import test from "node:test";
 
 const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
 const app = read("../ui/app.js");
+const gate = read("../src/main/verify-update-apply-dialog.js");
+const entry = read("../src/main/verify-update-apply-dialog-entry.js");
+const runner = read("../scripts/verify-update-apply-dialog.mjs");
 const start = app.indexOf("function ensureUpdateCard()");
 const end = app.indexOf("async function refreshSettingsData()", start);
 const updateCard = app.slice(start, end);
@@ -24,4 +27,11 @@ test("Update Apply failure remains visible and retryable", () => {
   assert.match(updateCard, /staged update remains available to retry/);
   assert.match(updateCard, /applyConfirm\.disabled = applyPending/);
   assert.match(updateCard, /applyCancel\.disabled = applyPending/);
+});
+
+test("Update Apply gate keeps the app alive until evidence is written and fails closed", () => {
+  assert.match(gate, /writeFile\(join\(evidenceDir, "verify-update-apply-dialog\.json"\)/);
+  assert.doesNotMatch(gate, /app\?\.exit\?\.\(0\)/);
+  for (const expression of [/window-all-closed/, /event\.preventDefault\(\)/, /gateFinished/]) assert.match(entry, expression);
+  for (const expression of [/const hasFailure/, /gateExit=/, /!hasPass/]) assert.match(runner, expression);
 });
