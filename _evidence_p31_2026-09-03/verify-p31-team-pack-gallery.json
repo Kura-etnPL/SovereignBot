@@ -1,13 +1,17 @@
 {
-  "at": "2026-09-03T03:44:20.543Z",
+  "at": "2026-09-03T03:48:23.875Z",
   "checks": {
     "hidden Electron window stays hidden": true,
     "ordinary Product hubs navigation reaches the older Team Pack gallery": true,
     "older first-party gallery entry is read-only and guides Duplicate": true,
     "P31 Team Pack gallery gate runner completed": false
   },
-  "failureStage": "bounded native-input precondition for older-gallery Duplicate",
-  "inputMethod": "BrowserWindow.webContents.sendInputEvent mouseMove/mouseDown/mouseUp; not reached",
-  "inputSent": false,
-  "fatal": "older gallery Duplicate button is outside the viewport"
+  "failureStage": "native sendInputEvent after scrollIntoView and bounds checks",
+  "duplicateInputCoordinates": {
+    "x": 649.7239799499512,
+    "y": 382.3020839691162,
+    "viewport": { "width": 1266, "height": 764 }
+  },
+  "inputDelivery": "unconfirmed; Electron returned a generic execution failure during the native input dispatch",
+  "fatal": "Script failed to execute, this normally means an error was thrown. Check the renderer console for the error."
 }
