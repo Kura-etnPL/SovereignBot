@@ -38,7 +38,7 @@
       const h = document.createElement("h3"); h.textContent = item.title || item.fileName; card.append(h);
       card.append(line("Type", item.mimeType), line("Creator", item.creator?.name), line("Team", item.team?.name), line("Channel", item.channel?.name), line("Created", item.createdAt), line("Status", item.status));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Open preview / 预览", async () => { const result = await api.artifacts.preview({ artifactId: item.id }); window.alert(result?.preview || "Preview is not available."); }));
+      actions.append(button("Open preview / 预览", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-artifact-preview", { detail: { item } }))));
       actions.append(button("Open / 打开", async () => { try { await api.artifacts.open({ artifactId: item.id }); } catch (e) { error(root, e); } }));
       actions.append(button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id })));
       if (item.conversationId && typeof openConversation === "function") actions.append(button("Go to conversation / 回到会话", () => openConversation(item.conversationId)));
@@ -562,6 +562,37 @@
     if ([...node.options].some((option) => option.value === selected)) node.value = selected;
   }
   function selected(id, fallback) { return $(id)?.value || fallback; }
+  let focusedArtifactId;
+  let pendingArtifactId;
+  let artifactPreviewRequest = 0;
+  async function openArtifactPreview(item) {
+    const dialog = $("artifact-preview-dialog");
+    if (!dialog) return;
+    const request = ++artifactPreviewRequest;
+    const title = $("artifact-preview-title"); const meta = $("artifact-preview-meta"); const status = $("artifact-preview-status"); const body = $("artifact-preview-body");
+    title.textContent = item.title || item.fileName || "Artifact";
+    meta.textContent = `${item.mimeType || "application/octet-stream"} · ${item.size ?? 0} bytes · v${item.version ?? 1}`;
+    status.textContent = "Loading a bounded preview…"; body.textContent = "";
+    dialog.showModal?.();
+    try {
+      const result = await api.artifacts.preview({ artifactId: item.id });
+      if (request !== artifactPreviewRequest) return;
+      const artifact = result?.artifact ?? item;
+      title.textContent = artifact.title || artifact.fileName || "Artifact";
+      meta.textContent = `${artifact.mimeType || "application/octet-stream"} · ${artifact.size ?? 0} bytes · v${artifact.version ?? 1}`;
+      if (typeof result?.preview === "string") {
+        body.textContent = result.preview;
+        status.textContent = result.truncated ? "Readable text preview · truncated to a safe limit." : "Readable text preview.";
+      } else {
+        body.textContent = "This artifact type is not previewable in the product surface. The managed file was not opened in the renderer.";
+        status.textContent = "Preview unavailable for this MIME type.";
+      }
+    } catch {
+      if (request !== artifactPreviewRequest) return;
+      body.textContent = "No preview is available.";
+      status.textContent = "Preview unavailable: the managed artifact could not be read safely.";
+    }
+  }
 
   function playbookSemanticPlan(item) {
     return Object.fromEntries(["stages", "reviewPoints", "expectedOutput", "recommendedCoworkerRoles", "recommendedSkillIds"].map((field) => [field, item[field]]).filter(([, value]) => value !== undefined));
@@ -697,11 +728,12 @@
   function artifacts(items) {
     const root = pageRoots.artifacts; if (!root) return; clear(root);
     for (const item of items) {
-      const card = document.createElement("article"); card.className = "settings-card";
+      const card = document.createElement("article"); card.className = "settings-card"; card.dataset.artifactId = item.id;
+      if (item.id === focusedArtifactId) { card.classList.add("artifact-focused"); card.setAttribute("aria-current", "true"); }
       const title = document.createElement("h3"); title.textContent = item.title || item.fileName;
       card.append(title, text("Type", item.mimeType), text("Version", item.version ? `v${item.version}` : "Original"), text("Creator", item.creator?.name), text("Team", item.team?.name), text("Channel", item.channel?.name), text("Created", item.createdAt), text("History", item.history?.map((entry) => `${entry.event} · ${entry.timestamp}`).join(", ")), text("Status", item.status));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Preview / 预览", async () => { const preview = await api.artifacts.preview({ artifactId: item.id }); window.alert(preview?.preview || "Preview is not available."); }, root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root), button("History / 历史", async () => {
+      actions.append(button("Preview / 预览", () => openArtifactPreview(item), root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root), button("History / 历史", async () => {
         const existing = card.querySelector(".artifact-history-panel");
         if (existing) { existing.remove(); return; }
         const result = await api.artifacts.history({ artifactId: item.id });
@@ -721,6 +753,7 @@
       }, root));
       if (item.conversationId) actions.append(button("Go to conversation / 前往会话", () => openConversationSafe(item.conversationId), root));
       card.append(actions); root.append(card);
+      if (item.id === focusedArtifactId) requestAnimationFrame(() => card.scrollIntoView?.({ block: "center" }));
     }
     if (!items.length) root.append(text("Artifacts", "No artifacts yet."));
   }
@@ -955,9 +988,21 @@
     populate("artifact-hub-type-page", [{ value: "", label: "All types / 全部类型" }, ...artifactTypes.map((value) => ({ value, label: value }))], artifactType);
     const artifactPayload = { limit: 100 }; const resolvedScope = selected("artifact-hub-filter-page", artifactScope); if (resolvedScope.startsWith("team:")) artifactPayload.teamId = resolvedScope.slice(5); if (resolvedScope.startsWith("channel:")) artifactPayload.channelId = resolvedScope.slice(8); if (resolvedScope.startsWith("coworker:")) artifactPayload.coworkerId = resolvedScope.slice(9); const resolvedType = selected("artifact-hub-type-page", artifactType); if (resolvedType) artifactPayload.type = resolvedType;
     const historyScope = selected("computer-history-filter-page", "all"); populate("computer-history-filter-page", [{ value: "all", label: "All coworkers / 全部同事" }, ...cache.coworkers.map((coworker) => ({ value: coworker.id, label: `By Coworker / 同事: ${coworker.name}` }))], historyScope);
-    const [playbookResult, artifactResult, historyResult, skillResult, channelResult, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations?.list ? api.conversations.list({}) : Promise.resolve({ conversations: [] })]);
+    let [playbookResult, artifactResult, historyResult, skillResult, channelResult, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations?.list ? api.conversations.list({}) : Promise.resolve({ conversations: [] })]);
+    const requestedArtifactId = pendingArtifactId;
+    pendingArtifactId = undefined;
+    let requestedArtifactError = "";
+    if (requestedArtifactId && !artifactResult.artifacts?.some((entry) => entry.id === requestedArtifactId)) {
+      try {
+        const exact = await api.artifacts.get({ artifactId: requestedArtifactId });
+        artifactResult = { ...artifactResult, artifacts: [...(artifactResult.artifacts ?? []), exact] };
+      } catch {
+        requestedArtifactError = "The requested artifact is unavailable or no longer published.";
+      }
+    }
     cache.conversations = conversations.conversations ?? [];
     playbooks(playbookResult.playbooks ?? []); artifacts(artifactResult.artifacts ?? []); history(historyResult.history ?? []); skills(skillResult.skills ?? []); packs(teams.packs ?? []); channels(channelResult.channels ?? []);
+    if (requestedArtifactError) showError(pageRoots.artifacts, requestedArtifactError);
   }
 
   function setup() {
@@ -1023,7 +1068,8 @@
     for (const id of ["artifact-hub-filter-page", "artifact-hub-type-page", "computer-history-filter-page", "product-channel-filter-page"]) $(id)?.addEventListener("change", () => void refresh());
     $("product-channel-switch-page")?.addEventListener("change", (event) => openConversationSafe(event.target.value));
     api.onNavigate?.((target) => { if (navViews.has("nav-" + target) || ["product-hubs", "playbooks", "artifacts", "computer-history", "skills", "team-packs", "channels"].includes(target)) nav(target); });
-    document.addEventListener("sovereignbot:open-artifact", (event) => { if (event.detail?.artifactId) nav("artifacts"); });
+    document.addEventListener("sovereignbot:open-artifact", (event) => { const artifactId = event.detail?.artifactId; if (!artifactId) return; focusedArtifactId = String(artifactId); pendingArtifactId = focusedArtifactId; nav("artifacts"); });
+    document.addEventListener("sovereignbot:open-artifact-preview", (event) => { if (event.detail?.item) void openArtifactPreview(event.detail.item); });
     document.addEventListener("sovereignbot:open-artifacts", () => nav("artifacts"));
     document.addEventListener("sovereignbot:open-computer-history", () => nav("computer-history"));
     window.refreshIndependentProductPages = refresh;
