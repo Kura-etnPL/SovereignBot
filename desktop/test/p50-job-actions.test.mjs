@@ -50,7 +50,7 @@ test("P50 hidden gate covers card/detail actions, retry counts, isolation, and d
     /Work Retry failure is visible, retryable, single-call, and isolated to its Job/,
     /Work Dismiss clearly clears Attention without affecting another Job/,
     /Job Details Approve uses the shared pending action path/,
-    /Job Details Pause is available only for a legal working state/,
+    /Job Details Pause is available only for a legal queued nonterminal state/,
     /Job Details Resume is available only for a legal waiting state/,
     /Job Details Dismiss clears Attention with scoped feedback/,
     /const workerNodeId = "worker_[0-9a-f]{16}"/,

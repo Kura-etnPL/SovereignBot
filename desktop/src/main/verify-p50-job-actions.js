@@ -155,7 +155,7 @@ export async function runVerifyP50JobActions({ app }) {
       seedJob({ id: ids.cardPeer, title: "P50 Peer Dismiss", ownerCoworkerId: peer.id, status: "needs_attention", workspaceId: workspace.id, attentionState }),
       seedJob({ id: ids.detailApprove, title: "P50 Detail Approve", ownerCoworkerId: owner.id, status: "needs_attention", workspaceId: workspace.id, attentionState }),
       seedJob({ id: ids.detailDismiss, title: "P50 Detail Dismiss", ownerCoworkerId: owner.id, status: "needs_attention", workspaceId: workspace.id, attentionState }),
-      seedJob({ id: ids.detailPause, title: "P50 Detail Pause", ownerCoworkerId: owner.id, status: "working", workspaceId: workspace.id }),
+      seedJob({ id: ids.detailPause, title: "P50 Detail Pause", ownerCoworkerId: owner.id, status: "queued", workspaceId: workspace.id }),
       seedJob({ id: ids.detailResume, title: "P50 Detail Resume", ownerCoworkerId: owner.id, status: "waiting", workspaceId: workspace.id, nextActionAt: "2099-01-01T00:00:00.000Z" }),
       seedJob({ id: ids.worker, title: "P50 Worker Label", ownerCoworkerId: peer.id, status: "completed", workspaceId: workspace.id, executionTarget: { kind: "worker-node", nodeId: workerNodeId, workspaceId: workspace.id }, workerNodeName: "Remote Builder", workerWorkspaceName: "Builder workspace" }),
     ];
@@ -192,7 +192,7 @@ export async function runVerifyP50JobActions({ app }) {
     await detailAction(ids.detailApprove, "P50 Detail Approve", "job-detail-approve", "Approve", "Retry requested");
     check("Job Details Approve uses the shared pending action path", counts.approve === 3 && jobs.getJob(ids.detailApprove).status !== "needs_attention", JSON.stringify({ approveCalls: counts.approve, status: jobs.getJob(ids.detailApprove).status }));
     await detailAction(ids.detailPause, "P50 Detail Pause", "job-detail-pause", "Pause", "Job paused");
-    check("Job Details Pause is available only for a legal working state", counts.pause === 1 && jobs.getJob(ids.detailPause).status === "waiting", JSON.stringify({ pauseCalls: counts.pause, status: jobs.getJob(ids.detailPause).status }));
+    check("Job Details Pause is available only for a legal queued nonterminal state", counts.pause === 1 && jobs.getJob(ids.detailPause).status === "waiting", JSON.stringify({ pauseCalls: counts.pause, status: jobs.getJob(ids.detailPause).status }));
     await detailAction(ids.detailResume, "P50 Detail Resume", "job-detail-resume", "Resume", "Job resumed");
     check("Job Details Resume is available only for a legal waiting state", counts.resume === 1 && jobs.getJob(ids.detailResume).status !== "waiting", JSON.stringify({ resumeCalls: counts.resume, status: jobs.getJob(ids.detailResume).status }));
     await detailAction(ids.detailDismiss, "P50 Detail Dismiss", "job-detail-dismiss", "Dismiss", "Attention dismissed");
