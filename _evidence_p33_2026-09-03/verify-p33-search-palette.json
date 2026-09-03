@@ -1,0 +1,32 @@
+{
+  "at": "2026-09-03T05:37:44.377Z",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "ordinary entry exposes typed Search and Command Palette": true,
+    "Command Palette lists the seven required actions": true,
+    "search discovers conversations through the ordinary typed surface": true,
+    "search discovers channels through the ordinary typed surface": true,
+    "search discovers coworkers through the ordinary typed surface": true,
+    "search discovers projects through the ordinary typed surface": true,
+    "search discovers artifacts through the ordinary typed surface": true,
+    "search discovers skills through the ordinary typed surface": true,
+    "search discovers playbooks through the ordinary typed surface": true,
+    "search discovers routines through the ordinary typed surface": true,
+    "search returns safe public summaries for all required types": true,
+    "search result opens the exact Skill editor target": true,
+    "empty search state is honest": true,
+    "index invalidation exposes a newly persisted local record": true,
+    "search index survives a real renderer and service restart": true
+  },
+  "ids": {
+    "teamId": "team_8feed006c8815d58",
+    "channelId": "channel_99e84ec3d3d86617",
+    "conversationId": "conv_f035d5009f39c914",
+    "projectId": "project_3b5a5e9b5a49beaa",
+    "skillId": "skill_50b52fd192de2ac6",
+    "playbookId": "playbook_bdc5f4c66f7eb5f0",
+    "routineId": "routine_706158568414a373",
+    "artifactId": "artifact_589370e534612183"
+  }
+}
