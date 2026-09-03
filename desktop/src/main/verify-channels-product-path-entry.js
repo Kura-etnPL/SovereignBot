@@ -6,7 +6,18 @@ registerAppSchemePrivileged();
 app.setName("SovereignBot Channels Product Verification");
 app.enableSandbox();
 app.setAppUserModelId("com.sovereignbot.desktop.verify-channels-product-path");
-app.whenReady().then(() => runVerifyChannelsProductPath({ app })).catch((error) => {
-  try { process.stderr.write(String(error?.stack ?? error) + "\n"); } catch {}
-  app.exit(1);
+let gateFinished = false;
+app.on("window-all-closed", (event) => {
+  if (!gateFinished) event.preventDefault();
+});
+app.whenReady().then(async () => {
+  try {
+    await runVerifyChannelsProductPath({ app });
+    gateFinished = true;
+    app.exit(0);
+  } catch (error) {
+    gateFinished = true;
+    try { process.stderr.write(String(error?.stack ?? error) + "\n"); } catch {}
+    app.exit(1);
+  }
 });

@@ -10,6 +10,7 @@ const app = read("../ui/app.js");
 const main = read("../src/main/index.js");
 const gate = read("../src/main/verify-channels-product-path.js");
 const runner = read("../scripts/verify-channels-product-path.mjs");
+const entry = read("../src/main/verify-channels-product-path-entry.js");
 
 test("Channels product page exposes lifecycle, template, and quick-switch controls", () => {
   for (const id of ["view-channels", "product-channel-filter-page", "product-channel-switch-page", "product-channel-create-page", "product-channel-template-team-page", "product-channel-template-page", "product-channel-template-add-page", "product-channels-page"]) assert.match(html, new RegExp(`id=\\"${id}\\"`), id);
@@ -20,6 +21,7 @@ test("Channels product page exposes lifecycle, template, and quick-switch contro
   assert.match(main, /isArchivedConversation/);
   for (const expression of [/Project Channel/, /neutral conversation before unread fixture/]) assert.match(gate, expression);
   for (const expression of [/const hasFailure/, /gateExit=/, /!hasPass/]) assert.match(runner, expression);
+  for (const expression of [/window-all-closed/, /event\.preventDefault\(\)/, /gateFinished/]) assert.match(entry, expression);
 });
 
 test("Channels product path has no native prompt or confirm fallback", () => {

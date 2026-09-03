@@ -229,6 +229,5 @@ export async function runVerifyChannelsProductPath({ app } = {}) {
   const result = { schema: "sovereignbot.desktop.channels-product-path-canary.v1", fixtureBoundary: "LOCAL_FIXTURE", publishEligible: false, checks, notes, externalActions: [], ok: Object.values(checks).every((entry) => entry.ok) };
   if (evidenceDir) { await mkdir(evidenceDir, { recursive: true }); await writeFile(join(evidenceDir, "verify-channels-product-path.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8"); await writeFile(join(evidenceDir, "verify-channels-product-path.log"), `${notes.join("\n")}\n`, "utf8"); }
   if (!result.ok) throw new Error(`Channels product gate failed: ${Object.entries(checks).filter(([, entry]) => !entry.ok).map(([name]) => name).join(", ")}`);
-  app?.exit?.(0);
   return result;
 }
