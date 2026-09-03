@@ -1,0 +1,8 @@
+PASS hidden Electron window stays hidden
+[fatal] Error: ERR_FAILED (-2) loading 'sovereignbot://app/'
+    at rejectAndCleanup (node:electron/js2c/browser_init:2:94962)
+    at finishListener (node:electron/js2c/browser_init:2:95124)
+    at WebContents.stopLoadingListener (node:electron/js2c/browser_init:2:95511)
+    at WebContents.emit (node:events:509:28)
+FAIL P31 Team Pack gallery gate runner completed ERR_FAILED (-2) loading 'sovereignbot://app/'
+[summary] 1/2 PASS

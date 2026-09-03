@@ -1,0 +1,8 @@
+{
+  "at": "2026-09-03T03:07:06.456Z",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "P31 Team Pack gallery gate runner completed": false
+  },
+  "fatal": "ERR_FAILED (-2) loading 'sovereignbot://app/'"
+}
