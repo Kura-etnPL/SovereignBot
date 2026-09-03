@@ -25,7 +25,7 @@ const routineB = "routine_bbbbbbbbbbbbbbbb";
 const jobA = "job_aaaaaaaaaaaaaaaa";
 const historyA = "history_aaaaaaaaaaaaaaaa";
 
-function fixture({ fullScan = false, messageRecords = [], latestPreview, beforeBuild, includeSearchRecords = true, conversationTitle = "Alpha Conversation" } = {}) {
+function fixture({ fullScan = false, messageRecords = [], latestPreview, beforeBuild, includeSearchRecords = true, conversationTitle = "Alpha Conversation", artifactSearchRecords } = {}) {
     const projects = [
         { projectId: projectA, name: "Alpha Project", state: "active", available: true, updatedAt: "2026-09-02T00:00:02.000Z", teams: [{ id: teamA, name: "Alpha Team", channels: [{ id: channelA, name: "Alpha Channel", conversationId: conversationA }] }], coworkers: [{ id: coworkerA, name: "Alpha Coworker" }] },
         { projectId: projectB, name: "Beta Project", state: "active", available: true, updatedAt: "2026-09-02T00:00:01.000Z", teams: [{ id: teamB, name: "Beta Team", channels: [{ id: channelB, name: "Beta Channel", conversationId: conversationB }] }], coworkers: [{ id: coworkerB, name: "Beta Coworker" }] },
@@ -50,7 +50,7 @@ function fixture({ fullScan = false, messageRecords = [], latestPreview, beforeB
         teamService: { list: () => ({ teams }) },
         conversationStore: { list: () => ({ conversations }), ...(includeSearchRecords ? { searchRecords: () => messageRecords } : {}) },
         coworkerStore: { list: () => ({ coworkers }) },
-        artifactStore: { list: () => ({ artifacts: [{ id: artifactA, title: "Alpha Artifact", fileName: "alpha.txt", conversationId: conversationA, createdAt: "2026-09-02T00:00:02.000Z" }, { id: artifactB, title: "Beta Artifact", fileName: "beta.txt", conversationId: conversationB, createdAt: "2026-09-02T00:00:01.000Z" }] }) },
+        artifactStore: { list: () => ({ artifacts: [{ id: artifactA, title: "Alpha Artifact", fileName: "alpha.txt", conversationId: conversationA, createdAt: "2026-09-02T00:00:02.000Z" }, { id: artifactB, title: "Beta Artifact", fileName: "beta.txt", conversationId: conversationB, createdAt: "2026-09-02T00:00:01.000Z" }] }), ...(artifactSearchRecords ? { searchRecords: () => ({ artifacts: artifactSearchRecords }) } : {}) },
         skillStore: { list: () => ({ skills }) },
         productSurfaces: { listPlaybooks: () => ({ playbooks }) },
         getRoutines: () => ({ routines }),
@@ -95,6 +95,21 @@ test("conversation Search redacts sensitive message patterns before indexing whi
     const ordinary = await service.query({ query: "ordinary history phrase", types: ["conversations"], limit: 10 });
     assert.equal(ordinary.results[0].messageId, "msg_bcdefabcdefabcde");
     assert.match(ordinary.results[0].matchSnippet, /ordinary history phrase/i);
+});
+
+test("Artifact Search indexes bounded text content without leaking raw content", async () => {
+    const artifactSearchRecords = [
+        { id: artifactA, title: "P45 Text Artifact", fileName: "report.md", mimeType: "text/markdown", conversationId: conversationA, createdAt: "2026-09-02T00:00:04.000Z", searchText: "P45 unique artifact body" },
+        { id: artifactB, title: "P45 Secret Artifact", fileName: "secret.md", mimeType: "text/markdown", conversationId: conversationB, createdAt: "2026-09-02T00:00:03.000Z", searchText: "token=P45HiddenArtifactSecret C:\\Users\\Eternal\\private\\secret.md" },
+    ];
+    const { service } = fixture({ artifactSearchRecords });
+    const result = await service.query({ query: "P45 unique artifact body", types: ["artifacts"], limit: 10 });
+    assert.equal(result.results[0]?.id, artifactA);
+    assert.match(result.results[0]?.matchSnippet ?? "", /unique artifact body/i);
+    assert.equal(Object.hasOwn(result.results[0], "searchText"), false);
+    assert.equal(Object.hasOwn(result.results[0], "projectIds"), false);
+    const secret = await service.query({ query: "P45HiddenArtifactSecret", types: ["artifacts"], limit: 10 });
+    assert.deepEqual(secret.results, []);
 });
 
 test("conversation message candidates do not repeat titles and win content ties with the summary", async () => {

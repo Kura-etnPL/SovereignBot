@@ -49,6 +49,29 @@ test("artifact store copies trusted workspace output into durable managed storag
     }
 });
 
+test("artifact search projection reads only bounded allowlisted text from managed files", () => {
+    const { root, workspace, store } = fixture();
+    try {
+        writeFileSync(join(workspace, "searchable.md"), "P45 bounded artifact body", "utf8");
+        writeFileSync(join(workspace, "binary.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+        writeFileSync(join(workspace, "oversized.txt"), Buffer.alloc(64 * 1024 + 1, 0x61));
+        const searchable = store.ingestWorkspaceFile({ workspaceId: "workspace_project", workspacePath: workspace, relativePath: "searchable.md", title: "Searchable" });
+        const binary = store.ingestWorkspaceFile({ workspaceId: "workspace_project", workspacePath: workspace, relativePath: "binary.png", title: "Binary" });
+        const oversized = store.ingestWorkspaceFile({ workspaceId: "workspace_project", workspacePath: workspace, relativePath: "oversized.txt", title: "Oversized" });
+        const records = store.searchRecords({ visibility: "all", limit: 5_000 }).artifacts;
+        const byId = new Map(records.map((entry) => [entry.id, entry]));
+        assert.equal(byId.get(searchable.id).searchText, "P45 bounded artifact body");
+        assert.equal(Object.hasOwn(byId.get(searchable.id), "storageRelativePath"), false);
+        assert.equal(Object.hasOwn(byId.get(binary.id), "searchText"), false);
+        assert.equal(Object.hasOwn(byId.get(oversized.id), "searchText"), false);
+        rmSync(store.managedPath(searchable.id));
+        assert.equal(Object.hasOwn(new Map(store.searchRecords({ visibility: "all", limit: 5_000 }).artifacts.map((entry) => [entry.id, entry])).get(searchable.id), "searchText"), false);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("artifact ingestion refuses absolute/traversal paths, workspace escape and symlink sources", () => {
     const { root, workspace, store } = fixture();
     try {

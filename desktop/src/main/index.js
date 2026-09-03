@@ -318,6 +318,7 @@ async function main() {
         getHistory: (payload) => productSurfaces.computerHistory(payload),
     });
     conversationStore.onMessage(() => search?.invalidate());
+    artifactStore.onChanged(() => search?.invalidate());
     teamService.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => {
         const binding = host.rosterSummary()?.coworkerBindings?.[targetCoworkerId];
         if (!binding?.ready || binding.agentId !== coworkerAgentId(targetCoworkerId)) throw new Error("target coworker provider binding is not ready");
@@ -936,7 +937,7 @@ async function main() {
         };
         const searchMutationChannels = new Set([
             "conversation:createDirect", "conversation:createTeam", "conversation:send", "conversation:redirect",
-            "artifact:attachViaDialog", "artifact:archive", "artifact:restore", "artifact:restoreAsNewVersion", "artifact:reviseViaDialog", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
+            "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
             "team:requestCollaboration", "team:requestParallel", "team:installPack", "team:importPack", "team:importPlaybook", "team:createChannelFromTemplate",
             "playbook:create", "playbook:update", "playbook:archive", "playbook:restore", "playbook:duplicate", "playbook:import", "playbook:assign",
             "channel:create", "channel:update", "channel:archive", "channel:restore",

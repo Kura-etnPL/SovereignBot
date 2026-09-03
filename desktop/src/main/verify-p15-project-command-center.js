@@ -71,6 +71,7 @@ export function makeFixture(dataDir) {
   projectService.setMemoryService(memoryService);
   search = createSearchService({ teamService, conversationStore, coworkerStore, projectService, artifactStore, skillStore, productSurfaces, getRoutines: () => routines?.list(), memoryService, getJobs: () => jobs, getHistory: (payload) => productSurfaces.computerHistory(payload) });
   conversationStore.onMessage(() => search?.invalidate());
+  artifactStore.onChanged(() => search?.invalidate());
   const palette = createCommandPaletteService({ runRoutine: (routineId) => routines.runNow(routineId) });
   return { services, rawServices: baseServices, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, connectedApps, productSurfaces, routines, eventTriggers, search, jobs, palette, chief, specialist, sharedWorkspaceId: shared.workspace.id };
 }

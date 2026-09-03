@@ -195,7 +195,9 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         const conversationById = new Map(conversations.map((conversation) => [conversation.id, conversation]));
         const hasFullConversationHistory = typeof conversationStore.searchRecords === "function";
         const coworkers = coworkerStore.list({ includeArchived: true }).coworkers ?? [];
-        const artifacts = artifactStore?.indexRecords
+        const artifacts = artifactStore?.searchRecords
+            ? (artifactStore.searchRecords({ visibility: "all", limit: 5_000 }).artifacts ?? [])
+            : artifactStore?.indexRecords
             ? (artifactStore.indexRecords({ visibility: "all", limit: 5_000 }).artifacts ?? [])
             : artifactStore?.list ? (artifactStore.list({ visibility: "all", limit: 500 }).artifacts ?? []) : [];
         const skills = skillStore?.list ? (skillStore.list({ includeArchived: true }).skills ?? []) : [];
@@ -264,7 +266,7 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
             });
         }
         for (const coworker of coworkers) emit("coworkers", coworker, coworker.name, coworker.role, coworkerProjects.get(coworker.id), coworker.updatedAt, { view: "conversation", coworkerId: coworker.id }, coworker.role);
-        for (const artifact of artifacts) emit("artifacts", artifact, artifact.title, artifact.fileName, artifactProjects.get(artifact.id), artifact.createdAt, { view: "artifacts", artifactId: artifact.id, conversationId: artifact.conversationId }, artifact.fileName);
+        for (const artifact of artifacts) emit("artifacts", artifact, artifact.title, artifact.fileName, artifactProjects.get(artifact.id), artifact.createdAt, { view: "artifacts", artifactId: artifact.id, conversationId: artifact.conversationId }, Object.hasOwn(artifact, "searchText") ? artifact.searchText : artifact.fileName);
         for (const skill of skills) emit("skills", skill, skill.name, skill.description, skillProjects.get(skill.id), skill.updatedAt, { view: "skills", skillId: skill.id }, skill.description);
         for (const playbook of playbooks) emit("playbooks", playbook, playbook.name, playbook.description, playbookProjects.get(playbook.id), playbook.updatedAt, { view: "playbooks", playbookId: playbook.id }, playbook.description);
         for (const routine of routines) emit("routines", routine, routine.name, routine.enabled ? "Enabled routine" : "Disabled routine", routineProjects.get(routine.id), routine.updatedAt, { view: "routines", routineId: routine.id }, routine.instruction);
@@ -369,6 +371,14 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
                 publicResult.messageId = record.messageId;
                 publicResult.matchSnippet = source.slice(start, start + 180);
                 publicResult.id = record.conversationId;
+            }
+            if (record.type === "artifacts" && Object.hasOwn(record, "searchText") && match.fields.includes("content")) {
+                const source = record.searchText;
+                const normalizedSource = normalized(source);
+                const positions = tokens(queryText).map((token) => normalizedSource.indexOf(normalized(token))).filter((position) => position >= 0);
+                const hit = positions.length ? Math.min(...positions) : 0;
+                const start = Math.max(0, Math.min(hit - 64, Math.max(0, source.length - 180)));
+                publicResult.matchSnippet = source.slice(start, start + 180);
             }
             if (record.type === "conversations") {
                 const key = record.conversationId ?? record.id;

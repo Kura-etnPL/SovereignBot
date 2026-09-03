@@ -8,6 +8,7 @@ export const ARTIFACTS_SCHEMA = "sovereignbot.desktop.artifacts.v1";
 const MAX_ARTIFACTS = 5_000;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 128 * 1024;
+const MAX_SEARCH_TEXT_BYTES = 64 * 1024;
 const MAX_ATTACHMENT_CONTEXT_BYTES = 24 * 1024;
 const MAX_TITLE = 180;
 const MAX_ARTIFACT_VERSION = MAX_ARTIFACTS;
@@ -22,6 +23,7 @@ const MIME_BY_EXT = new Map([
     [".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
     [".zip", "application/zip"],
 ]);
+const TEXT_SEARCH_MIME_TYPES = new Set([...MIME_BY_EXT.values()].filter((mimeType) => mimeType.startsWith("text/") || mimeType === "application/json"));
 
 function makeId() {
     return `artifact_${randomBytes(8).toString("hex")}`;
@@ -59,6 +61,14 @@ function safeRelativePath(value) {
     if (normalized.split("/").some((part) => part === "" || part === "." || part === ".."))
         throw new Error("artifact path contains unsafe traversal components");
     return normalized;
+}
+
+function sanitizeArtifactSearchText(value) {
+    return String(value ?? "").slice(0, 20_000)
+        .replace(/[A-Za-z]:[\\/][^\s"'<>|?\r\n]+/g, "[redacted-path]")
+        .replace(/(?:file:\/\/|\\\\|\/(?:Users|home|tmp|var|private|mnt|workspace|opt|etc)\/)[^\s"'<>|?\r\n]*/gi, "[redacted-path]")
+        .replace(/(?:bearer\s+|token\s*[:=]\s*|cookie\s*[:=]\s*|secret\s*[:=]\s*|password\s*[:=]\s*)[^\s,;]+/gi, "[redacted-secret]")
+        .replace(/https?:\/\/[^\s"'<>]+/gi, "[redacted-url]");
 }
 
 function inside(root, candidate) {
@@ -177,6 +187,7 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
         byMimeType: new Map(),
     };
     let nextOrder = 0;
+    const changeObservers = new Set();
 
     function addToIndex(map, key, id) {
         if (!key) return;
@@ -232,6 +243,9 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
 
     function save() {
         saveJsonState(persistPath, { schema: ARTIFACTS_SCHEMA, artifacts });
+        for (const observer of [...changeObservers]) {
+            try { observer(); } catch {}
+        }
     }
 
     function requireArtifact(id) {
@@ -358,6 +372,12 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
     return {
         schema: ARTIFACTS_SCHEMA,
 
+        onChanged(observer) {
+            if (typeof observer !== "function") throw new Error("artifact change observer must be a function");
+            changeObservers.add(observer);
+            return () => changeObservers.delete(observer);
+        },
+
         list({ conversationId, coworkerId, visibility = "active", limit = 100 } = {}) {
             if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact list limit must be 1..500");
             return { schema: ARTIFACTS_SCHEMA, artifacts: indexedEntries({ conversationId, coworkerId, visibility, limit }).map(publicView) };
@@ -367,6 +387,29 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             const allowed = new Set(["conversationId", "conversationIds", "coworkerId", "coworkerIds", "artifactFamilyId", "mimeType", "visibility", "limit"]);
             for (const key of Object.keys(arguments[0] ?? {})) if (!allowed.has(key)) throw new Error(`unknown indexed artifact field: ${key}`);
             return { schema: ARTIFACTS_SCHEMA, artifacts: indexedEntries({ conversationId, conversationIds, coworkerId, coworkerIds, artifactFamilyId, mimeType, visibility, limit }).map(publicView) };
+        },
+
+        searchRecords({ conversationId, conversationIds, coworkerId, coworkerIds, artifactFamilyId, mimeType, visibility = "active", limit = MAX_ARTIFACTS } = {}) {
+            const allowed = new Set(["conversationId", "conversationIds", "coworkerId", "coworkerIds", "artifactFamilyId", "mimeType", "visibility", "limit"]);
+            for (const key of Object.keys(arguments[0] ?? {})) if (!allowed.has(key)) throw new Error(`unknown artifact search field: ${key}`);
+            const entries = indexedEntries({ conversationId, conversationIds, coworkerId, coworkerIds, artifactFamilyId, mimeType, visibility, limit });
+            return {
+                schema: ARTIFACTS_SCHEMA,
+                artifacts: entries.map((entry) => {
+                    const visible = publicView(entry);
+                    if (!TEXT_SEARCH_MIME_TYPES.has(entry.mimeType) || entry.size > MAX_SEARCH_TEXT_BYTES) return visible;
+                    try {
+                        const full = storagePath(entry);
+                        const stat = statSync(full);
+                        if (!stat.isFile() || stat.size > MAX_SEARCH_TEXT_BYTES) return visible;
+                        const text = sanitizeArtifactSearchText(readFileSync(full).toString("utf8"));
+                        return text.length ? { ...visible, searchText: text } : visible;
+                    }
+                    catch {
+                        return visible;
+                    }
+                }),
+            };
         },
 
         get(id) {
