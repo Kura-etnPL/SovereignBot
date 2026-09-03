@@ -36,7 +36,8 @@ test("P31 dedicated Team Pack entry keeps first-party read-only and custom Dupli
 });
 
 test("P31 verifier preflights the exact injected Duplicate click source", () => {
-  assert.match(verifier, /OLD_DUPLICATE_CLICK_SOURCE/);
-  assert.match(verifier, /new Function\(source\)/);
-  assert.match(verifier, /executeJavaScript\(duplicateClickSource\)/);
+  assert.match(verifier, /OLD_DUPLICATE_CLICK_EXPRESSION/);
+  assert.match(verifier, /new Function\(`return \(\$\{expression\}\)\(\)`\)/);
+  assert.match(verifier, /invoke\(win, duplicateClickExpression\)/);
+  assert.doesNotMatch(verifier, /executeJavaScript\(duplicateClick/);
 });
