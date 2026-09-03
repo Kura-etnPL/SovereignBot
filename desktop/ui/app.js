@@ -110,6 +110,10 @@ function resetConversationPage(conversationId) {
     nextBeforeMessageId: undefined,
     loadedOlder: false,
     loadingOlder: false,
+    historyMode: false,
+    windowIncludesLatest: true,
+    newMessagesAvailable: 0,
+    latestMessageId: undefined,
     seenMessageIds: new Set(),
   };
 }
@@ -117,23 +121,35 @@ function resetConversationPage(conversationId) {
 function updateConversationPageControls() {
   const page = state.conversationPage;
   const button = $("conversation-load-older");
+  const latestButton = $("conversation-latest-messages");
   const status = $("conversation-page-status");
   if (!button || !status) return;
   const current = page?.conversationId === state.selectedConversationId ? page : undefined;
   button.classList.toggle("hidden", !current?.hasOlder);
   button.disabled = Boolean(current?.loadingOlder);
   button.textContent = current?.loadingOlder ? "Loading older messages… / 正在加载更早消息…" : "Load older messages / 加载更早消息";
+  if (latestButton) {
+    const showLatest = Boolean(current?.historyMode || current?.newMessagesAvailable);
+    latestButton.classList.toggle("hidden", !showLatest);
+    latestButton.disabled = Boolean(current?.loadingLatest);
+    latestButton.textContent = current?.newMessagesAvailable
+      ? `${current.newMessagesAvailable} new message${current.newMessagesAvailable === 1 ? "" : "s"} · Back to latest / ${current.newMessagesAvailable} 条新消息 · 回到最新`
+      : "Back to latest / 回到最新";
+  }
   status.textContent = current && current.total > current.messages.length
     ? `${current.messages.length} of ${current.total} messages loaded / 已加载 ${current.messages.length} / ${current.total} 条消息`
-    : "";
+    : current?.historyMode ? "Browsing older messages / 正在浏览更早消息" : "";
 }
 
 function mergeConversationPage(pageResponse, mode = "latest") {
   const page = state.conversationPage;
   const incoming = Array.isArray(pageResponse?.messages) ? pageResponse.messages : [];
   const current = page?.messages ?? [];
-  const incomingIds = new Set(incoming.map((message) => message?.id).filter(Boolean));
-  const freshMessages = mode === "latest" ? incoming.filter((message) => message?.id && !page.seenMessageIds.has(message.id)) : [];
+  let freshMessages = mode === "latest" ? incoming.filter((message) => message?.id && !page.seenMessageIds.has(message.id)) : [];
+  const observedLatestId = pageResponse?.lastMessage?.id ?? incoming.at(-1)?.id;
+  const previousLatestId = page.latestMessageId;
+  const previousTotal = page.total;
+  page.total = Number.isInteger(pageResponse?.messageCount) ? pageResponse.messageCount : (pageResponse?.pageInfo?.total ?? page.total);
   let merged;
   if (mode === "older") {
     const seen = new Set();
@@ -147,15 +163,40 @@ function mergeConversationPage(pageResponse, mode = "latest") {
     merged = current.map((message) => incoming.find((entry) => entry?.id === message.id) ?? message);
     for (const message of incoming) if (message?.id && !positions.has(message.id)) merged.push(message);
   }
-  if (merged.length > MAX_RENDERED_MESSAGES) merged = mode === "older" ? merged.slice(0, MAX_RENDERED_MESSAGES) : merged.slice(-MAX_RENDERED_MESSAGES);
+  if (mode === "older") {
+    const includesLatest = Boolean(page.latestMessageId && merged.some((message) => message?.id === page.latestMessageId));
+    if (merged.length > MAX_RENDERED_MESSAGES) {
+      // Keep the newly requested older edge. The omitted latest tail is
+      // deliberately not replaced by the next polling response.
+      merged = merged.slice(0, MAX_RENDERED_MESSAGES);
+      page.windowIncludesLatest = false;
+      page.historyMode = true;
+    } else {
+      page.windowIncludesLatest = includesLatest;
+      page.historyMode = !includesLatest;
+    }
+  } else if (page.historyMode || page.windowIncludesLatest === false) {
+    // A polling page is still useful for totals and latest identity while the
+    // user is reading history, but must not eject the visible historical window.
+    merged = current;
+    const latestChanged = Boolean(observedLatestId && previousLatestId && observedLatestId !== previousLatestId);
+    if (latestChanged || (page.total > previousTotal && previousLatestId)) {
+      page.newMessagesAvailable += Math.max(1, page.total - previousTotal);
+    }
+    freshMessages = [];
+  } else if (merged.length > MAX_RENDERED_MESSAGES) {
+    // At the live edge, retain the latest bounded window as new messages land.
+    merged = merged.slice(-MAX_RENDERED_MESSAGES);
+    page.windowIncludesLatest = true;
+  }
   page.messages = merged;
-  page.total = Number.isInteger(pageResponse?.messageCount) ? pageResponse.messageCount : (pageResponse?.pageInfo?.total ?? page.total);
   page.hasOlder = mode === "older" ? Boolean(pageResponse?.pageInfo?.hasOlder) : Boolean(page.hasOlder || pageResponse?.pageInfo?.hasOlder);
   page.nextBeforeMessageId = page.hasOlder ? (page.messages[0]?.id ?? pageResponse?.pageInfo?.nextBeforeMessageId) : undefined;
   page.loadedOlder = page.loadedOlder || mode === "older";
+  if (observedLatestId) page.latestMessageId = observedLatestId;
   for (const message of incoming) if (message?.id) page.seenMessageIds.add(message.id);
   while (page.seenMessageIds.size > MAX_RENDERED_MESSAGES * 2) page.seenMessageIds.delete(page.seenMessageIds.values().next().value);
-  return { messages: page.messages, freshMessages, incomingIds };
+  return { messages: page.messages, freshMessages };
 }
 
 function conversationUnread(conversation) {
@@ -947,6 +988,45 @@ async function loadOlderMessages() {
   } finally {
     if (state.conversationPage === page) {
       page.loadingOlder = false;
+      updateConversationPageControls();
+    }
+  }
+}
+
+async function jumpToLatestMessages() {
+  const page = state.conversationPage;
+  const id = state.selectedConversationId;
+  if (!page || page.conversationId !== id || page.loadingLatest) return;
+  page.loadingLatest = true;
+  updateConversationPageControls();
+  try {
+    const response = await window.sovereignbot.conversations.get({ conversationId: id, limit: CONVERSATION_PAGE_SIZE });
+    if (state.selectedConversationId !== id || state.conversationPage !== page) return;
+    const messages = Array.isArray(response?.messages) ? response.messages.slice(-MAX_RENDERED_MESSAGES) : [];
+    page.messages = messages;
+    page.total = Number.isInteger(response?.messageCount) ? response.messageCount : (response?.pageInfo?.total ?? messages.length);
+    page.hasOlder = Boolean(response?.pageInfo?.hasOlder);
+    page.nextBeforeMessageId = page.hasOlder ? messages[0]?.id : undefined;
+    page.loadedOlder = false;
+    page.historyMode = false;
+    page.windowIncludesLatest = true;
+    page.newMessagesAvailable = 0;
+    page.latestMessageId = response?.lastMessage?.id ?? messages.at(-1)?.id;
+    page.seenMessageIds = new Set(messages.map((message) => message?.id).filter(Boolean));
+    state.conversationSignature = undefined;
+    const conversation = { ...response, messages, pageInfo: response.pageInfo };
+    state.selectedConversation = conversation;
+    renderConversationHeader(conversation);
+    renderMessages(conversation, true, { voiceMessages: [] });
+    if (state.selectedConversation) renderDetails(state.selectedConversation);
+  } catch (error) {
+    if (state.selectedConversationId === id) {
+      $("composer-error").textContent = text(error?.message || error);
+      show($("composer-error"));
+    }
+  } finally {
+    if (state.conversationPage === page) {
+      page.loadingLatest = false;
       updateConversationPageControls();
     }
   }
@@ -2774,6 +2854,7 @@ function bindEvents() {
   $("conversation-stop")?.addEventListener("click", stopCurrentConversation);
   $("conversation-redirect")?.addEventListener("click", toggleRedirectMode);
   $("conversation-load-older")?.addEventListener("click", () => { void loadOlderMessages(); });
+  $("conversation-latest-messages")?.addEventListener("click", () => { void jumpToLatestMessages(); });
   $("open-details").addEventListener("click", () => $("details-panel").classList.toggle("hidden"));
   $("close-details").addEventListener("click", () => hide($("details-panel")));
   $("nav-settings").addEventListener("click", async () => { switchView("settings"); await refreshSettingsData(); });

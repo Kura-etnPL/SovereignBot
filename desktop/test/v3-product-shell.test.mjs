@@ -51,12 +51,15 @@ test("V3 conversation UX supports durable polling, team mentions, details and pr
     assert.match(app, /conversations\.get\(\{ conversationId: id, limit: CONVERSATION_PAGE_SIZE \}\)/);
     assert.match(app, /loadOlderMessages/);
     assert.match(app, /MAX_RENDERED_MESSAGES = 300/);
+    assert.match(app, /historyMode/);
+    assert.match(app, /jumpToLatestMessages/);
     assert.match(app, /@everyone/);
     assert.match(app, /state\.mentionIds/);
     assert.match(app, /pendingUserRecipients/);
     assert.match(app, /coworkerBindings/);
     assert.match(html, /id="conversation-presence"/);
     assert.match(html, /id="conversation-load-older"/);
+    assert.match(html, /id="conversation-latest-messages"/);
     assert.match(html, /id="conversation-page-status"/);
     assert.match(html, /id="mention-row"/);
     assert.match(html, /id="provider-cards"/);
