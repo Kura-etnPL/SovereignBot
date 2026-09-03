@@ -35,9 +35,14 @@ test("P31 dedicated Team Pack entry keeps first-party read-only and custom Dupli
   assert.match(page, /button\("Export \/ 导出", \(\) => exportPackToFile\(item\)/);
 });
 
-test("P31 verifier preflights the exact injected Duplicate click source", () => {
-  assert.match(verifier, /OLD_DUPLICATE_CLICK_EXPRESSION/);
-  assert.match(verifier, /new Function\(`return \(\$\{expression\}\)\(\)`\)/);
-  assert.match(verifier, /invoke\(win, duplicateClickExpression\)/);
-  assert.doesNotMatch(verifier, /executeJavaScript\(duplicateClick/);
+test("P31 verifier uses bounded native input for the older-gallery Duplicate control", () => {
+  assert.match(verifier, /async function clickVisibleElementWithInput\(win, selector, label\)/);
+  assert.match(verifier, /getBoundingClientRect\(\)/);
+  assert.match(verifier, /values\.every\(Number\.isFinite\)/);
+  assert.match(verifier, /sendInputEvent\(\{ type: "mouseMove"/);
+  assert.match(verifier, /sendInputEvent\(\{ type: "mouseDown"/);
+  assert.match(verifier, /sendInputEvent\(\{ type: "mouseUp"/);
+  assert.match(verifier, /clickVisibleElementWithInput\(win, "#product-packs/);
+  assert.doesNotMatch(verifier, /OLD_DUPLICATE_CLICK_EXPRESSION/);
+  assert.doesNotMatch(verifier, /invoke\(win, duplicateClickExpression\)/);
 });

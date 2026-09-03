@@ -12,11 +12,21 @@ import { bindIpcChannels } from "./ipc.js";
 const WORKTREE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const EVIDENCE_DIR = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR ?? join(WORKTREE_ROOT, "_evidence_p31_2026-09-03");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const OLD_DUPLICATE_CLICK_EXPRESSION = "async()=>{const button=document.querySelectorAll('#product-packs .settings-card')[4].querySelectorAll('button')[2]; if(!button) throw new Error('older gallery Duplicate button is unavailable'); button.click(); return true}";
 
-function preflightJavaScriptExpression(expression) {
-  new Function(`return (${expression})()`);
-  return expression;
+async function clickVisibleElementWithInput(win, selector, label) {
+  const geometry = await invoke(win, `async()=>{const element=document.querySelector(${JSON.stringify(selector)}); if(!element) return {found:false}; const rect=element.getBoundingClientRect(); const style=getComputedStyle(element); const viewport={width:document.documentElement.clientWidth,height:document.documentElement.clientHeight}; return {found:true,x:rect.left+rect.width/2,y:rect.top+rect.height/2,left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom,width:rect.width,height:rect.height,display:style.display,visibility:style.visibility,opacity:style.opacity,viewport};}`);
+  const values = [geometry?.x, geometry?.y, geometry?.left, geometry?.top, geometry?.right, geometry?.bottom, geometry?.width, geometry?.height, geometry?.viewport?.width, geometry?.viewport?.height];
+  if (!geometry?.found) throw new Error(`${label} is unavailable`);
+  if (!values.every(Number.isFinite)) throw new Error(`${label} has non-finite bounds`);
+  if (!(geometry.width > 0 && geometry.height > 0)) throw new Error(`${label} is not visible: zero bounds`);
+  if (geometry.display === "none" || geometry.visibility === "hidden" || Number(geometry.opacity) <= 0) throw new Error(`${label} is not visible`);
+  if (!(geometry.left >= 0 && geometry.top >= 0 && geometry.right <= geometry.viewport.width && geometry.bottom <= geometry.viewport.height && geometry.x >= 0 && geometry.y >= 0 && geometry.x <= geometry.viewport.width && geometry.y <= geometry.viewport.height)) throw new Error(`${label} is outside the viewport`);
+  win.focus();
+  win.webContents.focus();
+  await win.webContents.sendInputEvent({ type: "mouseMove", x: geometry.x, y: geometry.y });
+  await win.webContents.sendInputEvent({ type: "mouseDown", button: "left", clickCount: 1, x: geometry.x, y: geometry.y });
+  await win.webContents.sendInputEvent({ type: "mouseUp", button: "left", clickCount: 1, x: geometry.x, y: geometry.y });
+  return geometry;
 }
 
 export async function runVerifyP31TeamPackGallery({ app }) {
@@ -61,8 +71,8 @@ export async function runVerifyP31TeamPackGallery({ app }) {
     check("older first-party gallery entry is read-only and guides Duplicate", Boolean(oldFirstParty) && !oldFirstParty.buttons.some((label) => label.includes("Edit")) && oldFirstParty.buttons.some((label) => label.includes("Duplicate")), JSON.stringify(oldFirstParty));
 
     const beforeIds = await invoke(win, "async()=>((await window.sovereignbot.teams.list({})).packs.filter((entry)=>entry.custom).map((entry)=>entry.id))");
-    const duplicateClickExpression = preflightJavaScriptExpression(OLD_DUPLICATE_CLICK_EXPRESSION);
-    await invoke(win, duplicateClickExpression);
+    const duplicateGeometry = await clickVisibleElementWithInput(win, "#product-packs .settings-card:nth-child(5) button:nth-child(3)", "older gallery Duplicate button");
+    note(`Duplicate input coordinates: ${JSON.stringify({ x: duplicateGeometry.x, y: duplicateGeometry.y, viewport: duplicateGeometry.viewport })}`);
     await waitFor("legacy gallery duplicate refresh", async () => await invoke(win, "async()=>((await window.sovereignbot.teams.list({})).packs ?? []).some((entry)=>entry.custom)"));
     const afterDuplicate = await invoke(win, "async()=>{const listed=await window.sovereignbot.teams.list({}); return {ids:listed.packs.filter((entry)=>entry.custom).map((entry)=>entry.id),cards:[...document.querySelectorAll('#product-packs .settings-card')].map((card)=>({id:card.dataset.teamPackId,title:card.querySelector('h3')?.textContent,buttons:[...card.querySelectorAll('button')].map((button)=>button.textContent)}))}})");
     duplicateRecipeId = afterDuplicate.ids.find((id) => !beforeIds.includes(id));
