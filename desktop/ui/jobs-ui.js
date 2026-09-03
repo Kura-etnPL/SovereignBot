@@ -24,6 +24,11 @@
   let routineRemoveCandidate;
   let workerNodes = [];
   let computerTargets = [];
+  let coworkerLabels = new Map();
+  let workspaceLabels = new Map();
+  let identityRequest = 0;
+  let jobDetailRequest = 0;
+  const jobActionState = new Map();
   const ATTENTION_CATEGORIES = Object.freeze([
     ["login-required", "Login required / 需要登录"],
     ["secret-required", "Secret required / 需要密钥"],
@@ -62,6 +67,99 @@
   function statusClass(s) { return `job-status ${s}`; }
   function statusLabel(s) { return t(`work.status.${s}`, s); }
 
+  function actionState(jobId) {
+    let state = jobActionState.get(jobId);
+    if (!state) { state = { pending: new Set(), feedback: "", error: false }; jobActionState.set(jobId, state); }
+    return state;
+  }
+  function safePublicText(value, fallback = "—", limit = 240) {
+    const text = String(value ?? "").trim();
+    if (!text || /(?:provider\s+session|credential|session(?:Id)?|raw\s+path|workspace\s+path|access\s+token)/i.test(text)) return fallback;
+    return text.replace(/(?:[A-Za-z]:[\\/]|\\\\|\/(?:Users|home|tmp|var|private|mnt)\/)[^\s]*/gi, "[local detail]").slice(0, limit) || fallback;
+  }
+  function safeLabel(value, fallback) {
+    const text = String(value ?? "").trim();
+    return text && !/[\\/]/.test(text) ? safePublicText(text, fallback, 120) : fallback;
+  }
+  function ownerLabel(job) {
+    const owner = coworkerLabels.get(job?.ownerCoworkerId);
+    if (!owner) return "Assigned Coworker / 已分配同事";
+    const name = I18n()?.displayCoworkerName?.(owner.name) ?? owner.name;
+    return `${safeLabel(name, "Coworker")} · ${safeLabel(owner.role, "Coworker")}`;
+  }
+  function workspaceLabel(job) {
+    const executionKind = job?.executionTarget?.kind;
+    if (["worker-node", "worker-computer"].includes(executionKind)) {
+      return `Worker Node: ${safeLabel(job.workerNodeName, "Worker Node")} · Worker workspace: ${safeLabel(job.workerWorkspaceName, "Worker workspace")}`;
+    }
+    const workspace = workspaceLabels.get(job?.workspaceId);
+    if (workspace) return `Workspace: ${safeLabel(workspace.label, "Trusted workspace")} · ${workspace.kind === "shared-project" ? "Shared project workspace" : "Trusted workspace"}`;
+    return executionKind === "local" || !job?.workspaceId ? "This PC / 此电脑" : "Trusted workspace / 受信工作区";
+  }
+  function jobMeta(job) {
+    const priority = safePublicText(job?.priority, "normal", 40);
+    const next = job?.nextActionAt ? ` · next ${new Date(job.nextActionAt).toLocaleString()}` : "";
+    const error = job?.error ? ` · ${safePublicText(job.error, "Job attention requires review.", 160)}` : "";
+    return `${ownerLabel(job)} · ${priority} · ${workspaceLabel(job)}${next}${error}`;
+  }
+  function feedbackNode(jobId) {
+    const state = actionState(jobId);
+    const node = document.createElement("p");
+    node.className = `job-action-feedback${state.error ? " error" : ""}${state.feedback ? "" : " hidden"}`;
+    node.dataset.jobFeedback = jobId;
+    node.setAttribute("role", "status");
+    node.textContent = state.feedback;
+    return node;
+  }
+  function jobActionPending(jobId) { return actionState(jobId).pending.size > 0; }
+  function syncJobDetailActionState() {
+    if (!currentJobId) return;
+    const state = actionState(currentJobId);
+    for (const button of document.querySelectorAll("[data-job-detail-action]")) button.disabled = state.pending.size > 0;
+  }
+  function renderJobSurfaces() {
+    renderList();
+    renderAttentionList();
+    syncJobDetailActionState();
+  }
+  async function refreshPublicLabels() {
+    const request = ++identityRequest;
+    const [coworkers, workspaces] = await Promise.all([
+      window.sovereignbot.coworkers?.list ? window.sovereignbot.coworkers.list({}) : Promise.resolve({ coworkers: [] }),
+      window.sovereignbot.workspaces?.list ? window.sovereignbot.workspaces.list({}) : Promise.resolve({ workspaces: [] }),
+    ]);
+    if (request !== identityRequest) return;
+    coworkerLabels = new Map((coworkers?.coworkers ?? []).map((entry) => [entry.id, { name: entry.name, role: entry.role }]));
+    workspaceLabels = new Map((workspaces?.workspaces ?? []).map((entry) => [entry.id, { label: entry.label, kind: entry.kind }]));
+  }
+  async function runJobAction(jobId, action, invoke, successMessage = "Job action completed.") {
+    const state = actionState(jobId);
+    if (state.pending.has(action)) return;
+    state.pending.add(action);
+    state.feedback = "";
+    state.error = false;
+    renderJobSurfaces();
+    try {
+      await invoke();
+      state.feedback = successMessage;
+    } catch (error) {
+      state.error = true;
+      state.feedback = `Action failed: ${safePublicText(error?.message ?? error, "Job action failed.", 320)}`;
+    } finally {
+      state.pending.delete(action);
+      try { await refresh(); } catch {}
+      renderJobSurfaces();
+      if (currentJobId === jobId && $("job-detail-dialog")?.open) await openDetail(jobId);
+    }
+  }
+  function jobActionButton(job, action, label, className, invoke, successMessage) {
+    const button = attentionButton(label, className, () => { void runJobAction(job.id, action, invoke, successMessage); });
+    button.dataset.jobId = job.id;
+    button.dataset.jobAction = action;
+    button.disabled = jobActionPending(job.id);
+    return button;
+  }
+
   function ensureExecutionTargetSurface() {
     if ($("job-execution") || !$("job-form-error")) return;
     const makeLabel = (caption, control) => { const label = document.createElement("label"); label.textContent = caption; label.append(control); return label; };
@@ -94,6 +192,7 @@
     for (const job of jobs) {
       const card = document.createElement("div");
       card.className = "job-card";
+      card.dataset.jobId = job.id;
       const head = document.createElement("div");
       head.className = "job-card-head";
       const title = document.createElement("strong");
@@ -106,8 +205,7 @@
       const meta = document.createElement("div");
       meta.className = "setting-feedback";
       meta.style.margin = "0";
-       const target = job.executionTarget?.kind === "worker-node" ? ` · ${job.workerNodeName ?? job.executionTarget.nodeId} / ${job.workerWorkspaceName ?? job.executionTarget.workspaceId}` : " · This PC / 此电脑";
-       meta.textContent = `${job.ownerCoworkerId} · ${job.priority}${target}${job.nextActionAt ? ` · next ${new Date(job.nextActionAt).toLocaleString()}` : ""}${job.error ? ` · ${job.error.slice(0,80)}` : ""}`;
+       meta.textContent = jobMeta(job);
       const actions = document.createElement("div");
       actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
       const openBtn = document.createElement("button");
@@ -117,11 +215,11 @@
       if (job.status === "needs_attention") {
         if (attentionActionAllowed(job, "open-settings")) actions.append(attentionButton("Open settings / 打开设置", "quiet-action", () => openAttentionDestination("open-settings")));
         if (attentionActionAllowed(job, "open-this-pc")) actions.append(attentionButton("Open This PC / 打开此电脑", "quiet-action", () => openAttentionDestination("open-this-pc")));
-        if (attentionActionAllowed(job, "retry")) actions.append(attentionButton(t("attention.retry", "Retry"), "hero-action", async () => { await window.sovereignbot.jobs.approve({ jobId: job.id }); await refresh(); }));
+         if (attentionActionAllowed(job, "retry")) actions.append(jobActionButton(job, "retry", t("attention.retry", "Retry"), "hero-action", () => window.sovereignbot.jobs.approve({ jobId: job.id }), "Retry requested."));
         if (attentionActionAllowed(job, "snooze")) actions.append(attentionButton(t("attention.snooze", "Snooze"), "quiet-action", async () => { await window.sovereignbot.jobs.snooze({ jobId: job.id, minutes: selectedSnoozeMinutes() }); await refresh(); }));
-        if (attentionActionAllowed(job, "dismiss")) actions.append(attentionButton(t("attention.dismiss", "Dismiss"), "quiet-action", async () => { await window.sovereignbot.jobs.dismiss({ jobId: job.id }); await refresh(); }));
-      }
-      card.append(head, meta, actions);
+         if (attentionActionAllowed(job, "dismiss")) actions.append(jobActionButton(job, "dismiss", "Dismiss attention / 消退关注", "quiet-action", () => window.sovereignbot.jobs.dismiss({ jobId: job.id }), "Attention dismissed."));
+       }
+       card.append(head, meta, feedbackNode(job.id), actions);
       root.append(card);
     }
   }
@@ -183,7 +281,7 @@
       category.textContent = attentionCategoryLabel(job.attentionState?.category);
       head.append(category);
       const reason = job.attentionState?.reason || job.error || job.outcomeSummary || "—";
-      const owner = I18n()?.displayCoworkerName?.(job.ownerCoworkerId) ?? job.ownerCoworkerId ?? "—";
+       const owner = ownerLabel(job);
       const priority = t(`attention.priority.${job.priority}`, job.priority ?? "normal");
       const source = job.routineId ? t("attention.source.routine", "Routine") : t("attention.source.job", "Job");
       const raisedAt = attentionTime(job);
@@ -200,40 +298,28 @@
       );
       const actions = document.createElement("div");
       actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      const runAction = async (button, action) => {
-        button.disabled = true;
-        try {
-          await action();
-          await refreshAttention();
-          await refresh();
-        } catch (error) {
-          const errorEl = $("attention-error");
-          if (errorEl) { errorEl.textContent = String(error?.message ?? error).slice(0, 400); errorEl.classList.remove("hidden"); }
-        } finally {
-          button.disabled = false;
-        }
-      };
       if (attentionActionAllowed(job, "open")) actions.append(attentionButton(t("attention.openJob", "Open job"), "quiet-action", () => { void openDetail(job.id); }));
       if (attentionActionAllowed(job, "open-settings")) actions.append(attentionButton(t("attention.openSettings", "Open settings"), "quiet-action", () => openAttentionDestination("open-settings")));
       if (attentionActionAllowed(job, "open-this-pc")) actions.append(attentionButton(t("attention.openThisPc", "Open This PC"), "quiet-action", () => openAttentionDestination("open-this-pc")));
       if (attentionActionAllowed(job, "retry")) {
-        const retry = attentionButton(t("attention.retry", "Retry"), "hero-action", () => runAction(retry, () => window.sovereignbot.jobs.approve({ jobId: job.id })));
+         const retry = jobActionButton(job, "retry", t("attention.retry", "Retry"), "hero-action", () => window.sovereignbot.jobs.approve({ jobId: job.id }), "Retry requested.");
         actions.append(retry);
       }
       if (attentionActionAllowed(job, "snooze")) {
-        const snooze = attentionButton(`${t("attention.snooze", "Snooze")} · ${$("attention-snooze-duration")?.selectedOptions?.[0]?.textContent ?? "1 hour"}`, "quiet-action", () => runAction(snooze, () => window.sovereignbot.jobs.snooze({ jobId: job.id, minutes: selectedSnoozeMinutes() })));
+         const snooze = jobActionButton(job, "snooze", `${t("attention.snooze", "Snooze")} · ${$("attention-snooze-duration")?.selectedOptions?.[0]?.textContent ?? "1 hour"}`, "quiet-action", () => window.sovereignbot.jobs.snooze({ jobId: job.id, minutes: selectedSnoozeMinutes() }), "Attention snoozed.");
         actions.append(snooze);
       }
       if (attentionActionAllowed(job, "dismiss")) {
-        const dismiss = attentionButton(t("attention.dismiss", "Dismiss"), "quiet-action", () => runAction(dismiss, () => window.sovereignbot.jobs.dismiss({ jobId: job.id })));
+         const dismiss = jobActionButton(job, "dismiss", "Dismiss attention / 消退关注", "quiet-action", () => window.sovereignbot.jobs.dismiss({ jobId: job.id }), "Attention dismissed.");
         actions.append(dismiss);
       }
-      card.append(head, details, actions);
+       card.append(head, details, feedbackNode(job.id), actions);
       root.append(card);
     }
   }
 
   async function refresh() {
+    try { await refreshPublicLabels(); } catch { coworkerLabels = new Map(); workspaceLabels = new Map(); }
     try {
       const res = await window.sovereignbot.jobs.list({});
       jobs = res?.jobs ?? [];
@@ -253,7 +339,7 @@
     for (const entry of workerNodes.filter((item) => item.enabled && item.status === "online")) {
       const option = document.createElement("option");
       option.value = entry.nodeId;
-      option.textContent = `${entry.name} (${entry.nodeId})`;
+      option.textContent = safeLabel(entry.name, "Worker Node");
       node.append(option);
     }
     workspace.textContent = "";
@@ -261,14 +347,14 @@
     for (const entry of selected?.workspaces ?? []) {
       const option = document.createElement("option");
       option.value = entry.id;
-      option.textContent = `${entry.name} (${entry.id})`;
+      option.textContent = safeLabel(entry.name, "Worker workspace");
       workspace.append(option);
     }
     const profile = $("job-computer-profile");
     if (profile) {
       profile.textContent = "";
       for (const entry of computerTargets.filter((item) => ["local-isolated", "vm", "cloud"].includes(item.kind))) {
-        const option = document.createElement("option"); option.value = entry.id; option.textContent = `${entry.id} (${entry.state})`; profile.append(option);
+        const option = document.createElement("option"); option.value = entry.id; option.textContent = `${safeLabel(entry.name ?? entry.kind, "Computer profile")} · ${safeLabel(entry.state, "available")}`; profile.append(option);
       }
     }
     const isolatedWorkspace = $("job-computer-workspace");
@@ -276,7 +362,7 @@
       let workspaces = [];
       try { workspaces = (await window.sovereignbot.workspaces.list({})).workspaces ?? []; } catch {}
       isolatedWorkspace.textContent = "";
-      for (const entry of workspaces) { const option = document.createElement("option"); option.value = entry.id; option.textContent = `${entry.name} (${entry.id})`; isolatedWorkspace.append(option); }
+      for (const entry of workspaces) { const option = document.createElement("option"); option.value = entry.id; option.textContent = `${safeLabel(entry.label ?? entry.name, "Trusted workspace")} · ${entry.kind === "shared-project" ? "Shared project workspace" : "Trusted workspace"}`; isolatedWorkspace.append(option); }
     }
     execution.dispatchEvent(new Event("change"));
   }
@@ -299,26 +385,35 @@
 
   async function openDetail(jobId) {
     currentJobId = jobId;
+    const request = ++jobDetailRequest;
     try {
+      try { await refreshPublicLabels(); } catch {}
       const job = await window.sovereignbot.jobs.getStatus({ jobId });
       const conv = await window.sovereignbot.jobs.getConversation({ jobId }).catch(() => ({ messages: [] }));
+      if (request !== jobDetailRequest || currentJobId !== jobId) return;
       $("job-detail-title").textContent = job.title;
-      $("job-detail-meta").textContent = `${job.status} · ${job.ownerCoworkerId} · ${job.priority}${job.error ? ` · ${job.error}` : ""}${job.outcomeSummary ? ` · ${job.outcomeSummary.slice(0,200)}` : ""}`;
+      $("job-detail-meta").textContent = `${statusLabel(job.status)} · ${jobMeta(job)}${job.outcomeSummary ? ` · ${safePublicText(job.outcomeSummary, "Job outcome unavailable.", 200)}` : ""}`;
+      const feedback = $("job-detail-feedback");
+      const state = actionState(jobId);
+      if (feedback) { feedback.textContent = state.feedback; feedback.classList.toggle("hidden", !state.feedback); feedback.classList.toggle("error", state.error); }
       const body = $("job-detail-body");
       const msgs = conv.messages ?? [];
-      body.textContent = msgs.length ? msgs.map(m => `[${m.kind ?? m.role}] ${m.text}`).join("\n\n") : (job.outcomeSummary ?? job.error ?? "");
+      body.textContent = msgs.length ? msgs.map(m => `[${safePublicText(m.kind ?? m.role, "update", 40)}] ${safePublicText(m.text, "Job update unavailable.", 1000)}`).join("\n\n") : safePublicText(job.outcomeSummary ?? job.error, "Job update unavailable.", 1000);
       const needs = job.status === "needs_attention";
       const waiting = job.status === "waiting";
       const canRetry = needs && attentionActionAllowed(job, "retry");
       const canDismiss = needs && attentionActionAllowed(job, "dismiss");
       const approve = $("job-detail-approve");
       if (approve) approve.textContent = t("attention.retry", "Retry");
+      const dismiss = $("job-detail-dismiss");
+      if (dismiss) dismiss.textContent = "Dismiss attention / 消退关注";
       $("job-detail-approve")?.classList.toggle("hidden", !canRetry);
       $("job-detail-dismiss")?.classList.toggle("hidden", !canDismiss);
       $("job-detail-pause")?.classList.toggle("hidden", waiting || needs || ["completed","failed","cancelled"].includes(job.status));
       $("job-detail-resume")?.classList.toggle("hidden", !waiting);
       if ($("job-detail-resume")) $("job-detail-resume").textContent = t("action.resume", "Resume");
-      $("job-detail-dialog")?.showModal?.();
+      if (!$("job-detail-dialog")?.open) $("job-detail-dialog")?.showModal?.();
+      syncJobDetailActionState();
     } catch (e) {
       const el = $("provider-action-result");
       if (el) el.textContent = String(e?.message ?? e).slice(0, 300);
@@ -333,7 +428,7 @@
       if (c.state !== "active") continue;
       const opt = document.createElement("option");
       opt.value = c.id;
-      opt.textContent = I18n()?.displayCoworkerName?.(c.name) ?? c.name;
+      opt.textContent = `${safeLabel(I18n()?.displayCoworkerName?.(c.name) ?? c.name, "Coworker")} · ${safeLabel(c.role, "Coworker")}`;
       sel.append(opt);
     }
   }
@@ -399,7 +494,7 @@
     node.addEventListener("change", () => {
       const selected = workerNodes.find((entry) => entry.nodeId === node.value);
       workspace.textContent = "";
-      for (const item of selected?.workspaces ?? []) { const option = document.createElement("option"); option.value = item.id; option.textContent = item.name + " (" + item.id + ")"; workspace.append(option); }
+      for (const item of selected?.workspaces ?? []) { const option = document.createElement("option"); option.value = item.id; option.textContent = safeLabel(item.name, "Worker workspace"); workspace.append(option); }
       const target = selected?.computer; computer.textContent = "";
       if (target?.id) { const option = document.createElement("option"); option.value = target.id; option.textContent = (target.name ?? "Worker Computer") + " (" + target.state + ")"; computer.append(option); }
     });
@@ -780,7 +875,7 @@
     ]);
     workerNodes = workerResult?.nodes ?? [];
     const routineNode = $("routine-computer-node");
-    if (routineNode) { routineNode.textContent = ""; for (const item of workerNodes.filter((entry) => entry.enabled && entry.status === "online" && ["online", "capacity-limited"].includes(entry.computer?.state))) { const option = document.createElement("option"); option.value = item.nodeId; option.textContent = item.name + " (" + item.nodeId + ")"; routineNode.append(option); } routineNode.dispatchEvent(new Event("change")); }
+    if (routineNode) { routineNode.textContent = ""; for (const item of workerNodes.filter((entry) => entry.enabled && entry.status === "online" && ["online", "capacity-limited"].includes(entry.computer?.state))) { const option = document.createElement("option"); option.value = item.nodeId; option.textContent = safeLabel(item.name, "Worker Node"); routineNode.append(option); } routineNode.dispatchEvent(new Event("change")); }
     populateOwnerSelect(cw?.coworkers ?? [], "routine-owner");
     const skill = $("routine-skill"); skill.textContent = "";
     const none = document.createElement("option"); none.value = ""; none.textContent = t("routines.noSkill", "No skill"); skill.append(none);
@@ -905,13 +1000,13 @@
       workspace.textContent = "";
       const selected = workerNodes.find((entry) => entry.nodeId === $("job-node").value);
       for (const entry of selected?.workspaces ?? []) {
-        const option = document.createElement("option"); option.value = entry.id; option.textContent = `${entry.name} (${entry.id})`; workspace.append(option);
+        const option = document.createElement("option"); option.value = entry.id; option.textContent = safeLabel(entry.name, "Worker workspace"); workspace.append(option);
       }
       const computer = $("job-computer");
       if (computer) {
         computer.textContent = "";
         const target = selected?.computer;
-        if (target?.id) { const option = document.createElement("option"); option.value = target.id; option.textContent = `${target.name ?? "Worker Computer"} (${target.state}, ${target.currentLoad ?? 0}/${target.capacity ?? 0})`; computer.append(option); }
+        if (target?.id) { const option = document.createElement("option"); option.value = target.id; option.textContent = `${safeLabel(target.name, "Worker Computer")} · ${safeLabel(target.state, "available")}`; computer.append(option); }
       }
     });
     $("job-form")?.addEventListener("submit", async (e) => {
@@ -933,10 +1028,13 @@
       }
       catch (err) { if (errEl) { errEl.textContent = String(err?.message ?? err).replace(/^.*Error: /, "").slice(0, 400); errEl.classList.remove("hidden"); } }
     });
-    $("job-detail-approve")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.approve({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refreshAttention(); await refresh(); });
-    $("job-detail-dismiss")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.dismiss({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refreshAttention(); await refresh(); });
-    $("job-detail-pause")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.pause({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refresh(); });
-    $("job-detail-resume")?.addEventListener("click", async () => { if(!currentJobId) return; await window.sovereignbot.jobs.resume({ jobId: currentJobId }); $("job-detail-dialog")?.close(); await refresh(); });
+    $("job-detail-approve")?.addEventListener("click", () => { if (!currentJobId) return; const jobId = currentJobId; void runJobAction(jobId, "retry", () => window.sovereignbot.jobs.approve({ jobId }), "Retry requested."); });
+    $("job-detail-dismiss")?.addEventListener("click", () => { if (!currentJobId) return; const jobId = currentJobId; void runJobAction(jobId, "dismiss", () => window.sovereignbot.jobs.dismiss({ jobId }), "Attention dismissed."); });
+    $("job-detail-pause")?.addEventListener("click", () => { if (!currentJobId) return; const jobId = currentJobId; void runJobAction(jobId, "pause", () => window.sovereignbot.jobs.pause({ jobId }), "Job paused."); });
+    $("job-detail-resume")?.addEventListener("click", () => { if (!currentJobId) return; const jobId = currentJobId; void runJobAction(jobId, "resume", () => window.sovereignbot.jobs.resume({ jobId }), "Job resumed."); });
+    for (const [id, action] of [["job-detail-approve", "retry"], ["job-detail-dismiss", "dismiss"], ["job-detail-pause", "pause"], ["job-detail-resume", "resume"]]) {
+      const button = $(id); if (button) { button.dataset.jobDetailAction = action; button.dataset.jobDetailActionBound = "true"; }
+    }
     $("routine-refresh")?.addEventListener("click", refreshRoutines);
     $("attention-refresh")?.addEventListener("click", refreshAttention);
     $("attention-category-filter")?.addEventListener("change", refreshAttention);
