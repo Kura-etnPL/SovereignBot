@@ -49,6 +49,7 @@
         "verify:p43-search-index": "node scripts/verify-p43-search-index.mjs",
         "verify:p44-conversation-search": "node scripts/verify-p44-conversation-search.mjs",
         "verify:p45-artifact-search": "node scripts/verify-p45-artifact-search.mjs",
+        "verify:p46-trigger-workspace-label": "node scripts/verify-v44-event-triggers.mjs",
         "verify:p41-coworker-roster": "node scripts/verify-p41-coworker-roster.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
