@@ -152,6 +152,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .quiet-action:hover { background: var(--panel-3); }
 .readiness-strip { margin: 38px auto 0; max-width: 560px; display: flex; justify-content: center; gap: 26px; color: var(--text-2); font-size: 12px; }
 .readiness-strip > div { display: flex; align-items: center; gap: 7px; }
+.readiness-detail { margin: 8px auto 0; max-width: 560px; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .status-dot, .presence-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
 .status-dot.offline { background: var(--warn); }
 .status-dot.muted { background: var(--text-3); }

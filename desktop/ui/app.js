@@ -157,6 +157,11 @@ function humanProvider(provider) {
   return "Automatic";
 }
 
+function translate(key, fallback, params) {
+  const value = globalThis.SovereignI18n?.t?.(key, params);
+  return value && value !== key ? value : fallback;
+}
+
 function economyAvailable() {
   const provider = state.roster?.providers?.economy;
   return provider?.configured === true && provider.usable === true && provider.health === "ready";
@@ -376,21 +381,47 @@ function renderSidebar() {
 
 function renderReadiness() {
   const readyCoworkers = Object.values(state.roster?.coworkerBindings ?? {}).filter((entry) => entry?.ready).length;
-  const providers = Object.entries(state.roster?.providers ?? {}).filter(([, value]) => value?.health === "ready" && value?.usable).map(([key]) => humanProvider(key));
-  const blocked = Object.values(state.roster?.providers ?? {}).find((value) => ["signed-out", "capacity-limited", "unavailable"].includes(value?.health));
+  const providerState = (key) => state.roster?.providers?.[key] ?? {};
+  const isReady = (entry) => entry?.health === "ready" && entry?.usable === true;
+  const codex = providerState("codex");
+  const claude = providerState("claude");
+  const deep = providerState("chatgpt-web");
+  const providers = Object.entries(state.roster?.providers ?? {}).filter(([, value]) => isReady(value)).map(([key]) => humanProvider(key));
   const summary = $("provider-summary");
   const dot = $("provider-dot");
+  const detail = $("provider-readiness-detail");
   if (state.roster?.mode === "demo") {
-    summary.textContent = "Demo mode";
+    summary.textContent = translate("status.demoMode", "Demo mode");
+    if (detail) detail.textContent = "";
+    dot.classList.add("offline");
+  } else if (!isReady(codex)) {
+    summary.textContent = codex?.health === "capacity-limited"
+      ? translate("status.codexCapacityLimited", "Codex capacity is limited")
+      : translate("status.connectCodex", "Connect Codex");
+    if (detail) {
+      const core = isReady(claude) ? translate("status.claudeReady", "Claude Code ready") : "";
+      const deepStatus = deep?.health === "capacity-limited"
+        ? translate("status.deepCapacityLimited", "Deep unavailable · ChatGPT Web capacity is limited")
+        : isReady(deep)
+          ? translate("status.deepReady", "Deep ready")
+          : translate("status.deepUnavailable", "Deep unavailable · Connect ChatGPT Web");
+      detail.textContent = [core, deepStatus].filter(Boolean).join(" · ");
+    }
     dot.classList.add("offline");
   } else if (state.roster?.ready) {
     summary.textContent = providers.length ? `${providers.join(" + ")} ready · ${readyCoworkers} coworker lanes` : `${readyCoworkers} coworker lanes ready`;
+    if (detail) {
+      const deepStatus = deep?.health === "capacity-limited"
+        ? translate("status.deepCapacityLimited", "Deep unavailable · ChatGPT Web capacity is limited")
+        : isReady(deep)
+          ? translate("status.deepReady", "Deep ready")
+          : translate("status.deepUnavailable", "Deep unavailable · Connect ChatGPT Web");
+      detail.textContent = deepStatus;
+    }
     dot.classList.remove("offline");
   } else {
-    summary.textContent = blocked?.health === "signed-out" ? "Sign in to an AI provider"
-      : blocked?.health === "capacity-limited" ? "Provider capacity is limited"
-        : blocked?.health === "unavailable" ? "Provider unavailable — check Settings"
-          : "Connect Codex or Claude Code";
+    summary.textContent = translate("status.connectProvider", "Connect Codex or Claude Code");
+    if (detail) detail.textContent = translate("status.deepUnavailable", "Deep unavailable · Connect ChatGPT Web");
     dot.classList.add("offline");
   }
 }
@@ -2557,7 +2588,9 @@ function showToastError(error) {
 
 function bindEvents() {
   ensureVoiceSettingsCard();
-  $("new-coworker").addEventListener("click", () => { resetCoworkerDialog(); populateCoworkerAdvanced(); openDialog("coworker-dialog"); });
+  const openNewCoworker = () => { resetCoworkerDialog(); populateCoworkerAdvanced(); openDialog("coworker-dialog"); };
+  $("new-coworker").addEventListener("click", openNewCoworker);
+  $("welcome-create-coworker")?.addEventListener("click", openNewCoworker);
   $("refresh-coworkers").addEventListener("click", () => Promise.all([refreshCoworkers(), refreshConversations(), refreshRoster()]));
   $("new-team").addEventListener("click", () => { populateTeamPicker(); openDialog("team-dialog"); });
   $("welcome-create-team").addEventListener("click", () => { populateTeamPicker(); openDialog("team-dialog"); });
