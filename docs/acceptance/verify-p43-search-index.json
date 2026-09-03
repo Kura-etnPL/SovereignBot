@@ -1,0 +1,14 @@
+{
+  "schema": "sovereignbot.desktop.p43-search-index-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "ok": false,
+  "status": "blocked",
+  "attemptedOnce": true,
+  "blockedBy": "Luna-host Electron Chromium ERR_FAILED (-2) loading sovereignbot://app/",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "P43 runtime index checks": "not reached"
+  },
+  "externalActions": []
+}

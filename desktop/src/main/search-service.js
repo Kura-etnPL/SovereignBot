@@ -32,6 +32,41 @@ function normalizeStatus(value) {
 }
 function tokens(query) { return query.toLocaleLowerCase().split(/\s+/).filter(Boolean).slice(0, 12); }
 function normalized(value) { return String(value ?? "").trim().toLocaleLowerCase(); }
+function grams(value) {
+    const chars = [...normalized(value)];
+    const result = new Set();
+    for (let index = 0; index < chars.length; index += 1) {
+        result.add(chars[index]);
+        if (index + 1 < chars.length) result.add(chars[index] + chars[index + 1]);
+    }
+    return result;
+}
+function createQueryIndex(records) {
+    const byGram = new Map();
+    const add = (gram, recordIndex) => {
+        if (!byGram.has(gram)) byGram.set(gram, new Set());
+        byGram.get(gram).add(recordIndex);
+    };
+    records.forEach((record, recordIndex) => {
+        const fields = [record.title, record.subtitle, record.searchText, ...(record.tags ?? [])];
+        const recordGrams = new Set();
+        for (const field of fields) for (const gram of grams(field)) recordGrams.add(gram);
+        for (const gram of recordGrams) add(gram, recordIndex);
+    });
+    return {
+        candidates(query) {
+            const candidateIndexes = new Set();
+            for (const token of tokens(query)) {
+                const chars = [...normalized(token)];
+                if (!chars.length) continue;
+                const gram = chars.length > 1 ? chars[0] + chars[1] : chars[0];
+                for (const recordIndex of byGram.get(gram) ?? []) candidateIndexes.add(recordIndex);
+            }
+            return candidateIndexes;
+        },
+        gramCount: byGram.size,
+    };
+}
 function matchFor(record, query) {
     if (!query) return { score: 0, key: "token", fields: [] };
     const normalizedQuery = normalized(query);
@@ -103,6 +138,7 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
     let index;
     let indexPromise;
     let generation = 0;
+    let lastQueryStats = { indexed: false, corpusCount: 0, candidateCount: 0, matchEvaluations: 0 };
 
     function invalidate() {
         generation += 1;
@@ -221,7 +257,7 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
                 });
             }
         }
-        return { records, projects, indexedAt: new Date().toISOString() };
+        return { records, projects, queryIndex: createQueryIndex(records), indexedAt: new Date().toISOString() };
     }
 
     async function getIndex() {
@@ -250,21 +286,38 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         const requestedProject = input.projectId ? built.projects.find((project) => project.projectId === input.projectId) : undefined;
         if (input.projectId && (!requestedProject || (requestedProject.state !== "active" && status === "active"))) return { schema: SEARCH_SCHEMA, query: queryText, status, indexedAt: built.indexedAt, total: 0, hasMore: false, results: [] };
         const scopeProjectId = requestedProject?.projectId;
-        const { records, indexedAt } = built;
+        const { records, indexedAt, queryIndex } = built;
+        const candidateIndexes = queryText ? queryIndex.candidates(queryText) : undefined;
         const result = [];
-        for (const record of records) {
+        let matchEvaluations = 0;
+        for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
+            if (candidateIndexes && !candidateIndexes.has(recordIndex)) continue;
+            const record = records[recordIndex];
             if (!selectedTypes.has(record.type) || (status !== "all" && record.status !== status)) continue;
             if (scopeProjectId && !record.projectIds.includes(scopeProjectId)) continue;
+            matchEvaluations += 1;
             const match = matchFor(record, queryText);
             if (!match) continue;
             const { searchText: _searchText, projectIds: _projectIds, tags: _tags, ...publicRecord } = record;
             if (scopeProjectId && !publicRecord.projectId) publicRecord.projectId = scopeProjectId;
             result.push({ ...publicRecord, score: match.score, matchReason: { key: match.key, fields: match.fields, coverage: match.coverage }, action: "open" });
         }
+        lastQueryStats = {
+            indexed: Boolean(queryText),
+            corpusCount: records.length,
+            candidateCount: candidateIndexes?.size ?? records.length,
+            matchEvaluations,
+        };
         result.sort((a, b) => b.score - a.score || String(b.updatedAt).localeCompare(String(a.updatedAt)) || String(a.title).localeCompare(String(b.title)) || String(a.id).localeCompare(String(b.id)));
         return { schema: SEARCH_SCHEMA, query: queryText, status, indexedAt, total: result.length, hasMore: result.length > limit, results: result.slice(0, limit) };
     }
-    return { schema: SEARCH_SCHEMA, query, invalidate, refresh: async () => { invalidate(); const built = await getIndex(); return { schema: SEARCH_SCHEMA, indexedAt: built.indexedAt, count: built.records.length }; } };
+    return {
+        schema: SEARCH_SCHEMA,
+        query,
+        invalidate,
+        diagnostics: () => clone(lastQueryStats),
+        refresh: async () => { invalidate(); const built = await getIndex(); return { schema: SEARCH_SCHEMA, indexedAt: built.indexedAt, count: built.records.length }; },
+    };
 }
 
 export { SEARCH_SCHEMA, TYPES as SEARCH_TYPES, STATUSES as SEARCH_STATUSES, SEARCH_MATCH_REASONS };

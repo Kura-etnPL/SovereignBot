@@ -143,6 +143,17 @@ test("search relevance is field-aware, tolerant of useful partial phrases, and s
     assert.deepEqual(again.results.map(({ id, score, matchReason }) => ({ id, score, matchReason })), (await service.query({ query: "Alpha", types: ["projects", "memory"], limit: 100 })).results.map(({ id, score, matchReason }) => ({ id, score, matchReason })));
 });
 
+test("non-empty Search queries use a no-loss bounded candidate index before scoring", async () => {
+    const { service } = fixture();
+    const result = await service.query({ query: "Alpha Project", types: ["projects"], limit: 10 });
+    const stats = service.diagnostics();
+    assert.equal(result.results[0].id, projectA);
+    assert.equal(stats.indexed, true);
+    assert.ok(stats.candidateCount < stats.corpusCount);
+    assert.ok(stats.matchEvaluations <= stats.candidateCount);
+    assert.equal(Object.hasOwn(result, "diagnostics"), false);
+});
+
 test("palette exposes only seven fixed actions and delegates to trusted callbacks", async () => {
     const calls = [];
     const palette = createCommandPaletteService({
