@@ -25,7 +25,7 @@ const routineB = "routine_bbbbbbbbbbbbbbbb";
 const jobA = "job_aaaaaaaaaaaaaaaa";
 const historyA = "history_aaaaaaaaaaaaaaaa";
 
-function fixture() {
+function fixture({ fullScan = false } = {}) {
     const projects = [
         { projectId: projectA, name: "Alpha Project", state: "active", available: true, updatedAt: "2026-09-02T00:00:02.000Z", teams: [{ id: teamA, name: "Alpha Team", channels: [{ id: channelA, name: "Alpha Channel", conversationId: conversationA }] }], coworkers: [{ id: coworkerA, name: "Alpha Coworker" }] },
         { projectId: projectB, name: "Beta Project", state: "active", available: true, updatedAt: "2026-09-02T00:00:01.000Z", teams: [{ id: teamB, name: "Beta Team", channels: [{ id: channelB, name: "Beta Channel", conversationId: conversationB }] }], coworkers: [{ id: coworkerB, name: "Beta Coworker" }] },
@@ -57,6 +57,7 @@ function fixture() {
         memoryService: { indexRecords: async () => memoryRows },
         getJobs: () => ({ listJobs: () => ({ jobs }) }),
         getHistory: async () => ({ history }),
+        internal: fullScan ? { fullScan: true } : undefined,
     });
     return { service, projectsApi, routines, memoryRows, getProjectListCalls: () => projectListCalls };
 }
@@ -152,6 +153,30 @@ test("non-empty Search queries use a no-loss bounded candidate index before scor
     assert.ok(stats.candidateCount < stats.corpusCount);
     assert.ok(stats.matchEvaluations <= stats.candidateCount);
     assert.equal(Object.hasOwn(result, "diagnostics"), false);
+});
+
+test("indexed Search results equal the internal full-scan oracle across match fields", async () => {
+    const indexedFixture = fixture();
+    const oracleFixture = fixture({ fullScan: true });
+    const cjk = { id: "mem_cccccccccccccccc", title: "项目复盘记忆", content: "发布检查清单", tags: ["发布"], scope: "project", ownerId: projectA, state: "active", updatedAt: "2026-09-02T00:00:06.000Z", source: { type: "fact", label: "已批准事实" } };
+    indexedFixture.memoryRows.push(cjk);
+    oracleFixture.memoryRows.push(structuredClone(cjk));
+    indexedFixture.service.invalidate();
+    oracleFixture.service.invalidate();
+    const cases = [
+        { query: "Alpha Project", types: ["projects"] },
+        { query: "launch", types: ["memory"] },
+        { query: "发", types: ["memory"] },
+        { query: "alpha.txt", types: ["artifacts"] },
+        { query: "release checklist", types: ["memory"] },
+        { query: "Alpha missing", types: ["projects"] },
+    ];
+    for (const input of cases) {
+        const indexed = await indexedFixture.service.query({ ...input, limit: 100 });
+        const oracle = await oracleFixture.service.query({ ...input, limit: 100 });
+        assert.deepEqual(indexed.results, oracle.results, input.query);
+        assert.equal(indexed.total, oracle.total, input.query);
+    }
 });
 
 test("palette exposes only seven fixed actions and delegates to trusted callbacks", async () => {

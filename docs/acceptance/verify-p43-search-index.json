@@ -2,13 +2,51 @@
   "schema": "sovereignbot.desktop.p43-search-index-canary.v1",
   "fixtureBoundary": "LOCAL_FIXTURE",
   "publishEligible": false,
-  "ok": false,
-  "status": "blocked",
+  "status": "failed",
   "attemptedOnce": true,
-  "blockedBy": "Luna-host Electron Chromium ERR_FAILED (-2) loading sovereignbot://app/",
+  "blockedBy": "Previous Sol gate completed with exit 0 but used the pre-correction candidate algorithm and failed the required reduction: candidateCount=5003, matchEvaluations=5000 for corpusCount=5006",
   "checks": {
-    "hidden Electron window stays hidden": true,
-    "P43 runtime index checks": "not reached"
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "required query reduction after correction": {
+      "ok": false,
+      "detail": "pre-correction Sol evidence: corpusCount=5006, candidateCount=5003, matchEvaluations=5000; correction rerun required"
+    },
+    "renderer Search finds the deep canonical Artifact": {
+      "ok": true,
+      "detail": "{\"total\":1,\"ids\":[\"artifact_0000000000001388\"],\"matchReason\":{\"key\":\"title-exact\",\"fields\":[\"title\"],\"coverage\":1}}"
+    },
+    "non-empty query narrows before matchFor without a full-corpus refinement pass": {
+      "ok": true,
+      "detail": "{\"indexed\":true,\"corpusCount\":5006,\"candidateCount\":5003,\"matchEvaluations\":5000}"
+    },
+    "Search UI uses the indexed query path and safe public projection": {
+      "ok": true,
+      "detail": "{\"title\":\"P43 Quartz Needle Result\",\"subtitle\":\"artifacts · artifact_0000000000001388.md · active · Exact title match / 标题精确匹配\"}"
+    },
+    "archive invalidates indexed Search and preserves archived filtering": {
+      "ok": true,
+      "detail": "{\"active\":0,\"archived\":\"artifact_0000000000001388\"}"
+    },
+    "restore rebuilds the indexed Search view": {
+      "ok": true,
+      "detail": "{\"ids\":[\"artifact_0000000000001388\"]}"
+    },
+    "restart rebuilds the bounded Search index and keeps deep coverage": {
+      "ok": true,
+      "detail": "{\"ids\":[\"artifact_0000000000001388\"],\"stats\":{\"indexed\":true,\"corpusCount\":5006,\"candidateCount\":5003,\"matchEvaluations\":5000}}"
+    }
   },
-  "externalActions": []
+  "notes": [
+    "PASS hidden Electron window stays hidden",
+    "PASS renderer Search finds the deep canonical Artifact {\"total\":1,\"ids\":[\"artifact_0000000000001388\"],\"matchReason\":{\"key\":\"title-exact\",\"fields\":[\"title\"],\"coverage\":1}}",
+    "PASS non-empty query narrows before matchFor without a full-corpus refinement pass {\"indexed\":true,\"corpusCount\":5006,\"candidateCount\":5003,\"matchEvaluations\":5000}",
+    "PASS Search UI uses the indexed query path and safe public projection {\"title\":\"P43 Quartz Needle Result\",\"subtitle\":\"artifacts · artifact_0000000000001388.md · active · Exact title match / 标题精确匹配\"}",
+    "PASS archive invalidates indexed Search and preserves archived filtering {\"active\":0,\"archived\":\"artifact_0000000000001388\"}",
+    "PASS restore rebuilds the indexed Search view {\"ids\":[\"artifact_0000000000001388\"]}",
+    "PASS restart rebuilds the bounded Search index and keeps deep coverage {\"ids\":[\"artifact_0000000000001388\"],\"stats\":{\"indexed\":true,\"corpusCount\":5006,\"candidateCount\":5003,\"matchEvaluations\":5000}}"
+  ],
+  "externalActions": [],
+  "ok": false
 }

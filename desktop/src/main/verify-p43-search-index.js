@@ -62,8 +62,9 @@ export async function runVerifyP43SearchIndex({ app } = {}) {
 
         const initial = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P43 Quartz Needle Result",types:["artifacts"],status:"active",limit:10})`);
         const stats = fixture.search.diagnostics();
+        const reduction = { ...stats, candidateReductionRatio: Number((1 - stats.candidateCount / Math.max(1, stats.corpusCount)).toFixed(4)), matchReductionRatio: Number((1 - stats.matchEvaluations / Math.max(1, stats.corpusCount)).toFixed(4)) };
         check("renderer Search finds the deep canonical Artifact", initial.results?.length === 1 && initial.results[0].id === targetId && initial.results[0].matchReason?.key === "title-exact" && !/(searchText|projectIds|storageRelativePath|sourceRelativePath|provider|session|token|secret)/i.test(JSON.stringify(initial)), { total: initial.total, ids: initial.results?.map((entry) => entry.id), matchReason: initial.results?.[0]?.matchReason });
-        check("non-empty query narrows before matchFor without a full-corpus refinement pass", stats.indexed && stats.corpusCount >= 5_000 && stats.candidateCount < stats.corpusCount && stats.matchEvaluations < stats.corpusCount && stats.matchEvaluations <= stats.candidateCount, stats);
+        check("non-empty query narrows before matchFor without a full-corpus refinement pass", stats.indexed && stats.corpusCount >= 5_000 && stats.candidateCount <= 100 && stats.matchEvaluations <= 100 && stats.matchEvaluations <= stats.candidateCount, reduction);
 
         await invoke(win, `async()=>{document.getElementById("open-command-palette")?.click(); return true}`);
         await waitFor(async () => (await invoke(win, `async()=>document.querySelectorAll("#palette-results .command-palette-result").length`)) === 7, "Search palette");
@@ -90,7 +91,7 @@ export async function runVerifyP43SearchIndex({ app } = {}) {
         await loadWindow(win);
         const afterRestart = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P43 Quartz Needle Result",types:["artifacts"],status:"active",limit:10})`);
         const restartStats = fixture.search.diagnostics();
-        check("restart rebuilds the bounded Search index and keeps deep coverage", afterRestart.results?.[0]?.id === targetId && restartStats.corpusCount >= 5_000 && restartStats.matchEvaluations < restartStats.corpusCount, { ids: afterRestart.results?.map((entry) => entry.id), stats: restartStats });
+        check("restart rebuilds the bounded Search index and keeps deep coverage", afterRestart.results?.[0]?.id === targetId && restartStats.corpusCount >= 5_000 && restartStats.matchEvaluations <= 100, { ids: afterRestart.results?.map((entry) => entry.id), stats: { ...restartStats, matchReductionRatio: Number((1 - restartStats.matchEvaluations / Math.max(1, restartStats.corpusCount)).toFixed(4)) } });
     } catch (error) {
         result.error = safeJson(error?.stack ?? error); check("P43 hidden Search index gate completed", false, error?.message ?? error);
     }

@@ -55,14 +55,27 @@ function createQueryIndex(records) {
     });
     return {
         candidates(query) {
-            const candidateIndexes = new Set();
+            const tokenCandidateSets = [];
             for (const token of tokens(query)) {
                 const chars = [...normalized(token)];
                 if (!chars.length) continue;
-                const gram = chars.length > 1 ? chars[0] + chars[1] : chars[0];
-                for (const recordIndex of byGram.get(gram) ?? []) candidateIndexes.add(recordIndex);
+                const tokenGrams = chars.length > 1
+                    ? chars.slice(0, -1).map((char, index) => char + chars[index + 1])
+                    : [chars[0]];
+                const buckets = tokenGrams.map((gram) => byGram.get(gram)).filter(Boolean).sort((left, right) => left.size - right.size);
+                // An absent token gram means no record can match that token,
+                // but a strong title/tag hit may still satisfy the existing
+                // partial multi-token coverage rule.
+                if (buckets.length !== tokenGrams.length) { tokenCandidateSets.push(new Set()); continue; }
+                const tokenCandidates = new Set(buckets[0]);
+                for (const bucket of buckets.slice(1)) for (const recordIndex of tokenCandidates) if (!bucket.has(recordIndex)) tokenCandidates.delete(recordIndex);
+                tokenCandidateSets.push(tokenCandidates);
             }
-            return candidateIndexes;
+            if (!tokenCandidateSets.length) return new Set();
+            const minimumTokenCoverage = Math.ceil(tokenCandidateSets.length / 2);
+            const coverage = new Map();
+            for (const tokenCandidates of tokenCandidateSets) for (const recordIndex of tokenCandidates) coverage.set(recordIndex, (coverage.get(recordIndex) ?? 0) + 1);
+            return new Set([...coverage].filter(([, count]) => count >= minimumTokenCoverage).map(([recordIndex]) => recordIndex));
         },
         gramCount: byGram.size,
     };
@@ -132,8 +145,9 @@ function add(map, id, projectId) {
 }
 function onlyProject(ids) { return ids?.size === 1 ? [...ids][0] : undefined; }
 
-export function createSearchService({ teamService, conversationStore, coworkerStore, projectService, artifactStore, skillStore, productSurfaces, getRoutines, memoryService, getJobs, getHistory } = {}) {
+export function createSearchService({ teamService, conversationStore, coworkerStore, projectService, artifactStore, skillStore, productSurfaces, getRoutines, memoryService, getJobs, getHistory, internal } = {}) {
     if (!teamService?.list || !conversationStore?.list || !coworkerStore?.list || !projectService?.list || !projectService?.resolveScope) throw new Error("search service requires product stores and Project scope");
+    const forceFullScan = internal?.fullScan === true;
 
     let index;
     let indexPromise;
@@ -287,7 +301,7 @@ export function createSearchService({ teamService, conversationStore, coworkerSt
         if (input.projectId && (!requestedProject || (requestedProject.state !== "active" && status === "active"))) return { schema: SEARCH_SCHEMA, query: queryText, status, indexedAt: built.indexedAt, total: 0, hasMore: false, results: [] };
         const scopeProjectId = requestedProject?.projectId;
         const { records, indexedAt, queryIndex } = built;
-        const candidateIndexes = queryText ? queryIndex.candidates(queryText) : undefined;
+        const candidateIndexes = queryText && !forceFullScan ? queryIndex.candidates(queryText) : undefined;
         const result = [];
         let matchEvaluations = 0;
         for (let recordIndex = 0; recordIndex < records.length; recordIndex += 1) {
