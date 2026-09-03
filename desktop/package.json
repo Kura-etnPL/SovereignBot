@@ -30,6 +30,7 @@
         "verify:p23-skills": "node scripts/verify-p23-skills.mjs",
         "verify:p24-artifacts": "node scripts/verify-p24-artifacts.mjs",
         "verify:p25-memory-editor": "node scripts/verify-p25-memory-editor.mjs",
+        "verify:p26-artifact-export": "node scripts/verify-p26-artifact-export.mjs",
         "verify-fuses": "node scripts/apply-and-verify-fuses.mjs --verify-only",
         "secret-scan": "node scripts/no-secret-scan.mjs",
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",

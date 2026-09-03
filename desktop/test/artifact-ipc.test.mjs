@@ -7,7 +7,7 @@ import { V3_IPC_CHANNELS, validateV3IpcRequest } from "../src/main/lib/v3-ipc-sc
 const ARTIFACT_ID = "artifact_1234567890abcdef";
 
 test("artifact renderer channels are enumerated, identifier-only and bounded", () => {
-    for (const channel of ["artifact:list", "artifact:get", "artifact:preview", "artifact:open", "artifact:reveal", "artifact:history", "artifact:restoreAsNewVersion", "artifact:reviseViaDialog", "artifact:hub"])
+    for (const channel of ["artifact:list", "artifact:get", "artifact:preview", "artifact:open", "artifact:reveal", "artifact:history", "artifact:restoreAsNewVersion", "artifact:reviseViaDialog", "artifact:exportViaDialog", "artifact:hub"])
         assert.ok(V3_IPC_CHANNELS[channel], channel);
     assert.deepEqual(validateV3IpcRequest("artifact:get", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
     assert.deepEqual(validateV3IpcRequest("artifact:preview", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
@@ -16,6 +16,7 @@ test("artifact renderer channels are enumerated, identifier-only and bounded", (
     assert.deepEqual(validateV3IpcRequest("artifact:history", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
     assert.deepEqual(validateV3IpcRequest("artifact:restoreAsNewVersion", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
     assert.deepEqual(validateV3IpcRequest("artifact:reviseViaDialog", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
+    assert.deepEqual(validateV3IpcRequest("artifact:exportViaDialog", { artifactId: ARTIFACT_ID }), { artifactId: ARTIFACT_ID });
     assert.deepEqual(validateV3IpcRequest("artifact:hub", { type: "text/markdown", limit: 25 }), { type: "text/markdown", limit: 25 });
     assert.throws(() => validateV3IpcRequest("artifact:hub", { type: "text/markdown", cwd: "C:/secret" }), /not accepted from the renderer/);
     assert.deepEqual(validateV3IpcRequest("artifact:list", { conversationId: "conv_1234567890abcdef", limit: 25 }), { conversationId: "conv_1234567890abcdef", limit: 25 });
@@ -33,6 +34,7 @@ test("sandboxed preload exposes artifact operations without a raw file path API"
     assert.match(source, /artifact:history/);
     assert.match(source, /artifact:restoreAsNewVersion/);
     assert.match(source, /artifact:reviseViaDialog/);
+    assert.match(source, /artifact:exportViaDialog/);
     assert.doesNotMatch(source, /readFile/);
     assert.doesNotMatch(source, /writeFile/);
 });

@@ -733,7 +733,11 @@
       const title = document.createElement("h3"); title.textContent = item.title || item.fileName;
       card.append(title, text("Type", item.mimeType), text("Version", item.version ? `v${item.version}` : "Original"), text("Creator", item.creator?.name), text("Team", item.team?.name), text("Channel", item.channel?.name), text("Created", item.createdAt), text("History", item.history?.map((entry) => `${entry.event} · ${entry.timestamp}`).join(", ")), text("Status", item.status));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Preview / 预览", () => openArtifactPreview(item), root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root), button("History / 历史", async () => {
+      const exportStatus = document.createElement("p"); exportStatus.className = "setting-feedback"; exportStatus.setAttribute("role", "status");
+      actions.append(button("Preview / 预览", () => openArtifactPreview(item), root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root), button("Export copy / 导出副本", async () => {
+        const result = await api.artifacts.exportViaDialog({ artifactId: item.id });
+        exportStatus.textContent = result?.canceled ? "Export canceled / 已取消导出" : `Exported ${result.fileName} / 已导出副本`;
+      }, root), button("History / 历史", async () => {
         const existing = card.querySelector(".artifact-history-panel");
         if (existing) { existing.remove(); return; }
         const result = await api.artifacts.history({ artifactId: item.id });
@@ -752,7 +756,7 @@
         if (!result?.canceled && result?.artifact) await refresh();
       }, root));
       if (item.conversationId) actions.append(button("Go to conversation / 前往会话", () => openConversationSafe(item.conversationId), root));
-      card.append(actions); root.append(card);
+      card.append(actions, exportStatus); root.append(card);
       if (item.id === focusedArtifactId) requestAnimationFrame(() => card.scrollIntoView?.({ block: "center" }));
     }
     if (!items.length) root.append(text("Artifacts", "No artifacts yet."));

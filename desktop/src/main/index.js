@@ -21,6 +21,7 @@ import { createCoworkerStore } from "./coworker-store.js";
 import { createConversationStore } from "./conversation-store.js";
 import { createArtifactStore } from "./artifact-store.js";
 import { createAttachmentAwareConversationStore, pickArtifactRevision, pickConversationAttachments } from "./attachment-integration.js";
+import { exportArtifactViaDialog } from "./artifact-file-io.js";
 import { createSkillStore } from "./skill-store.js";
 import { createSkillAwareConversationStore, createSkillHandlers } from "./skill-integration.js";
 import { createTeachOnceController } from "./teach-once-controller.js";
@@ -816,6 +817,7 @@ async function main() {
                 "artifact:history": ({ artifactId }) => productSurfaces.artifactHistory({ artifactId }),
                 "artifact:restoreAsNewVersion": ({ artifactId }) => artifactStore.restoreAsNewVersion(artifactId),
                 "artifact:reviseViaDialog": ({ artifactId }) => pickArtifactRevision({ win, dialog, artifactStore, artifactId }),
+                "artifact:exportViaDialog": ({ artifactId }) => exportArtifactViaDialog({ parentWindow: win, dialog, artifactStore, artifactId }),
                 "artifact:open": async ({ artifactId }) => {
                     const managedPath = artifactStore.managedPath(artifactId);
                     if (process.env.SOVEREIGNBOT_VERIFY_SOFTWARE_TEAM === "1") return { ok: true, verified: "managed-artifact", action: "open", artifactId };
