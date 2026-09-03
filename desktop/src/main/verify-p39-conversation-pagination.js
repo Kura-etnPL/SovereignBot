@@ -14,6 +14,22 @@ const EVIDENCE_DIR = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR ?? join(proce
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor(check, label, timeout = 15_000) { const started = Date.now(); while (Date.now() - started < timeout) { if (await check()) return; await sleep(100); } throw new Error(`timed out waiting for ${label}`); }
 
+async function settleVerificationWindow(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    await win.webContents.executeJavaScript(`(()=>{try{window.sovereignbotStopVoice?.();}catch{} try{switchView("welcome");}catch{} return true;})()`);
+  } catch {}
+  try { win.webContents.stop(); } catch {}
+  await new Promise((resolve) => {
+    if (win.isDestroyed()) { resolve(); return; }
+    let settled = false;
+    const finish = () => { if (settled) return; settled = true; clearTimeout(timeout); resolve(); };
+    const timeout = setTimeout(finish, 2_000);
+    win.once("closed", finish);
+    try { win.close(); } catch { finish(); }
+  });
+}
+
 export async function runVerifyP39ConversationPagination({ app } = {}) {
   mkdirSync(EVIDENCE_DIR, { recursive: true });
   const checks = {}; const notes = [];
@@ -86,6 +102,10 @@ export async function runVerifyP39ConversationPagination({ app } = {}) {
   const evidencePath = join(EVIDENCE_DIR, "verify-p39-conversation-pagination.json");
   const logPath = join(EVIDENCE_DIR, "verify-p39-conversation-pagination.log");
   try { const { writeFileSync } = await import("node:fs"); writeFileSync(evidencePath, `${JSON.stringify(result, null, 2)}\n`, "utf8"); writeFileSync(logPath, `${notes.join("\n")}\n`, "utf8"); } catch {}
-  try { unbind?.(); } catch {} try { uninstallProtocol?.(); } catch {} try { win?.destroy(); } catch {} try { if (dataDir) rmSync(dataDir, { recursive: true, force: true }); } catch {}
+  try { await win?.webContents?.executeJavaScript(`(()=>{try{window.sovereignbotStopVoice?.();}catch{} try{switchView("welcome");}catch{} return true;})()`); } catch {}
+  try { unbind?.(); } catch {}
+  try { uninstallProtocol?.(); } catch {}
+  try { await settleVerificationWindow(win); } catch {}
+  try { if (dataDir) rmSync(dataDir, { recursive: true, force: true }); } catch {}
   app?.exit(result.ok ? 0 : 1);
 }
