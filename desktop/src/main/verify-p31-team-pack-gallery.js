@@ -12,6 +12,29 @@ import { bindIpcChannels } from "./ipc.js";
 const WORKTREE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const EVIDENCE_DIR = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR ?? join(WORKTREE_ROOT, "_evidence_p31_2026-09-03");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const safeDiagnosticText = (value) => String(value ?? "").replace(/[A-Za-z]:[\\/][^\s"'<>]+/g, "<redacted-path>").replace(/(?:file|https?):\/\/[^\s"'<>]+/gi, "<redacted-url>").replace(/\b(?:token|password|secret|credential)\b\s*[=:]\s*[^\s,;]+/gi, "$1=<redacted>").slice(0, 240);
+
+async function probeDuplicateState(win) {
+  try {
+    const result = await invoke(win, "async()=>{try{const listed=await window.sovereignbot.teams.list({}); return {ok:true,ids:(listed?.packs??[]).filter((entry)=>entry.custom).map((entry)=>entry.id),errorSummary:null};}catch(error){return {ok:false,ids:[],errorSummary:(error?.name||'RendererError')+': '+String(error?.message||'operation failed').slice(0,160).replace(/[A-Za-z]:[\\/][^\\s\"'<>]+/g,'<redacted-path>').replace(/(?:file|https?):\\/\\/[^\\s\"'<>]+/gi,'<redacted-url>')};}}()");
+    return result && Array.isArray(result.ids) && typeof result.ok === "boolean" ? result : { ok: false, ids: [], errorSummary: "invalid renderer probe result" };
+  }
+  catch {
+    return { ok: false, ids: [], errorSummary: "main executeJavaScript failed transiently" };
+  }
+}
+
+async function waitForDuplicateState(win, beforeIds, note, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastProbe = { ok: false, ids: [], errorSummary: "probe not run" };
+  while (Date.now() < deadline) {
+    lastProbe = await probeDuplicateState(win);
+    note(`[duplicate-probe] ${JSON.stringify(lastProbe)}`);
+    if (lastProbe.ok && lastProbe.ids.some((id) => !beforeIds.includes(id))) return lastProbe;
+    await sleep(80);
+  }
+  throw new Error(`timed out waiting for legacy gallery duplicate state: ${JSON.stringify(lastProbe)}`);
+}
 
 async function clickVisibleElementWithInput(win, selector, label) {
   const scrolled = await invoke(win, `async()=>{const element=document.querySelector(${JSON.stringify(selector)}); if(!element) return false; element.scrollIntoView({block:"center",inline:"center"}); return true;}`);
@@ -51,6 +74,8 @@ export async function runVerifyP31TeamPackGallery({ app }) {
   let fatal;
   let duplicateRecipeId;
   let restart;
+  const rendererDiagnostics = [];
+  const rendererHealth = [];
 
   try {
     const teamPackDialog = {
@@ -62,6 +87,16 @@ export async function runVerifyP31TeamPackGallery({ app }) {
     fixture = makeFixture(dataDir, { teamPackDialog });
     uninstallProtocol = installAppProtocolHandler();
     win = createMainWindow({ smoke: true });
+    win.webContents.on("console-message", (_event, level, message, line) => {
+      const detail = { level, message: safeDiagnosticText(message), line: Number.isFinite(line) ? line : null };
+      rendererDiagnostics.push(detail);
+      note(`[renderer-console] ${JSON.stringify(detail)}`);
+    });
+    win.webContents.on("render-process-gone", (_event, details) => {
+      const detail = { reason: safeDiagnosticText(details?.reason), exitCode: Number.isFinite(details?.exitCode) ? details.exitCode : null };
+      rendererHealth.push(detail);
+      note(`[renderer-health] ${JSON.stringify(detail)}`);
+    });
     unbind = bindIpcChannels({ win, handlers: handlers(fixture) });
     check("hidden Electron window stays hidden", win.isVisible() === false);
     await loadWindow(win);
@@ -76,9 +111,10 @@ export async function runVerifyP31TeamPackGallery({ app }) {
     const beforeIds = await invoke(win, "async()=>((await window.sovereignbot.teams.list({})).packs.filter((entry)=>entry.custom).map((entry)=>entry.id))");
     const duplicateGeometry = await clickVisibleElementWithInput(win, "#product-packs .settings-card:nth-child(5) button:nth-child(3)", "older gallery Duplicate button");
     note(`Duplicate input coordinates: ${JSON.stringify({ x: duplicateGeometry.x, y: duplicateGeometry.y, viewport: duplicateGeometry.viewport })}`);
-    await waitFor("legacy gallery duplicate refresh", async () => await invoke(win, "async()=>((await window.sovereignbot.teams.list({})).packs ?? []).some((entry)=>entry.custom)"));
+    note("sendInputEvent completed; state probe pending");
+    const duplicateProbe = await waitForDuplicateState(win, beforeIds, note);
     const afterDuplicate = await invoke(win, "async()=>{const listed=await window.sovereignbot.teams.list({}); return {ids:listed.packs.filter((entry)=>entry.custom).map((entry)=>entry.id),cards:[...document.querySelectorAll('#product-packs .settings-card')].map((card)=>({id:card.dataset.teamPackId,title:card.querySelector('h3')?.textContent,buttons:[...card.querySelectorAll('button')].map((button)=>button.textContent)}))}})");
-    duplicateRecipeId = afterDuplicate.ids.find((id) => !beforeIds.includes(id));
+    duplicateRecipeId = duplicateProbe.ids.find((id) => !beforeIds.includes(id));
     check("older gallery Duplicate creates an editable custom recipe", Boolean(duplicateRecipeId) && afterDuplicate.cards.some((card) => card.id === duplicateRecipeId && card.buttons.some((label) => label.includes("Edit recipe"))), JSON.stringify(afterDuplicate));
 
     await invoke(win, `async()=>document.querySelector('[data-team-pack-id="${duplicateRecipeId}"] button:last-child')?.click()`);
@@ -148,7 +184,7 @@ export async function runVerifyP31TeamPackGallery({ app }) {
 
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
   note(`[summary] ${Object.keys(checks).length - failed.length}/${Object.keys(checks).length} PASS`);
-  writeFileSync(join(EVIDENCE_DIR, "verify-p31-team-pack-gallery.json"), `${JSON.stringify({ at: new Date().toISOString(), checks, duplicateRecipeId, restart, fatal: fatal ? String(fatal?.message ?? fatal) : undefined }, null, 2)}\n`, "utf8");
+  writeFileSync(join(EVIDENCE_DIR, "verify-p31-team-pack-gallery.json"), `${JSON.stringify({ at: new Date().toISOString(), checks, duplicateRecipeId, restart, rendererDiagnostics, rendererHealth, fatal: fatal ? String(fatal?.message ?? fatal) : undefined }, null, 2)}\n`, "utf8");
   writeFileSync(join(EVIDENCE_DIR, "verify-p31-team-pack-gallery.log"), `${log.join("\n")}\n`, "utf8");
   try { unbind?.(); } catch {}
   try { uninstallProtocol?.(); } catch {}
