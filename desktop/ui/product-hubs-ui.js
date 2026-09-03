@@ -572,7 +572,11 @@
   const readJson = (label, value = "") => { const raw = window.prompt(label, value ? JSON.stringify(value, null, 2) : ""); if (!raw) return undefined; try { return JSON.parse(raw); } catch { throw new Error("Paste valid JSON."); } };
   const openConversationSafe = (id) => id && typeof openConversation === "function" ? openConversation(id) : undefined;
   const refreshHost = () => Promise.all([typeof refreshConversations === "function" ? refreshConversations() : undefined, typeof refreshTeams === "function" ? refreshTeams() : undefined, typeof refreshCoworkers === "function" ? refreshCoworkers() : undefined]);
-  const unread = (conversation) => typeof conversationUnread === "function" ? conversationUnread(conversation) : Boolean(conversation?.unread);
+  const unread = (conversation) => {
+    const last = conversation?.lastMessage;
+    if (!conversation?.id || !last?.createdAt || last.senderId === "user") return false;
+    return typeof conversationUnread === "function" ? conversationUnread(conversation) : true;
+  };
   function nav(view) {
     if (typeof switchView === "function") switchView(view);
     for (const [id, target] of navViews) $(id)?.classList.toggle("active", target === view);
@@ -1118,7 +1122,7 @@
     $("team-pack-search-page")?.addEventListener("input", () => void refresh()); $("team-pack-category-page")?.addEventListener("change", () => void refresh());
     $("product-channel-create-page")?.addEventListener("click", () => { const teamId = $("product-channel-template-team-page")?.value || cache.teams[0]?.id; if (teamId) void openEditor(teamId).catch((reason) => showError(pageRoots.channels, reason)); });
     $("product-channel-template-add-page")?.addEventListener("click", () => void (async () => { const teamId = $("product-channel-template-team-page")?.value; const templateId = $("product-channel-template-page")?.value; if (!teamId || !templateId) return; await api.teams.createChannelFromTemplate({ teamId, templateId }); await refreshHost(); await refresh(); })().catch((reason) => showError(pageRoots.channels, reason)));
-    for (const id of ["artifact-hub-filter-page", "artifact-hub-visibility-page", "artifact-hub-type-page", "computer-history-filter-page", "product-channel-filter-page"]) $(id)?.addEventListener("change", () => { if (id === "artifact-hub-filter-page") { artifactScopeOverride = ""; artifactDeepLinkNotice = ""; } if (id === "computer-history-filter-page") { historyScopeOverride = ""; historyDeepLinkNotice = ""; } void refresh(); });
+    for (const id of ["artifact-hub-filter-page", "artifact-hub-visibility-page", "artifact-hub-type-page", "computer-history-filter-page", "product-channel-filter-page"]) $(id)?.addEventListener("change", () => { if (id === "artifact-hub-filter-page") { artifactScopeOverride = ""; artifactDeepLinkNotice = ""; } if (id === "computer-history-filter-page") { historyScopeOverride = ""; historyDeepLinkNotice = ""; } void refresh().catch((reason) => showError(pageRoots[id === "product-channel-filter-page" ? "channels" : id === "computer-history-filter-page" ? "history" : id.startsWith("artifact-") ? "artifacts" : "playbooks"], reason)); });
     $("product-channel-switch-page")?.addEventListener("change", (event) => openConversationSafe(event.target.value));
     api.onNavigate?.((target) => { if (navViews.has("nav-" + target) || ["product-hubs", "playbooks", "artifacts", "computer-history", "skills", "team-packs", "channels"].includes(target)) nav(target); });
     document.addEventListener("sovereignbot:open-artifact", (event) => { const artifactId = event.detail?.artifactId; if (!artifactId) return; focusedArtifactId = String(artifactId); pendingArtifactId = focusedArtifactId; nav("artifacts"); });

@@ -135,6 +135,13 @@ export async function runVerifyChannelsProductPath({ app } = {}) {
     const templateCreated = await invoke(win, `async()=>({ card:document.getElementById('product-channels-page')?.innerText.includes('Work Channel'), hiddenId:document.getElementById('product-channels-page')?.innerText.includes(${JSON.stringify(workChannel.id)}), templateValue:document.getElementById('product-channel-template-page')?.value||'' })`);
     check("From template creates a real channel through the product page", Boolean(workChannel?.id) && templateCreated.card && !templateCreated.hiddenId && templateCreated.templateValue === "work", JSON.stringify(templateCreated));
 
+    const projectChannel = team.channels.find((entry) => entry.name === "Project Channel");
+    await invoke(win, "async()=>{ const card=[...document.querySelectorAll('#product-channels-page article')].find((entry)=>entry.querySelector('h3')?.textContent==='Project Channel'); [...card?.querySelectorAll('button')||[]].find((button)=>button.textContent.includes('Open'))?.click(); return Boolean(card); }");
+    await waitFor(win, "async()=>document.getElementById('conversation-title')?.textContent==='Project Channel'", "neutral conversation before unread fixture");
+    await invoke(win, "async()=>{ document.getElementById('nav-channels')?.click(); return true; }");
+    await waitFor(win, "async()=>!document.getElementById('view-channels')?.classList.contains('hidden') && document.getElementById('product-channels-page')?.innerText.includes('Work Channel')", "Channels page after neutral conversation");
+    check("Unread fixture starts outside the target conversation", projectChannel?.conversationId !== workChannel.conversationId, JSON.stringify({ selectedConversation: projectChannel?.name ?? null }));
+
     fixture.conversations.postCoworkerMessage(workChannel.conversationId, owner.id, { text: "Unread channel activity fixture" }, { notifyChannelUnread: false });
     await invoke(win, "async()=>{ const filter=document.getElementById('product-channel-filter-page'); filter.value='unread'; filter.dispatchEvent(new Event('change',{bubbles:true})); return true; }");
     await waitFor(win, "async()=>document.getElementById('product-channels-page')?.innerText.includes('Unread / 未读') && document.getElementById('product-channels-page')?.innerText.includes('Unread channel activity fixture')", "unread channel projection");
