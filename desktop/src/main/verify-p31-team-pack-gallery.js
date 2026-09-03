@@ -13,10 +13,19 @@ const WORKTREE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", 
 const EVIDENCE_DIR = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR ?? join(WORKTREE_ROOT, "_evidence_p31_2026-09-03");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const safeDiagnosticText = (value) => String(value ?? "").replace(/[A-Za-z]:[\\/][^\s"'<>]+/g, "<redacted-path>").replace(/(?:file|https?):\/\/[^\s"'<>]+/gi, "<redacted-url>").replace(/\b(?:token|password|secret|credential)\b\s*[=:]\s*[^\s,;]+/gi, "$1=<redacted>").slice(0, 240);
+const DUPLICATE_STATE_PROBE_EXPRESSION = "async()=>{try{const listed=await window.sovereignbot.teams.list({}); return {ok:true,ids:(listed?.packs??[]).filter((entry)=>entry.custom).map((entry)=>entry.id),errorSummary:null};}catch(error){return {ok:false,ids:[],errorSummary:(error?.name||'RendererError')+': '+String(error?.message||'operation failed').slice(0,160).replace(/[A-Za-z]:[\\/][^\\s\"'<>]+/g,'<redacted-path>').replace(/(?:file|https?):\\/\\/[^\\s\"'<>]+/gi,'<redacted-url>')};}}";
+
+function preflightInvokeExpression(expression) {
+  const wrapped = `(${expression})()`;
+  new Function(`return ${wrapped}`);
+  return expression;
+}
+
+const PREFLIGHTED_DUPLICATE_STATE_PROBE_EXPRESSION = preflightInvokeExpression(DUPLICATE_STATE_PROBE_EXPRESSION);
 
 async function probeDuplicateState(win) {
   try {
-    const result = await invoke(win, "async()=>{try{const listed=await window.sovereignbot.teams.list({}); return {ok:true,ids:(listed?.packs??[]).filter((entry)=>entry.custom).map((entry)=>entry.id),errorSummary:null};}catch(error){return {ok:false,ids:[],errorSummary:(error?.name||'RendererError')+': '+String(error?.message||'operation failed').slice(0,160).replace(/[A-Za-z]:[\\/][^\\s\"'<>]+/g,'<redacted-path>').replace(/(?:file|https?):\\/\\/[^\\s\"'<>]+/gi,'<redacted-url>')};}}()");
+    const result = await invoke(win, PREFLIGHTED_DUPLICATE_STATE_PROBE_EXPRESSION);
     return result && Array.isArray(result.ids) && typeof result.ok === "boolean" ? result : { ok: false, ids: [], errorSummary: "invalid renderer probe result" };
   }
   catch {

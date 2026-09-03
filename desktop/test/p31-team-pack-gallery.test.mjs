@@ -39,6 +39,11 @@ test("P31 verifier uses bounded native input for the older-gallery Duplicate con
   assert.match(verifier, /async function clickVisibleElementWithInput\(win, selector, label\)/);
   assert.match(verifier, /console-message/);
   assert.match(verifier, /render-process-gone/);
+  assert.match(verifier, /const DUPLICATE_STATE_PROBE_EXPRESSION = "async/);
+  assert.match(verifier, /const wrapped = `\(\$\{expression\}\)\(\)`/);
+  assert.match(verifier, /new Function\(`return \$\{wrapped\}`\)/);
+  assert.match(verifier, /preflightInvokeExpression\(DUPLICATE_STATE_PROBE_EXPRESSION\)/);
+  assert.doesNotMatch(verifier, /DUPLICATE_STATE_PROBE_EXPRESSION = [^;]+}\(\)"/);
   assert.match(verifier, /async function probeDuplicateState\(win\)/);
   assert.match(verifier, /errorSummary/);
   assert.match(verifier, /sendInputEvent completed; state probe pending/);
