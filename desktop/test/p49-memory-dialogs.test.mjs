@@ -54,6 +54,10 @@ test("P49 hidden gate writes evidence before window teardown and exits nonzero o
     /"team:activity": \(\) => \(\{ events: \[\] \}\)/,
   ]) assert.match(gate, expression);
   assert.match(gate, /waitForRenderer\(win,/);
+  assert.match(gate, /#view-memory:not\(\.hidden\)/);
+  assert.match(gate, /target main Memory row/);
+  assert.match(gate, /rows\.find\(\(entry\)=>entry\.textContent\.includes\("P49 Memory"\)/);
+  assert.doesNotMatch(gate, /const card=document\.querySelector\("#memory-list \.memory-row"\)/);
   assert.match(gate, /Details Memory row/);
   assert.match(gate, /targetCoworker.*state === "active"/s);
   assert.match(gate, /!editFailure\.disabled && failures\.editCalls === 1/);
