@@ -1,12 +1,10 @@
 PASS hidden Electron window stays hidden
 PASS ordinary Product hubs navigation reaches the older Team Pack gallery {"cards":[{"id":"software-team","title":"Software Team","buttons":["Install","Export / 导出","Duplicate / 复制"]},{"id":"research-team","title":"Research Team","buttons":["Install","Export / 导出","Duplicate / 复制"]},{"id":"content-team","title":"Content Team","buttons":["Install","Export / 导出","Duplicate / 复制"]},{"id":"operations-team","title":"Operations Team","buttons":["Install","Export / 导出","Duplicate / 复制"]},{"id":"product-team","title":"Product Discovery Team","buttons":["Install","Export / 导出","Duplicate / 复制"]},{"id":"revenue-team","title":"Revenue Planning Team","buttons":["Install","Export / 导出","Duplicate / 复制"]},{"id":"support-team","title":"Customer Support Team","buttons":["Install","Export / 导出","Duplicate / 复制"]}]}
 PASS older first-party gallery entry is read-only and guides Duplicate {"id":"product-team","title":"Product Discovery Team","buttons":["Install","Export / 导出","Duplicate / 复制"]}
-Verifier preflight: Node new Function(`return (expression)()`) passed
-Verifier click expression: async()=>{const button=document.querySelectorAll('#product-packs .settings-card')[4].querySelectorAll('button')[2]; if(!button) throw new Error('older gallery Duplicate button is unavailable'); button.click(); return true}
-[fatal] Error: Script failed to execute, this normally means an error was thrown. Check the renderer console for the error.
-    at node:electron/js2c/sandbox_bundle:2:104135
-    at IpcRendererInternal.<anonymous> (node:electron/js2c/sandbox_bundle:2:98639)
-    at IpcRendererInternal.emit (node:electron/js2c/sandbox_bundle:2:37735)
-    at Object.onMessage (node:electron/js2c/sandbox_bundle:2:97705)
-FAIL P31 Team Pack gallery gate runner completed Script failed to execute, this normally means an error was thrown. Check the renderer console for the error.
+Native input precondition: Duplicate getBoundingClientRect() failed the finite/visible/viewport bounds check; no mouseMove/mouseDown/mouseUp event was sent.
+[fatal] Error: older gallery Duplicate button is outside the viewport
+    at clickVisibleElementWithInput (file:///E:/Eternal/Auto_Empire/projects/SovereignBot-luna-attention/desktop/src/main/verify-p31-team-pack-gallery.js:23:270)
+    at async runVerifyP31TeamPackGallery (file:///E:/Eternal/Auto_Empire/projects/SovereignBot-luna-attention/desktop/src/main/verify-p31-team-pack-gallery.js:74:31)
+    at async file:///E:/Eternal/Auto_Empire/projects/SovereignBot-luna-attention/desktop/src/main/verify-p31-team-pack-gallery-entry.js:12:5
+FAIL P31 Team Pack gallery gate runner completed older gallery Duplicate button is outside the viewport
 [summary] 3/4 PASS

@@ -1,13 +1,13 @@
 {
-  "at": "2026-09-03T03:34:53.883Z",
+  "at": "2026-09-03T03:44:20.543Z",
   "checks": {
     "hidden Electron window stays hidden": true,
     "ordinary Product hubs navigation reaches the older Team Pack gallery": true,
     "older first-party gallery entry is read-only and guides Duplicate": true,
     "P31 Team Pack gallery gate runner completed": false
   },
-  "failureStage": "verifier invoke at older-gallery Duplicate after the two older-gallery checks",
-  "clickExpression": "async()=>{const button=document.querySelectorAll('#product-packs .settings-card')[4].querySelectorAll('button')[2]; if(!button) throw new Error('older gallery Duplicate button is unavailable'); button.click(); return true}",
-  "preflight": "Node new Function(`return (expression)()`) passed",
-  "fatal": "Script failed to execute, this normally means an error was thrown. Check the renderer console for the error."
+  "failureStage": "bounded native-input precondition for older-gallery Duplicate",
+  "inputMethod": "BrowserWindow.webContents.sendInputEvent mouseMove/mouseDown/mouseUp; not reached",
+  "inputSent": false,
+  "fatal": "older gallery Duplicate button is outside the viewport"
 }
