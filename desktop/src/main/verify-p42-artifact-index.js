@@ -87,11 +87,11 @@ export async function runVerifyP42ArtifactIndex({ app } = {}) {
     check("renderer Artifact Hub uses indexed Team/Channel candidates and latest family version", hub.cards.length === 1 && hub.cards[0] === latestId && /Saffron Needle Result/.test(hub.body), safeJson(hub));
 
     await invoke(win, `async()=>window.sovereignbot.artifacts.archive({artifactId:${JSON.stringify(latestId)}})`);
-    await waitFor(async () => fixture.artifactStore.list({ visibility: "active" }).artifacts.every((entry) => entry.id !== targetId && entry.id !== latestId), "archived family");
+    await waitFor(async () => fixture.artifactStore.indexRecords({ visibility: "active", limit: 5_000 }).artifacts.every((entry) => entry.id !== targetId && entry.id !== latestId), "archived family");
     const archivedSearch = await invoke(win, `async()=>window.sovereignbot.search.query({query:"Saffron Needle Result",types:["artifacts"],status:"active",limit:10})`);
     check("archive removes the indexed family from active Search", archivedSearch.results?.length === 0, JSON.stringify({ total: archivedSearch.total }));
     await invoke(win, `async()=>window.sovereignbot.artifacts.restore({artifactId:${JSON.stringify(latestId)}})`);
-    await waitFor(async () => fixture.artifactStore.list({ visibility: "active" }).artifacts.some((entry) => entry.id === latestId), "restored family");
+    await waitFor(async () => fixture.artifactStore.indexRecords({ visibility: "active", limit: 5_000 }).artifacts.some((entry) => entry.id === latestId), "restored family");
     const restoredSearch = await invoke(win, `async()=>window.sovereignbot.search.query({query:"Saffron Needle Result",types:["artifacts"],status:"active",limit:10})`);
     check("restore reindexes the family without changing latest version", restoredSearch.results?.some((entry) => entry.id === latestId) && fixture.artifactStore.history(latestId).history.map((entry) => entry.version).join(",") === "2,1", JSON.stringify({ ids: restoredSearch.results?.map((entry) => entry.id), history: fixture.artifactStore.history(latestId).history.map((entry) => entry.version) }));
 
