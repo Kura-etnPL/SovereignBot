@@ -1,0 +1,65 @@
+{
+  "schema": "sovereignbot.desktop.p45-artifact-content-search-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "checks": {
+    "canonical ArtifactStore retains the full bounded text corpus": {
+      "ok": true,
+      "detail": "{\"count\":623,\"targetId\":\"artifact_30ee3923be46e33d\"}"
+    },
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "Search finds old Artifact body content beyond the recent 500": {
+      "ok": true,
+      "detail": "{\"total\":1,\"id\":\"artifact_30ee3923be46e33d\",\"targetId\":\"artifact_30ee3923be46e33d\",\"snippetLength\":26}"
+    },
+    "Artifact content Search uses bounded candidates and safe projection": {
+      "ok": true,
+      "detail": "{\"indexed\":true,\"corpusCount\":626,\"candidateCount\":1,\"matchEvaluations\":1,\"generation\":623,\"indexGeneration\":623,\"buildingGeneration\":null,\"keys\":[\"type\",\"id\",\"title\",\"subtitle\",\"status\",\"updatedAt\",\"navigation\",\"score\",\"matchReason\",\"action\",\"matchSnippet\"]}"
+    },
+    "binary, oversized, and sensitive content stay out of Search": {
+      "ok": true,
+      "detail": "{\"[redacted]\":0,\"binary\":0,\"oversized\":0,\"binaryId\":\"artifact_4050a12b485dae5b\",\"oversizedId\":\"artifact_3e6d9117f0db410e\",\"[redacted]Id\":\"artifact_d9157cbc3c5a5cd7\"}"
+    },
+    "Search UI shows a safe content snippet and opens the exact Artifact": {
+      "ok": true,
+      "detail": "{\"title\":\"Files & Artifacts\",\"focused\":true,\"uiBeforeOpen\":{\"title\":\"P45 Artifact 0\",\"subtitle\":\"artifacts · artifact-0000.md · active · Phrase match / 短语匹配 · P45 ancient cobalt lantern\"}}"
+    },
+    "archive invalidates content Search and preserves archived filtering": {
+      "ok": true,
+      "detail": "{\"active\":0,\"archived\":\"artifact_30ee3923be46e33d\"}"
+    },
+    "restore rebuilds Artifact content Search": {
+      "ok": true,
+      "detail": "{\"id\":\"artifact_30ee3923be46e33d\",\"snippetLength\":26}"
+    },
+    "revision invalidates and indexes the new Artifact version": {
+      "ok": true,
+      "detail": "{\"id\":\"artifact_5b8c2fd40620ea9f\",\"revisedId\":\"artifact_5b8c2fd40620ea9f\"}"
+    },
+    "discard invalidates the authoritative Artifact Search service": {
+      "ok": true,
+      "detail": "{\"before\":{\"indexed\":true,\"corpusCount\":627,\"candidateCount\":620,\"matchEvaluations\":620,\"generation\":627,\"indexGeneration\":626,\"buildingGeneration\":null},\"after\":{\"indexed\":true,\"corpusCount\":627,\"candidateCount\":620,\"matchEvaluations\":620,\"generation\":628,\"indexGeneration\":626,\"buildingGeneration\":null},\"discardedId\":\"artifact_63fce33f277c7df9\"}"
+    },
+    "restart rebuilds bounded Artifact content Search": {
+      "ok": true,
+      "detail": "{\"id\":\"artifact_5b8c2fd40620ea9f\",\"revisedId\":\"artifact_5b8c2fd40620ea9f\",\"stats\":{\"indexed\":true,\"corpusCount\":627,\"candidateCount\":620,\"matchEvaluations\":620,\"generation\":0,\"indexGeneration\":0,\"buildingGeneration\":null}}"
+    }
+  },
+  "notes": [
+    "PASS canonical ArtifactStore retains the full bounded text corpus {\"count\":623,\"targetId\":\"artifact_30ee3923be46e33d\"}",
+    "PASS hidden Electron window stays hidden",
+    "PASS Search finds old Artifact body content beyond the recent 500 {\"total\":1,\"id\":\"artifact_30ee3923be46e33d\",\"targetId\":\"artifact_30ee3923be46e33d\",\"snippetLength\":26}",
+    "PASS Artifact content Search uses bounded candidates and safe projection {\"indexed\":true,\"corpusCount\":626,\"candidateCount\":1,\"matchEvaluations\":1,\"generation\":623,\"indexGeneration\":623,\"buildingGeneration\":null,\"keys\":[\"type\",\"id\",\"title\",\"subtitle\",\"status\",\"updatedAt\",\"navigation\",\"score\",\"matchReason\",\"action\",\"matchSnippet\"]}",
+    "PASS binary, oversized, and sensitive content stay out of Search {\"[redacted]\":0,\"binary\":0,\"oversized\":0,\"binaryId\":\"artifact_4050a12b485dae5b\",\"oversizedId\":\"artifact_3e6d9117f0db410e\",\"[redacted]Id\":\"artifact_d9157cbc3c5a5cd7\"}",
+    "PASS Search UI shows a safe content snippet and opens the exact Artifact {\"title\":\"Files & Artifacts\",\"focused\":true,\"uiBeforeOpen\":{\"title\":\"P45 Artifact 0\",\"subtitle\":\"artifacts · artifact-0000.md · active · Phrase match / 短语匹配 · P45 ancient cobalt lantern\"}}",
+    "PASS archive invalidates content Search and preserves archived filtering {\"active\":0,\"archived\":\"artifact_30ee3923be46e33d\"}",
+    "PASS restore rebuilds Artifact content Search {\"id\":\"artifact_30ee3923be46e33d\",\"snippetLength\":26}",
+    "PASS revision invalidates and indexes the new Artifact version {\"id\":\"artifact_5b8c2fd40620ea9f\",\"revisedId\":\"artifact_5b8c2fd40620ea9f\"}",
+    "PASS discard invalidates the authoritative Artifact Search service {\"before\":{\"indexed\":true,\"corpusCount\":627,\"candidateCount\":620,\"matchEvaluations\":620,\"generation\":627,\"indexGeneration\":626,\"buildingGeneration\":null},\"after\":{\"indexed\":true,\"corpusCount\":627,\"candidateCount\":620,\"matchEvaluations\":620,\"generation\":628,\"indexGeneration\":626,\"buildingGeneration\":null},\"discardedId\":\"artifact_63fce33f277c7df9\"}",
+    "PASS restart rebuilds bounded Artifact content Search {\"id\":\"artifact_5b8c2fd40620ea9f\",\"revisedId\":\"artifact_5b8c2fd40620ea9f\",\"stats\":{\"indexed\":true,\"corpusCount\":627,\"candidateCount\":620,\"matchEvaluations\":620,\"generation\":0,\"indexGeneration\":0,\"buildingGeneration\":null}}"
+  ],
+  "externalActions": [],
+  "ok": true
+}
