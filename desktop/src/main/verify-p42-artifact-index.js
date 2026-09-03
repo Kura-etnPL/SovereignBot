@@ -46,8 +46,8 @@ export async function runVerifyP42ArtifactIndex({ app } = {}) {
     const targetId = "artifact_0000000000000001";
     const latestId = "artifact_0000000000000002";
     const artifacts = [
-      metadata(targetId, { familyId: targetFamilyId, version: 1, title: "P42 Indexed Target Artifact", conversationId: targetConversationId, coworkerId: fixture.chief.id, createdAt: "2026-08-01T00:00:00.000Z" }),
-      metadata(latestId, { familyId: targetFamilyId, version: 2, title: "P42 Indexed Target Artifact", conversationId: targetConversationId, coworkerId: fixture.chief.id, createdAt: "2026-08-01T00:00:01.000Z" }),
+      metadata(targetId, { familyId: targetFamilyId, version: 1, title: "Saffron Needle Result", conversationId: targetConversationId, coworkerId: fixture.chief.id, createdAt: "2026-08-01T00:00:00.000Z" }),
+      metadata(latestId, { familyId: targetFamilyId, version: 2, title: "Saffron Needle Result", conversationId: targetConversationId, coworkerId: fixture.chief.id, createdAt: "2026-08-01T00:00:01.000Z" }),
     ];
     for (let index = 3; index <= 620; index += 1) {
       const id = `artifact_${index.toString(16).padStart(16, "0")}`;
@@ -60,6 +60,9 @@ export async function runVerifyP42ArtifactIndex({ app } = {}) {
     const baseHandlers = handlers(fixture);
     const fixtureHandlers = {
       ...baseHandlers,
+      "computer:history": () => ({ history: [] }),
+      "job:list": () => ({ jobs: [] }),
+      "job:attention": () => ({ jobs: [] }),
       "artifact:archive": ({ artifactId }) => { const value = fixture.artifactStore.archive(artifactId); fixture.search.invalidate(); return value; },
       "artifact:restore": ({ artifactId }) => { const value = fixture.artifactStore.restore(artifactId); fixture.search.invalidate(); return value; },
       "artifact:restoreAsNewVersion": ({ artifactId }) => { const value = fixture.artifactStore.restoreAsNewVersion(artifactId); fixture.search.invalidate(); return value; },
@@ -68,10 +71,11 @@ export async function runVerifyP42ArtifactIndex({ app } = {}) {
     check("hidden Electron window stays hidden", win.isVisible() === false); await loadWindow(win);
 
     const indexed = fixture.artifactStore.indexRecords({ visibility: "all", limit: 5_000 }).artifacts;
-    check("canonical ArtifactStore index covers 620 metadata records", indexed.length === 620 && indexed[0].id === latestId && indexed.at(-1).id === targetId, JSON.stringify({ count: indexed.length, first: indexed[0]?.id, last: indexed.at(-1)?.id }));
+    const targetPositions = [targetId, latestId].map((id) => indexed.findIndex((entry) => entry.id === id));
+    check("canonical ArtifactStore index covers 620 metadata records", indexed.length === 620 && indexed[0].id !== latestId && indexed.at(-1).id === targetId && targetPositions.every((position) => position >= 500), JSON.stringify({ count: indexed.length, first: indexed[0]?.id, targetPositions }));
     check("indexed query rejects unbounded limits and arbitrary fields", (() => { try { fixture.artifactStore.indexRecords({ limit: 5_001 }); return false; } catch {} try { fixture.artifactStore.indexRecords({ predicate: "all" }); return false; } catch {} return true; })());
 
-    const searchResult = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P42 Indexed Target Artifact",types:["artifacts"],status:"active",limit:10})`);
+    const searchResult = await invoke(win, `async()=>window.sovereignbot.search.query({query:"Saffron Needle Result",types:["artifacts"],status:"active",limit:10})`);
     check("renderer Search finds the old scoped Artifact outside the recent 500", searchResult.results?.some((entry) => entry.id === latestId) && searchResult.results?.length === 2 && !/(storageRelativePath|sourceRelativePath|workspacePath|provider|session|token|secret)/i.test(JSON.stringify(searchResult)), safeJson({ total: searchResult.total, ids: searchResult.results?.map((entry) => entry.id) }));
 
     await invoke(win, `async()=>{document.getElementById("nav-artifacts")?.click(); return true}`);
@@ -80,15 +84,15 @@ export async function runVerifyP42ArtifactIndex({ app } = {}) {
     await invoke(win, `async()=>{const select=document.getElementById("artifact-hub-filter-page"); select.value=${JSON.stringify(`channel:${targetChannelId}`)}; select.dispatchEvent(new Event("change",{bubbles:true})); return true}`);
     await waitFor(async () => await invoke(win, `async()=>Boolean(document.querySelector('[data-artifact-id="${latestId}"]'))`), "scoped Artifact Hub card");
     const hub = await invoke(win, `async()=>({ cards:[...document.querySelectorAll("#product-artifacts-page [data-artifact-id]")].map((node)=>node.dataset.artifactId), body:document.getElementById("product-artifacts-page")?.textContent||"" })`);
-    check("renderer Artifact Hub uses indexed Team/Channel candidates and latest family version", hub.cards.length === 1 && hub.cards[0] === latestId && /P42 Indexed Target Artifact/.test(hub.body), safeJson(hub));
+    check("renderer Artifact Hub uses indexed Team/Channel candidates and latest family version", hub.cards.length === 1 && hub.cards[0] === latestId && /Saffron Needle Result/.test(hub.body), safeJson(hub));
 
     await invoke(win, `async()=>window.sovereignbot.artifacts.archive({artifactId:${JSON.stringify(latestId)}})`);
     await waitFor(async () => fixture.artifactStore.list({ visibility: "active" }).artifacts.every((entry) => entry.id !== targetId && entry.id !== latestId), "archived family");
-    const archivedSearch = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P42 Indexed Target Artifact",types:["artifacts"],status:"active",limit:10})`);
+    const archivedSearch = await invoke(win, `async()=>window.sovereignbot.search.query({query:"Saffron Needle Result",types:["artifacts"],status:"active",limit:10})`);
     check("archive removes the indexed family from active Search", archivedSearch.results?.length === 0, JSON.stringify({ total: archivedSearch.total }));
     await invoke(win, `async()=>window.sovereignbot.artifacts.restore({artifactId:${JSON.stringify(latestId)}})`);
     await waitFor(async () => fixture.artifactStore.list({ visibility: "active" }).artifacts.some((entry) => entry.id === latestId), "restored family");
-    const restoredSearch = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P42 Indexed Target Artifact",types:["artifacts"],status:"active",limit:10})`);
+    const restoredSearch = await invoke(win, `async()=>window.sovereignbot.search.query({query:"Saffron Needle Result",types:["artifacts"],status:"active",limit:10})`);
     check("restore reindexes the family without changing latest version", restoredSearch.results?.some((entry) => entry.id === latestId) && fixture.artifactStore.history(latestId).history.map((entry) => entry.version).join(",") === "2,1", JSON.stringify({ ids: restoredSearch.results?.map((entry) => entry.id), history: fixture.artifactStore.history(latestId).history.map((entry) => entry.version) }));
 
     const invalid = await invoke(win, `async()=>{const result={}; for(const [key,call] of Object.entries({hub:()=>window.sovereignbot.artifacts.hub({limit:501}),search:()=>window.sovereignbot.search.query({query:"x",limit:101})})){try{await call(); result[key]=false}catch(error){result[key]=Boolean(error?.message)}} return result}`);
@@ -98,9 +102,9 @@ export async function runVerifyP42ArtifactIndex({ app } = {}) {
     fixture.artifactStore = restartedStore;
     fixture.productSurfaces = createProductSurfaceService({ dataDir, teamService: fixture.teamService, coworkerStore: fixture.coworkerStore, artifactStore: restartedStore, runtime: {}, getRuntime: () => ({}) });
     fixture.search = createSearchService({ teamService: fixture.teamService, conversationStore: fixture.conversationStore, coworkerStore: fixture.coworkerStore, projectService: fixture.projectService, artifactStore: restartedStore, skillStore: fixture.skillStore, productSurfaces: fixture.productSurfaces, getRoutines: () => fixture.routines?.list?.(), memoryService: fixture.memoryService, getJobs: () => fixture.jobs, getHistory: (payload) => fixture.productSurfaces.computerHistory(payload) });
-    unbind?.(); unbind = bindIpcChannels({ win, handlers: { ...handlers(fixture), "artifact:archive": ({ artifactId }) => { const value = restartedStore.archive(artifactId); fixture.search.invalidate(); return value; }, "artifact:restore": ({ artifactId }) => { const value = restartedStore.restore(artifactId); fixture.search.invalidate(); return value; } } });
+    unbind?.(); unbind = bindIpcChannels({ win, handlers: { ...handlers(fixture), "computer:history": () => ({ history: [] }), "job:list": () => ({ jobs: [] }), "job:attention": () => ({ jobs: [] }), "artifact:archive": ({ artifactId }) => { const value = restartedStore.archive(artifactId); fixture.search.invalidate(); return value; }, "artifact:restore": ({ artifactId }) => { const value = restartedStore.restore(artifactId); fixture.search.invalidate(); return value; } } });
     await loadWindow(win);
-    const afterRestart = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P42 Indexed Target Artifact",types:["artifacts"],status:"active",limit:10})`);
+    const afterRestart = await invoke(win, `async()=>window.sovereignbot.search.query({query:"Saffron Needle Result",types:["artifacts"],status:"active",limit:10})`);
     const restartedHub = await invoke(win, `async()=>window.sovereignbot.artifacts.hub({teamId:${JSON.stringify(createdTeam.team.id)},channelId:${JSON.stringify(targetChannelId)},limit:10})`);
     check("restart rebuilds the index and preserves scoped Hub/Search coverage", afterRestart.results?.some((entry) => entry.id === latestId) && restartedHub.artifacts?.length === 1 && restartedHub.artifacts[0].id === latestId && restartedStore.indexRecords({ visibility: "all", limit: 5_000 }).artifacts.length === 620, JSON.stringify({ searchIds: afterRestart.results?.map((entry) => entry.id), hubIds: restartedHub.artifacts?.map((entry) => entry.id), count: restartedStore.indexRecords({ visibility: "all", limit: 5_000 }).artifacts.length }));
   } catch (error) { result.error = safeJson(error?.stack ?? error); check("P42 hidden Artifact index gate completed", false, error?.message ?? error); }
