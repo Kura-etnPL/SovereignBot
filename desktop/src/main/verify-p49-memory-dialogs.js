@@ -50,6 +50,7 @@ function makeHandlers(fixture, failures) {
     "conversation:list": () => conversations.list(),
     "conversation:get": ({ conversationId }) => conversations.get(conversationId),
     "conversation:createDirect": ({ coworkerId }) => conversations.createDirect(coworkerId),
+    "conversation:createTeam": ({ title, coworkerIds }) => conversations.createTeam({ title, coworkerIds }),
     "team:list": () => teams.list(),
     "channel:list": (payload) => teams.listChannels(payload),
     "project:list": (payload) => projects.list(payload),
@@ -57,6 +58,11 @@ function makeHandlers(fixture, failures) {
     "artifact:list": (payload) => artifacts.list(payload),
     "connectedApps:list": () => ({ apps: [] }),
     "connectedApps:search": () => ({ apps: [] }),
+    "skill:list": () => ({ skills: [] }),
+    "eventTrigger:list": () => ({ triggers: [] }),
+    "notification:list": () => ({ notifications: [] }),
+    "data:status": () => ({ backups: [] }),
+    "data:listBackups": () => ({ backups: [] }),
     "memory:list": (payload) => memory.list(payload),
     "memory:listSuggestions": () => memory.listSuggestions(),
     "memory:sourceTrace": (payload) => memory.sourceTrace(payload),
@@ -82,7 +88,7 @@ async function invoke(win, expression) { return win.webContents.executeJavaScrip
 export async function runVerifyP49MemoryDialogs({ app }) {
   const checks = {};
   const notes = [];
-  const check = (name, ok, detail = "") => { checks[name] = Boolean(ok); notes.push(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` ${detail}` : ""}`); };
+  const check = (name, ok, detail = "") => { const line = `${ok ? "PASS" : "FAIL"} ${name}${detail ? ` ${detail}` : ""}`; checks[name] = Boolean(ok); notes.push(line); try { process.stdout.write(`${line}\n`); } catch {} };
   let dataDir;
   let win;
   let unbind;
@@ -133,19 +139,35 @@ export async function runVerifyP49MemoryDialogs({ app }) {
   } catch (error) {
     check("P49 hidden Memory dialog gate completes", false, String(error?.message ?? error));
     try { process.stderr.write(`${error?.stack ?? error}\n`); } catch {}
-  } finally {
-    try { unbind?.(); } catch {}
-    try { uninstallProtocol?.(); } catch {}
-    try { win?.destroy(); } catch {}
-    if (dataDir) try { await rm(dataDir, { recursive: true, force: true }); } catch {}
   }
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
-  if (evidenceDir) {
-    await mkdir(evidenceDir, { recursive: true });
-    await writeFile(join(evidenceDir, "verify-p49-memory-dialogs.json"), `${JSON.stringify({ schema: "sovereignbot.desktop.p49-memory-dialogs.v1", checks, failed, notes, fixtureBoundary: "LOCAL_FIXTURE", externalActions: [], ok: failed.length === 0 }, null, 2)}\n`, "utf8");
-    await writeFile(join(evidenceDir, "verify-p49-memory-dialogs.log"), `${notes.join("\n")}\n`, "utf8");
+  const result = { schema: "sovereignbot.desktop.p49-memory-dialogs.v1", checks, failed, notes, fixtureBoundary: "LOCAL_FIXTURE", externalActions: [], ok: failed.length === 0 };
+  let evidenceError;
+  try {
+    if (evidenceDir) {
+      await mkdir(evidenceDir, { recursive: true });
+      await writeFile(join(evidenceDir, "verify-p49-memory-dialogs.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
+      await writeFile(join(evidenceDir, "verify-p49-memory-dialogs.log"), `${notes.join("\n")}\n`, "utf8");
+    }
+  } catch (error) {
+    evidenceError = error;
+    try { process.stderr.write(`P49 evidence write failed: ${error?.stack ?? error}\n`); } catch {}
   }
-  if (failed.length) throw new Error(`P49 Memory dialog gate failed: ${failed.join(", ")}`);
-  if (app?.exit) { app.exit(0); return { ok: true, checks }; }
-  return { ok: true, checks };
+  const finalFailed = evidenceError ? [...failed, "P49 evidence write"] : failed;
+  const finalResult = { ...result, failed: finalFailed, ok: finalFailed.length === 0 };
+  const exitCode = finalFailed.length ? 1 : 0;
+  try { process.stdout.write(`${exitCode ? "FAIL" : "PASS"} P49 Memory dialog gate summary ${Object.values(checks).filter(Boolean).length}/${Object.keys(checks).length} checks passed\n`); } catch {}
+  try { unbind?.(); } catch {}
+  try { uninstallProtocol?.(); } catch {}
+  if (dataDir) try { await rm(dataDir, { recursive: true, force: true }); } catch {}
+  if (app?.exit) {
+    // Evidence, notes, and the exit decision are complete before Electron can
+    // quit because the only BrowserWindow is destroyed.
+    if (exitCode) { app.exit(1); return finalResult; }
+    app.exit(0);
+    return { ok: true, checks };
+  }
+  try { win?.destroy(); } catch {}
+  if (exitCode) throw new Error(`P49 Memory dialog gate failed: ${finalFailed.join(", ")}`);
+  return finalResult;
 }
