@@ -21,6 +21,7 @@
   let currentRoutineId;
   const routineActionPending = new Set();
   const routineActionFeedback = new Map();
+  let routineRemoveCandidate;
   let workerNodes = [];
   let computerTargets = [];
   const ATTENTION_CATEGORIES = Object.freeze([
@@ -373,7 +374,9 @@
           <label id="routine-field-weekday" class="hidden"><span data-i18n="routines.weekday">Weekday</span><select id="routine-weekday"></select></label>
           <p id="routine-form-error" class="inline-error hidden"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-dialog" type="button" data-i18n="action.cancel">Cancel</button><button class="hero-action" type="submit" data-i18n="routines.create">New routine</button></div>
         </form></dialog>
-        <dialog id="routine-detail-dialog" class="modal"><div class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="routines.history">History</span><h2 id="routine-detail-title">Routine</h2></div><button class="modal-x" data-close-dialog="routine-detail-dialog" type="button">×</button></div><p id="routine-detail-meta" class="setting-feedback"></p><div id="routine-history" class="workspace-cards"></div><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-detail-dialog" type="button" data-i18n="action.close">Close</button></div></div></dialog>`;
+        <p id="routine-action-status" class="setting-feedback hidden" role="status" aria-live="polite"></p>
+        <dialog id="routine-detail-dialog" class="modal"><div class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="routines.history">History</span><h2 id="routine-detail-title">Routine</h2></div><button class="modal-x" data-close-dialog="routine-detail-dialog" type="button">×</button></div><p id="routine-detail-meta" class="setting-feedback"></p><div id="routine-history" class="workspace-cards"></div><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-detail-dialog" type="button" data-i18n="action.close">Close</button></div></div></dialog>
+        <dialog id="routine-remove-dialog" class="modal"><form id="routine-remove-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span class="eyebrow">ROUTINE LIFECYCLE / 例行任务生命周期</span><h2>Remove Routine? / 移除例行任务？</h2></div><button class="modal-x" data-close-dialog="routine-remove-dialog" type="button">×</button></div><p id="routine-remove-name" class="setting-feedback"></p><p id="routine-remove-impact">This permanently removes the Routine and its schedule/history. Use Archive if you may want to restore it later. / 此操作会永久移除例行任务及其计划/历史；如需以后恢复，请使用归档。</p><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-remove-dialog" type="button">Cancel / 取消</button><button id="routine-remove-confirm" class="hero-action" type="submit">Remove Routine / 移除例行任务</button></div></form></dialog>`;
       document.querySelector(".workspace-shell")?.append(section);
     }
     applyRoutineLocale();
@@ -504,6 +507,14 @@
     else routineActionFeedback.set(routineId, { kind, message });
   }
 
+  function setRoutineActionStatus(kind, message) {
+    const status = $("routine-action-status");
+    if (!status) return;
+    status.textContent = message || "";
+    status.dataset.kind = message ? kind : "";
+    status.classList.toggle("hidden", !message);
+  }
+
   function appendRoutineActionFeedback(card, routineId) {
     const feedback = routineActionFeedback.get(routineId);
     if (!feedback) return;
@@ -580,6 +591,102 @@
     }
   }
 
+  async function toggleRoutineFromCard(routineId) {
+    if (routineActionPending.has(routineId)) return;
+    const routine = routines.find((entry) => entry.id === routineId);
+    if (!routine) {
+      setRoutineActionFeedback(routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      renderRoutineList();
+      return;
+    }
+    if (routine.state !== "active") {
+      setRoutineActionFeedback(routineId, "error", "This Routine is not active. Restore it before changing Enable state. / 此例行任务未处于活动状态，请先恢复。");
+      renderRoutineList();
+      return;
+    }
+    const enabled = !routine.enabled;
+    routineActionPending.add(routineId);
+    setRoutineActionFeedback(routineId);
+    renderRoutineList();
+    try {
+      await window.sovereignbot.routines.setEnabled({ routineId, enabled });
+      setRoutineActionFeedback(routineId, "success", enabled ? `Routine enabled: ${routine.name} / 例行任务已启用：${routine.name}` : `Routine disabled: ${routine.name} / 例行任务已停用：${routine.name}`);
+      await refreshRoutines();
+    } catch (error) {
+      setRoutineActionFeedback(routineId, "error", routineActionError(error, "Routine Enable state could not be changed. Check its state and try again. / 例行任务启用状态未改变，请检查状态后重试。"));
+    } finally {
+      routineActionPending.delete(routineId);
+      renderRoutineList();
+    }
+  }
+
+  async function archiveRoutineFromCard(routineId) {
+    if (routineActionPending.has(routineId)) return;
+    const routine = routines.find((entry) => entry.id === routineId);
+    if (!routine) {
+      setRoutineActionFeedback(routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      renderRoutineList();
+      return;
+    }
+    if (routine.state === "archived") {
+      setRoutineActionFeedback(routineId, "error", "This Routine is already archived. Refresh and try again. / 此例行任务已归档，请刷新后重试。");
+      renderRoutineList();
+      return;
+    }
+    routineActionPending.add(routineId);
+    setRoutineActionFeedback(routineId);
+    renderRoutineList();
+    try {
+      await window.sovereignbot.routines.archive({ routineId });
+      setRoutineActionFeedback(routineId, "success", `Routine archived: ${routine.name} / 例行任务已归档：${routine.name}`);
+      await refreshRoutines();
+    } catch (error) {
+      setRoutineActionFeedback(routineId, "error", routineActionError(error, "Routine could not be archived. Check its state and try again. / 例行任务未归档，请检查状态后重试。"));
+    } finally {
+      routineActionPending.delete(routineId);
+      renderRoutineList();
+    }
+  }
+
+  function openRoutineRemoveDialog(routineId) {
+    if (routineActionPending.has(routineId)) return;
+    const routine = routines.find((entry) => entry.id === routineId);
+    if (!routine) {
+      setRoutineActionFeedback(routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      renderRoutineList();
+      return;
+    }
+    routineRemoveCandidate = { routineId, name: routine.name };
+    $("routine-remove-name").textContent = `Routine: ${routine.name} / 例行任务：${routine.name}`;
+    $("routine-remove-dialog")?.showModal?.();
+  }
+
+  async function confirmRoutineRemoval() {
+    const candidate = routineRemoveCandidate;
+    routineRemoveCandidate = undefined;
+    $("routine-remove-dialog")?.close();
+    if (!candidate || routineActionPending.has(candidate.routineId)) return;
+    const routine = routines.find((entry) => entry.id === candidate.routineId);
+    if (!routine) {
+      setRoutineActionFeedback(candidate.routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      renderRoutineList();
+      return;
+    }
+    routineActionPending.add(candidate.routineId);
+    setRoutineActionFeedback(candidate.routineId);
+    renderRoutineList();
+    try {
+      await window.sovereignbot.routines.remove({ routineId: candidate.routineId });
+      setRoutineActionStatus("success", `Routine removed: ${routine.name} / 例行任务已移除：${routine.name}`);
+      await refreshRoutines();
+    } catch (error) {
+      setRoutineActionFeedback(candidate.routineId, "error", routineActionError(error, "Routine could not be removed. It was not changed; retry when ready. / 例行任务未移除，状态未改变，请稍后重试。"));
+    } finally {
+      routineActionPending.delete(candidate.routineId);
+      renderRoutineList();
+    }
+  }
+
   function renderRoutineList() {
     const root = $("routine-list");
     if (!root) return;
@@ -597,18 +704,19 @@
       const next = routine.nextRunAt ? new Date(routine.nextRunAt).toLocaleString() : "—";
       meta.textContent = `${scheduleLabel(routine.schedule)} · ${t("routines.nextRun", "Next run")}: ${next}${routine.lastStatus ? ` · ${t("routines.lastStatus", "Last status")}: ${routine.lastStatus}` : ""}`;
       const actions = document.createElement("div"); actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
-      const open = document.createElement("button"); open.className = "quiet-action"; open.type = "button"; open.textContent = t("routines.history", "History"); open.addEventListener("click", () => openRoutineDetail(routine.id));
-      const remove = document.createElement("button"); remove.className = "quiet-action"; remove.type = "button"; remove.textContent = t("routines.remove", "Remove"); remove.addEventListener("click", async () => { await window.sovereignbot.routines.remove({ routineId: routine.id }); await refreshRoutines(); });
-      const runNow = document.createElement("button"); runNow.className = "hero-action"; runNow.type = "button"; runNow.textContent = routineActionPending.has(routine.id) ? "Starting… / 启动中…" : "Run now / 立即运行"; runNow.disabled = routineActionPending.has(routine.id) || routine.canRun !== true; runNow.addEventListener("click", () => void runRoutineFromCard(routine.id));
+      const actionPending = routineActionPending.has(routine.id);
+      const open = document.createElement("button"); open.className = "quiet-action"; open.type = "button"; open.textContent = t("routines.history", "History"); open.disabled = actionPending; open.addEventListener("click", () => openRoutineDetail(routine.id));
+      const remove = document.createElement("button"); remove.className = "quiet-action"; remove.type = "button"; remove.textContent = actionPending ? "Removing… / 移除中…" : t("routines.remove", "Remove"); remove.disabled = actionPending; remove.addEventListener("click", () => openRoutineRemoveDialog(routine.id));
+      const runNow = document.createElement("button"); runNow.className = "hero-action"; runNow.type = "button"; runNow.textContent = actionPending ? "Working… / 处理中…" : "Run now / 立即运行"; runNow.disabled = actionPending || routine.canRun !== true; runNow.addEventListener("click", () => void runRoutineFromCard(routine.id));
       const consumedOneTime = routine.schedule?.type === "one-time" && Boolean(routine.lastRunAt);
       actions.append(open, runNow);
       if (routine.state === "archived") {
-        const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = routineActionPending.has(routine.id) ? "Restoring… / 恢复中…" : "Restore / 恢复"; restore.disabled = routineActionPending.has(routine.id); restore.addEventListener("click", () => void restoreRoutineFromCard(routine.id)); actions.append(restore);
+        const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = actionPending ? "Restoring… / 恢复中…" : "Restore / 恢复"; restore.disabled = actionPending; restore.addEventListener("click", () => void restoreRoutineFromCard(routine.id)); actions.append(restore);
       } else if (!consumedOneTime) {
-        const toggle = document.createElement("button"); toggle.className = "quiet-action"; toggle.type = "button"; toggle.textContent = routine.enabled ? t("routines.disable", "Disable") : t("routines.enable", "Enable"); toggle.addEventListener("click", async () => { await window.sovereignbot.routines.setEnabled({ routineId: routine.id, enabled: !routine.enabled }); await refreshRoutines(); });
+        const toggle = document.createElement("button"); toggle.className = "quiet-action"; toggle.type = "button"; toggle.textContent = actionPending ? "Updating… / 更新中…" : routine.enabled ? t("routines.disable", "Disable") : t("routines.enable", "Enable"); toggle.disabled = actionPending; toggle.addEventListener("click", () => void toggleRoutineFromCard(routine.id));
         actions.append(toggle);
       }
-      if (routine.state !== "archived") { const archive = document.createElement("button"); archive.className = "quiet-action"; archive.type = "button"; archive.textContent = "Archive / 归档"; archive.addEventListener("click", async () => { await window.sovereignbot.routines.archive({ routineId: routine.id }); await refreshRoutines(); }); actions.append(archive); }
+      if (routine.state !== "archived") { const archive = document.createElement("button"); archive.className = "quiet-action"; archive.type = "button"; archive.textContent = actionPending ? "Updating… / 更新中…" : "Archive / 归档"; archive.disabled = actionPending; archive.addEventListener("click", () => void archiveRoutineFromCard(routine.id)); actions.append(archive); }
       actions.append(remove);
       card.append(head, meta, actions); appendRoutineActionFeedback(card, routine.id); root.append(card);
     }
@@ -845,6 +953,8 @@
         $("routine-dialog")?.close(); $("routine-form")?.reset(); await refreshRoutines();
       } catch (error) { if (err) { err.textContent = String(error?.message ?? error).replace(/^.*Error: /, "").slice(0,400); err.classList.remove("hidden"); } }
     });
+    $("routine-remove-form")?.addEventListener("submit", (e) => { e.preventDefault(); void confirmRoutineRemoval(); });
+    $("routine-remove-dialog")?.addEventListener("close", () => { routineRemoveCandidate = undefined; });
     document.addEventListener("sovereignbot:create-routine-from-skill", (event) => {
       void createRoutineFromSkill(event.detail?.skillId);
     });

@@ -35,6 +35,7 @@
         "verify:p28-project-create": "node scripts/verify-p28-project-create.mjs",
     "verify:p29-routine-selector": "node scripts/verify-p29-routine-selector.mjs",
     "verify:p30-routine-actions": "node scripts/verify-p30-routine-actions.mjs",
+        "verify:p47-routine-lifecycle": "node scripts/verify-p30-routine-actions.mjs",
     "verify:p31-team-pack-gallery": "node scripts/verify-p31-team-pack-gallery.mjs",
         "verify:p32-apps-catalog": "node scripts/verify-p32-apps-catalog.mjs",
         "verify:p33-search-palette": "node scripts/verify-p33-search-palette.mjs",
