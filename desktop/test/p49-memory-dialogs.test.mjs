@@ -55,4 +55,9 @@ test("P49 hidden gate writes evidence before window teardown and exits nonzero o
   ]) assert.match(gate, expression);
   assert.match(gate, /waitForRenderer\(win,/);
   assert.match(gate, /Details Memory row/);
+  assert.match(gate, /targetCoworker.*state === "active"/s);
+  assert.match(gate, /!editFailure\.disabled && failures\.editCalls === 1/);
+  assert.match(gate, /!deleteFailure\.disabled && failures\.deleteCalls === 1/);
+  assert.match(gate, /editCalls === 2/);
+  assert.match(gate, /deleteCalls === 2/);
 });
