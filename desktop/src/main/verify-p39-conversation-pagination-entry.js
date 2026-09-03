@@ -6,4 +6,8 @@ registerAppSchemePrivileged();
 app.setName("SovereignBot P39 Conversation Pagination Verification");
 app.enableSandbox();
 app.setAppUserModelId("com.sovereignbot.desktop.verify-p39-conversation-pagination");
-app.whenReady().then(() => runVerifyP39ConversationPagination({ app })).catch((error) => { try { process.stderr.write(String(error?.stack ?? error) + "\n"); } catch {} app.exit(1); });
+app.whenReady().then(() => runVerifyP39ConversationPagination({ app })).catch((error) => {
+  try { process.stderr.write(String(error?.stack ?? error) + "\n"); } catch {}
+  process.exitCode = 1;
+  app.quit();
+});

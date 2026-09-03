@@ -107,5 +107,6 @@ export async function runVerifyP39ConversationPagination({ app } = {}) {
   try { uninstallProtocol?.(); } catch {}
   try { await settleVerificationWindow(win); } catch {}
   try { if (dataDir) rmSync(dataDir, { recursive: true, force: true }); } catch {}
-  app?.exit(result.ok ? 0 : 1);
+  process.exitCode = result.ok ? 0 : 1;
+  app?.quit();
 }
