@@ -1,0 +1,25 @@
+{
+  "at": "2026-09-03T01:49:42.417Z",
+  "checks": {
+    "gate window stays hidden": true,
+    "renderer exposes product preview, export, lifecycle, and artifact APIs": true,
+    "text artifact opens an in-product bounded preview": true,
+    "binary artifact has explicit non-previewable state": true,
+    "oversized text preview reports truncation": true,
+    "Recent/team/channel/coworker filters keep bounded correct results": true,
+    "type filter selects only the requested MIME": true,
+    "History and Restore create append-only lineage": true,
+    "Revise via native dialog appends a new version": true,
+    "Open and Reveal stay on the managed artifact handler boundary": true,
+    "Export copy writes the selected artifact bytes without exposing a raw path": true,
+    "Archive hides the family from the active view without deleting managed bytes or history": true,
+    "Archived filter shows a restorable artifact": true,
+    "Restore reactivates the family and preserves lineage": true,
+    "Go to conversation remains a real source navigation": true,
+    "open-artifact navigates and focuses the exact artifact": true,
+    "Computer History is an allowlisted safe audit projection": true,
+    "Computer History Coworker filter is correct": true,
+    "artifact lineage and safe history survive restart": true
+  },
+  "publishEligible": false
+}
