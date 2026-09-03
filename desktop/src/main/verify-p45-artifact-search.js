@@ -13,10 +13,15 @@ import { bindIpcChannels } from "./ipc.js";
 
 const EVIDENCE_DIR = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR ?? join(process.cwd(), ".p45-evidence");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function waitFor(check, label, timeout = 20_000) {
+async function waitFor(check, label, timeout = 20_000, diagnose) {
     const started = Date.now();
-    while (Date.now() - started < timeout) { if (await check()) return; await sleep(100); }
-    throw new Error(`timed out waiting for ${label}`);
+    let last;
+    while (Date.now() - started < timeout) {
+        if (diagnose) { try { last = await diagnose(); } catch (error) { last = { diagnoseError: String(error?.message ?? error) }; } }
+        if (await check()) return;
+        await sleep(100);
+    }
+    throw new Error(`timed out waiting for ${label}: ${JSON.stringify({ last })}`);
 }
 
 export async function runVerifyP45ArtifactSearch({ app } = {}) {
@@ -40,15 +45,23 @@ export async function runVerifyP45ArtifactSearch({ app } = {}) {
             const artifact = fixture.artifactStore.ingestWorkspaceFile({ workspaceId: fixture.sharedWorkspaceId, workspacePath, relativePath: `p45-artifacts/${fileName}`, title: `P45 Artifact ${index}` });
             if (index === 0) targetArtifact = artifact;
         }
-        writeFileSync(join(artifactDir, "binary.png"), Buffer.from("P45 binary cobalt lantern", "utf8"));
-        const binaryArtifact = fixture.artifactStore.ingestWorkspaceFile({ workspaceId: fixture.sharedWorkspaceId, workspacePath, relativePath: "p45-artifacts/binary.png", title: "P45 Binary" });
-        writeFileSync(join(artifactDir, "oversized.txt"), Buffer.alloc(64 * 1024 + 1, "x").toString("utf8") + " P45 oversized cobalt lantern");
-        const oversizedArtifact = fixture.artifactStore.ingestWorkspaceFile({ workspaceId: fixture.sharedWorkspaceId, workspacePath, relativePath: "p45-artifacts/oversized.txt", title: "P45 Oversized" });
+        writeFileSync(join(artifactDir, "opaque-bin.png"), Buffer.from("obsidian raster sigil", "utf8"));
+        const binaryArtifact = fixture.artifactStore.ingestWorkspaceFile({ workspaceId: fixture.sharedWorkspaceId, workspacePath, relativePath: "p45-artifacts/opaque-bin.png", title: "Binary Fixture" });
+        writeFileSync(join(artifactDir, "overflow.txt"), Buffer.alloc(64 * 1024 + 1, "x").toString("utf8") + " vermilion overflow glyph");
+        const oversizedArtifact = fixture.artifactStore.ingestWorkspaceFile({ workspaceId: fixture.sharedWorkspaceId, workspacePath, relativePath: "p45-artifacts/overflow.txt", title: "Oversized Fixture" });
         writeFileSync(join(artifactDir, "secret.txt"), "token=P45HiddenArtifactSecret C:\\Users\\Eternal\\private\\secret.txt", "utf8");
-        const secretArtifact = fixture.artifactStore.ingestWorkspaceFile({ workspaceId: fixture.sharedWorkspaceId, workspacePath, relativePath: "p45-artifacts/secret.txt", title: "P45 Secret" });
+        const secretArtifact = fixture.artifactStore.ingestWorkspaceFile({ workspaceId: fixture.sharedWorkspaceId, workspacePath, relativePath: "p45-artifacts/secret.txt", title: "Secret Fixture" });
         check("canonical ArtifactStore retains the full bounded text corpus", fixture.artifactStore.indexRecords({ visibility: "all", limit: 5_000 }).artifacts.length >= 623, { count: fixture.artifactStore.indexRecords({ visibility: "all", limit: 5_000 }).artifacts.length, targetId: targetArtifact?.id });
 
-        const fixtureHandlers = handlers(fixture);
+        const fixtureHandlers = {
+            ...handlers(fixture),
+            "computer:history": () => ({ history: [] }),
+            "job:list": () => ({ jobs: [] }),
+            "job:attention": () => ({ jobs: [] }),
+            "memory:list": () => ({ memories: [], total: 0 }),
+            "thisPc:list": () => ({ items: [] }),
+            "notification:list": () => ({ notifications: [], totalCount: 0, unreadCount: 0 }),
+        };
         uninstallProtocol = installAppProtocolHandler();
         win = createMainWindow({ smoke: true });
         unbind = bindIpcChannels({ win, handlers: fixtureHandlers });
@@ -63,18 +76,18 @@ export async function runVerifyP45ArtifactSearch({ app } = {}) {
         check("Artifact content Search uses bounded candidates and safe projection", stats.indexed && stats.corpusCount >= 623 && stats.candidateCount < stats.corpusCount / 4 && stats.matchEvaluations <= stats.candidateCount && hit?.matchSnippet?.length <= 180 && !/(searchText|projectIds|storageRelativePath|sourceRelativePath|provider|session|credential|token|secret|password|cwd|path)/i.test(publicJson), { ...stats, keys: Object.keys(hit ?? {}) });
 
         const secret = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P45HiddenArtifactSecret",types:["artifacts"],status:"active",limit:10})`);
-        const binary = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P45 binary cobalt lantern",types:["artifacts"],status:"active",limit:10})`);
-        const oversized = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P45 oversized cobalt lantern",types:["artifacts"],status:"active",limit:10})`);
+        const binary = await invoke(win, `async()=>window.sovereignbot.search.query({query:"obsidian raster sigil",types:["artifacts"],status:"active",limit:10})`);
+        const oversized = await invoke(win, `async()=>window.sovereignbot.search.query({query:"vermilion overflow glyph",types:["artifacts"],status:"active",limit:10})`);
         check("binary, oversized, and sensitive content stay out of Search", secret.results?.length === 0 && binary.results?.length === 0 && oversized.results?.length === 0, { secret: secret.results?.length, binary: binary.results?.length, oversized: oversized.results?.length, binaryId: binaryArtifact.id, oversizedId: oversizedArtifact.id, secretId: secretArtifact.id });
 
         await invoke(win, `async()=>{document.getElementById("open-command-palette")?.click(); return true}`);
         await waitFor(async () => (await invoke(win, `async()=>!!document.querySelector("#command-palette:not(.hidden)")`)), "Artifact Search palette");
         await invoke(win, `async()=>{const type=document.getElementById("palette-type-filter"); type.value="artifacts"; type.dispatchEvent(new Event("change",{bubbles:true})); const input=document.querySelector("#command-palette input[type=search]"); input.value="P45 ancient cobalt lantern"; input.dispatchEvent(new Event("input",{bubbles:true})); return true}`);
-        await waitFor(async () => (await invoke(win, `async()=>document.querySelectorAll("#palette-results .command-palette-result").length`)) === 1, "Artifact content Search UI result");
+        await waitFor(async () => (await invoke(win, `async()=>document.querySelectorAll("#palette-results .command-palette-result").length`)) === 1, "Artifact content Search UI result", 20_000, async () => invoke(win, `async()=>({count:document.querySelectorAll("#palette-results .command-palette-result").length,results:document.querySelector("#palette-results")?.textContent||""})`));
         const uiBeforeOpen = await invoke(win, `async()=>({title:document.querySelector("#palette-results .command-palette-result-title")?.textContent||"",subtitle:document.querySelector("#palette-results .command-palette-result-subtitle")?.textContent||""})`);
         await invoke(win, `async()=>{document.querySelector("#palette-results .command-palette-result")?.click(); return true}`);
-        await waitFor(async () => (await invoke(win, `async()=>document.querySelector("#view-artifacts")?.classList.contains("hidden")===false`)), "Artifact deep link view");
-        await waitFor(async () => (await invoke(win, `async()=>!!document.querySelector('[data-artifact-id="${targetArtifact.id}"]')`)), "Artifact deep link card");
+        await waitFor(async () => (await invoke(win, `async()=>document.querySelector("#view-artifacts")?.classList.contains("hidden")===false`)), "Artifact deep link view", 20_000, async () => invoke(win, `async()=>({artifactsHidden:document.querySelector("#view-artifacts")?.classList.contains("hidden"),body:document.querySelector("#view-artifacts")?.textContent?.slice(0,500)||""})`));
+        await waitFor(async () => (await invoke(win, `async()=>!!document.querySelector('[data-artifact-id="${targetArtifact.id}"]')`)), "Artifact deep link card", 20_000, async () => invoke(win, `async()=>({targetId:${JSON.stringify(targetArtifact.id)},cards:document.querySelectorAll("#artifact-hub-list [data-artifact-id], #artifacts-list [data-artifact-id]").length,body:document.querySelector("#view-artifacts")?.textContent?.slice(0,500)||""})`));
         const ui = await invoke(win, `async()=>{const card=document.querySelector('[data-artifact-id="${targetArtifact.id}"]'); return {title:document.querySelector("#view-artifacts h1")?.textContent||"",focused:card?.getAttribute("aria-current")==="true",uiBeforeOpen:${JSON.stringify(uiBeforeOpen)}}}`);
         check("Search UI shows a safe content snippet and opens the exact Artifact", /cobalt lantern/i.test(uiBeforeOpen.subtitle) && ui.focused && /Artifacts/i.test(ui.title), ui);
 
@@ -105,7 +118,15 @@ export async function runVerifyP45ArtifactSearch({ app } = {}) {
         fixture.search = createSearchService({ teamService: fixture.teamService, conversationStore: fixture.conversationStore, coworkerStore: fixture.coworkerStore, projectService: fixture.projectService, artifactStore: restartedStore, skillStore: fixture.skillStore, productSurfaces: fixture.productSurfaces, getRoutines: () => fixture.routines?.list?.(), memoryService: fixture.memoryService, getJobs: () => fixture.jobs, getHistory: () => ({ history: [] }) });
         restartedStore.onChanged(() => fixture.search?.invalidate());
         unbind?.();
-        unbind = bindIpcChannels({ win, handlers: handlers(fixture) });
+        unbind = bindIpcChannels({ win, handlers: {
+            ...handlers(fixture),
+            "computer:history": () => ({ history: [] }),
+            "job:list": () => ({ jobs: [] }),
+            "job:attention": () => ({ jobs: [] }),
+            "memory:list": () => ({ memories: [], total: 0 }),
+            "thisPc:list": () => ({ items: [] }),
+            "notification:list": () => ({ notifications: [], totalCount: 0, unreadCount: 0 }),
+        } });
         await loadWindow(win);
         const afterRestart = await invoke(win, `async()=>window.sovereignbot.search.query({query:"P45 revised emerald artifact body",types:["artifacts"],status:"active",limit:10})`);
         const restartStats = fixture.search.diagnostics();

@@ -43,3 +43,12 @@ test("sandboxed preload exposes artifact operations without a raw file path API"
     assert.doesNotMatch(source, /readFile/);
     assert.doesNotMatch(source, /writeFile/);
 });
+
+test("Artifact text projection stays main-process-only and public results stay projected", () => {
+    const preload = readFileSync(fileURLToPath(new URL("../src/main/preload.cjs", import.meta.url)), "utf8");
+    const search = readFileSync(fileURLToPath(new URL("../src/main/search-service.js", import.meta.url)), "utf8");
+    assert.match(search, /artifactStore\?\.searchRecords/);
+    assert.doesNotMatch(preload, /searchRecords|artifact:searchRecords|searchText/);
+    assert.match(search, /searchText: _searchText/);
+    assert.match(search, /publicResult = \{ \.\.\.publicRecord/);
+});
