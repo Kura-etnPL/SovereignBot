@@ -29,7 +29,7 @@ function roster() {
     return { ready: false, mode: "local-gate", roles: {}, agents: [], providers: {}, coworkerBindings: {} };
 }
 
-function makeFixture(dataDir, { teamPackDialog = {} } = {}) {
+export function makeFixture(dataDir, { teamPackDialog = {} } = {}) {
     const stateDir = join(dataDir, "desktop-state");
     mkdirSync(stateDir, { recursive: true });
     const services = createDesktopServices({ dataDir, dialog: {} });
@@ -58,7 +58,7 @@ function publicTeamList(fixture) {
     return { ...listed, packs: [...packs, ...recipes.filter((pack) => !known.has(pack.id))] };
 }
 
-function handlers(fixture) {
+export function handlers(fixture) {
     const { services, coworkerStore, conversationStore, artifactStore, skillStore, teamService, projectService, memoryService, productSurfaces, search, teamPackDialog } = fixture;
     return {
         "app:handshake": () => ({ ok: true, version: desktopVersion(), platform: process.platform, locale: "en-US", language: services.getSettings().language }),
@@ -118,17 +118,17 @@ function handlers(fixture) {
     };
 }
 
-async function loadWindow(win) {
+export async function loadWindow(win) {
     await win.loadURL(appOrigin());
     await win.webContents.executeJavaScript("(async()=>document.readyState==='complete'?true:await new Promise(r=>window.addEventListener('load',()=>r(true),{once:true})))()");
     await sleep(900);
 }
 
-async function invoke(win, expression) {
+export async function invoke(win, expression) {
     return win.webContents.executeJavaScript(`(${expression})()`);
 }
 
-async function waitFor(label, fn, timeoutMs = 15_000) {
+export async function waitFor(label, fn, timeoutMs = 15_000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         if (await fn()) return;

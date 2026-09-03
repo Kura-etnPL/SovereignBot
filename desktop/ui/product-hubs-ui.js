@@ -165,7 +165,17 @@
     const query = $("team-pack-search")?.value.trim().toLowerCase() ?? "";
     if (query) items = items.filter((item) => [item.name, item.description, ...(item.coworkerNames ?? []), ...(item.channelNames ?? []), ...(item.playbookNames ?? [])].join(" ").toLowerCase().includes(query));
     const root = $("product-packs"); clear(root);
-    for (const item of items) { const card = document.createElement("article"); card.className = "settings-card"; const h = document.createElement("h3"); h.textContent = item.name; card.append(h, line("Contents", `${item.coworkerNames?.length ?? 0} coworkers · ${item.channelNames?.length ?? 0} channels · ${item.playbookNames?.length ?? 0} playbooks`), line("Status", item.installed ? "Installed" : "Available")); const actions = document.createElement("div"); actions.className = "detail-actions"; if (!item.installed) actions.append(button("Install", async () => { await api.teams.installPack({ packId: item.id }); await refresh(); })); actions.append(button("Export", async () => { const teams = typeof state !== "undefined" ? state.teams : []; const team = teams.find((entry) => entry.packId === item.id); const pack = team ? await api.teams.exportPack({ teamId: team.id }) : await api.teams.exportPackRecipe({ packId: item.id }); await copy(pack); })); actions.append(button("Duplicate", async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); })); if (item.custom) actions.append(button("Edit", async () => { const name = window.prompt("Pack name", item.name); if (!name) return; await api.teams.editPack({ packId: item.id, patch: { name, description: item.description } }); await refresh(); })); card.append(actions); root.append(card); }
+    for (const item of items) {
+      const card = document.createElement("article"); card.className = "settings-card"; card.dataset.teamPackId = item.id;
+      const h = document.createElement("h3"); h.textContent = item.name;
+      card.append(h, line("Contents", `${item.coworkerNames?.length ?? 0} coworkers · ${item.channelNames?.length ?? 0} channels · ${item.playbookNames?.length ?? 0} playbooks`), line("Status", item.installed ? "Installed" : "Available"));
+      const actions = document.createElement("div"); actions.className = "detail-actions";
+      if (!item.installed) actions.append(button("Install", async () => { await api.teams.installPack({ packId: item.id }); await refresh(); }));
+      actions.append(button("Export / 导出", () => document.dispatchEvent(new CustomEvent("sovereignbot:export-team-pack", { detail: { item } }))));
+      actions.append(button("Duplicate / 复制", async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); }));
+      if (item.custom) actions.append(button("Edit recipe / 编辑配方", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-team-pack-editor", { detail: { item } }))));
+      card.append(actions); root.append(card);
+    }
   }
   function renderWorkspaceSwitcher(snapshot) {
     const select = $("product-workspace-switch");
@@ -927,6 +937,15 @@
     $("team-pack-editor-dialog")?.showModal?.();
     $("team-pack-editor-name")?.focus();
   }
+
+  document.addEventListener("sovereignbot:open-team-pack-editor", (event) => {
+    const item = event.detail?.item;
+    if (item) void openPackEditor(item).catch((reason) => showError(pageRoots.packs, reason));
+  });
+  document.addEventListener("sovereignbot:export-team-pack", (event) => {
+    const item = event.detail?.item;
+    if (item) void exportPackToFile(item).catch((reason) => showError(pageRoots.packs, reason));
+  });
 
   function packs(items) {
     const root = pageRoots.packs; if (!root) return; clear(root);
