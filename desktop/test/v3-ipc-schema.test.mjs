@@ -28,6 +28,21 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     assert.match(preloadSource, /disable: invoke\("connectedApps:disable"\)/);
 });
 
+test("conversation:get accepts only bounded pagination inputs", () => {
+    assert.deepEqual(
+        validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef" }),
+        { conversationId: "conv_1234567890abcdef", limit: 100 },
+    );
+    assert.deepEqual(
+        validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", limit: 25, beforeMessageId: "msg_1234567890abcdef" }),
+        { conversationId: "conv_1234567890abcdef", limit: 25, beforeMessageId: "msg_1234567890abcdef" },
+    );
+    assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", limit: 101 }), /limit/);
+    assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", beforeMessageId: "msg_not-a-cursor" }), /message identifier/);
+    assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", unknown: true }), /unexpected request field/);
+    assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", sessionId: "provider-session" }), /not accepted from the renderer/);
+});
+
 test("parallel Team requests accept only bounded specialist tasks and a separate reviewer", () => {
     const payload = {
         conversationId: "conversation_1234567890abcdef",

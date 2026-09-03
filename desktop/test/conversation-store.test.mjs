@@ -203,3 +203,42 @@ test("conversation membership and threading fail closed", () => {
         rmSync(root, { recursive: true, force: true });
     }
 });
+
+test("conversation pages are bounded, ordered, cursor-safe, and durable", () => {
+    const { root, coworkerStore, conversations, coder, researcher } = fixture();
+    try {
+        const direct = conversations.createDirect(coder.id);
+        const other = conversations.createDirect(researcher.id);
+        const foreignCursor = conversations.postUserMessage(other.id, { text: "Foreign cursor" }).id;
+        for (let index = 0; index < 205; index += 1) conversations.postUserMessage(direct.id, { text: `Message ${index}` });
+
+        const latest = conversations.getPage(direct.id);
+        assert.equal(latest.messages.length, 100);
+        assert.equal(latest.messages[0].text, "Message 105");
+        assert.equal(latest.messages.at(-1).text, "Message 204");
+        assert.deepEqual(latest.pageInfo, { total: 205, hasOlder: true, nextBeforeMessageId: conversations.get(direct.id).messages[105].id });
+
+        const middle = conversations.getPage(direct.id, { limit: 100, beforeMessageId: latest.pageInfo.nextBeforeMessageId });
+        assert.equal(middle.messages[0].text, "Message 5");
+        assert.equal(middle.messages.at(-1).text, "Message 104");
+        assert.equal(middle.pageInfo.hasOlder, true);
+
+        const oldest = conversations.getPage(direct.id, { limit: 100, beforeMessageId: middle.pageInfo.nextBeforeMessageId });
+        assert.equal(oldest.messages.length, 5);
+        assert.equal(oldest.messages[0].text, "Message 0");
+        assert.equal(oldest.pageInfo.hasOlder, false);
+        assert.equal(oldest.pageInfo.nextBeforeMessageId, null);
+
+        assert.throws(() => conversations.getPage(direct.id, { limit: 0 }), /page limit/);
+        assert.throws(() => conversations.getPage(direct.id, { limit: 101 }), /page limit/);
+        assert.throws(() => conversations.getPage(direct.id, { beforeMessageId: "msg_deadbeefdeadbeef" }), /invalid conversation page cursor/);
+        assert.throws(() => conversations.getPage(direct.id, { beforeMessageId: foreignCursor }), /invalid conversation page cursor/);
+
+        const reloaded = createConversationStore({ persistPath: join(root, "conversations.json"), coworkerStore });
+        const afterRestart = reloaded.getPage(direct.id, { limit: 10, beforeMessageId: latest.pageInfo.nextBeforeMessageId });
+        assert.deepEqual(afterRestart.messages.map((message) => message.text), middle.messages.slice(-10).map((message) => message.text));
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});

@@ -796,7 +796,7 @@ async function main() {
                 "teach:save": ({ sessionId }) => teachOnce.save(sessionId),
                 "teach:cancel": ({ sessionId }) => teachOnce.cancel(sessionId),
                 "conversation:list": () => conversationStore.list(),
-                "conversation:get": ({ conversationId }) => conversationStore.get(conversationId),
+                "conversation:get": ({ conversationId, limit, beforeMessageId }) => conversationStore.getPage(conversationId, { limit, beforeMessageId }),
                 "conversation:acknowledge": ({ conversationId }) => notifications.resolveChannelUnread(conversationId),
                 "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
                 "conversation:createTeam": ({ title, coworkerIds, leadCoworkerId }) => teamService.createTeam({ title, coworkerIds, leadCoworkerId }).conversation,

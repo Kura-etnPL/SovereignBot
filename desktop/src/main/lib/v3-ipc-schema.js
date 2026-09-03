@@ -25,6 +25,7 @@ function bytes(value) { return Buffer.byteLength(JSON.stringify(value ?? null), 
 function objectPayload(payload) { if (!isPlainObject(payload)) throw new Error("request payload must be an object"); assertNoAuthority(payload); return payload; }
 function empty(payload) { if (payload === undefined || payload === null) return {}; const value = objectPayload(payload); if (Object.keys(value).length) throw new Error("request payload must be empty"); return {}; }
 function identifier(value, name) { if (typeof value !== "string" || !/^[A-Za-z0-9][\w:.-]{0,127}$/.test(value)) throw new Error(`${name} must be an identifier`); return value; }
+function messageIdentifier(value, name) { if (typeof value !== "string" || !/^msg_[a-f0-9]{16}$/i.test(value)) throw new Error(`${name} must be a message identifier`); return value; }
 function string(value, name, max, required = false) { if (value === undefined || value === null) { if (required) throw new Error(`missing request field: ${name}`); return undefined; } if (typeof value !== "string") throw new Error(`${name} must be a string`); if (value.length > max) throw new Error(`${name} exceeds ${max} characters`); if (required && !value.trim()) throw new Error(`${name} is required`); return value; }
 function idArray(value, name, max) { if (value === undefined) return undefined; if (!Array.isArray(value) || value.length > max) throw new Error(`${name} must be an array of at most ${max} identifiers`); return [...new Set(value.map((entry) => identifier(entry, name)))]; }
 function stringArray(value, name, maxItems, maxLength) { if (value === undefined) return undefined; if (!Array.isArray(value) || value.length > maxItems) throw new Error(`${name} must be an array of at most ${maxItems} strings`); return [...new Set(value.map((entry) => string(entry, name, maxLength, true)))]; }
@@ -386,7 +387,7 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "palette:list": spec(1024, empty),
     "palette:execute": spec(16 * 1024, (payload) => paletteTarget(payload)),
     "conversation:list": spec(1024, empty),
-    "conversation:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["conversationId"])); return { conversationId: identifier(value.conversationId, "conversationId") }; }),
+    "conversation:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["conversationId", "limit", "beforeMessageId"])); return { conversationId: identifier(value.conversationId, "conversationId"), limit: value.limit === undefined ? 100 : positiveInteger(value.limit, "limit", 1, 100), ...(value.beforeMessageId === undefined ? {} : { beforeMessageId: messageIdentifier(value.beforeMessageId, "beforeMessageId") }) }; }),
     "conversation:acknowledge": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["conversationId"])); return { conversationId: identifier(value.conversationId, "conversationId") }; }),
     "conversation:createDirect": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),
     "conversation:createTeam": spec(4096, (payload) => {

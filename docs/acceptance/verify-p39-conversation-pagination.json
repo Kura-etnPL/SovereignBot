@@ -1,0 +1,60 @@
+{
+  "schema": "sovereignbot.desktop.p39-conversation-pagination-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "default public conversation page is bounded": {
+      "ok": true,
+      "detail": "{\"count\":100,\"total\":220,\"pageInfo\":{\"total\":220,\"hasOlder\":true,\"nextBeforeMessageId\":\"msg_bfba8c81c70df9c9\"}}"
+    },
+    "public conversation page strips internal fields": {
+      "ok": true,
+      "detail": "{\"keys\":[\"id\",\"kind\",\"title\",\"participants\",\"leadCoworkerId\",\"createdAt\",\"updatedAt\",\"messageCount\",\"lastMessage\",\"messages\",\"pageInfo\"],\"messageKeys\":[\"id\",\"senderId\",\"text\",\"mentions\",\"artifactIds\",\"delivery\",\"createdAt\"]}"
+    },
+    "initial Conversation DOM stays bounded": {
+      "ok": true,
+      "detail": "{\"count\":100,\"first\":\"P39 message 120\",\"last\":\"P39 message 219\",\"buttonHidden\":false}"
+    },
+    "Load older prepends ordered unique messages": {
+      "ok": true,
+      "detail": "{\"count\":200,\"unique\":200,\"first\":\"P39 message 20\",\"last\":\"P39 message 219\",\"top\":12780,\"height\":25231,\"buttonHidden\":false}"
+    },
+    "Load older preserves the scroll anchor": {
+      "ok": true,
+      "detail": "{\"before\":{\"top\":240,\"height\":12691},\"after\":{\"top\":12780,\"height\":25231},\"anchorDelta\":0}"
+    },
+    "new messages merge during polling": {
+      "ok": true,
+      "detail": "{\"count\":201,\"last\":\"P39 polled new message\"}"
+    },
+    "conversation switch isolates pagination state": {
+      "ok": true,
+      "detail": "{\"count\":2,\"text\":[\"P39 second conversation one\",\"P39 second conversation two\"],\"olderHidden\":true}"
+    },
+    "pagination limit cursor and unknown fields fail closed": {
+      "ok": true,
+      "detail": "{\"rejected\":3,\"total\":3}"
+    },
+    "restart rebuilds the same bounded page from persistence": {
+      "ok": true,
+      "detail": "{\"count\":100,\"total\":221,\"lastId\":\"msg_5018d6290b76aae5\"}"
+    }
+  },
+  "notes": [
+    "PASS hidden Electron window stays hidden",
+    "PASS default public conversation page is bounded {\"count\":100,\"total\":220,\"pageInfo\":{\"total\":220,\"hasOlder\":true,\"nextBeforeMessageId\":\"msg_bfba8c81c70df9c9\"}}",
+    "PASS public conversation page strips internal fields {\"keys\":[\"id\",\"kind\",\"title\",\"participants\",\"leadCoworkerId\",\"createdAt\",\"updatedAt\",\"messageCount\",\"lastMessage\",\"messages\",\"pageInfo\"],\"messageKeys\":[\"id\",\"senderId\",\"text\",\"mentions\",\"artifactIds\",\"delivery\",\"createdAt\"]}",
+    "PASS initial Conversation DOM stays bounded {\"count\":100,\"first\":\"P39 message 120\",\"last\":\"P39 message 219\",\"buttonHidden\":false}",
+    "PASS Load older prepends ordered unique messages {\"count\":200,\"unique\":200,\"first\":\"P39 message 20\",\"last\":\"P39 message 219\",\"top\":12780,\"height\":25231,\"buttonHidden\":false}",
+    "PASS Load older preserves the scroll anchor {\"before\":{\"top\":240,\"height\":12691},\"after\":{\"top\":12780,\"height\":25231},\"anchorDelta\":0}",
+    "PASS new messages merge during polling {\"count\":201,\"last\":\"P39 polled new message\"}",
+    "PASS conversation switch isolates pagination state {\"count\":2,\"text\":[\"P39 second conversation one\",\"P39 second conversation two\"],\"olderHidden\":true}",
+    "PASS pagination limit cursor and unknown fields fail closed {\"rejected\":3,\"total\":3}",
+    "PASS restart rebuilds the same bounded page from persistence {\"count\":100,\"total\":221,\"lastId\":\"msg_5018d6290b76aae5\"}"
+  ],
+  "externalActions": [],
+  "ok": true
+}

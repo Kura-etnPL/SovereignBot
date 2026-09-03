@@ -30,6 +30,8 @@ const state = {
   channelEditorReturnView: undefined,
   pollTimer: undefined,
   conversationSignature: undefined,
+  conversationPage: undefined,
+  conversationRefreshRequest: 0,
   inlineAttentionFor: undefined,
   inlineAttentionAt: 0,
   inlineAttentionRequest: 0,
@@ -96,6 +98,66 @@ function conversationById(id) {
   return state.conversations.find((entry) => entry.id === id);
 }
 
+const CONVERSATION_PAGE_SIZE = 100;
+const MAX_RENDERED_MESSAGES = 300;
+
+function resetConversationPage(conversationId) {
+  state.conversationPage = {
+    conversationId,
+    messages: [],
+    total: 0,
+    hasOlder: false,
+    nextBeforeMessageId: undefined,
+    loadedOlder: false,
+    loadingOlder: false,
+    seenMessageIds: new Set(),
+  };
+}
+
+function updateConversationPageControls() {
+  const page = state.conversationPage;
+  const button = $("conversation-load-older");
+  const status = $("conversation-page-status");
+  if (!button || !status) return;
+  const current = page?.conversationId === state.selectedConversationId ? page : undefined;
+  button.classList.toggle("hidden", !current?.hasOlder);
+  button.disabled = Boolean(current?.loadingOlder);
+  button.textContent = current?.loadingOlder ? "Loading older messages… / 正在加载更早消息…" : "Load older messages / 加载更早消息";
+  status.textContent = current && current.total > current.messages.length
+    ? `${current.messages.length} of ${current.total} messages loaded / 已加载 ${current.messages.length} / ${current.total} 条消息`
+    : "";
+}
+
+function mergeConversationPage(pageResponse, mode = "latest") {
+  const page = state.conversationPage;
+  const incoming = Array.isArray(pageResponse?.messages) ? pageResponse.messages : [];
+  const current = page?.messages ?? [];
+  const incomingIds = new Set(incoming.map((message) => message?.id).filter(Boolean));
+  const freshMessages = mode === "latest" ? incoming.filter((message) => message?.id && !page.seenMessageIds.has(message.id)) : [];
+  let merged;
+  if (mode === "older") {
+    const seen = new Set();
+    merged = [...incoming, ...current].filter((message) => {
+      if (!message?.id || seen.has(message.id)) return false;
+      seen.add(message.id);
+      return true;
+    });
+  } else {
+    const positions = new Map(current.map((message, index) => [message.id, index]));
+    merged = current.map((message) => incoming.find((entry) => entry?.id === message.id) ?? message);
+    for (const message of incoming) if (message?.id && !positions.has(message.id)) merged.push(message);
+  }
+  if (merged.length > MAX_RENDERED_MESSAGES) merged = mode === "older" ? merged.slice(0, MAX_RENDERED_MESSAGES) : merged.slice(-MAX_RENDERED_MESSAGES);
+  page.messages = merged;
+  page.total = Number.isInteger(pageResponse?.messageCount) ? pageResponse.messageCount : (pageResponse?.pageInfo?.total ?? page.total);
+  page.hasOlder = mode === "older" ? Boolean(pageResponse?.pageInfo?.hasOlder) : Boolean(page.hasOlder || pageResponse?.pageInfo?.hasOlder);
+  page.nextBeforeMessageId = page.hasOlder ? (page.messages[0]?.id ?? pageResponse?.pageInfo?.nextBeforeMessageId) : undefined;
+  page.loadedOlder = page.loadedOlder || mode === "older";
+  for (const message of incoming) if (message?.id) page.seenMessageIds.add(message.id);
+  while (page.seenMessageIds.size > MAX_RENDERED_MESSAGES * 2) page.seenMessageIds.delete(page.seenMessageIds.values().next().value);
+  return { messages: page.messages, freshMessages, incomingIds };
+}
+
 function conversationUnread(conversation) {
   const last = conversation?.lastMessage;
   return Boolean(conversation?.id && last?.senderId !== "user" && last?.createdAt && conversation.id !== state.selectedConversationId
@@ -104,7 +166,7 @@ function conversationUnread(conversation) {
 
 function markConversationRead(conversation) {
   if (!conversation?.id) return Promise.resolve();
-  const stamp = conversation?.messages?.at(-1)?.createdAt;
+  const stamp = conversation?.lastMessage?.createdAt ?? conversation?.messages?.at(-1)?.createdAt;
   if (stamp) {
     readMarkers[conversation.id] = stamp;
     try { window.localStorage.setItem(READ_MARKERS_KEY, JSON.stringify(readMarkers)); } catch {}
@@ -509,6 +571,9 @@ async function openConversation(conversationId) {
   state.replyTo = undefined;
   state.redirectMode = false;
   state.conversationSignature = undefined;
+  state.conversationRefreshRequest += 1;
+  resetConversationPage(conversationId);
+  updateConversationPageControls();
   switchView("conversation");
   hide($("details-panel"));
   renderSidebar();
@@ -701,6 +766,7 @@ function speakMessage(conversation, message, button) {
 
 function renderMessage(conversation, message) {
   const row = document.createElement("li");
+  row.dataset.messageId = message.id;
   const user = message.senderId === "user";
   row.className = `chat-row${user ? " user" : ""}`;
   const coworker = user ? undefined : coworkerById(message.senderId);
@@ -778,19 +844,27 @@ function renderMessage(conversation, message) {
   return row;
 }
 
-function renderMessages(conversation, forceScroll = false) {
-  voiceController?.observeConversation(conversation.id, conversation.messages ?? []);
+function renderMessages(conversation, forceScroll = false, { voiceMessages = conversation.messages ?? [], preserveScroll = false } = {}) {
   const list = $("conversation-messages");
-  const signature = JSON.stringify(conversation.messages ?? []);
-  if (signature === state.conversationSignature) return;
+  const scroller = $("message-scroller");
+  const beforeHeight = scroller?.scrollHeight ?? 0;
+  const beforeTop = scroller?.scrollTop ?? 0;
+  const nearBottom = Boolean(forceScroll || !scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 160);
+  voiceController?.observeConversation(conversation.id, voiceMessages);
+  const messages = conversation.messages ?? [];
+  const signature = JSON.stringify(messages);
+  const changed = signature !== state.conversationSignature;
   state.conversationSignature = signature;
-  clearNode(list);
-  for (const message of conversation.messages ?? []) list.append(renderMessage(conversation, message));
+  if (changed) {
+    clearNode(list);
+    for (const message of messages) list.append(renderMessage(conversation, message));
+  }
 
   const members = participantCoworkers(conversation);
   const start = $("conversation-start");
-  start.classList.toggle("hidden", (conversation.messages?.length ?? 0) > 0);
-  if ((conversation.messages?.length ?? 0) === 0) {
+  const hasMessages = (conversation.messageCount ?? messages.length) > 0;
+  start.classList.toggle("hidden", hasMessages);
+  if (!hasMessages) {
     const direct = conversation.kind === "direct" ? members[0] : undefined;
     $("conversation-start-avatar").textContent = conversation.kind === "team" ? "#" : avatarFor(direct);
     $("conversation-start-title").textContent = conversation.kind === "team" ? conversation.title : direct?.name || "Start a conversation";
@@ -805,38 +879,77 @@ function renderMessages(conversation, forceScroll = false) {
     const names = [...pending].map((id) => coworkerById(id)?.name).filter(Boolean);
     $("typing-label").textContent = names.length > 1 ? `${names.join(" & ")} are working…` : `${names[0] || "Coworker"} is working…`;
   }
-  const scroller = $("message-scroller");
-  if (forceScroll || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 160)
-    requestAnimationFrame(() => { scroller.scrollTop = scroller.scrollHeight; });
+  updateConversationPageControls();
+  if (!changed && !forceScroll && !preserveScroll) return;
+  requestAnimationFrame(() => {
+    if (!scroller) return;
+    if (preserveScroll) scroller.scrollTop = Math.max(0, beforeTop + scroller.scrollHeight - beforeHeight);
+    else if (nearBottom) scroller.scrollTop = scroller.scrollHeight;
+  });
 }
 
 async function refreshConversation(forceScroll = false) {
   const id = state.selectedConversationId;
   if (!id || state.activeView !== "conversation") return;
+  if (state.conversationPage?.conversationId !== id) resetConversationPage(id);
+  const requestId = ++state.conversationRefreshRequest;
   try {
-    const [conversation, activity] = await Promise.all([
-      window.sovereignbot.conversations.get({ conversationId: id }),
+    const [pageResponse, activity] = await Promise.all([
+      window.sovereignbot.conversations.get({ conversationId: id, limit: CONVERSATION_PAGE_SIZE }),
       window.sovereignbot.teams.activity({ conversationId: id, limit: 24 }).catch(() => ({ events: [] })),
     ]);
-    if (state.selectedConversationId !== id) return;
+    if (requestId !== state.conversationRefreshRequest || state.selectedConversationId !== id) return;
+    const { messages, freshMessages } = mergeConversationPage(pageResponse, "latest");
+    const conversation = { ...pageResponse, messages, pageInfo: pageResponse.pageInfo };
     state.selectedConversation = conversation;
     state.teamActivity = activity ?? { events: [] };
     markConversationRead(conversation);
     renderConversationHeader(conversation);
-    renderMessages(conversation, forceScroll);
+    renderMessages(conversation, forceScroll, { voiceMessages: freshMessages });
     void refreshInlineAttention(id);
     await refreshConversations();
     if (state.teams.length) await refreshTeams();
     // Team flow state is refreshed after the conversation header. Re-render the
     // details panel so active fanout status is visible without waiting for the
     // next polling cycle.
+    if (state.selectedConversationId === id && state.selectedConversation) renderDetails(state.selectedConversation);
+  } catch (error) {
+    if (requestId === state.conversationRefreshRequest && state.selectedConversationId === id) {
+      $("composer-error").textContent = text(error?.message || error);
+      show($("composer-error"));
+    }
+  }
+  if (requestId !== state.conversationRefreshRequest) return;
+  clearTimeout(state.pollTimer);
+  if (state.activeView === "conversation" && state.selectedConversationId === id) state.pollTimer = setTimeout(() => refreshConversation(false), 850);
+}
+
+async function loadOlderMessages() {
+  const page = state.conversationPage;
+  const id = state.selectedConversationId;
+  if (!page || page.conversationId !== id || !page.hasOlder || page.loadingOlder || !page.nextBeforeMessageId) return;
+  page.loadingOlder = true;
+  updateConversationPageControls();
+  try {
+    const response = await window.sovereignbot.conversations.get({ conversationId: id, limit: CONVERSATION_PAGE_SIZE, beforeMessageId: page.nextBeforeMessageId });
+    if (state.selectedConversationId !== id || state.conversationPage !== page) return;
+    const { messages } = mergeConversationPage(response, "older");
+    const conversation = { ...response, messages, pageInfo: response.pageInfo };
+    state.selectedConversation = conversation;
+    renderConversationHeader(conversation);
+    renderMessages(conversation, false, { voiceMessages: [], preserveScroll: true });
     if (state.selectedConversation) renderDetails(state.selectedConversation);
   } catch (error) {
-    $("composer-error").textContent = text(error?.message || error);
-    show($("composer-error"));
+    if (state.selectedConversationId === id) {
+      $("composer-error").textContent = text(error?.message || error);
+      show($("composer-error"));
+    }
+  } finally {
+    if (state.conversationPage === page) {
+      page.loadingOlder = false;
+      updateConversationPageControls();
+    }
   }
-  clearTimeout(state.pollTimer);
-  if (state.activeView === "conversation") state.pollTimer = setTimeout(() => refreshConversation(false), 850);
 }
 
 function autoSizeComposer() {
@@ -2660,6 +2773,7 @@ function bindEvents() {
 
   $("conversation-stop")?.addEventListener("click", stopCurrentConversation);
   $("conversation-redirect")?.addEventListener("click", toggleRedirectMode);
+  $("conversation-load-older")?.addEventListener("click", () => { void loadOlderMessages(); });
   $("open-details").addEventListener("click", () => $("details-panel").classList.toggle("hidden"));
   $("close-details").addEventListener("click", () => hide($("details-panel")));
   $("nav-settings").addEventListener("click", async () => { switchView("settings"); await refreshSettingsData(); });

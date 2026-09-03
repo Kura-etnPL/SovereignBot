@@ -7,6 +7,8 @@ const MAX_CONVERSATIONS = 256;
 const MAX_MESSAGES_PER_CONVERSATION = 5_000;
 const MAX_PARTICIPANTS = 8;
 const MAX_MESSAGE_TEXT = 12_000;
+const DEFAULT_PAGE_LIMIT = 100;
+const MAX_PAGE_LIMIT = 100;
 const MAX_TITLE = 120;
 const MAX_REFERENCES = 24;
 const USER_PARTICIPANT = "user";
@@ -72,10 +74,27 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
             if (message.replyTo !== undefined && !validMessageId(message.replyTo)) return false;
             if (message.voiceEligible !== undefined && typeof message.voiceEligible !== "boolean") return false;
             if (message.voiceEligible === true && message.senderId === USER_PARTICIPANT) return false;
-            idList(message.mentions, "mentions", { max: MAX_PARTICIPANTS });
-            idList(message.artifactIds, "artifactIds");
+            const mentions = idList(message.mentions, "mentions", { max: MAX_PARTICIPANTS });
+            const artifactIds = idList(message.artifactIds, "artifactIds");
             if (!message.delivery || typeof message.delivery !== "object" || Array.isArray(message.delivery)) return false;
-            return true;
+            const delivery = {};
+            for (const [recipientId, entry] of Object.entries(message.delivery)) {
+                if (recipientId === USER_PARTICIPANT || !participants.includes(recipientId)) continue;
+                if (!entry || typeof entry !== "object" || Array.isArray(entry) || !["pending", "delivered", "failed"].includes(entry.status) || typeof entry.updatedAt !== "string") continue;
+                delivery[recipientId] = { status: entry.status, updatedAt: entry.updatedAt, ...(typeof entry.detail === "string" && entry.detail.trim() ? { detail: entry.detail.trim().slice(0, 500) } : {}) };
+            }
+            return {
+                id: message.id,
+                senderId: message.senderId,
+                text: message.text,
+                mentions,
+                artifactIds,
+                ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+                ...(typeof message.clientMessageId === "string" && message.clientMessageId.trim() ? { clientMessageId: message.clientMessageId.trim().slice(0, 128) } : {}),
+                ...(message.voiceEligible === true ? { voiceEligible: true } : {}),
+                delivery,
+                createdAt: message.createdAt,
+            };
         } catch { return false; }
     }
 
@@ -93,7 +112,7 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
                 requireCoworker(entry.leadCoworkerId);
                 leadCoworkerId = entry.leadCoworkerId;
             }
-            const messages = Array.isArray(entry.messages) ? entry.messages.filter((message) => sanitizePersistedMessage(message, participants)).slice(-MAX_MESSAGES_PER_CONVERSATION) : [];
+            const messages = Array.isArray(entry.messages) ? entry.messages.map((message) => sanitizePersistedMessage(message, participants)).filter(Boolean).slice(-MAX_MESSAGES_PER_CONVERSATION) : [];
             const title = boundedText(entry.title, "title", MAX_TITLE) ?? (entry.kind === "direct" ? "Conversation" : "Team");
             if (typeof entry.createdAt !== "string" || typeof entry.updatedAt !== "string") return undefined;
             return { id: entry.id, kind: entry.kind, title, participants, ...(leadCoworkerId ? { leadCoworkerId } : {}), messages, createdAt: entry.createdAt, updatedAt: entry.updatedAt };
@@ -112,6 +131,33 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
     function save() { saveJsonState(persistPath, { schema: CONVERSATIONS_SCHEMA, conversations }); }
     function requireConversation(id) { const conversation = conversations.find((entry) => entry.id === String(id)); if (!conversation) throw new Error(`unknown conversation id: ${id}`); return conversation; }
     function requireParticipant(conversation, participantId) { if (!conversation.participants.includes(participantId)) throw new Error(`participant ${participantId} is not in conversation ${conversation.id}`); if (participantId !== USER_PARTICIPANT) requireCoworker(participantId); }
+    function pageLimit(value) {
+        if (value === undefined) return DEFAULT_PAGE_LIMIT;
+        if (!Number.isInteger(value) || value < 1 || value > MAX_PAGE_LIMIT) throw new Error(`conversation page limit must be between 1 and ${MAX_PAGE_LIMIT}`);
+        return value;
+    }
+    function getPage(id, { limit = DEFAULT_PAGE_LIMIT, beforeMessageId } = {}) {
+        const conversation = requireConversation(id);
+        const pageSize = pageLimit(limit);
+        let end = conversation.messages.length;
+        if (beforeMessageId !== undefined) {
+            if (!validMessageId(beforeMessageId)) throw new Error("invalid conversation page cursor");
+            const cursorIndex = conversation.messages.findIndex((message) => message.id === beforeMessageId);
+            if (cursorIndex < 0) throw new Error("invalid conversation page cursor");
+            end = cursorIndex;
+        }
+        const start = Math.max(0, end - pageSize);
+        const messages = conversation.messages.slice(start, end);
+        return {
+            ...summarize(conversation),
+            messages: clone(messages),
+            pageInfo: {
+                total: conversation.messages.length,
+                hasOlder: start > 0,
+                nextBeforeMessageId: start > 0 ? conversation.messages[start].id : null,
+            },
+        };
+    }
 
     function recipientIds(conversation, senderId, mentions) {
         const coworkers = conversation.participants.filter((id) => id !== USER_PARTICIPANT && id !== senderId);
@@ -246,6 +292,7 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         },
         list() { return { schema: CONVERSATIONS_SCHEMA, conversations: conversations.map(summarize) }; },
         get(id) { const conversation = requireConversation(id); return { ...summarize(conversation), messages: clone(conversation.messages) }; },
+        getPage,
         createDirect(coworkerId) {
             const existing = conversations.find((entry) => entry.kind === "direct" && entry.participants.length === 2 && entry.participants.includes(coworkerId));
             return existing ? summarize(existing) : createConversation({ kind: "direct", coworkerIds: [coworkerId] });
