@@ -806,10 +806,21 @@ export async function runVerifySoftwareTeam({
         result.error = String(error?.stack ?? error).slice(0, 4_000);
         check("SOFTWARE_TEAM_CANARY_COMPLETED", false, String(error?.message ?? error).slice(0, 500));
     }
-    result.ok = Object.values(checks).every((entry) => entry.ok);
-    if (result.ok)
-        check("SOFTWARE_TEAM_CANARY_COMPLETED", true);
-    result.ok = Object.values(checks).every((entry) => entry.ok);
+        try {
+            await renderer(`(async()=>{
+                const coworkers = await window.sovereignbot.coworkers.list({});
+                const lead = coworkers.coworkers?.find(c => c.name === "Coding Lead");
+                if (lead) {
+                    await openDirect(lead.id);
+                }
+            })()`);
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            result.screenshots.push(await capture("software-team-coding-lead.png"));
+        } catch {}
+        result.ok = Object.values(checks).every((entry) => entry.ok);
+        if (result.ok)
+            check("SOFTWARE_TEAM_CANARY_COMPLETED", true);
+        result.ok = Object.values(checks).every((entry) => entry.ok);
     return result;
 }
 

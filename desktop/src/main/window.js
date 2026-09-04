@@ -16,6 +16,16 @@ export function createMainWindow({ smoke = false } = {}) {
         autoHideMenuBar: true,
         title: "SovereignBot",
         icon: ICON_PATH,
+        ...(process.platform === "win32" ? {
+            titleBarStyle: "hidden",
+            titleBarOverlay: {
+                color: "#00000000",
+                symbolColor: "#8e8e93",
+                height: 38,
+            },
+        } : process.platform === "darwin" ? {
+            titleBarStyle: "hiddenInset",
+        } : {}),
         webPreferences: {
             preload: PRELOAD_PATH,
             contextIsolation: true,

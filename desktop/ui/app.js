@@ -52,6 +52,10 @@ try {
 
 const $ = (id) => document.getElementById(id);
 const t = (key, params) => globalThis.SovereignI18n?.t(key, params) ?? (typeof params === "string" ? params : key);
+const displayCoworkerName = (name) => globalThis.SovereignI18n?.displayCoworkerName?.(name) ?? String(name ?? "");
+const displayCoworkerRole = (role) => globalThis.SovereignI18n?.displayCoworkerRole?.(role) ?? String(role ?? "");
+const displayCoworkerDescription = (coworker) => globalThis.SovereignI18n?.displayCoworkerDescription?.(coworker) ?? (typeof coworker === "object" ? (coworker.role || coworker.instructions || "") : String(coworker ?? ""));
+const displayStage = (stage) => globalThis.SovereignI18n?.displayStage?.(stage) ?? String(stage ?? "");
 const show = (el) => el?.classList.remove("hidden");
 const hide = (el) => el?.classList.add("hidden");
 
@@ -318,7 +322,7 @@ function formatRelative(iso) {
   const value = new Date(iso).getTime();
   if (!Number.isFinite(value)) return "";
   const delta = Date.now() - value;
-  if (delta < 60_000) return "now";
+  if (delta < 60_000) return t("time.now");
   if (delta < 3_600_000) return `${Math.max(1, Math.floor(delta / 60_000))}m`;
   if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h`;
   return `${Math.floor(delta / 86_400_000)}d`;
@@ -419,7 +423,13 @@ function renderCoworkers() {
   const counts = { active: all.filter(({ coworker }) => coworker.state === "active").length, paused: all.filter(({ coworker }) => coworker.state === "paused").length, working: all.filter(({ status }) => status === "working").length, attention: all.filter(({ status }) => status === "attention").length, available: all.filter(({ status }) => status === "available").length };
   const total = all.length;
   const count = $("coworker-count");
-  if (count) count.textContent = `${total} persistent coworker${total === 1 ? "" : "s"} · ${counts.active} active · ${counts.available} available`;
+  if (count) {
+    if (globalThis.SovereignI18n?.currentLocale?.() === "zh-CN") {
+      count.textContent = `${total} 位常驻同事 · ${counts.active} 位活跃 · ${counts.available} 位可用`;
+    } else {
+      count.textContent = `${total} persistent coworker${total === 1 ? "" : "s"} · ${counts.active} active · ${counts.available} available`;
+    }
+  }
   const summary = $("coworker-roster-summary");
   if (summary) summary.textContent = t("coworkers.coworkerSummary", { total, working: counts.working, attention: counts.attention, paused: counts.paused });
   const selectedCoworkerId = [...directByCoworker.entries()].find(([, conversation]) => conversation.id === state.selectedConversationId)?.[0];
@@ -433,8 +443,8 @@ function renderCoworkers() {
     const direct = directByCoworker.get(coworker.id);
     const item = makeNavItem({
       avatar: avatarFor(coworker),
-      title: coworker.name,
-      subtitle: `${coworker.role} · ${statusLabel[status]}`,
+      title: displayCoworkerName(coworker.name),
+      subtitle: `${displayCoworkerDescription(coworker)} · ${statusLabel[status]}`,
       status: status === "available" ? "ready" : status === "paused" ? "offline" : status,
       statusLabel: statusLabel[status],
       unread: conversationUnread(direct),
@@ -469,7 +479,7 @@ function renderTeams() {
       const teamItem = makeNavItem({
         avatar: "👥",
         title: team.name,
-        subtitle: `${team.coworkerIds?.length ?? 0} members · ${channels.length} channels`,
+        subtitle: t("team.membersChannels", { members: team.coworkerIds?.length ?? 0, channels: channels.length }),
         compact: true,
         active: isSelectedTeam && !state.selectedConversationId,
         onClick: () => {
@@ -488,7 +498,7 @@ function renderTeams() {
           sublist.append(makeNavItem({
             avatar: "#",
             title: channel.name,
-            subtitle: channel.kind === "work" ? "Work" : channel.kind === "project" ? "Project" : "",
+            subtitle: channel.kind === "work" ? t("channel.kindWork") : channel.kind === "project" ? t("channel.kindProject") : "",
             unread: conversationUnread(conversation),
             compact: true,
             active: isSelected,
@@ -505,10 +515,11 @@ function renderTeams() {
     .filter((entry) => entry.kind === "team")
     .sort((a, b) => text(b.updatedAt).localeCompare(text(a.updatedAt)));
   for (const conversation of teams) {
+    const coworkerCount = Math.max(0, (conversation.participants?.length ?? 1) - 1);
     list.append(makeNavItem({
       avatar: "#",
       title: conversation.title,
-      subtitle: `${Math.max(0, (conversation.participants?.length ?? 1) - 1)} coworkers`,
+      subtitle: t("team.coworkersCount", { count: coworkerCount }),
       meta: formatRelative(conversation.updatedAt),
       unread: conversationUnread(conversation),
       active: conversation.id === state.selectedConversationId,
@@ -559,7 +570,7 @@ function renderRecent() {
     list.append(makeNavItem({
       avatar: conversation.kind === "team" ? "#" : avatarFor(coworker),
       title: conversation.title,
-      subtitle: conversation.lastMessage?.textPreview || (conversation.kind === "team" ? "Team conversation" : coworker?.role),
+      subtitle: conversation.lastMessage?.textPreview || (conversation.kind === "team" ? t("team.conversation") : displayCoworkerDescription(coworker)),
       meta: formatRelative(conversation.updatedAt),
       compact: true,
       active: conversation.id === state.selectedConversationId,
@@ -585,7 +596,7 @@ function renderProjects() {
     list.append(makeNavItem({
       avatar: "📁",
       title: project.name,
-      subtitle: project.state === "active" ? "Active workspace" : project.state,
+      subtitle: project.state === "active" ? t("project.activeWorkspace") : (project.state === "archived" ? t("state.archived") : project.state),
       compact: true,
       active: isSelected,
       onClick: () => {
@@ -831,23 +842,23 @@ function renderConversationHeader(conversation) {
   const channel = channelForConversation(conversation.id);
   const team = teamForConversation(conversation.id);
   $("conversation-avatar").textContent = conversation.kind === "team" ? "#" : avatarFor(direct);
-  $("conversation-title").textContent = channel?.name ?? conversation.title;
-  $("conversation-kind").textContent = channel ? "Project Channel" : conversation.kind === "team" ? "Team" : "Coworker";
+  $("conversation-title").textContent = channel?.name ?? (direct ? direct.name : conversation.title);
+  $("conversation-kind").textContent = channel ? t("conversation.kindProjectChannel") : conversation.kind === "team" ? t("conversation.kindTeam") : t("conversation.kindCoworker");
   $("conversation-subtitle").textContent = conversation.kind === "team"
     ? channel && team ? `${team.name} · ${members.map((entry) => entry.name).join(" · ")}` : members.map((entry) => entry.name).join(" · ")
-    : direct?.role || "Persistent coworker conversation";
+    : (direct ? displayCoworkerDescription(direct) : t("conversation.subtitleDefault"));
   $("demo-banner").classList.toggle("hidden", state.roster?.mode !== "demo");
 
   const pending = pendingUserRecipients(conversation);
   const presence = $("conversation-presence");
   if (pending.size) {
     presence.className = "presence busy";
-    presence.lastChild.textContent = ` ${pending.size > 1 ? `${pending.size} coworkers working` : "Working"}`;
+    presence.lastChild.textContent = ` ${pending.size > 1 ? t("conversation.presenceWorkingMultiple", { count: pending.size }) : t("conversation.presenceWorking")}`;
   } else {
     const directBinding = direct ? bindingFor(direct.id) : undefined;
     const offline = conversation.kind === "direct" && !directBinding?.ready;
     presence.className = `presence${offline ? " offline" : ""}`;
-    presence.lastChild.textContent = offline ? " Provider unavailable" : " Ready";
+    presence.lastChild.textContent = offline ? ` ${t("conversation.presenceUnavailable")}` : ` ${t("conversation.presenceReady")}`;
   }
 
   const stopButton = $("conversation-stop");
@@ -860,8 +871,8 @@ function renderConversationHeader(conversation) {
   }
   const hint = $("composer-hint");
   if (hint) hint.textContent = state.redirectMode
-    ? "Enter to redirect the active work · Shift+Enter for a new line"
-    : pending.size ? "Active work is running · Redirect changes its direction" : "Enter to send · Shift+Enter for a new line";
+    ? t("composer.redirectHint")
+    : pending.size ? t("composer.activeRunningHint") : t("chat.hint");
 
   renderMentionRow(conversation);
   renderReplyComposer(conversation);
@@ -953,12 +964,12 @@ function renderMessage(conversation, message) {
   const meta = document.createElement("div");
   meta.className = "chat-meta";
   const author = document.createElement("strong");
-  author.textContent = user ? "You" : coworker?.name || "Coworker";
+  author.textContent = user ? t("chat.you") : displayCoworkerName(coworker?.name || t("common.coworker"));
   meta.append(author);
   if (!user && coworker?.role) {
     const role = document.createElement("span");
     role.className = "coworker-role-pill";
-    role.textContent = coworker.role;
+    role.textContent = displayCoworkerDescription(coworker);
     meta.append(role);
   }
   const time = document.createElement("time");
@@ -969,7 +980,7 @@ function renderMessage(conversation, message) {
     if (target) {
       const handoff = document.createElement("div");
       handoff.className = "handoff-card";
-      handoff.textContent = t("handoff.handoffTo", { name: target.name });
+      handoff.textContent = t("handoff.handoffTo", { name: displayCoworkerName(target.name) });
       content.append(handoff);
     }
   }
@@ -1017,16 +1028,16 @@ function renderMessage(conversation, message) {
       delivery.textContent = pendingEntry.detail;
       delivery.classList.add("delivery-pending");
     } else if (pending) {
-      delivery.textContent = "Working…";
+      delivery.textContent = t("chat.working");
     } else if (attentionEntry) {
-      delivery.textContent = `Needs Attention: ${attentionEntry.detail || attentionEntry.reason}`;
+      delivery.textContent = t("delivery.attention", { reason: attentionEntry.detail || attentionEntry.reason });
       delivery.classList.add("delivery-attention");
     } else if (redirected) {
       delivery.textContent = t("chat.redirected");
     } else if (failed) {
-      delivery.textContent = `${failed} delivery failed`;
+      delivery.textContent = t("delivery.failedCount", { count: failed });
     } else {
-      delivery.textContent = "Delivered";
+      delivery.textContent = t("chat.delivered");
     }
     content.append(delivery);
   }
@@ -1057,10 +1068,10 @@ function renderMessages(conversation, forceScroll = false, { voiceMessages = con
   if (!hasMessages) {
     const direct = conversation.kind === "direct" ? members[0] : undefined;
     $("conversation-start-avatar").textContent = conversation.kind === "team" ? "#" : avatarFor(direct);
-    $("conversation-start-title").textContent = conversation.kind === "team" ? conversation.title : direct?.name || "Start a conversation";
+    $("conversation-start-title").textContent = conversation.kind === "team" ? conversation.title : direct?.name || t("conversation.startTitle");
     $("conversation-start-role").textContent = conversation.kind === "team"
-      ? `A shared room with ${members.map((entry) => entry.name).join(", ")}.`
-      : direct?.role || "This coworker keeps context across turns.";
+      ? (globalThis.SovereignI18n?.currentLocale?.() === "zh-CN" ? `包含 ${members.map((entry) => entry.name).join("、")} 的共享协作频道。` : `A shared room with ${members.map((entry) => entry.name).join(", ")}.`)
+      : (direct ? displayCoworkerDescription(direct) : t("conversation.startRole"));
   }
 
   const pending = pendingUserRecipients(conversation);
@@ -1071,9 +1082,11 @@ function renderMessages(conversation, forceScroll = false, { voiceMessages = con
     const stage = team?.flow?.stage;
     const currentOwner = team?.flow?.currentOwner;
     if (currentOwner && stage && stage !== "complete") {
-      $("typing-label").textContent = `${currentOwner} is working (${stage})…`;
+      $("typing-label").textContent = t("chat.typingWithStage", { name: displayCoworkerName(currentOwner), stage: displayStage(stage) });
     } else {
-      $("typing-label").textContent = names.length > 1 ? `${names.join(" & ")} are working…` : `${names[0] || "Coworker"} is working…`;
+      $("typing-label").textContent = names.length > 1
+        ? t("chat.typingMultiple", { names: names.map(displayCoworkerName).join(globalThis.SovereignI18n?.currentLocale?.() === "zh-CN" ? "、" : " & ") })
+        : t("chat.typing", { name: displayCoworkerName(names[0] || t("common.coworker")) });
     }
   }
   updateConversationPageControls();
@@ -1570,7 +1583,7 @@ function renderDetails(conversation) {
   const profiles = [...new Set(members.map((entry) => bindingFor(entry.id)?.profile).filter(Boolean))];
   $("details-provider").textContent = profiles.length ? profiles.map(humanModelProfile).join(" + ") : t("modelProfile.auto");
   const team = teamForConversation(conversation.id);
-  $("details-workspace").textContent = team ? "Shared project workspace" : "Private workspace";
+  $("details-workspace").textContent = team ? t("details.workspaceShared") : t("details.workspacePrivate");
   renderCoworkerConnectedApps(conversation.kind === "direct" ? members[0] : undefined);
   const teamTools = $("details-team-tools");
   teamTools?.classList.toggle("hidden", !team);
@@ -2183,7 +2196,7 @@ function populateTeamPicker() {
     avatar.className = "nav-avatar";
     avatar.textContent = avatarFor(coworker);
     const copy = document.createElement("span");
-    copy.textContent = `${coworker.name} — ${coworker.role}`;
+    copy.textContent = `${coworker.name} — ${displayCoworkerDescription(coworker)}`;
     label.append(checkbox, avatar, copy);
     picker.append(label);
   }
@@ -2524,10 +2537,10 @@ function renderWorkspaces() {
       await refreshSettingsData();
     });
     const label = document.createElement("span");
-    label.textContent = workspace.kind === "shared-project" ? "Shared project workspace" : workspace.label || "Private workspace";
+    label.textContent = workspace.kind === "shared-project" ? t("details.workspaceShared") : workspace.label || t("details.workspacePrivate");
     const remove = document.createElement("button");
     remove.type = "button";
-    remove.textContent = "Remove";
+    remove.textContent = t("common.remove");
     remove.addEventListener("click", async () => {
       await window.sovereignbot.workspaces.remove({ id: workspace.id });
       await refreshSettingsData();

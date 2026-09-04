@@ -105,6 +105,9 @@
 
       // Conversation & Chat
       "conversation.titleDefault": "Conversation",
+      "conversation.kindCoworker": "Coworker",
+      "conversation.kindTeam": "Team",
+      "conversation.kindProjectChannel": "Project Channel",
       "conversation.kindDirect": "Direct",
       "conversation.kindProject": "Project",
       "conversation.kindWork": "Work",
@@ -112,7 +115,9 @@
       "conversation.subtitleDefault": "Persistent coworker conversation",
       "conversation.presenceReady": "Ready",
       "conversation.presenceWorking": "Working",
+      "conversation.presenceWorkingMultiple": "{count} coworkers working",
       "conversation.presenceAttention": "Needs attention",
+      "conversation.presenceUnavailable": "Provider unavailable",
       "conversation.startTitle": "Start a conversation",
       "conversation.startRole": "This coworker keeps context across turns.",
       "conversation.loadOlder": "Load older messages",
@@ -128,7 +133,26 @@
       "chat.hint": "Enter to send · Shift+Enter for a new line",
       "chat.working": "Working…",
       "chat.delivered": "Delivered",
+      "chat.redirected": "Redirected",
       "chat.send": "Send",
+      "chat.you": "You",
+      "chat.typing": "{name} is working…",
+      "chat.typingMultiple": "{names} are working…",
+      "chat.typingWithStage": "{name} is working ({stage})…",
+      "common.coworker": "Coworker",
+      "team.softwareTeam": "Software Team",
+      "team.membersChannels": "{members} members · {channels} channels",
+      "team.coworkersCount": "{count} coworkers",
+      "team.conversation": "Team conversation",
+      "channel.kindWork": "Work",
+      "channel.kindProject": "Project",
+      "channel.nameProjectChannel": "Project Channel",
+      "project.activeWorkspace": "Active workspace",
+      "composer.activeRunningHint": "Active work is running · Redirect changes its direction",
+      "composer.redirectHint": "Enter to redirect the active work · Shift+Enter for a new line",
+      "time.now": "now",
+      "artifacts.hidePreview": "Hide preview",
+      "artifacts.loadingResult": "Loading result…",
 
       // Delivery & Status
       "delivery.working": "Working…",
@@ -1226,6 +1250,9 @@
 
       // Conversation & Chat
       "conversation.titleDefault": "会话",
+      "conversation.kindCoworker": "同事",
+      "conversation.kindTeam": "团队",
+      "conversation.kindProjectChannel": "项目频道",
       "conversation.kindDirect": "单人会话",
       "conversation.kindProject": "项目会话",
       "conversation.kindWork": "工作会话",
@@ -1233,7 +1260,9 @@
       "conversation.subtitleDefault": "常驻同事会话",
       "conversation.presenceReady": "就绪",
       "conversation.presenceWorking": "工作中",
+      "conversation.presenceWorkingMultiple": "{count} 位同事工作中",
       "conversation.presenceAttention": "需关注",
+      "conversation.presenceUnavailable": "服务不可用",
       "conversation.startTitle": "开启对话",
       "conversation.startRole": "这位同事会在多轮交互中持续保持上下文。",
       "conversation.loadOlder": "加载更早消息",
@@ -1249,7 +1278,26 @@
       "chat.hint": "回车发送 · Shift+回车换行",
       "chat.working": "处理中…",
       "chat.delivered": "已送达",
+      "chat.redirected": "已重定向",
       "chat.send": "发送",
+      "chat.you": "你",
+      "chat.typing": "{name} 正在处理…",
+      "chat.typingMultiple": "{names} 正在协同处理…",
+      "chat.typingWithStage": "{name} 正在处理（{stage}）…",
+      "common.coworker": "同事",
+      "team.softwareTeam": "软件团队",
+      "team.membersChannels": "{members} 位成员 · {channels} 个频道",
+      "team.coworkersCount": "{count} 位同事",
+      "team.conversation": "团队会话",
+      "channel.kindWork": "工作",
+      "channel.kindProject": "项目",
+      "channel.nameProjectChannel": "项目频道",
+      "project.activeWorkspace": "活跃工作区",
+      "composer.activeRunningHint": "任务正在运行中 · 可使用重定向调整方向",
+      "composer.redirectHint": "按 Enter 重定向正在运行的任务 · Shift+Enter 换行",
+      "time.now": "刚刚",
+      "artifacts.hidePreview": "隐藏预览",
+      "artifacts.loadingResult": "正在加载结果…",
 
       // Delivery & Status
       "delivery.working": "处理中…",
@@ -2289,13 +2337,72 @@
     "Chief of Staff": { en: "Chief of Staff", "zh-CN": "幕僚长" },
     "Coding Lead": { en: "Coding Lead", "zh-CN": "编程主管" },
     Researcher: { en: "Researcher", "zh-CN": "研究员" },
-    Reviewer: { en: "Reviewer", "zh-CN": "审阅员" }
+    Reviewer: { en: "Reviewer", "zh-CN": "审阅员" },
+    "Software Team": { en: "Software Team", "zh-CN": "软件团队" },
+    "Project Channel": { en: "Project Channel", "zh-CN": "项目频道" }
   };
 
-  function displayCoworkerRole(name) {
-    const entry = DEFAULT_ROLES[String(name)];
-    if (!entry) return String(name);
-    return entry[_locale] ?? entry.en ?? String(name);
+  const DEFAULT_ROLE_DESCRIPTIONS = {
+    "Own the outcome, coordinate specialists, escalate only when human judgment is needed.": {
+      en: "Own the outcome, coordinate specialists, escalate only when human judgment is needed.",
+      "zh-CN": "统筹交付成果，协调专家分工，并在需要人工决策时升级汇报。"
+    },
+    "Implement, debug, test, and improve software in trusted workspaces.": {
+      en: "Implement, debug, test, and improve software in trusted workspaces.",
+      "zh-CN": "在受信任的工作区中实现、调试、测试并改进代码。"
+    },
+    "Investigate questions, compare evidence, and produce decision-ready findings.": {
+      en: "Investigate questions, compare evidence, and produce decision-ready findings.",
+      "zh-CN": "调研技术方案，对比分析事实，提炼立即可用的结论。"
+    },
+    "Review the implementation and verify all acceptance criteria before declaring success.": {
+      en: "Review the implementation and verify all acceptance criteria before declaring success.",
+      "zh-CN": "在最终交接前严格审查代码实现与各项验收标准。"
+    }
+  };
+
+  function displayCoworkerRole(roleOrName) {
+    if (!roleOrName) return "";
+    const str = String(roleOrName).trim();
+    const roleEntry = DEFAULT_ROLES[str];
+    if (roleEntry) return roleEntry[_locale] ?? roleEntry.en ?? str;
+    const descEntry = DEFAULT_ROLE_DESCRIPTIONS[str];
+    if (descEntry) return descEntry[_locale] ?? descEntry.en ?? str;
+    for (const [key, val] of Object.entries(DEFAULT_ROLE_DESCRIPTIONS)) {
+      if (str.startsWith(key.slice(0, 25)) || key.startsWith(str.slice(0, 25))) {
+        return val[_locale] ?? val.en ?? str;
+      }
+    }
+    return str;
+  }
+
+  function displayCoworkerName(name) {
+    if (!name) return "";
+    return String(name).trim();
+  }
+
+  function displayCoworkerDescription(descOrCoworker) {
+    if (!descOrCoworker) return "";
+    const raw = typeof descOrCoworker === "object" ? (descOrCoworker.role || descOrCoworker.instructions) : descOrCoworker;
+    return displayCoworkerRole(raw);
+  }
+
+  const STAGE_LABELS = {
+    "coding-lead": { en: "implementation", "zh-CN": "代码实现" },
+    reviewer: { en: "review", "zh-CN": "代码审阅" },
+    "chief-of-staff": { en: "coordination", "zh-CN": "统筹协调" },
+    researcher: { en: "research", "zh-CN": "技术调研" },
+    delegate: { en: "delegation", "zh-CN": "任务委派" },
+    review: { en: "review", "zh-CN": "审阅" },
+    complete: { en: "complete", "zh-CN": "已完成" },
+    idle: { en: "idle", "zh-CN": "空闲" }
+  };
+
+  function displayStage(stage) {
+    const key = String(stage ?? "").toLowerCase();
+    const entry = STAGE_LABELS[key];
+    if (!entry) return String(stage);
+    return entry[_locale] ?? entry.en ?? String(stage);
   }
 
   const MODEL_PROFILES = {
@@ -2331,7 +2438,9 @@
     currentLocale,
     t,
     displayCoworkerRole,
-    displayCoworkerName: displayCoworkerRole, // Backward compat
+    displayCoworkerName,
+    displayCoworkerDescription,
+    displayStage,
     displayModelProfile,
     formatCount
   };

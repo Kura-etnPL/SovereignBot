@@ -5,6 +5,7 @@
 
   const baseRenderMessage = renderMessage;
   const baseRenderDetails = typeof renderDetails === "function" ? renderDetails : undefined;
+  const t = (key, params) => globalThis.SovereignI18n?.t(key, params) ?? (typeof params === "string" ? params : key);
 
   function formatBytes(value) {
     const bytes = Number(value || 0);
@@ -55,7 +56,7 @@
     const copy = document.createElement("div");
     copy.className = "artifact-copy";
     const title = document.createElement("strong");
-    title.textContent = "Loading result…";
+    title.textContent = t("artifacts.loadingResult");
     const meta = document.createElement("span");
     meta.textContent = artifactId;
     copy.append(title, meta);
@@ -65,11 +66,11 @@
     const previewButton = document.createElement("button");
     previewButton.type = "button";
     previewButton.className = "artifact-action hidden";
-    previewButton.textContent = "Preview";
+    previewButton.textContent = t("common.preview");
     const revealButton = document.createElement("button");
     revealButton.type = "button";
     revealButton.className = "artifact-action";
-    revealButton.textContent = "Show";
+    revealButton.textContent = t("common.reveal");
     revealButton.disabled = true;
     actions.append(previewButton, revealButton);
 
@@ -109,12 +110,12 @@
       if (!artifact) return;
       if (!preview.classList.contains("hidden")) {
         preview.classList.add("hidden");
-        previewButton.textContent = "Preview";
+        previewButton.textContent = t("common.preview");
         return;
       }
       if (!previewLoaded) {
         previewButton.disabled = true;
-        previewButton.textContent = "Loading…";
+        previewButton.textContent = t("common.refreshing");
         try {
           const result = await window.sovereignbot.artifacts.preview({ artifactId });
           preview.textContent = result?.preview ?? "Preview is not available for this file type.";
@@ -128,7 +129,7 @@
         }
       }
       preview.classList.remove("hidden");
-      previewButton.textContent = "Hide preview";
+      previewButton.textContent = t("artifacts.hidePreview");
     });
 
     return card;
