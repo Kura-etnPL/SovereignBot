@@ -362,7 +362,7 @@
       "notifications.readFilterUnread": "Unread only",
       "notifications.readFilterRead": "Read only",
       "notifications.help": "Notifications are stored locally and privately on this device. They never contain secrets, tokens, or raw paths. Channel unread notifications are recorded automatically for active team channels and resolved when opened.",
-      "notifications.empty": "No notifications.",
+      "notifications.empty": "No notifications yet.",
       "notifications.markRead": "Mark read",
       "notifications.markUnread": "Mark unread",
       "notifications.navTarget.attention": "View Attention",

@@ -26,6 +26,7 @@
         const ref = (artifacts && artifacts.parentNode === targetContainer) ? artifacts : ((future && future.parentNode === targetContainer) ? future : null);
         targetContainer.insertBefore(section, ref);
       }
+      section.classList.remove("hidden");
       if (!section.querySelector(".computer-context-help")) {
         const productTitle = document.createElement("strong");
         productTitle.className = "computer-product-title";

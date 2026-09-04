@@ -1419,7 +1419,14 @@ function ensureParallelControls() {
   error.className = "inline-error hidden";
   form.append(rows, rowActions, makeParallelLabel(t("parallel.independentReviewer"), reviewer), makeParallelLabel(t("parallel.reason"), reason), submit, error);
   section.append(label, help, progress, progressList, form);
-  collaboration.after(section);
+  const fold = $("details-admin-fold");
+  if (fold) {
+    fold.before(section);
+  } else if (collaboration) {
+    collaboration.after(section);
+  } else {
+    $("details-body")?.append(section);
+  }
   submit.addEventListener("click", submitParallelCollaboration);
   if (!rows.children.length) { rows.append(makeParallelRow(), makeParallelRow()); }
   return section;
@@ -1721,22 +1728,20 @@ function renderDetails(conversation, force = false) {
     if (parallel?.children?.length) {
       const done = parallel.children.filter((entry) => entry.status === "completed").length;
       const parallelStatus = parallel.state === "stopped" || parallel.state === "blocked"
-        ? t("state.attention")
+        ? `${t("state.attention")} (Attention)`
         : parallel.state === "reviewing"
-        ? t("state.reviewing")
+        ? `${t("state.reviewing")} (Reviewing)`
         : parallel.state === "join_requested" || parallel.state === "joining"
-        ? t("state.joining")
-        : t("state.parallel");
+        ? `${t("state.joining")} (Joining)`
+        : `${t("state.parallel")} (Parallel work)`;
       if ($("details-current-work")) {
-        $("details-current-work").textContent = `${t("details.specialistsComplete", { done, total: parallel.children.length })} · ${parallelStatus}`;
+        $("details-current-work").textContent = `${done}/${parallel.children.length} specialists complete · ${parallelStatus}`;
       }
     } else if (team?.flow?.currentOwner) {
-      const st = team.flow.status === "needs-attention"
-        ? t("state.attention")
+      const st = team.flow.status === "needs-attention" || team.flow.status === "stopped"
+        ? `${t("state.attention")} (Attention)`
         : team.flow.status === "active"
         ? t("state.active")
-        : team.flow.status === "stopped"
-        ? t("state.attention")
         : t("state.waiting");
       if ($("details-current-work")) {
         $("details-current-work").textContent = `${st} · ${team.flow.currentOwner}${activitySuffix}`;
@@ -1764,7 +1769,7 @@ function renderDetails(conversation, force = false) {
       const icon = document.createElement("span");
       icon.textContent = "⚠️";
       const desc = document.createElement("span");
-      desc.textContent = `${t("state.attention")} · ${flow.statusMessage || t("dialog.routineRun.title")}`;
+      desc.textContent = `${t("state.attention")} (Attention) · ${flow.statusMessage || "Attention required"}`;
       div.append(icon, desc);
       actionContent.append(div);
     } else if (isReview) {
@@ -1780,7 +1785,6 @@ function renderDetails(conversation, force = false) {
   }
 
   // 4. Secondary Administration Tools
->>>>>>> Stashed changes
   renderCoworkerConnectedApps(conversation.kind === "direct" ? members[0] : undefined);
   const teamTools = $("details-team-tools");
   teamTools?.classList.toggle("hidden", !team);
@@ -3409,7 +3413,8 @@ function bindEvents() {
     else switchView("welcome");
   });
   $("new-project")?.addEventListener("click", () => $("project-create-dialog")?.showModal());
-  $("nav-inbox")?.addEventListener("click", () => switchView("notifications"));
+  $("nav-notifications")?.addEventListener("click", () => switchView("notifications"));
+  $("nav-inbox")?.addEventListener("click", () => $("nav-notifications")?.click());
   $("nav-search-palette")?.addEventListener("click", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
   });

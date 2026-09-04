@@ -425,6 +425,7 @@
   const api = window.sovereignbot;
   if (!api?.projects) return;
   const $ = (id) => document.getElementById(id);
+  const t = (key, params) => globalThis.SovereignI18n?.t(key, params) ?? key;
   const state = { projects: [], selectedProjectId: "" };
   const clear = (node) => { if (node) node.textContent = ""; };
   const error = (reason) => { const node = $("project-result"); if (node) node.textContent = String(reason?.message ?? reason).slice(0, 240); };
@@ -551,6 +552,7 @@
   const api = window.sovereignbot;
   if (!api?.playbooks || !api?.artifacts?.hub || typeof api.artifacts.history !== "function" || typeof api.artifacts.restoreAsNewVersion !== "function" || typeof api.artifacts.reviseViaDialog !== "function" || !api?.skills || !api?.teams) return;
   const $ = (id) => document.getElementById(id);
+  const t = (key, params) => globalThis.SovereignI18n?.t(key, params) ?? key;
   const pageRoots = {
     playbooks: $("product-playbooks-page"),
     artifacts: $("product-artifacts-page"),

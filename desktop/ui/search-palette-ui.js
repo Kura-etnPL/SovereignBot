@@ -63,12 +63,37 @@
     try { await api.palette.execute({ paletteId: "run-routine", args: { routineId: selectedRoutine.id } }); const msg = t("routines.started", { name: selectedRoutine.name }); if (routineStatus) routineStatus.textContent = msg; routineDialog?.close(); setStatus(msg); }
     catch (error) { setRoutineError(String(error?.message ?? error).replace(/^.*Error: /, "").slice(0, 240)); if (routineStatus) routineStatus.textContent = t("routines.notStarted"); if (routineConfirm) routineConfirm.disabled = false; }
   }
+  const COMMAND_ICONS = new Map([
+    ["new-coworker", "👤"],
+    ["new-team", "👥"],
+    ["new-channel", "💬"],
+    ["run-routine", "⚡"],
+    ["teach-skill", "🧠"],
+    ["open-computer", "💻"],
+    ["search", "🔍"]
+  ]);
+  const TYPE_ICONS = {
+    conversations: "💬",
+    channels: "📢",
+    coworkers: "👤",
+    projects: "📁",
+    artifacts: "📄",
+    skills: "🧠",
+    playbooks: "📋",
+    routines: "⚡",
+    memory: "💡",
+    jobs: "⚙",
+    history: "🕒"
+  };
   function ensureOverlay() {
     if (overlay) return overlay;
     overlay = make("section", "command-palette hidden"); overlay.id = "command-palette"; overlay.setAttribute("role", "dialog"); overlay.setAttribute("aria-modal", "true"); overlay.setAttribute("aria-label", "Search and command palette");
     const card = make("div", "command-palette-card");
     const heading = make("div", "command-palette-heading"); heading.append(make("div", "eyebrow", t("searchPalette.eyebrow")), make("button", "modal-x", "×")); heading.lastChild.addEventListener("click", close);
-    input = document.createElement("input"); input.type = "search"; input.placeholder = "Search people, projects, conversations, skills…"; input.setAttribute("aria-label", "Search or command"); input.setAttribute("aria-controls", "palette-results"); input.addEventListener("input", () => void refresh());
+    const inputWrap = make("div", "command-palette-input-wrap");
+    const searchIcon = make("span", "command-palette-search-icon", "🔍");
+    input = document.createElement("input"); input.type = "search"; input.placeholder = t("search.placeholder") || "Search people, projects, conversations, skills…"; input.setAttribute("aria-label", "Search or command"); input.setAttribute("aria-controls", "palette-results"); input.addEventListener("input", () => void refresh());
+    inputWrap.append(searchIcon, input);
     const controls = make("div", "command-palette-controls");
     const scope = document.createElement("select"); scope.id = "palette-project-scope"; scope.setAttribute("aria-label", "Project scope"); scope.append(new Option(t("apps.allProjects"), "")); scope.addEventListener("change", () => { projectId = scope.value || undefined; void refresh(); });
     const type = document.createElement("select"); type.id = "palette-type-filter"; type.setAttribute("aria-label", "Search type filter"); type.append(new Option(t("artifacts.allTypes"), "all")); for (const entry of ["conversations", "channels", "coworkers", "projects", "artifacts", "skills", "playbooks", "routines", "memory", "jobs", "history"]) type.append(new Option(entry, entry)); type.addEventListener("change", () => { searchTypes = type.value === "all" ? new Set(["conversations", "channels", "coworkers", "projects", "artifacts", "skills", "playbooks", "routines", "memory", "jobs", "history"]) : new Set([type.value]); void refresh(); });
@@ -76,14 +101,24 @@
     controls.append(scope, type, state);
     results = make("div", "command-palette-results"); results.id = "palette-results"; results.setAttribute("role", "listbox");
     const status = make("p", "setting-feedback"); status.id = "palette-status";
-    card.append(heading, input, controls, results, status); overlay.append(card); document.body.append(overlay);
+    card.append(heading, inputWrap, controls, results, status); overlay.append(card); document.body.append(overlay);
     overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
     input.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); close(); } else if (event.key === "ArrowDown") { event.preventDefault(); selected = Math.min(selected + 1, Math.max(0, results.children.length - 1)); paintSelection(); } else if (event.key === "ArrowUp") { event.preventDefault(); selected = Math.max(0, selected - 1); paintSelection(); } else if (event.key === "Enter") { event.preventDefault(); results.children[selected]?.click(); } });
     return overlay;
   }
   async function loadProjects() { const scope = $("palette-project-scope"); if (!scope) return; try { const listed = await api.projects.list({ includeArchived: true }); const current = scope.value; while (scope.options.length > 1) scope.remove(1); for (const project of listed.projects ?? []) { const option = new Option(`${project.name} · ${project.state}`, project.projectId); scope.append(option); } scope.value = current; } catch {} }
   function paintSelection() { [...results.children].forEach((node, index) => { node.classList.toggle("selected", index === selected); node.setAttribute("aria-selected", index === selected ? "true" : "false"); }); }
-  function addResult(label, subtitle, fn) { const item = make("button", "command-palette-result"); item.type = "button"; item.setAttribute("role", "option"); item.append(make("strong", "command-palette-result-title", label), make("span", "command-palette-result-subtitle", subtitle)); item.addEventListener("click", () => void fn()); results.append(item); }
+  function addResult(label, subtitle, fn, icon = "🔍") {
+    const item = make("button", "command-palette-result");
+    item.type = "button";
+    item.setAttribute("role", "option");
+    const iconEl = make("span", "command-palette-result-icon", icon);
+    const textWrap = make("div", "command-palette-result-text");
+    textWrap.append(make("strong", "command-palette-result-title", label), make("span", "command-palette-result-subtitle", subtitle));
+    item.append(iconEl, textWrap);
+    item.addEventListener("click", () => void fn());
+    results.append(item);
+  }
   function navigate(item) {
     const nav = item.navigation ?? {};
     close();
@@ -111,8 +146,33 @@
   async function refresh() {
     const sequence = ++refreshSequence;
     ensureOverlay(); results.textContent = ""; selected = 0; const value = input.value.trim();
-    if (mode === "commands" && !value) { const response = await api.palette.list(); if (sequence !== refreshSequence) return; commandList = response.commands ?? []; for (const command of commandList) addResult(COMMAND_LABELS.get(command.id) ?? command.id, command.risk === "governed" ? t("searchPalette.riskGoverned") : command.risk === "read-only" ? t("searchPalette.riskReadOnly") : t("searchPalette.riskProduct"), () => void runPaletteCommand(command.id)); paintSelection(); return; }
-    mode = "search"; const response = await api.search.query({ query: value, types: [...searchTypes], ...(projectId ? { projectId } : {}), status, limit: 50 }); if (sequence !== refreshSequence) return; for (const item of response.results ?? []) { const reason = getMatchReasonLabel(item.matchReason?.key); const snippet = item.matchSnippet ? ` · ${item.matchSnippet}` : ""; addResult(item.title, `${item.type} · ${item.subtitle} · ${item.status} · ${reason}${snippet}`, () => navigate(item)); } if (!response.results?.length) { results.append(make("p", "setting-feedback", t("searchPalette.noResults"))); setStatus(""); } else { setStatus(`${response.total ?? response.results.length} result${(response.total ?? response.results.length) === 1 ? "" : "s"}${response.hasMore ? ` · ${t("searchPalette.refineFilters")}` : ""}`); } paintSelection();
+    if (mode === "commands" && !value) {
+      const response = await api.palette.list();
+      if (sequence !== refreshSequence) return;
+      commandList = response.commands ?? [];
+      for (const command of commandList) {
+        const icon = COMMAND_ICONS.get(command.id) ?? "⚡";
+        addResult(COMMAND_LABELS.get(command.id) ?? command.id, command.risk === "governed" ? t("searchPalette.riskGoverned") : command.risk === "read-only" ? t("searchPalette.riskReadOnly") : t("searchPalette.riskProduct"), () => void runPaletteCommand(command.id), icon);
+      }
+      paintSelection();
+      return;
+    }
+    mode = "search";
+    const response = await api.search.query({ query: value, types: [...searchTypes], ...(projectId ? { projectId } : {}), status, limit: 50 });
+    if (sequence !== refreshSequence) return;
+    for (const item of response.results ?? []) {
+      const reason = getMatchReasonLabel(item.matchReason?.key);
+      const snippet = item.matchSnippet ? ` · ${item.matchSnippet}` : "";
+      const icon = TYPE_ICONS[item.type] ?? "🔍";
+      addResult(item.title, `${item.type} · ${item.subtitle} · ${item.status} · ${reason}${snippet}`, () => navigate(item), icon);
+    }
+    if (!response.results?.length) {
+      results.append(make("p", "setting-feedback", t("searchPalette.noResults")));
+      setStatus("");
+    } else {
+      setStatus(`${response.total ?? response.results.length} result${(response.total ?? response.results.length) === 1 ? "" : "s"}${response.hasMore ? ` · ${t("searchPalette.refineFilters")}` : ""}`);
+    }
+    paintSelection();
   }
   async function open() { ensureOverlay(); opener = document.activeElement; overlay.classList.remove("hidden"); mode = "commands"; input.value = ""; await loadProjects(); await refresh(); input.focus(); }
   function installButton() {
