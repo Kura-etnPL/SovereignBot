@@ -35,7 +35,7 @@ test("Antigravity A/B/C profiles are physically separate and continuity is accou
         const first = await providers[0].start({ instruction: "first", conversation: [] });
         await providers[0].continue({ continuationRef: first.continuationRef, instruction: "second", conversation: [] });
         await assert.rejects(() => providers[1].continue({ continuationRef: first.continuationRef, instruction: "spoof", conversation: [] }), /does not belong/);
-        assert.equal(JSON.stringify(readFileSync(join(root, "provider-profiles", "antigravity", a, "provider-state.json"), "utf8")).includes("account-a"), false);
+        assert.equal(JSON.stringify(readFileSync(join(root, "desktop-state", "provider-profiles", "antigravity", a, "provider-state.json"), "utf8")).includes("account-a"), false);
         assert.deepEqual(providers[0].capabilities(), ["chat", "continuation", "cancellation", "account-isolation"]);
         assert.deepEqual(providers[0].models(), ["antigravity"]);
         await factory.close();

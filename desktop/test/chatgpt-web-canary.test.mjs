@@ -28,7 +28,7 @@ test("production Core runtime canary routes ChatGPT Web / Sol through the W3C-sh
     const dataDir = await mkdtemp(join(tmpdir(), "sb-chatgpt-canary-"));
     const namespace = accountIsolationNamespace("chatgpt-web", "canary-account");
     const agent = { id: "chatgpt-coworker", name: "ChatGPT Web / Sol", role: "worker", capabilities: ["general"], harness: { kind: "chatgpt-web", model: "sol", accountNamespace: namespace } };
-    const adapter = new ChatGPTWebProvider({ accountNamespace: namespace, profileDir: join(dataDir, "provider-profile"), driver: fakeBrowser() });
+    const adapter = new ChatGPTWebProvider({ accountNamespace: namespace, profileDir: join(dataDir, "desktop-state", "provider-profiles", "chatgpt-web", namespace), driver: fakeBrowser() });
     const runtime = await createRuntime({
         dataDir,
         agents: [

@@ -236,7 +236,7 @@ export function createChatGPTWebProviderFactory({ dataDir, driverConfig = {}, dr
     const providers = new Map();
     const providerDrivers = new Map();
     const loginDrivers = new Map();
-    const root = join(dataDir, "provider-profiles", "chatgpt-web");
+    const root = join(dataDir, "desktop-state", "provider-profiles", "chatgpt-web");
     const get = (accountNamespace) => {
         const namespace = safeNamespace(accountNamespace);
         if (!providers.has(namespace)) {

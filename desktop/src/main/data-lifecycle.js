@@ -6,6 +6,7 @@ import {
     exportState,
     restoreStateBackup,
 } from "../../vendor/core/src/state-transfer.js";
+import { migrateProviderProfiles } from "./provider-profiles-migration.js";
 
 export const DESKTOP_LIFECYCLE_SCHEMA = "sovereignbot.desktop.lifecycle.v1";
 export const DESKTOP_STATE_VERSION = 4;
@@ -386,7 +387,10 @@ export function createDesktopDataLifecycle({ dataDir, audit, stopRuntime, releas
         }
     }
     return {
-        async recover() { return migrate(); },
+        async recover() {
+            migrateProviderProfiles({ dataDir: root });
+            return migrate();
+        },
         migrate,
         status: async () => ({ schema: DESKTOP_LIFECYCLE_SCHEMA, stateVersion: (await readMarker()).stateVersion, backups: (await listBackups()).backups.length }),
         backup: createBackup,

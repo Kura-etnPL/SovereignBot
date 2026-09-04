@@ -158,7 +158,7 @@ export class AntigravityProvider {
 export function createAntigravityProviderFactory({ dataDir, driverConfig = {}, driverFactory } = {}) {
     if (!dataDir) throw new Error("Antigravity provider factory requires dataDir");
     const providers = new Map(), providerDrivers = new Map(), loginDrivers = new Map();
-    const root = join(dataDir, "provider-profiles", "antigravity");
+    const root = join(dataDir, "desktop-state", "provider-profiles", "antigravity");
     const get = (accountNamespace) => {
         const namespace = safeNamespace(accountNamespace);
         if (!providers.has(namespace)) {

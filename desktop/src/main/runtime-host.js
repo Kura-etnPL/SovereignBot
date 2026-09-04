@@ -11,6 +11,7 @@ import { createChatGPTWebProviderFactory } from "./chatgpt-web-provider.js";
 import { antigravityAccountNamespace, createAntigravityProviderFactory } from "./antigravity-provider.js";
 import { createEconomyProviderFactory } from "./economy-provider.js";
 import { prepareInternalNode } from "./internal-node.js";
+import { migrateProviderProfiles } from "./provider-profiles-migration.js";
 
 const DESKTOP_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const VENDOR_ROOT = join(DESKTOP_ROOT, "vendor", "core");
@@ -120,6 +121,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         throw new Error("runtime host requires a settings reader");
     if (typeof getCoworkers !== "function")
         throw new Error("runtime host requires a coworker reader");
+    migrateProviderProfiles({ dataDir });
     verifyVendorCore();
     const internalNode = prepareInternalNode();
 
