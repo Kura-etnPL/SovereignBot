@@ -587,6 +587,7 @@
       "dialog.routineRun.confirm": "Run selected",
 
       // Settings
+      "settings.eyebrow": "CONTROL CENTER",
       "settings.title": "Settings",
       "settings.subtitle": "Provider access, trusted workspaces and runtime preferences.",
       "settings.providers": "AI providers",
@@ -625,6 +626,12 @@
       "settings.keyboard.close": "Close panel / dialog",
       "settings.advanced": "Advanced runtime",
       "settings.advancedDesc": "Internal orchestration remains available for diagnostics. Normal product use should not require these controls.",
+      "settings.dataLifecycle": "Data lifecycle",
+      "settings.dataLifecycleDesc": "Local backups, redacted export, and confirmed product-state reset. Credentials, browser profiles, leases, and private computer state stay local.",
+      "settings.dataLifecycleBackup": "Create backup",
+      "settings.dataLifecycleExport": "Export data",
+      "settings.dataLifecycleReset": "Clean reset…",
+      "settings.checkingLocalState": "Checking local state…",
 
       // Model profiles
       "modelProfile.auto": "Automatic",
@@ -1701,6 +1708,7 @@
       "dialog.routineRun.confirm": "运行所选",
 
       // Settings
+      "settings.eyebrow": "控制中心",
       "settings.title": "设置",
       "settings.subtitle": "模型提供商、受信任工作区与运行偏好设置。",
       "settings.providers": "AI 提供方",
@@ -1739,6 +1747,12 @@
       "settings.keyboard.close": "关闭面板/弹窗",
       "settings.advanced": "高级运行诊断",
       "settings.advancedDesc": "内部编排诊断选项。日常产品使用通常无需调整。",
+      "settings.dataLifecycle": "数据生命周期",
+      "settings.dataLifecycleDesc": "本地备份、脱敏导出与经过确认的产品状态重置。凭据、浏览器配置、租约和私有电脑状态保留在本地。",
+      "settings.dataLifecycleBackup": "创建备份",
+      "settings.dataLifecycleExport": "导出数据",
+      "settings.dataLifecycleReset": "完全重置…",
+      "settings.checkingLocalState": "正在检查本地状态…",
 
       // Model profiles
       "modelProfile.auto": "自动",

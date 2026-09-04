@@ -333,6 +333,8 @@ function switchView(name) {
   if (name !== "conversation") {
     clearTimeout(state.pollTimer);
     state.pollTimer = undefined;
+    hide($("details-panel"));
+    hide($("activity-drawer"));
   }
 }
 
@@ -2659,11 +2661,18 @@ function ensureSettingsPreferences() {
   const group = document.createElement("div");
   group.id = "notification-preferences";
   group.className = "notification-preferences";
-  for (const [category, label] of [["attention", "Attention"], ["routine-completed", "Routine completed"], ["trigger-fired", "Trigger fired"], ["coworker-finished", "Coworker finished"], ["channel-unread", "Channel unread"]]) {
+  const categoryLabels = {
+    attention: t("notifications.catAttention"),
+    "routine-completed": t("notifications.catRoutineCompleted"),
+    "trigger-fired": t("notifications.catTriggerFired"),
+    "coworker-finished": t("notifications.catCoworkerFinished"),
+    "channel-unread": t("notifications.catChannelUnread"),
+  };
+  for (const [category, defaultLabel] of [["attention", "Attention"], ["routine-completed", "Routine completed"], ["trigger-fired", "Trigger fired"], ["coworker-finished", "Coworker finished"], ["channel-unread", "Channel unread"]]) {
     const row = document.createElement("label");
     row.className = "toggle-row";
     const labelText = document.createElement("span");
-    labelText.textContent = label;
+    labelText.textContent = categoryLabels[category] || defaultLabel;
     const input = document.createElement("input");
     input.type = "checkbox";
     input.dataset.notificationCategory = category;
@@ -2683,11 +2692,11 @@ function ensureDataLifecycleCard() {
   card.id = "data-lifecycle-card";
   card.className = "settings-card span-2";
   const heading = document.createElement("div"); heading.className = "card-heading";
-  const copy = document.createElement("div"); const title = document.createElement("h2"); title.textContent = "Data lifecycle"; const description = document.createElement("p"); description.textContent = "Local backups, redacted export, and confirmed product-state reset. Credentials, browser profiles, leases, and private computer state stay local."; copy.append(title, description);
-  const refreshButton = document.createElement("button"); refreshButton.id = "data-lifecycle-refresh"; refreshButton.className = "quiet-action"; refreshButton.type = "button"; refreshButton.textContent = "Refresh"; heading.append(copy, refreshButton);
-  const status = document.createElement("div"); status.id = "data-lifecycle-status"; status.className = "setting-feedback"; status.textContent = "Checking local state…";
+  const copy = document.createElement("div"); const title = document.createElement("h2"); title.textContent = t("settings.dataLifecycle"); const description = document.createElement("p"); description.textContent = t("settings.dataLifecycleDesc"); copy.append(title, description);
+  const refreshButton = document.createElement("button"); refreshButton.id = "data-lifecycle-refresh"; refreshButton.className = "quiet-action"; refreshButton.type = "button"; refreshButton.textContent = t("common.refresh"); heading.append(copy, refreshButton);
+  const status = document.createElement("div"); status.id = "data-lifecycle-status"; status.className = "setting-feedback"; status.textContent = t("settings.checkingLocalState");
   const actions = document.createElement("div"); actions.className = "detail-actions";
-  for (const [id, label] of [["data-lifecycle-backup", "Create backup"], ["data-lifecycle-export", "Export data"], ["data-lifecycle-reset", "Clean reset…"]]) { const button = document.createElement("button"); button.id = id; button.className = "quiet-action"; button.type = "button"; button.textContent = label; actions.append(button); }
+  for (const [id, label] of [["data-lifecycle-backup", t("settings.dataLifecycleBackup")], ["data-lifecycle-export", t("settings.dataLifecycleExport")], ["data-lifecycle-reset", t("settings.dataLifecycleReset")]]) { const button = document.createElement("button"); button.id = id; button.className = "quiet-action"; button.type = "button"; button.textContent = label; actions.append(button); }
   const backups = document.createElement("div"); backups.id = "data-lifecycle-backups"; backups.className = "workspace-cards";
   const result = document.createElement("p"); result.id = "data-lifecycle-result"; result.className = "setting-feedback";
   const restoreDialog = document.createElement("dialog");
