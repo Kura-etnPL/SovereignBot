@@ -4,6 +4,7 @@
   const api = window.sovereignbot;
   if (!api?.memory?.list || !api?.memory?.listSuggestions) return;
   const $ = (id) => document.getElementById(id);
+  const t = (key, params) => globalThis.SovereignI18n?.t(key, params) ?? key;
   let selectedMemoryId;
   let pendingOwnerId;
   let editingMemory;
@@ -15,7 +16,7 @@
   const errorText = (reason) => text(reason?.message ?? reason).replace(/^.*Error: /, "").slice(0, 240);
   const setResult = (value) => { const node = $("memory-result"); if (node) node.textContent = value ?? ""; };
   const memoryActionKey = (memory, action, target = scopeTarget()) => `${target.scope}:${target.ownerId}:${memory.id}:${action}`;
-  const button = (label, fn, { key, busyLabel = "Working… / 处理中…" } = {}) => {
+  const button = (label, fn, { key, busyLabel = t("common.working") } = {}) => {
     const node = document.createElement("button"); node.type = "button"; node.className = "quiet-action"; node.textContent = label;
     node.addEventListener("click", () => {
       if (key && pendingMemoryActions.has(key)) return;
@@ -36,7 +37,7 @@
     node.classList.toggle("hidden", !enabled);
   }
   function openFactDialog() {
-    if (!canAddProjectFact()) { setResult("Choose an active Project first / 请先选择一个活跃项目"); return; }
+    if (!canAddProjectFact()) { setResult(t("memory.chooseActiveProject")); return; }
     const dialog = $("memory-fact-dialog");
     if (!dialog?.showModal) return;
     $("memory-fact-form")?.reset();
@@ -46,18 +47,18 @@
   }
   async function saveFact(event) {
     event.preventDefault();
-    if (!canAddProjectFact()) { $("memory-fact-form-error").textContent = "Choose an active Project first / 请先选择一个活跃项目"; $("memory-fact-form-error").classList.remove("hidden"); return; }
+    if (!canAddProjectFact()) { $("memory-fact-form-error").textContent = t("memory.chooseActiveProject"); $("memory-fact-form-error").classList.remove("hidden"); return; }
     const title = text($("memory-fact-title")?.value).trim();
     const content = text($("memory-fact-content")?.value).trim();
     const tags = text($("memory-fact-tags")?.value).split(",").map((entry) => entry.trim()).filter(Boolean);
     const error = $("memory-fact-form-error");
-    if (!title || !content) { if (error) { error.textContent = "Title and content are required / 标题和内容不能为空"; error.classList.remove("hidden"); } return; }
-    if (tags.length > 16) { if (error) { error.textContent = "Use at most 16 tags / 最多使用 16 个标签"; error.classList.remove("hidden"); } return; }
+    if (!title || !content) { if (error) { error.textContent = t("memory.titleAndContentRequired"); error.classList.remove("hidden"); } return; }
+    if (tags.length > 16) { if (error) { error.textContent = t("memory.maxTags"); error.classList.remove("hidden"); } return; }
     try {
       const fact = await api.memory.putFact({ scope: "project", ownerId: selected("memory-owner"), draft: { key: title, title, content, ...(tags.length ? { tags } : {}) }, label: "User-added Project fact" });
       $("memory-fact-dialog")?.close();
       selectedMemoryId = fact?.id;
-      setResult("Approved Project fact saved / 项目事实已保存");
+      setResult(t("memory.factSaved"));
       await refresh();
     } catch (reason) {
       if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }
@@ -77,31 +78,31 @@
   async function saveEdit(event) {
     event.preventDefault();
     const error = $("memory-edit-form-error");
-    if (!editingMemory) { if (error) { error.textContent = "Choose a memory to edit / 请选择要编辑的记忆"; error.classList.remove("hidden"); } return; }
+    if (!editingMemory) { if (error) { error.textContent = t("memory.chooseMemoryToEdit"); error.classList.remove("hidden"); } return; }
     const title = text($("memory-edit-title")?.value).trim();
     const content = text($("memory-edit-content")?.value).trim();
     const tags = text($("memory-edit-tags")?.value).split(",").map((entry) => entry.trim()).filter(Boolean);
-    if (!title || !content) { if (error) { error.textContent = "Title and content are required / 标题和内容不能为空"; error.classList.remove("hidden"); } return; }
-    if (tags.length > 16) { if (error) { error.textContent = "Use at most 16 tags / 最多使用 16 个标签"; error.classList.remove("hidden"); } return; }
+    if (!title || !content) { if (error) { error.textContent = t("memory.titleAndContentRequired"); error.classList.remove("hidden"); } return; }
+    if (tags.length > 16) { if (error) { error.textContent = t("memory.maxTags"); error.classList.remove("hidden"); } return; }
     const current = editingMemory;
     const key = `${current.scope}:${current.ownerId}:${current.id}:edit`;
     if (pendingMemoryActions.has(key)) return;
     const submit = event.currentTarget?.querySelector("button[type=submit]");
     pendingMemoryActions.add(key);
-    if (submit) { submit.disabled = true; submit.textContent = "Saving… / 保存中…"; }
+    if (submit) { submit.disabled = true; submit.textContent = t("common.saving"); }
     try {
       const updated = await api.memory.update({ scope: current.scope, ownerId: current.ownerId, memoryId: current.id, patch: { title, content, tags } });
       $("memory-edit-dialog")?.close();
       editingMemory = undefined;
       selectedMemoryId = updated?.id ?? selectedMemoryId;
-      setResult("Memory updated / 记忆已更新");
+      setResult(t("memory.updated"));
       await refresh();
       await current.onSaved?.(updated);
     } catch (reason) {
       if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }
     } finally {
       pendingMemoryActions.delete(key);
-      if (submit) { submit.disabled = false; submit.textContent = "Save changes / 保存修改"; }
+      if (submit) { submit.disabled = false; submit.textContent = t("common.saveChanges"); }
     }
   }
   function openDeleteDialog(memory, target = scopeTarget(), onDeleted) {
@@ -110,7 +111,7 @@
     const key = memoryActionKey(memory, "delete", target);
     if (pendingMemoryActions.has(key)) return;
     deleteCandidate = { id: memory.id, title: memory.title, content: memory.content, scope: target.scope, ownerId: target.ownerId, onDeleted, key };
-    $("memory-delete-scope").textContent = `Scope / 归属: ${target.scope}`;
+    $("memory-delete-scope").textContent = `${t("memory.scopeLabel")}: ${target.scope}`;
     $("memory-delete-summary").textContent = `${memory.title || "Untitled memory"} — ${text(memory.content).replace(/\s+/g, " ").trim().slice(0, 240)}${text(memory.content).length > 240 ? "…" : ""}`;
     $("memory-delete-form-error")?.classList.add("hidden");
     dialog.showModal();
@@ -119,26 +120,26 @@
     event.preventDefault();
     const current = deleteCandidate;
     const error = $("memory-delete-form-error");
-    if (!current) { if (error) { error.textContent = "Choose a memory to delete / 请选择要删除的记忆"; error.classList.remove("hidden"); } return; }
+    if (!current) { if (error) { error.textContent = t("memory.chooseMemoryToDelete"); error.classList.remove("hidden"); } return; }
     if (pendingMemoryActions.has(current.key)) return;
     const submit = $("memory-delete-confirm");
     const cancel = $("memory-delete-form")?.querySelector("[data-close-dialog]");
     pendingMemoryActions.add(current.key);
-    if (submit) { submit.disabled = true; submit.textContent = "Deleting… / 删除中…"; }
+    if (submit) { submit.disabled = true; submit.textContent = t("common.deleting"); }
     if (cancel) cancel.disabled = true;
     try {
       await api.memory.delete({ scope: current.scope, ownerId: current.ownerId, memoryId: current.id });
       $("memory-delete-dialog")?.close();
       deleteCandidate = undefined;
       if (selectedMemoryId === current.id) selectedMemoryId = undefined;
-      setResult("Memory deleted / 记忆已删除");
+      setResult(t("memory.deleted"));
       await refresh();
       await current.onDeleted?.();
     } catch (reason) {
       if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }
     } finally {
       pendingMemoryActions.delete(current.key);
-      if (submit) { submit.disabled = false; submit.textContent = "Delete memory / 删除记忆"; }
+      if (submit) { submit.disabled = false; submit.textContent = t("memory.deleteAction"); }
       if (cancel) cancel.disabled = false;
     }
   }
@@ -164,7 +165,7 @@
     const current = node.value;
     node.textContent = "";
     const options = owners[selected("memory-scope")] ?? [];
-    if (!options.length) node.append(new Option("No scope owners / 没有可用归属", ""));
+    if (!options.length) node.append(new Option(t("memory.noOwners"), ""));
     for (const entry of options) node.append(new Option(entry.label, entry.value));
     if ([...node.options].some((option) => option.value === pendingOwnerId)) node.value = pendingOwnerId;
     else if ([...node.options].some((option) => option.value === current)) node.value = current;
@@ -173,7 +174,7 @@
     syncAddFactButton();
   }
   function sourceAction(memory, sourceNode) {
-    return button("Source / 来源", async () => {
+    return button(t("memory.sourceBtn"), async () => {
       const trace = await api.memory.sourceTrace({ ...scopeTarget(), memoryId: memory.id });
       sourceNode.textContent = `Source: ${trace?.label ?? "Unavailable"}`;
       const navigation = trace?.navigation;
@@ -192,14 +193,14 @@
       const title = document.createElement("h3"); title.textContent = `${memory.title}${memory.pinned ? " · pinned" : ""}`;
       const content = document.createElement("p"); content.textContent = memory.content;
       const meta = document.createElement("small"); const stateLabel = memory.state || "active"; meta.textContent = `${stateLabel}${memory.tags?.length ? " · " + memory.tags.join(", ") : ""}`;
-      const reason = document.createElement("small"); reason.className = "memory-match-reason"; reason.textContent = `Match: ${memory.matchReason?.label ?? "Recent memory / 最近记忆"}`;
+      const reason = document.createElement("small"); reason.className = "memory-match-reason"; reason.textContent = `${t("memory.matchPrefix")}: ${memory.matchReason?.label ?? t("memory.recentMemory")}`;
       const source = document.createElement("small"); source.textContent = `Source: ${memory.source?.label ?? "Unavailable"}`;
       const actions = document.createElement("div"); actions.className = "detail-actions";
       const target = scopeTarget();
-      actions.append(button(memory.pinned ? "Unpin / 取消置顶" : "Pin / 置顶", async () => { await api.memory.pin({ ...target, memoryId: memory.id, pinned: !memory.pinned }); await refresh(); }, { key: memoryActionKey(memory, "pin", target) }), button("Edit / 编辑", () => openEditDialog(memory, target)), button("Forget / 忘记", async () => { if (memory.state === "forgotten") return; await api.memory.forget({ ...target, memoryId: memory.id }); await refresh(); }, { key: memoryActionKey(memory, "forget", target) }), button("Delete / 删除", () => openDeleteDialog(memory, target), { key: memoryActionKey(memory, "delete", target) }), sourceAction(memory, source));
+      actions.append(button(memory.pinned ? t("memory.unpin") : t("memory.pin"), async () => { await api.memory.pin({ ...target, memoryId: memory.id, pinned: !memory.pinned }); await refresh(); }, { key: memoryActionKey(memory, "pin", target) }), button(t("common.edit"), () => openEditDialog(memory, target)), button(t("memory.forget"), async () => { if (memory.state === "forgotten") return; await api.memory.forget({ ...target, memoryId: memory.id }); await refresh(); }, { key: memoryActionKey(memory, "forget", target) }), button(t("common.delete"), () => openDeleteDialog(memory, target), { key: memoryActionKey(memory, "delete", target) }), sourceAction(memory, source));
       card.append(title, content, meta, reason, source, actions); root.append(card);
     }
-    if (!memories.length) { const empty = document.createElement("p"); empty.textContent = "No memories in this scope / 此归属暂无记忆"; root.append(empty); }
+    if (!memories.length) { const empty = document.createElement("p"); empty.textContent = t("memory.empty"); root.append(empty); }
   }
   function renderSuggestions(suggestions) {
     const root = $("memory-suggestions"); if (!root) return; root.textContent = "";
@@ -209,10 +210,10 @@
       const content = document.createElement("p"); content.textContent = suggestion.content;
       const source = document.createElement("small"); source.textContent = `${suggestion.scope} · Source: ${suggestion.source?.label ?? "Unavailable"}`;
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Approve / 批准", async () => { await api.memory.approveSuggestion({ suggestionId: suggestion.suggestionId }); setResult("Suggestion approved / 建议已批准"); await refresh(); }), button("Reject / 拒绝", async () => { await api.memory.rejectSuggestion({ suggestionId: suggestion.suggestionId }); setResult("Suggestion rejected / 建议已拒绝"); await refresh(); }));
+      actions.append(button(t("common.approve"), async () => { await api.memory.approveSuggestion({ suggestionId: suggestion.suggestionId }); setResult(t("memory.suggestionApproved")); await refresh(); }), button(t("memory.reject"), async () => { await api.memory.rejectSuggestion({ suggestionId: suggestion.suggestionId }); setResult(t("memory.suggestionRejected")); await refresh(); }));
       card.append(title, content, source, actions); root.append(card);
     }
-    if (!suggestions.length) { const empty = document.createElement("p"); empty.textContent = "No pending suggestions / 暂无待审建议"; root.append(empty); }
+    if (!suggestions.length) { const empty = document.createElement("p"); empty.textContent = t("memory.suggestionsEmpty"); root.append(empty); }
   }
   async function refresh() {
     const sequence = ++refreshSequence;
@@ -221,13 +222,13 @@
       if (sequence !== refreshSequence) return;
       renderOwnerOptions();
       const request = listTarget();
-      if (!request.ownerId) { renderMemories([]); setResult("Choose a scope owner / 请选择归属"); } else {
+      if (!request.ownerId) { renderMemories([]); setResult(t("memory.chooseOwner")); } else {
         const result = await api.memory.list({ ...request, ...(selected("memory-search") ? { query: selected("memory-search") } : {}) });
         if (sequence !== refreshSequence) return;
         renderMemories(result.memories ?? []);
         const count = result.resultCount ?? result.memories?.length ?? 0;
         const returned = result.returnedCount ?? result.memories?.length ?? 0;
-        setResult(`${count} matches${returned !== count ? ` · showing ${returned}` : ""} · rebuilt locally / ${count} 条匹配 · 已在本地重建`);
+        setResult(t("memory.rebuiltLocally", { count, returnedSuffix: returned !== count ? ` · showing ${returned}` : "" }));
       }
       const suggestions = await api.memory.listSuggestions();
       if (sequence === refreshSequence) renderSuggestions(suggestions.suggestions ?? []);

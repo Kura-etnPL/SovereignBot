@@ -7,6 +7,8 @@
   const selectedSkills = new Set();
   let attachments = [];
 
+  const t = (key, fallback) => globalThis.SovereignI18n?.t(key) ?? fallback ?? key;
+
   function el(tag, className, textValue) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -222,12 +224,13 @@
       const body = document.createElement("div");
       body.className = "skill-option-copy";
       body.append(el("strong", "", skill.name), el("span", "", skill.description || "Reusable coworker workflow"));
+      const t = globalThis.SovereignI18n?.t || ((k) => k);
       const capabilities = (skill.requestedCapabilities ?? []).join(", ") || "none";
-      const tested = skill.lastTestedAt ? new Date(skill.lastTestedAt).toLocaleString() : "Not tested / 未测试";
-      const used = skill.lastUsedAt ? new Date(skill.lastUsedAt).toLocaleString() : "Not used / 未使用";
-      body.append(el("span", "skill-option-meta", (skill.source === "taught" ? "Taught by Teach Once / 教学创建" : "Created manually / 手动创建") + " · capabilities: " + capabilities + " · tested: " + tested + " · used: " + used));
+      const tested = skill.lastTestedAt ? new Date(skill.lastTestedAt).toLocaleString() : t("skills.notTested");
+      const used = skill.lastUsedAt ? new Date(skill.lastUsedAt).toLocaleString() : t("skills.notUsed");
+      body.append(el("span", "skill-option-meta", (skill.source === "taught" ? t("skills.taughtByTeachOnce") : t("skills.createdManually")) + " · capabilities: " + capabilities + " · tested: " + tested + " · used: " + used));
       const assignment = el("div", "skill-assignment");
-      assignment.append(el("span", "skill-assignment-label", "Usable by / 可用对象"));
+      assignment.append(el("span", "skill-assignment-label", t("skills.usableBy")));
       const assigned = [
         ...(skill.assignedCoworkerIds ?? []).map((id) => ({ kind: "coworker", id, label: state.coworkers.find((entry) => entry.id === id)?.name })),
         ...(skill.assignedTeamIds ?? []).map((id) => ({ kind: "team", id, label: state.teams.find((entry) => entry.id === id)?.name })),
@@ -235,7 +238,7 @@
       for (const target of assigned) {
         const chip = el("button", "skill-assignment-chip", target.label + " ×");
         chip.type = "button";
-        chip.title = "Remove assignment / 移除分配";
+        chip.title = t("skills.removeAssignment");
         chip.addEventListener("click", async (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -247,7 +250,7 @@
       const select = document.createElement("select");
       select.className = "skill-assignment-select";
       select.title = "Assign this skill to a coworker or team";
-      select.append(el("option", "", "Assign… / 分配…"));
+      select.append(el("option", "", t("skills.assignOption", "Assign…")));
       for (const coworker of state.coworkers ?? []) {
         const option = el("option", "", "Coworker · " + coworker.name);
         option.value = "coworker:" + coworker.id;
@@ -271,7 +274,7 @@
         }
       });
       assignment.append(select);
-      const routine = el("button", "quiet-action skill-routine-button", "Create Routine / 创建例行任务");
+      const routine = el("button", "quiet-action skill-routine-button", t("skills.createRoutine"));
       routine.type = "button";
       routine.title = "Turn this verified skill into a scheduled routine";
       routine.addEventListener("click", (event) => {

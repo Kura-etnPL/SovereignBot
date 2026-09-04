@@ -8,6 +8,7 @@
   let manualPending = false;
 
   const $ = (id) => document.getElementById(id);
+  const t = (key, params) => globalThis.SovereignI18n?.t(key, params) ?? key;
   const participantList = () => typeof participantCoworkers === "function"
     ? participantCoworkers(state.selectedConversation)
     : [];
@@ -27,9 +28,9 @@
     if (section) return section;
     section = make("section", "detail-section teach-section");
     section.id = "details-teach-section";
-    const label = make("span", "detail-label", "Teach Once / 教它一次");
-    const copy = make("p", "teach-section-copy", "Demonstrate a semantic Computer workflow and turn it into a reusable Skill.");
-    const button = make("button", "computer-action primary", "Teach a task / 教它一个任务");
+    const label = make("span", "detail-label", t("teach.eyebrow"));
+    const copy = make("p", "teach-section-copy", t("teach.copy"));
+    const button = make("button", "computer-action primary", t("teach.title"));
     button.type = "button";
     button.addEventListener("click", () => openDialog());
     section.append(label, copy, button);
@@ -46,46 +47,46 @@
     dialog.className = "modal teach-modal";
     dialog.innerHTML = `
       <div class="modal-card">
-        <div class="modal-heading"><div><span class="eyebrow">TEACH ONCE / 教它一次</span><h2>Teach a task</h2></div><button id="teach-close" class="modal-x" type="button">×</button></div>
-        <p class="teach-copy">Use the current Computer lane. Actions are governed, targets are semantic, and demo input is never saved.</p>
+        <div class="modal-heading"><div><span class="eyebrow">${t("teach.eyebrow")}</span><h2>${t("teach.title")}</h2></div><button id="teach-close" class="modal-x" type="button">×</button></div>
+        <p class="teach-copy">${t("teach.copy")}</p>
         <div id="teach-start-panel" class="teach-panel">
-          <label>Name / 名称<input id="teach-name" maxlength="100" placeholder="e.g. Prepare a weekly report" required></label>
-          <label>Description / 描述<input id="teach-description" maxlength="280" placeholder="What should this task accomplish?"></label>
-          <label>Coworker / 同事<select id="teach-coworker"></select></label>
+          <label>${t("teach.name")}<input id="teach-name" maxlength="100" placeholder="${t("teach.namePlaceholder")}" required></label>
+          <label>${t("teach.description")}<input id="teach-description" maxlength="280" placeholder="${t("teach.descriptionPlaceholder")}"></label>
+          <label>${t("teach.coworker")}<select id="teach-coworker"></select></label>
           <p id="teach-start-error" class="inline-error hidden"></p>
-          <div class="modal-actions"><button id="teach-start" class="hero-action" type="button">Start demonstration / 开始演示</button></div>
+          <div class="modal-actions"><button id="teach-start" class="hero-action" type="button">${t("teach.start")}</button></div>
         </div>
         <div id="teach-record-panel" class="teach-panel hidden">
-          <div class="teach-session-head"><div><strong id="teach-session-title"></strong><span id="teach-session-state" class="job-status working">Recording</span></div><button id="teach-snapshot" class="quiet-action" type="button">Read current screen / 读取当前页面</button></div>
+          <div class="teach-session-head"><div><strong id="teach-session-title"></strong><span id="teach-session-state" class="job-status working">${t("teach.state.recording")}</span></div><button id="teach-snapshot" class="quiet-action" type="button">${t("teach.readScreen")}</button></div>
           <p id="teach-context" class="setting-feedback"></p>
           <div id="teach-elements" class="teach-elements"></div>
           <div class="teach-action-form">
-            <label>Action / 动作<select id="teach-action-kind"><option value="click">Click semantic target / 点击语义目标</option><option value="type">Type input / 输入内容</option><option value="navigate">Navigate / 打开网站</option><option value="key">Press key / 按键</option><option value="scroll">Scroll / 滚动</option><option value="wait">Wait / 等待</option><option value="assert">Verify output / 验证结果</option></select></label>
-            <label id="teach-ref-field">Target from current screen / 当前页面目标<select id="teach-ref"><option value="">Read the screen first / 先读取页面</option></select></label>
-            <label id="teach-target-field">Semantic target / 语义目标<input id="teach-target" maxlength="240" placeholder="e.g. Submit button"></label>
-            <label id="teach-app-field">App (optional) / 应用（可选）<input id="teach-app" maxlength="120" placeholder="e.g. GitHub"></label>
-            <label id="teach-url-field" class="hidden">Site URL / 网站地址<input id="teach-url" maxlength="2000" placeholder="https://example.com"></label>
-            <label id="teach-input-name-field" class="hidden">Reusable input name / 可复用输入名<input id="teach-input-name" maxlength="80" placeholder="report_period"></label>
-            <label id="teach-demo-value-field" class="hidden">Demo value (not saved) / 演示值（不会保存）<input id="teach-demo-value" maxlength="4000" autocomplete="off"></label>
-            <label id="teach-sensitive-field" class="hidden toggle-row"><span><strong>Sensitive demo input / 敏感演示输入</strong><small>The value is used once and never persisted.</small></span><input id="teach-sensitive" type="checkbox"></label>
-            <label id="teach-key-field" class="hidden">Key / 按键<select id="teach-key"><option>Enter</option><option>Tab</option><option>Escape</option><option>Space</option><option>Backspace</option><option>Delete</option><option>ArrowUp</option><option>ArrowDown</option><option>ArrowLeft</option><option>ArrowRight</option></select></label>
-            <label id="teach-scroll-field" class="hidden">Scroll / 滚动<select id="teach-direction"><option value="down">Down / 向下</option><option value="up">Up / 向上</option></select><input id="teach-amount" type="number" min="1" max="10" value="1"></label>
-            <label id="teach-wait-field" class="hidden">Milliseconds / 毫秒<input id="teach-milliseconds" type="number" min="0" max="10000" value="500"></label>
-            <label id="teach-validator-field" class="hidden">Validator / 验证方式<select id="teach-validator"><option value="exists">Exists / 存在</option><option value="contains">Contains / 包含</option><option value="equals">Equals / 等于</option><option value="manual">Manual check / 手动确认</option></select></label>
-            <label id="teach-expected-field" class="hidden">Expected output / 预期结果<input id="teach-expected" maxlength="500" placeholder="e.g. Report is ready"></label>
+            <label>${t("teach.action")}<select id="teach-action-kind"><option value="click">${t("teach.action.click")}</option><option value="type">${t("teach.action.type")}</option><option value="navigate">${t("teach.action.navigate")}</option><option value="key">${t("teach.action.key")}</option><option value="scroll">${t("teach.action.scroll")}</option><option value="wait">${t("teach.action.wait")}</option><option value="assert">${t("teach.action.assert")}</option></select></label>
+            <label id="teach-ref-field">${t("teach.targetFromScreen")}<select id="teach-ref"><option value="">${t("teach.readScreenFirst")}</option></select></label>
+            <label id="teach-target-field">${t("teach.semanticTarget")}<input id="teach-target" maxlength="240" placeholder="${t("teach.targetPlaceholder")}"></label>
+            <label id="teach-app-field">${t("teach.appOptional")}<input id="teach-app" maxlength="120" placeholder="e.g. GitHub"></label>
+            <label id="teach-url-field" class="hidden">${t("teach.siteUrl")}<input id="teach-url" maxlength="2000" placeholder="https://example.com"></label>
+            <label id="teach-input-name-field" class="hidden">${t("teach.reusableInputName")}<input id="teach-input-name" maxlength="80" placeholder="report_period"></label>
+            <label id="teach-demo-value-field" class="hidden">${t("teach.demoValue")}<input id="teach-demo-value" maxlength="4000" autocomplete="off"></label>
+            <label id="teach-sensitive-field" class="hidden toggle-row"><span><strong>${t("teach.sensitiveInput")}</strong><small>${t("teach.sensitiveDesc")}</small></span><input id="teach-sensitive" type="checkbox"></label>
+            <label id="teach-key-field" class="hidden">${t("teach.key")}<select id="teach-key"><option>Enter</option><option>Tab</option><option>Escape</option><option>Space</option><option>Backspace</option><option>Delete</option><option>ArrowUp</option><option>ArrowDown</option><option>ArrowLeft</option><option>ArrowRight</option></select></label>
+            <label id="teach-scroll-field" class="hidden">${t("teach.scroll")}<select id="teach-direction"><option value="down">${t("teach.scrollDown")}</option><option value="up">${t("teach.scrollUp")}</option></select><input id="teach-amount" type="number" min="1" max="10" value="1"></label>
+            <label id="teach-wait-field" class="hidden">${t("teach.milliseconds")}<input id="teach-milliseconds" type="number" min="0" max="10000" value="500"></label>
+            <label id="teach-validator-field" class="hidden">${t("teach.validator")}<select id="teach-validator"><option value="exists">${t("teach.validator.exists")}</option><option value="contains">${t("teach.validator.contains")}</option><option value="equals">${t("teach.validator.equals")}</option><option value="manual">${t("teach.validator.manual")}</option></select></label>
+            <label id="teach-expected-field" class="hidden">${t("teach.expectedOutput")}<input id="teach-expected" maxlength="500" placeholder="${t("teach.expectedPlaceholder")}"></label>
             <p id="teach-action-error" class="inline-error hidden"></p>
-            <div class="modal-actions"><button id="teach-record" class="hero-action" type="button">Perform & record / 执行并记录</button></div>
+            <div class="modal-actions"><button id="teach-record" class="hero-action" type="button">${t("teach.recordAction")}</button></div>
           </div>
-          <div><span class="detail-label">Recorded semantic steps / 已记录语义步骤</span><ol id="teach-actions" class="teach-actions"></ol></div>
-          <div class="modal-actions"><button id="teach-finish" class="quiet-action" type="button">Create Skill draft / 生成 Skill 草稿</button><button id="teach-cancel" class="quiet-action" type="button">Cancel / 取消</button></div>
+          <div><span class="detail-label">${t("teach.recordedSteps")}</span><ol id="teach-actions" class="teach-actions"></ol></div>
+          <div class="modal-actions"><button id="teach-finish" class="quiet-action" type="button">${t("teach.finish")}</button><button id="teach-cancel" class="quiet-action" type="button">${t("common.cancel")}</button></div>
         </div>
         <div id="teach-draft-panel" class="teach-panel hidden">
-          <div class="teach-session-head"><div><strong id="teach-draft-title"></strong><span id="teach-draft-state" class="job-status">Draft</span></div></div>
+          <div class="teach-session-head"><div><strong id="teach-draft-title"></strong><span id="teach-draft-state" class="job-status">${t("teach.state.draft")}</span></div></div>
           <p id="teach-draft-description" class="teach-copy"></p>
           <ol id="teach-draft-steps" class="teach-actions"></ol>
           <div id="teach-draft-meta" class="teach-draft-meta"></div>
           <p id="teach-draft-error" class="inline-error hidden"></p>
-          <div class="modal-actions"><button id="teach-test" class="quiet-action" type="button">Test / 测试</button><button id="teach-confirm" class="quiet-action hidden" type="button">Confirm manual check / 确认手动检查</button><button id="teach-save" class="hero-action" type="button" disabled>Save Skill / 保存 Skill</button><button id="teach-draft-close" class="quiet-action" type="button">Close / 关闭</button></div>
+          <div class="modal-actions"><button id="teach-test" class="quiet-action" type="button">${t("teach.test")}</button><button id="teach-confirm" class="quiet-action hidden" type="button">${t("teach.confirmManual")}</button><button id="teach-save" class="hero-action" type="button" disabled>${t("teach.saveSkill")}</button><button id="teach-draft-close" class="quiet-action" type="button">${t("common.close")}</button></div>
         </div>
         <p id="teach-result" class="setting-feedback"></p>
       </div>`;
@@ -121,7 +122,7 @@
     }
     if (!select.options.length) {
       const option = document.createElement("option");
-      option.textContent = "Open a Coworker conversation first / 请先打开同事会话";
+      option.textContent = t("teach.openConversationFirst");
       option.value = "";
       select.append(option);
     }
@@ -186,7 +187,7 @@
     button.disabled = true;
     try {
       snapshot = await window.sovereignbot.teachOnce.snapshot({ sessionId: session.id });
-      $("teach-context").textContent = snapshot.site ? `Current site: ${snapshot.site} · semantic targets only / 当前网站：${snapshot.site} · 仅记录语义目标` : "Current screen read. Choose an accessible target below / 已读取当前页面，请选择语义目标";
+      $("teach-context").textContent = snapshot.site ? t("teach.contextSite", { site: snapshot.site }) : t("teach.contextRead");
       renderElements();
       $("teach-action-error")?.classList.add("hidden");
     } catch (reason) {
@@ -220,7 +221,7 @@
     if (!select.options.length) {
       const option = document.createElement("option");
       option.value = "";
-      option.textContent = "Read the screen first / 先读取页面";
+      option.textContent = t("teach.readScreenFirst");
       select.append(option);
     }
   }
@@ -297,7 +298,7 @@
 
   function renderSession(value) {
     $("teach-session-title").textContent = `${value.name} · ${value.actions.length} action${value.actions.length === 1 ? "" : "s"}`;
-    $("teach-session-state").textContent = value.state === "recording" ? "Recording / 录制中" : value.state;
+    $("teach-session-state").textContent = value.state === "recording" ? t("teach.state.recording") : value.state;
     const list = $("teach-actions");
     if (!list) return;
     list.textContent = "";
@@ -314,8 +315,8 @@
     error?.classList.add("hidden");
     const button = $("teach-finish");
     button.disabled = true;
-    $("teach-session-state").textContent = "Generating Skill draft… / 正在生成 Skill 草稿…";
-    $("teach-result").textContent = "The assigned Coworker is synthesizing a bounded SkillDraft. / 已由当前同事生成受边界约束的 SkillDraft。";
+    $("teach-session-state").textContent = t("teach.generatingDraft");
+    $("teach-result").textContent = t("teach.synthesizingNotice");
     try {
       const result = await window.sovereignbot.teachOnce.finish({ sessionId: session.id });
       session = result.session;
@@ -335,7 +336,7 @@
     if (!draft) return;
     $("teach-draft-title").textContent = draft.name;
     $("teach-draft-description").textContent = draft.description;
-    $("teach-draft-state").textContent = value.state === "tested" ? "Tested / 已测试" : "Draft / 草稿";
+    $("teach-draft-state").textContent = value.state === "tested" ? t("teach.state.tested") : t("teach.state.draft");
     const steps = $("teach-draft-steps");
     steps.textContent = "";
     for (const step of draft.steps) steps.append(make("li", "teach-action-row", step));
@@ -349,7 +350,7 @@
     error?.classList.add("hidden");
     const button = $("teach-test");
     button.disabled = true;
-    $("teach-result").textContent = "Running the bounded Computer/Governor test… / 正在运行受边界约束的 Computer/Governor 测试…";
+    $("teach-result").textContent = t("teach.runningTest");
     try {
       const result = await window.sovereignbot.teachOnce.test({ sessionId: session.id });
       session = result.session;
@@ -357,10 +358,10 @@
       manualPending = result.status === "awaiting-confirmation";
       $("teach-confirm")?.classList.toggle("hidden", !manualPending);
       $("teach-result").textContent = result.status === "awaiting-confirmation"
-        ? "The test reached a manual validator and is waiting for your confirmation; it was not marked passed. / 测试到达手动验证步骤，等待你的确认，尚未标记为通过。"
+        ? t("teach.testAwaitingConfirmation")
         : result.ok
-          ? "Governed Computer test passed. Review the draft, then save it as a Skill. / 受治理的 Computer 测试通过，请确认草稿后保存。"
-          : "Governed Computer test did not pass. / 受治理的 Computer 测试未通过。";
+          ? t("teach.testPassed")
+          : t("teach.testFailed");
     } catch (reason) {
       if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }
     }
@@ -392,7 +393,7 @@
     try {
       const result = await window.sovereignbot.teachOnce.save({ sessionId: session.id });
       session = result.session;
-      $("teach-result").textContent = `Saved “${result.skill.name}”. It is now available in Skills and can be selected by a Routine or Event Trigger. / 已保存，可在 Skills 中使用，也可由 Routine/Event Trigger 调用。`;
+      $("teach-result").textContent = t("teach.savedNotice", { name: result.skill.name });
       renderDraft(session);
     } catch (reason) {
       if (error) { error.textContent = errorText(reason); error.classList.remove("hidden"); }

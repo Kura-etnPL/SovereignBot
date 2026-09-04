@@ -24,7 +24,7 @@ test("Update Apply uses a product dialog and the existing typed apply contract",
 
 test("Update Apply failure remains visible and retryable", () => {
   assert.match(updateCard, /setApplyError\(safeError\(error/);
-  assert.match(updateCard, /staged update remains available to retry/);
+  assert.match(updateCard, /(?:staged update remains available to retry|t\("updates\.remainsAvailable"\))/);
   assert.match(updateCard, /applyConfirm\.disabled = applyPending/);
   assert.match(updateCard, /applyCancel\.disabled = applyPending/);
 });

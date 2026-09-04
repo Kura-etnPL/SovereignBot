@@ -31,27 +31,49 @@
   let identityRequest = 0;
   let jobDetailRequest = 0;
   const jobActionState = new Map();
-  const ATTENTION_CATEGORIES = Object.freeze([
-    ["login-required", "Login required / 需要登录"],
-    ["secret-required", "Secret required / 需要密钥"],
-    ["approval-required", "Approval required / 需要审批"],
-    ["provider-unavailable", "Provider unavailable / 提供方不可用"],
-    ["computer-takeover", "Computer takeover / 电脑接管"],
-    ["dangerous-action", "Dangerous action / 危险操作"],
-    ["real-blocker", "Real blocker / 实际阻塞"],
-  ]);
-  const ATTENTION_CATEGORY_LABELS = Object.freeze(Object.fromEntries(ATTENTION_CATEGORIES));
-  const SNOOZE_OPTIONS = Object.freeze([[15, "15 min / 15 分钟"], [60, "1 hour / 1 小时"], [240, "4 hours / 4 小时"], [1440, "1 day / 1 天"]]);
+  const ATTENTION_CATEGORY_KEYS = Object.freeze({
+    "login-required": "attention.category.loginRequired",
+    "secret-required": "attention.category.secretRequired",
+    "approval-required": "attention.category.approvalRequired",
+    "provider-unavailable": "attention.category.providerUnavailable",
+    "computer-takeover": "attention.category.computerTakeover",
+    "dangerous-action": "attention.category.dangerousAction",
+    "real-blocker": "attention.category.realBlocker",
+  });
+  const ATTENTION_CATEGORY_FALLBACKS = Object.freeze({
+    "login-required": "Login required",
+    "secret-required": "Secret required",
+    "approval-required": "Approval required",
+    "provider-unavailable": "Provider unavailable",
+    "computer-takeover": "Computer takeover",
+    "dangerous-action": "Dangerous action",
+    "real-blocker": "Real blocker",
+  });
+  const ATTENTION_CATEGORY_CODES = Object.keys(ATTENTION_CATEGORY_KEYS);
+  const SNOOZE_MINUTES = Object.freeze([15, 60, 240, 1440]);
+  function snoozeLabel(minutes) {
+    switch (minutes) {
+      case 15: return t("attention.snooze15m", "15 min");
+      case 60: return t("attention.snooze1h", "1 hour");
+      case 240: return t("attention.snooze4h", "4 hours");
+      case 1440: return t("attention.snooze1d", "1 day");
+      default: return `${minutes} min`;
+    }
+  }
   let attentionActiveCount = 0;
 
   function attentionActionAllowed(job, action) {
     const actions = job?.attentionState?.actions;
     return Array.isArray(actions) && actions.includes(action);
   }
-  function attentionCategoryLabel(category) { return ATTENTION_CATEGORY_LABELS[category] ?? ATTENTION_CATEGORY_LABELS["real-blocker"]; }
+  function attentionCategoryLabel(category) {
+    const key = ATTENTION_CATEGORY_KEYS[category] ?? ATTENTION_CATEGORY_KEYS["real-blocker"];
+    const fallback = ATTENTION_CATEGORY_FALLBACKS[category] ?? ATTENTION_CATEGORY_FALLBACKS["real-blocker"];
+    return t(key, fallback);
+  }
   function selectedSnoozeMinutes() {
     const value = Number($("attention-snooze-duration")?.value ?? 60);
-    return SNOOZE_OPTIONS.some(([minutes]) => minutes === value) ? value : 60;
+    return SNOOZE_MINUTES.includes(value) ? value : 60;
   }
   function openAttentionDestination(action) {
     if (action === "open-settings") { $("nav-settings")?.click(); return; }
@@ -85,7 +107,7 @@
   }
   function ownerLabel(job) {
     const owner = coworkerLabels.get(job?.ownerCoworkerId);
-    if (!owner) return "Assigned Coworker / 已分配同事";
+    if (!owner) return t("work.assignedCoworker", "Assigned Coworker");
     const name = I18n()?.displayCoworkerName?.(owner.name) ?? owner.name;
     return `${safeLabel(name, "Coworker")} · ${safeLabel(owner.role, "Coworker")}`;
   }
@@ -96,7 +118,7 @@
     }
     const workspace = workspaceLabels.get(job?.workspaceId);
     if (workspace) return `Workspace: ${safeLabel(workspace.label, "Trusted workspace")} · ${workspace.kind === "shared-project" ? "Shared project workspace" : "Trusted workspace"}`;
-    return executionKind === "local" || !job?.workspaceId ? "This PC / 此电脑" : "Trusted workspace / 受信工作区";
+    return executionKind === "local" || !job?.workspaceId ? t("work.thisPc", "This PC") : t("work.trustedWorkspace", "Trusted workspace");
   }
   function jobMeta(job) {
     const priority = safePublicText(job?.priority, "normal", 40);
@@ -166,7 +188,7 @@
     if ($("job-execution") || !$("job-form-error")) return;
     const makeLabel = (caption, control) => { const label = document.createElement("label"); label.textContent = caption; label.append(control); return label; };
     const execution = document.createElement("select"); execution.id = "job-execution";
-    for (const [value, caption] of [["local", "This PC / 此电脑"], ["worker-node", "Paired Worker Node / 已配对工作节点"], ["worker-computer", "Worker Computer / 工作电脑"], ["vm", "VM Computer / 虚拟机电脑"], ["local-isolated", "Local Isolated / 本机隔离"], ["cloud", "Cloud Computer / 云电脑"]]) { const option = document.createElement("option"); option.value = value; option.textContent = caption; execution.append(option); }
+    for (const [value, key, fallback] of [["local", "work.modeThisPc", "This PC"], ["worker-node", "work.modeWorkerNode", "Paired Worker Node"], ["worker-computer", "work.modeWorkerComputer", "Worker Computer"], ["vm", "work.modeVm", "VM Computer"], ["local-isolated", "work.modeIsolated", "Local Isolated"], ["cloud", "work.modeCloud", "Cloud Computer"]]) { const option = document.createElement("option"); option.value = value; option.textContent = t(key, fallback); execution.append(option); }
     const node = document.createElement("select"); node.id = "job-node";
     const workspace = document.createElement("select"); workspace.id = "job-node-workspace";
     const computer = document.createElement("select"); computer.id = "job-computer";
@@ -215,11 +237,11 @@
       openBtn.addEventListener("click", () => openDetail(job.id));
       if (job.status !== "needs_attention" || attentionActionAllowed(job, "open")) actions.append(openBtn);
       if (job.status === "needs_attention") {
-        if (attentionActionAllowed(job, "open-settings")) actions.append(attentionButton("Open settings / 打开设置", "quiet-action", () => openAttentionDestination("open-settings")));
-        if (attentionActionAllowed(job, "open-this-pc")) actions.append(attentionButton("Open This PC / 打开此电脑", "quiet-action", () => openAttentionDestination("open-this-pc")));
+        if (attentionActionAllowed(job, "open-settings")) actions.append(attentionButton(t("attention.openSettings", "Open settings"), "quiet-action", () => openAttentionDestination("open-settings")));
+        if (attentionActionAllowed(job, "open-this-pc")) actions.append(attentionButton(t("attention.openThisPc", "Open This PC"), "quiet-action", () => openAttentionDestination("open-this-pc")));
          if (attentionActionAllowed(job, "retry")) actions.append(jobActionButton(job, "retry", t("attention.retry", "Retry"), "hero-action", () => window.sovereignbot.jobs.approve({ jobId: job.id }), "Retry requested."));
         if (attentionActionAllowed(job, "snooze")) actions.append(attentionButton(t("attention.snooze", "Snooze"), "quiet-action", async () => { await window.sovereignbot.jobs.snooze({ jobId: job.id, minutes: selectedSnoozeMinutes() }); await refresh(); }));
-         if (attentionActionAllowed(job, "dismiss")) actions.append(jobActionButton(job, "dismiss", "Dismiss attention / 消退关注", "quiet-action", () => window.sovereignbot.jobs.dismiss({ jobId: job.id }), "Attention dismissed."));
+         if (attentionActionAllowed(job, "dismiss")) actions.append(jobActionButton(job, "dismiss", t("attention.dismissAttention", "Dismiss attention"), "quiet-action", () => window.sovereignbot.jobs.dismiss({ jobId: job.id }), "Attention dismissed."));
        }
        card.append(head, meta, feedbackNode(job.id), actions);
       root.append(card);
@@ -312,7 +334,7 @@
         actions.append(snooze);
       }
       if (attentionActionAllowed(job, "dismiss")) {
-         const dismiss = jobActionButton(job, "dismiss", "Dismiss attention / 消退关注", "quiet-action", () => window.sovereignbot.jobs.dismiss({ jobId: job.id }), "Attention dismissed.");
+         const dismiss = jobActionButton(job, "dismiss", t("attention.dismissAttention", "Dismiss attention"), "quiet-action", () => window.sovereignbot.jobs.dismiss({ jobId: job.id }), "Attention dismissed.");
         actions.append(dismiss);
       }
        card.append(head, details, feedbackNode(job.id), actions);
@@ -408,7 +430,7 @@
       const approve = $("job-detail-approve");
       if (approve) approve.textContent = t("attention.retry", "Retry");
       const dismiss = $("job-detail-dismiss");
-      if (dismiss) dismiss.textContent = "Dismiss attention / 消退关注";
+      if (dismiss) dismiss.textContent = t("attention.dismissAttention", "Dismiss attention");
       $("job-detail-approve")?.classList.toggle("hidden", !canRetry);
       $("job-detail-dismiss")?.classList.toggle("hidden", !canDismiss);
       $("job-detail-pause")?.classList.toggle("hidden", waiting || needs || ["completed","failed","cancelled"].includes(job.status));
@@ -455,25 +477,25 @@
         <header class="page-header"><div><span class="eyebrow" data-i18n="routines.title">Routines</span><h1 data-i18n="routines.title">Routines</h1><p data-i18n="routines.subtitle">Schedule recurring work.</p></div><div style="display:flex;gap:8px;align-items:center"><button id="routine-refresh" class="quiet-action" type="button" data-i18n="action.refresh">Refresh</button><button id="routine-new" class="hero-action" type="button" data-i18n="routines.create">New routine</button></div></header>
         <div id="routine-list" class="workspace-cards"></div>
         <dialog id="routine-dialog" class="modal"><form id="routine-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="routines.create">New routine</span><h2 data-i18n="routines.create">New routine</h2></div><button class="modal-x" data-close-dialog="routine-dialog" type="button">×</button></div>
-          <label><span>Routine template / 例行模板</span><select id="routine-template"><option value="">Start from scratch / 从头开始</option><option value="research">Daily research brief / 每日研究简报</option><option value="review">Weekly review / 每周复盘</option><option value="operations">Daily operations check / 每日运营检查</option><option value="content">Content publishing prep / 内容发布准备</option></select></label>
+          <label><span data-i18n="routines.templateLabel">Routine template</span><select id="routine-template"><option value="" data-i18n="routines.startFromBlank">Start from blank</option><option value="research" data-i18n="routines.templateResearch">Daily research brief</option><option value="review" data-i18n="routines.templateReview">Weekly review</option><option value="operations" data-i18n="routines.templateOperations">Daily operations check</option><option value="content" data-i18n="routines.templateContent">Content publishing prep</option></select></label>
           <label><span data-i18n="routines.name">Name</span><input id="routine-name" maxlength="120" required></label>
           <label><span data-i18n="routines.instruction">Instruction</span><textarea id="routine-instruction" maxlength="8000" rows="4" required></textarea></label>
           <label><span data-i18n="routines.coworker">Coworker</span><select id="routine-owner"></select></label>
-          <label><span>Team / 团队（可选）</span><select id="routine-team"><option value="">No team binding / 不绑定团队</option></select></label>
-          <label><span>Project / 项目（可选）</span><select id="routine-project"><option value="">No project binding / 不绑定项目</option></select></label>
+          <label><span data-i18n="routines.teamOptional">Team (optional)</span><select id="routine-team"><option value="" data-i18n="routines.noTeamBinding">No team binding</option></select></label>
+          <label><span data-i18n="routines.projectOptional">Project (optional)</span><select id="routine-project"><option value="" data-i18n="routines.noProjectBinding">No project binding</option></select></label>
           <label><span data-i18n="routines.skill">Skill</span><select id="routine-skill"></select></label>
           <label><span data-i18n="routines.workspace">Workspace</span><select id="routine-workspace"></select></label>
-          <label><span data-i18n="routines.schedule">Schedule</span><select id="routine-type"><option value="one-time" data-i18n="routines.type.one-time">One-time</option><option value="hourly" data-i18n="routines.type.hourly">Hourly</option><option value="daily" data-i18n="routines.type.daily">Daily</option><option value="weekly" data-i18n="routines.type.weekly">Weekly</option><option value="custom">Custom interval / 自定义间隔</option></select></label>
+          <label><span data-i18n="routines.schedule">Schedule</span><select id="routine-type"><option value="one-time" data-i18n="routines.type.one-time">One-time</option><option value="hourly" data-i18n="routines.type.hourly">Hourly</option><option value="daily" data-i18n="routines.type.daily">Daily</option><option value="weekly" data-i18n="routines.type.weekly">Weekly</option><option value="custom" data-i18n="routines.type.custom">Custom interval</option></select></label>
           <label id="routine-field-at"><span data-i18n="routines.at">Run at</span><input id="routine-at" type="datetime-local"></label>
           <label id="routine-field-minute" class="hidden"><span data-i18n="routines.minute">Minute past the hour</span><input id="routine-minute" type="number" min="0" max="59" value="0"></label>
-          <label id="routine-field-interval" class="hidden"><span>Interval minutes / 间隔分钟</span><input id="routine-interval" type="number" min="1" max="10080" value="60"></label>
+          <label id="routine-field-interval" class="hidden"><span data-i18n="routines.intervalMinutes">Interval minutes</span><input id="routine-interval" type="number" min="1" max="10080" value="60"></label>
           <label id="routine-field-time" class="hidden"><span data-i18n="routines.time">Time</span><input id="routine-time" type="time" value="09:00"></label>
           <label id="routine-field-weekday" class="hidden"><span data-i18n="routines.weekday">Weekday</span><select id="routine-weekday"></select></label>
           <p id="routine-form-error" class="inline-error hidden"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-dialog" type="button" data-i18n="action.cancel">Cancel</button><button class="hero-action" type="submit" data-i18n="routines.create">New routine</button></div>
         </form></dialog>
         <p id="routine-action-status" class="setting-feedback hidden" role="status" aria-live="polite"></p>
         <dialog id="routine-detail-dialog" class="modal"><div class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="routines.history">History</span><h2 id="routine-detail-title">Routine</h2></div><button class="modal-x" data-close-dialog="routine-detail-dialog" type="button">×</button></div><p id="routine-detail-meta" class="setting-feedback"></p><div id="routine-history" class="workspace-cards"></div><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-detail-dialog" type="button" data-i18n="action.close">Close</button></div></div></dialog>
-        <dialog id="routine-remove-dialog" class="modal"><form id="routine-remove-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span class="eyebrow">ROUTINE LIFECYCLE / 例行任务生命周期</span><h2>Remove Routine? / 移除例行任务？</h2></div><button class="modal-x" data-close-dialog="routine-remove-dialog" type="button">×</button></div><p id="routine-remove-name" class="setting-feedback"></p><p id="routine-remove-impact">This permanently removes the Routine and its schedule/history. Use Archive if you may want to restore it later. / 此操作会永久移除例行任务及其计划/历史；如需以后恢复，请使用归档。</p><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-remove-dialog" type="button">Cancel / 取消</button><button id="routine-remove-confirm" class="hero-action" type="submit">Remove Routine / 移除例行任务</button></div></form></dialog>`;
+        <dialog id="routine-remove-dialog" class="modal"><form id="routine-remove-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="routines.removeEyebrow">ROUTINE LIFECYCLE</span><h2 data-i18n="routines.removeTitle">Remove Routine?</h2></div><button class="modal-x" data-close-dialog="routine-remove-dialog" type="button">×</button></div><p id="routine-remove-name" class="setting-feedback"></p><p id="routine-remove-impact" data-i18n="routines.removeImpact">This permanently removes the Routine and its schedule/history. Use Archive if you may want to restore it later.</p><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-remove-dialog" type="button" data-i18n="common.cancel">Cancel</button><button id="routine-remove-confirm" class="hero-action" type="submit" data-i18n="routines.removeConfirm">Remove Routine</button></div></form></dialog>`;
       document.querySelector(".workspace-shell")?.append(section);
     }
     applyRoutineLocale();
@@ -485,7 +507,7 @@
     if ($("routine-execution") || !$("routine-form-error")) return;
     const makeLabel = (caption, control) => { const node = document.createElement("label"); node.textContent = caption; node.append(control); return node; };
     const mode = document.createElement("select"); mode.id = "routine-execution";
-    for (const pair of [["local", "This PC / 此电脑"], ["worker-computer", "Worker Computer / 工作电脑"]]) { const option = document.createElement("option"); option.value = pair[0]; option.textContent = pair[1]; mode.append(option); }
+    for (const [val, key, fallback] of [["local", "work.thisPc", "This PC"], ["worker-computer", "work.workerComputer", "Worker Computer"]]) { const option = document.createElement("option"); option.value = val; option.textContent = t(key, fallback); mode.append(option); }
     const node = document.createElement("select"); node.id = "routine-computer-node";
     const workspace = document.createElement("select"); workspace.id = "routine-computer-workspace";
     const computer = document.createElement("select"); computer.id = "routine-computer";
@@ -511,7 +533,7 @@
     heading.className = "card-heading";
     const copy = document.createElement("div");
     const title = document.createElement("h2");
-    title.textContent = "Routine Template Gallery / 例行模板库";
+    title.textContent = t("routines.templateGallery", "Routine Template Gallery");
     const description = document.createElement("p");
     description.textContent = "Start from a bounded routine template, then review the owner, workspace, and schedule before saving.";
     copy.append(title, description);
@@ -528,7 +550,7 @@
       const use = document.createElement("button");
       use.type = "button";
       use.className = "quiet-action";
-      use.textContent = "Use template / 使用模板";
+      use.textContent = t("routines.useTemplate", "Use template");
       use.addEventListener("click", async () => {
         await populateRoutineForm();
         const selector = $("routine-template");
@@ -550,7 +572,7 @@
       section.className = "main-view settings-view hidden";
       section.innerHTML = `
         <header class="page-header"><div><span class="eyebrow" data-i18n="attention.title">Attention</span><h1 data-i18n="attention.title">Attention</h1><p data-i18n="attention.subtitle">Items that need your decision before work can continue.</p></div><button id="attention-refresh" class="quiet-action" type="button" data-i18n="action.refresh">Refresh</button></header>
-        <div class="settings-card attention-toolbar"><div class="detail-actions"><label>Category / 分类<select id="attention-category-filter" aria-label="Attention category"><option value="all">All categories / 全部分类</option>${ATTENTION_CATEGORIES.map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select></label><label>Show / 显示<select id="attention-visibility-filter" aria-label="Attention visibility"><option value="active">Active / 活跃</option><option value="snoozed">Snoozed / 已稍后处理</option><option value="all">All / 全部</option></select></label><label>Snooze duration / 稍后处理时长<select id="attention-snooze-duration" aria-label="Snooze duration">${SNOOZE_OPTIONS.map(([minutes, label]) => `<option value="${minutes}"${minutes === 60 ? " selected" : ""}>${label}</option>`).join("")}</select></label></div><p class="detail-help">Categories and allowed actions come from the trusted main-process projection. They do not grant permissions or bypass Governor review.</p></div>
+        <div class="settings-card attention-toolbar"><div class="detail-actions"><label><span data-i18n="attention.categoryFilter">Category</span><select id="attention-category-filter" aria-label="Attention category"><option value="all" data-i18n="attention.category.all">All categories</option>${ATTENTION_CATEGORY_CODES.map((code) => `<option value="${code}">${attentionCategoryLabel(code)}</option>`).join("")}</select></label><label><span data-i18n="common.show">Show</span><select id="attention-visibility-filter" aria-label="Attention visibility"><option value="active" data-i18n="state.active">Active</option><option value="snoozed" data-i18n="attention.snoozed">Snoozed</option><option value="all" data-i18n="state.all">All</option></select></label><label><span data-i18n="attention.snoozeDuration">Snooze duration</span><select id="attention-snooze-duration" aria-label="Snooze duration">${SNOOZE_MINUTES.map((minutes) => `<option value="${minutes}"${minutes === 60 ? " selected" : ""}>${snoozeLabel(minutes)}</option>`).join("")}</select></label></div><p class="detail-help" data-i18n="attention.detailHelp">Categories and allowed actions come from the trusted main-process projection. They do not grant permissions or bypass Governor review.</p></div>
         <p id="attention-error" class="inline-error hidden"></p>
         <div id="attention-list" class="workspace-cards"></div>`;
       document.querySelector(".workspace-shell")?.append(section);
@@ -588,7 +610,7 @@
     if (!schedule) return "—";
     if (schedule.type === "one-time") return `${t("routines.type.one-time", "One-time")} · ${new Date(schedule.at).toLocaleString()}`;
     if (schedule.type === "hourly") return `${t("routines.type.hourly", "Hourly")} · :${String(schedule.minute).padStart(2,"0")}`;
-    if (schedule.type === "custom") return `Custom interval / 自定义间隔 · ${schedule.intervalMinutes} min`;
+    if (schedule.type === "custom") return t("routines.customInterval", { minutes: schedule.intervalMinutes });
     if (schedule.type === "daily") return `${t("routines.type.daily", "Daily")} · ${schedule.time}`;
     return `${t("routines.type.weekly", "Weekly")} · ${t(`weekday.${schedule.weekday}`, schedule.weekday)} ${schedule.time}`;
   }
@@ -651,7 +673,7 @@
     const dismiss = document.createElement("button");
     dismiss.type = "button";
     dismiss.className = "quiet-action routine-action-dismiss";
-    dismiss.textContent = "Dismiss / 消退";
+    dismiss.textContent = t("common.dismiss", "Dismiss");
     dismiss.addEventListener("click", () => { setRoutineRunFeedback(routineId, runId); void openRoutineDetail(routineId); });
     row.append(message, dismiss);
     card.append(row);
@@ -671,7 +693,7 @@
     const dismiss = document.createElement("button");
     dismiss.type = "button";
     dismiss.className = "quiet-action routine-action-dismiss";
-    dismiss.textContent = "Dismiss / 消退";
+    dismiss.textContent = t("common.dismiss", "Dismiss");
     dismiss.addEventListener("click", () => { setRoutineActionFeedback(routineId); renderRoutineList(); });
     row.append(message, dismiss);
     card.append(row);
@@ -681,12 +703,12 @@
     if (routineActionPending.has(routineId)) return;
     const routine = routines.find((entry) => entry.id === routineId);
     if (!routine) {
-      setRoutineActionFeedback(routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      setRoutineActionFeedback(routineId, "error", t("routines.noLongerAvailable", "This Routine is no longer available. Refresh and try again."));
       renderRoutineList();
       return;
     }
     if (routine.canRun !== true) {
-      setRoutineActionFeedback(routineId, "error", "This Routine is not currently runnable. Refresh and try again. / 此例行任务当前不可运行，请刷新后重试。");
+      setRoutineActionFeedback(routineId, "error", t("routines.notCurrentlyRunnable", "This Routine is not currently runnable. Refresh and try again."));
       renderRoutineList();
       return;
     }
@@ -695,10 +717,10 @@
     renderRoutineList();
     try {
       await window.sovereignbot.routines.runNow({ routineId });
-      setRoutineActionFeedback(routineId, "success", `Routine started: ${routine.name} / 例行任务已启动：${routine.name}`);
+      setRoutineActionFeedback(routineId, "success", t("routines.started", { name: routine.name }));
       await refreshRoutines();
     } catch (error) {
-      setRoutineActionFeedback(routineId, "error", routineActionError(error, "Routine could not be started. Check its state and try again. / 例行任务未启动，请检查状态后重试。"));
+      setRoutineActionFeedback(routineId, "error", routineActionError(error, t("routines.notStarted", "Routine was not started. Check its state and try again.")));
     } finally {
       routineActionPending.delete(routineId);
       renderRoutineList();
@@ -709,12 +731,12 @@
     if (routineActionPending.has(routineId)) return;
     const routine = routines.find((entry) => entry.id === routineId);
     if (!routine) {
-      setRoutineActionFeedback(routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      setRoutineActionFeedback(routineId, "error", t("routines.noLongerAvailable", "This Routine is no longer available. Refresh and try again."));
       renderRoutineList();
       return;
     }
     if (routine.state !== "archived") {
-      setRoutineActionFeedback(routineId, "error", "This Routine is not archived. Refresh and try again. / 此例行任务未归档，请刷新后重试。");
+      setRoutineActionFeedback(routineId, "error", t("routines.notArchived", "This Routine is not archived. Refresh and try again."));
       renderRoutineList();
       return;
     }
@@ -723,10 +745,10 @@
     renderRoutineList();
     try {
       await window.sovereignbot.routines.restore({ routineId });
-      setRoutineActionFeedback(routineId, "success", `Routine restored: ${routine.name} / 例行任务已恢复：${routine.name}`);
+      setRoutineActionFeedback(routineId, "success", t("routines.restored", { name: routine.name }));
       await refreshRoutines();
     } catch (error) {
-      setRoutineActionFeedback(routineId, "error", routineActionError(error, "Routine could not be restored. Check its state and try again. / 例行任务未恢复，请检查状态后重试。"));
+      setRoutineActionFeedback(routineId, "error", routineActionError(error, t("routines.notRestored", "Routine could not be restored. Check its state and try again.")));
     } finally {
       routineActionPending.delete(routineId);
       renderRoutineList();
@@ -737,12 +759,12 @@
     if (routineActionPending.has(routineId)) return;
     const routine = routines.find((entry) => entry.id === routineId);
     if (!routine) {
-      setRoutineActionFeedback(routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      setRoutineActionFeedback(routineId, "error", t("routines.noLongerAvailable", "This Routine is no longer available. Refresh and try again."));
       renderRoutineList();
       return;
     }
     if (routine.state !== "active") {
-      setRoutineActionFeedback(routineId, "error", "This Routine is not active. Restore it before changing Enable state. / 此例行任务未处于活动状态，请先恢复。");
+      setRoutineActionFeedback(routineId, "error", t("routines.notActive", "This Routine is not active. Restore it before changing status."));
       renderRoutineList();
       return;
     }
@@ -752,10 +774,10 @@
     renderRoutineList();
     try {
       await window.sovereignbot.routines.setEnabled({ routineId, enabled });
-      setRoutineActionFeedback(routineId, "success", enabled ? `Routine enabled: ${routine.name} / 例行任务已启用：${routine.name}` : `Routine disabled: ${routine.name} / 例行任务已停用：${routine.name}`);
+      setRoutineActionFeedback(routineId, "success", enabled ? t("routines.enabledNotice", { name: routine.name }) : t("routines.disabledNotice", { name: routine.name }));
       await refreshRoutines();
     } catch (error) {
-      setRoutineActionFeedback(routineId, "error", routineActionError(error, "Routine Enable state could not be changed. Check its state and try again. / 例行任务启用状态未改变，请检查状态后重试。"));
+      setRoutineActionFeedback(routineId, "error", routineActionError(error, t("routines.enableFailed", "Routine Enable state could not be changed. Check its state and try again.")));
     } finally {
       routineActionPending.delete(routineId);
       renderRoutineList();
@@ -766,12 +788,12 @@
     if (routineActionPending.has(routineId)) return;
     const routine = routines.find((entry) => entry.id === routineId);
     if (!routine) {
-      setRoutineActionFeedback(routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      setRoutineActionFeedback(routineId, "error", t("routines.noLongerAvailable", "This Routine is no longer available. Refresh and try again."));
       renderRoutineList();
       return;
     }
     if (routine.state === "archived") {
-      setRoutineActionFeedback(routineId, "error", "This Routine is already archived. Refresh and try again. / 此例行任务已归档，请刷新后重试。");
+      setRoutineActionFeedback(routineId, "error", t("routines.alreadyArchived", "This Routine is already archived. Refresh and try again."));
       renderRoutineList();
       return;
     }
@@ -780,10 +802,10 @@
     renderRoutineList();
     try {
       await window.sovereignbot.routines.archive({ routineId });
-      setRoutineActionFeedback(routineId, "success", `Routine archived: ${routine.name} / 例行任务已归档：${routine.name}`);
+      setRoutineActionFeedback(routineId, "success", t("routines.archivedNotice", { name: routine.name }));
       await refreshRoutines();
     } catch (error) {
-      setRoutineActionFeedback(routineId, "error", routineActionError(error, "Routine could not be archived. Check its state and try again. / 例行任务未归档，请检查状态后重试。"));
+      setRoutineActionFeedback(routineId, "error", routineActionError(error, t("routines.archiveFailed", "Routine could not be archived. Check its state and try again.")));
     } finally {
       routineActionPending.delete(routineId);
       renderRoutineList();
@@ -794,12 +816,12 @@
     if (routineActionPending.has(routineId)) return;
     const routine = routines.find((entry) => entry.id === routineId);
     if (!routine) {
-      setRoutineActionFeedback(routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      setRoutineActionFeedback(routineId, "error", t("routines.noLongerAvailable", "This Routine is no longer available. Refresh and try again."));
       renderRoutineList();
       return;
     }
     routineRemoveCandidate = { routineId, name: routine.name };
-    $("routine-remove-name").textContent = `Routine: ${routine.name} / 例行任务：${routine.name}`;
+    $("routine-remove-name").textContent = t("routines.labelWithColon", { name: routine.name });
     $("routine-remove-dialog")?.showModal?.();
   }
 
@@ -810,7 +832,7 @@
     if (!candidate || routineActionPending.has(candidate.routineId)) return;
     const routine = routines.find((entry) => entry.id === candidate.routineId);
     if (!routine) {
-      setRoutineActionFeedback(candidate.routineId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      setRoutineActionFeedback(candidate.routineId, "error", t("routines.noLongerAvailable", "This Routine is no longer available. Refresh and try again."));
       renderRoutineList();
       return;
     }
@@ -819,10 +841,10 @@
     renderRoutineList();
     try {
       await window.sovereignbot.routines.remove({ routineId: candidate.routineId });
-      setRoutineActionStatus("success", `Routine removed: ${routine.name} / 例行任务已移除：${routine.name}`);
+      setRoutineActionStatus("success", t("routines.removedNotice", { name: routine.name }));
       await refreshRoutines();
     } catch (error) {
-      setRoutineActionFeedback(candidate.routineId, "error", routineActionError(error, "Routine could not be removed. It was not changed; retry when ready. / 例行任务未移除，状态未改变，请稍后重试。"));
+      setRoutineActionFeedback(candidate.routineId, "error", routineActionError(error, t("routines.removeFailed", "Routine could not be removed. It was not changed; retry when ready.")));
     } finally {
       routineActionPending.delete(candidate.routineId);
       renderRoutineList();
@@ -834,7 +856,7 @@
     if (state.pending || routineActionPending.has(routineId)) return;
     const routine = routines.find((entry) => entry.id === routineId);
     if (!routine) {
-      setRoutineRunFeedback(routineId, runId, "error", "This Routine is no longer available. Refresh and try again. / 此例行任务已不存在，请刷新后重试。");
+      setRoutineRunFeedback(routineId, runId, "error", t("routines.noLongerAvailable", "This Routine is no longer available. Refresh and try again."));
       if (currentRoutineId === routineId) await openRoutineDetail(routineId);
       return;
     }
@@ -844,9 +866,9 @@
     syncRoutineHistoryActionState();
     try {
       await window.sovereignbot.routines.retry({ routineId, runId });
-      setRoutineRunFeedback(routineId, runId, "success", `Routine run retry requested: ${routine.name} / 已请求重试例行运行：${routine.name}`);
+      setRoutineRunFeedback(routineId, runId, "success", t("routines.retryRequested", { name: routine.name }));
     } catch (error) {
-      setRoutineRunFeedback(routineId, runId, "error", routineActionError(error, "Routine run could not be retried. Check its state and try again. / 例行运行未能重试，请检查状态后重试。"));
+      setRoutineRunFeedback(routineId, runId, "error", routineActionError(error, t("routines.retryFailed", "Routine run could not be retried. Check its state and try again.")));
     } finally {
       state.pending = false;
       renderRoutineList();
@@ -866,7 +888,7 @@
       const card = document.createElement("div"); card.className = "job-card";
       const head = document.createElement("div"); head.className = "job-card-head";
       const title = document.createElement("strong"); title.textContent = routine.name;
-      const badge = document.createElement("span"); badge.className = `job-status ${routine.state === "archived" ? "failed" : routine.enabled ? "completed" : "waiting"}`; badge.textContent = routine.state === "archived" ? "Archived / 已归档" : routine.enabled ? t("routines.enabled", "Enabled") : t("routines.disabled", "Disabled");
+      const badge = document.createElement("span"); badge.className = `job-status ${routine.state === "archived" ? "failed" : routine.enabled ? "completed" : "waiting"}`; badge.textContent = routine.state === "archived" ? t("routines.stateArchived", "Archived") : routine.enabled ? t("routines.enabled", "Enabled") : t("routines.disabled", "Disabled");
       head.append(title, badge);
       const meta = document.createElement("div"); meta.className = "setting-feedback"; meta.style.margin = "0";
       const next = routine.nextRunAt ? new Date(routine.nextRunAt).toLocaleString() : "—";
@@ -874,17 +896,17 @@
       const actions = document.createElement("div"); actions.style.cssText = "display:flex;gap:6px;flex-wrap:wrap";
       const actionPending = routineActionPending.has(routine.id) || routineHistoryPending(routine.id);
       const open = document.createElement("button"); open.className = "quiet-action"; open.type = "button"; open.textContent = t("routines.history", "History"); open.disabled = actionPending; open.addEventListener("click", () => openRoutineDetail(routine.id));
-      const remove = document.createElement("button"); remove.className = "quiet-action"; remove.type = "button"; remove.textContent = actionPending ? "Removing… / 移除中…" : t("routines.remove", "Remove"); remove.disabled = actionPending; remove.addEventListener("click", () => openRoutineRemoveDialog(routine.id));
-      const runNow = document.createElement("button"); runNow.className = "hero-action"; runNow.type = "button"; runNow.textContent = actionPending ? "Working… / 处理中…" : "Run now / 立即运行"; runNow.disabled = actionPending || routine.canRun !== true; runNow.addEventListener("click", () => void runRoutineFromCard(routine.id));
+      const remove = document.createElement("button"); remove.className = "quiet-action"; remove.type = "button"; remove.textContent = actionPending ? t("common.deleting", "Removing…") : t("routines.remove", "Remove"); remove.disabled = actionPending; remove.addEventListener("click", () => openRoutineRemoveDialog(routine.id));
+      const runNow = document.createElement("button"); runNow.className = "hero-action"; runNow.type = "button"; runNow.textContent = actionPending ? t("common.working", "Working…") : t("routines.runNow", "Run now"); runNow.disabled = actionPending || routine.canRun !== true; runNow.addEventListener("click", () => void runRoutineFromCard(routine.id));
       const consumedOneTime = routine.schedule?.type === "one-time" && Boolean(routine.lastRunAt);
       actions.append(open, runNow);
       if (routine.state === "archived") {
-        const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = actionPending ? "Restoring… / 恢复中…" : "Restore / 恢复"; restore.disabled = actionPending; restore.addEventListener("click", () => void restoreRoutineFromCard(routine.id)); actions.append(restore);
+        const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = actionPending ? t("common.working", "Restoring…") : t("common.restore", "Restore"); restore.disabled = actionPending; restore.addEventListener("click", () => void restoreRoutineFromCard(routine.id)); actions.append(restore);
       } else if (!consumedOneTime) {
-        const toggle = document.createElement("button"); toggle.className = "quiet-action"; toggle.type = "button"; toggle.textContent = actionPending ? "Updating… / 更新中…" : routine.enabled ? t("routines.disable", "Disable") : t("routines.enable", "Enable"); toggle.disabled = actionPending; toggle.addEventListener("click", () => void toggleRoutineFromCard(routine.id));
+        const toggle = document.createElement("button"); toggle.className = "quiet-action"; toggle.type = "button"; toggle.textContent = actionPending ? t("common.working", "Updating…") : routine.enabled ? t("routines.disable", "Disable") : t("routines.enable", "Enable"); toggle.disabled = actionPending; toggle.addEventListener("click", () => void toggleRoutineFromCard(routine.id));
         actions.append(toggle);
       }
-      if (routine.state !== "archived") { const archive = document.createElement("button"); archive.className = "quiet-action"; archive.type = "button"; archive.textContent = actionPending ? "Updating… / 更新中…" : "Archive / 归档"; archive.disabled = actionPending; archive.addEventListener("click", () => void archiveRoutineFromCard(routine.id)); actions.append(archive); }
+      if (routine.state !== "archived") { const archive = document.createElement("button"); archive.className = "quiet-action"; archive.type = "button"; archive.textContent = actionPending ? t("common.working", "Updating…") : t("common.archive", "Archive"); archive.disabled = actionPending; archive.addEventListener("click", () => void archiveRoutineFromCard(routine.id)); actions.append(archive); }
       actions.append(remove);
       card.append(head, meta, actions); appendRoutineActionFeedback(card, routine.id); root.append(card);
     }
@@ -914,7 +936,7 @@
         const line = document.createElement("div"); line.textContent = `${new Date(run.scheduledFor).toLocaleString()} · ${run.status}${runError ? ` · ${runError}` : ""}`;
         card.append(line);
         if (run.jobId) { const btn = document.createElement("button"); btn.className = "quiet-action"; btn.type = "button"; btn.textContent = `${t("action.open", "Open")} ${t("routines.job", "Job")}`; btn.addEventListener("click", async () => { $("routine-detail-dialog")?.close(); await openDetail(run.jobId); }); card.append(btn); }
-        if (run.jobId && ["waiting", "needs_attention"].includes(run.status) && routine.state !== "archived") { const retry = document.createElement("button"); retry.className = "hero-action"; retry.type = "button"; retry.textContent = routineRunState(routineId, run.id).pending ? "Retrying… / 重试中…" : "Retry / 重试"; retry.dataset.routineHistoryRetry = "true"; retry.dataset.routineId = routineId; retry.dataset.runId = run.id; retry.disabled = routineActionPending.has(routineId) || routineRunState(routineId, run.id).pending; retry.addEventListener("click", () => { void retryRoutineRun(routineId, run.id); }); card.append(retry); }
+        if (run.jobId && ["waiting", "needs_attention"].includes(run.status) && routine.state !== "archived") { const retry = document.createElement("button"); retry.className = "hero-action"; retry.type = "button"; retry.textContent = routineRunState(routineId, run.id).pending ? t("common.working", "Retrying…") : t("common.retry", "Retry"); retry.dataset.routineHistoryRetry = "true"; retry.dataset.routineId = routineId; retry.dataset.runId = run.id; retry.disabled = routineActionPending.has(routineId) || routineRunState(routineId, run.id).pending; retry.addEventListener("click", () => { void retryRoutineRun(routineId, run.id); }); card.append(retry); }
         appendRoutineRunFeedback(card, routineId, run.id);
         root.append(card);
       }
@@ -923,7 +945,7 @@
     } catch (error) {
       if (request === routineDetailRequest && currentRoutineId === routineId) {
         const meta = $("routine-detail-meta");
-        if (meta) meta.textContent = routineActionError(error, "Routine history is unavailable. Refresh and try again. / 例行历史暂不可用，请刷新后重试。");
+        if (meta) meta.textContent = routineActionError(error, t("routines.historyUnavailable", "Routine history is unavailable. Refresh and try again."));
       }
     }
   }
@@ -968,9 +990,9 @@
     for (const item of skills?.skills ?? []) { const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.name; skill.append(opt); }
     const ws = $("routine-workspace"); ws.textContent = "";
     const def = document.createElement("option"); def.value = ""; def.textContent = t("routines.defaultWorkspace", "Coworker default"); ws.append(def);
-    for (const item of workspaces?.workspaces ?? []) { const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.kind === "shared-project" ? "Shared project workspace / 共享项目工作区" : item.label || "Private workspace / 私有工作区"; ws.append(opt); }
-    const team = $("routine-team"); team.textContent = ""; const noTeam = document.createElement("option"); noTeam.value = ""; noTeam.textContent = "No team binding / 不绑定团队"; team.append(noTeam); for (const item of teams?.teams ?? []) { if (item.state === "archived") continue; const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.name; team.append(opt); }
-    const project = $("routine-project"); project.textContent = ""; const noProject = document.createElement("option"); noProject.value = ""; noProject.textContent = "No project binding / 不绑定项目"; project.append(noProject); for (const item of projects?.projects ?? []) { if (item.state === "archived") continue; const opt = document.createElement("option"); opt.value = item.projectId; opt.textContent = item.name; project.append(opt); }
+    for (const item of workspaces?.workspaces ?? []) { const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.kind === "shared-project" ? t("work.sharedProjectWorkspace", "Shared project workspace") : item.label || t("work.privateWorkspace", "Private workspace"); ws.append(opt); }
+    const team = $("routine-team"); team.textContent = ""; const noTeam = document.createElement("option"); noTeam.value = ""; noTeam.textContent = t("routines.noTeamBinding", "No team binding"); team.append(noTeam); for (const item of teams?.teams ?? []) { if (item.state === "archived") continue; const opt = document.createElement("option"); opt.value = item.id; opt.textContent = item.name; team.append(opt); }
+    const project = $("routine-project"); project.textContent = ""; const noProject = document.createElement("option"); noProject.value = ""; noProject.textContent = t("routines.noProjectBinding", "No project binding"); project.append(noProject); for (const item of projects?.projects ?? []) { if (item.state === "archived") continue; const opt = document.createElement("option"); opt.value = item.projectId; opt.textContent = item.name; project.append(opt); }
     const inOneHour = new Date(Date.now() + 3600_000); const local = new Date(inOneHour.getTime() - inOneHour.getTimezoneOffset() * 60000).toISOString().slice(0,16); $("routine-at").value = local;
     $("routine-minute").value = String(new Date().getMinutes());
     showScheduleFields();

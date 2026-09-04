@@ -30,9 +30,9 @@ test("P31 event bridge reuses the structured editor and native file exporter", (
 
 test("P31 dedicated Team Pack entry keeps first-party read-only and custom Duplicate/Edit affordances", () => {
   const page = source.slice(source.indexOf("function packs(items)"), source.indexOf("function channels(items)"));
-  assert.match(page, /button\("Duplicate \/ 复制"/);
-  assert.match(page, /if \(item\.custom\).*Edit recipe \/ 编辑配方/);
-  assert.match(page, /button\("Export \/ 导出", \(\) => exportPackToFile\(item\)/);
+  assert.match(page, /button\((?:"Duplicate \/ 复制"|t\("common\.duplicate"\))/);
+  assert.match(page, /if \(item\.custom\).*(?:Edit recipe \/ 编辑配方|t\("teamPacks\.editRecipe"\))/);
+  assert.match(page, /button\((?:"Export \/ 导出"|t\("common\.export"\)), \(\) => exportPackToFile\(item\)/);
 });
 
 test("P31 dedicated gallery probes stay scoped to the dedicated page root", () => {

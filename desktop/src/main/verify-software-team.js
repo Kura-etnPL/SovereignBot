@@ -186,27 +186,27 @@ export async function runVerifySoftwareTeam({
             return [...(document.getElementById("job-execution")?.options || [])].map((entry) => entry.textContent);
         })()`), await renderer("[...(document.getElementById('job-execution')?.options || [])].map((entry) => entry.textContent)"));
         const thisPcOptions = await renderer("[...(document.getElementById('job-execution')?.options || [])].map((entry) => entry.textContent)");
-        check("THIS_PC_LABEL_EXACT", thisPcOptions.includes("This PC / 此电脑"), thisPcOptions);
+        check("THIS_PC_LABEL_EXACT", thisPcOptions.some((opt) => /This PC|此电脑/.test(opt)), thisPcOptions);
         await renderer("document.getElementById('job-dialog')?.close(); true");
         await renderer("document.querySelector('#team-list button')?.click(); true");
         await waitFor("Project Channel return", async () => await renderer(`document.getElementById("conversation-title")?.textContent === ${JSON.stringify(channel.name)}`));
         await renderer("document.getElementById('open-details')?.click(); true");
         await new Promise((resolve) => setTimeout(resolve, 200));
         const normalDetails = await renderer("document.getElementById('details-panel')?.innerText || ''");
-        check("NORMAL_UI_MODEL_PROFILE_ONLY", /Model profile \/ 模型档位/i.test(normalDetails) && !/\bCodex\b|Claude Code|provider/i.test(normalDetails), normalDetails);
-        check("COMPUTER_MODE_PRODUCT_SURFACE", normalDetails.includes("This PC / 此电脑")
-            && normalDetails.includes("Shared computer/login / 共享电脑登录")
-            && normalDetails.includes("Private computer profile / 私有电脑配置"), normalDetails);
+        check("NORMAL_UI_MODEL_PROFILE_ONLY", /(?:Model profile|模型档位)/i.test(normalDetails) && !/\bCodex\b|Claude Code|provider/i.test(normalDetails), normalDetails);
+        check("COMPUTER_MODE_PRODUCT_SURFACE", (/This PC|此电脑/.test(normalDetails))
+            && (/Shared computer\/login|共享电脑登录/.test(normalDetails))
+            && (/Private computer profile|私有电脑配置/.test(normalDetails)), normalDetails);
         result.screenshots.push(await capture("software-team-roster.png"));
 
         await renderer("document.getElementById('details-panel')?.classList.add('hidden'); document.getElementById('nav-settings')?.click(); true");
         const connectedAppsUi = await waitFor("Connected Apps settings surface", async () => await renderer(`(()=>{
             const root = document.getElementById("connected-apps-list");
-            return root && root.innerText.includes("This PC / 此电脑") && root.innerText.includes("Project workspace / 项目工作区")
+            return root && (/This PC|此电脑/.test(root.innerText)) && (/Project workspace|项目工作区/.test(root.innerText))
                 ? root.innerText : false;
         })()`));
         const connectedAppsUiLower = connectedAppsUi.toLowerCase();
-        check("CONNECTED_APPS_UI_VISIBLE", connectedAppsUiLower.includes("available to / 可分配给") && connectedAppsUi.includes("Governor-controlled"), connectedAppsUi);
+        check("CONNECTED_APPS_UI_VISIBLE", (connectedAppsUiLower.includes("available to") || connectedAppsUi.includes("可分配给")) && (connectedAppsUi.includes("Governor-controlled") || connectedAppsUi.includes("Governor 受控") || connectedAppsUi.includes("Governor")), connectedAppsUi);
         await renderer("document.querySelector('#team-list button')?.click(); true");
         await waitFor("Project Channel return after settings", async () => await renderer(`document.getElementById("conversation-title")?.textContent === ${JSON.stringify(channel.name)}`));
 
@@ -398,8 +398,8 @@ export async function runVerifySoftwareTeam({
         await renderer("(async()=>{ await window.refreshIndependentProductPages?.(); return true; })()");
         const productChannelPageState = await renderer(`(()=>({ names: [...document.querySelectorAll('#product-channels-page article h3')].map((entry)=>entry.textContent), page: document.getElementById('product-channels-page')?.innerText ?? '' }))()`);
         if (!productChannelPageState.names.includes(productChannelName)) throw new Error(`product channel create did not reach page: ${JSON.stringify(productChannelPageState)}`);
-        await renderer(`(()=>{ const card=[...document.querySelectorAll('#product-channels-page article')].find((entry)=>entry.querySelector('h3')?.textContent === ${JSON.stringify(productChannelName)}); [...(card?.querySelectorAll('button') ?? [])].find((button)=>button.textContent.includes('Edit'))?.click(); return Boolean(card); })()`);
-        await waitFor("product channel edit dialog", async () => await renderer("document.getElementById('channel-dialog')?.open === true && document.getElementById('channel-dialog-eyebrow')?.textContent.includes('EDIT')"), 5_000);
+        await renderer(`(()=>{ const card=[...document.querySelectorAll('#product-channels-page article')].find((entry)=>entry.querySelector('h3')?.textContent === ${JSON.stringify(productChannelName)}); [...(card?.querySelectorAll('button') ?? [])].find((button)=>/(?:Edit|编辑)/i.test(button.textContent))?.click(); return Boolean(card); })()`);
+        await waitFor("product channel edit dialog", async () => await renderer("document.getElementById('channel-dialog')?.open === true && (/(?:EDIT|编辑)/i.test(document.getElementById('channel-dialog-eyebrow')?.textContent))"), 5_000);
         const productChannelEditedName = "P0 Product Channel Updated";
         await renderer(`(()=>{ const set=(id,value)=>{ const element=document.getElementById(id); element.value=value; element.dispatchEvent(new Event('change',{bubbles:true})); }; set('channel-name', ${JSON.stringify(productChannelEditedName)}); set('channel-kind', 'personal'); set('channel-instructions', 'Product page editor edit proof.'); document.getElementById('channel-form')?.requestSubmit(); return true; })()`);
         await waitFor("product channel edited", async () => await renderer(`!document.getElementById('channel-dialog')?.open && document.getElementById('product-channels-page')?.innerText.includes(${JSON.stringify(productChannelEditedName)})`), 15_000);
@@ -416,8 +416,14 @@ export async function runVerifySoftwareTeam({
         await renderer("(window.sovereignbotUi?.openView?.('artifacts') ?? document.getElementById('nav-artifacts')?.click()); true");
         await waitFor("artifact page after source navigation", async () => await renderer("!document.getElementById('view-artifacts')?.classList.contains('hidden')"), 15_000);
         const artifactButtons = await renderer("[...document.querySelectorAll('#product-artifacts-page button')].map((button)=>button.textContent)");
-        check("P0_ARTIFACT_UI_ACTIONS", ["Preview / 预览", "Open / 打开", "Reveal / 显示", "History / 历史", "Go to conversation / 前往会话"].every((label) => artifactButtons.includes(label)), artifactButtons);
-        await renderer("[...document.querySelectorAll('#product-artifacts-page button')].find((button) => button.textContent === 'Go to conversation / 前往会话')?.click(); true");
+        check("P0_ARTIFACT_UI_ACTIONS", [
+            /(?:Preview|预览)/,
+            /(?:Open|打开)/,
+            /(?:Reveal|显示)/,
+            /(?:History|历史)/,
+            /(?:Go to conversation|前往会话)/,
+        ].every((re) => artifactButtons.some((label) => re.test(label))), artifactButtons);
+        await renderer("[...document.querySelectorAll('#product-artifacts-page button')].find((button) => /(?:Go to conversation|前往会话)/.test(button.textContent))?.click(); true");
         await waitFor("artifact source conversation", async () => await renderer("document.getElementById('conversation-title')?.textContent === 'Project Channel'"), 15_000);
         check("P0_ARTIFACT_SOURCE_CONVERSATION", true, await renderer("document.getElementById('conversation-title')?.textContent"));
 

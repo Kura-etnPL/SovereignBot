@@ -4,6 +4,7 @@
   const api = window.sovereignbot;
   if (!api?.playbooks || !api?.artifacts?.hub || !api?.computer?.history || !api?.connectedApps || typeof api.connectedApps.list !== "function" || typeof api.connectedApps.search !== "function") return;
   const $ = (id) => document.getElementById(id);
+  const t = (key, params) => globalThis.SovereignI18n?.t(key, params) ?? key;
   const clear = (node) => { if (node) node.textContent = ""; };
   const button = (label, fn, className = "quiet-action") => { const b = document.createElement("button"); b.type = "button"; b.className = className; b.textContent = label; b.addEventListener("click", () => void fn(b)); return b; };
   const line = (label, value) => { const span = document.createElement("span"); span.textContent = `${label}: ${value ?? "—"}`; return span; };
@@ -17,19 +18,19 @@
       const h = document.createElement("h3"); h.textContent = item.name; card.append(h);
       card.append(line("Description", item.description), line("Steps", (item.steps ?? []).join(" → ")), line("Assigned teams", (item.assignedTeams ?? []).map((x) => x.name).join(", ") || "None"), line("Assigned channels", (item.assignedChannels ?? []).map((x) => x.name).join(", ") || "None"), line("Updated", item.updatedAt));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Export / 导出", async () => { const result = await api.playbooks.exportViaDialog({ playbookId: item.id }); const status = $("playbook-file-result"); if (status) status.textContent = result.canceled ? "Export canceled." : "Exported " + result.fileName + "."; }));
-      actions.append(button("Create Routine / 创建例行", () => document.dispatchEvent(new CustomEvent("sovereignbot:create-routine-from-source", { detail: { name: `Routine · ${item.name}`, instruction: item.description || item.steps.join("; "), teamId: item.assignedTeams[0]?.id } }))));
-      actions.append(button("Duplicate / 复制", async () => { await api.playbooks.duplicate({ playbookId: item.id }); await refresh(); }));
-      actions.append(button(item.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (item.state === "archived" ? api.playbooks.restore : api.playbooks.archive)({ playbookId: item.id }); await refresh(); }));
-      actions.append(button("Edit / 编辑", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-playbook-editor", { detail: { item } }))));
+      actions.append(button(t("common.export"), async () => { const result = await api.playbooks.exportViaDialog({ playbookId: item.id }); const status = $("playbook-file-result"); if (status) status.textContent = result.canceled ? "Export canceled." : "Exported " + result.fileName + "."; }));
+      actions.append(button(t("skills.createRoutine"), () => document.dispatchEvent(new CustomEvent("sovereignbot:create-routine-from-source", { detail: { name: `Routine · ${item.name}`, instruction: item.description || item.steps.join("; "), teamId: item.assignedTeams[0]?.id } }))));
+      actions.append(button(t("common.duplicate"), async () => { await api.playbooks.duplicate({ playbookId: item.id }); await refresh(); }));
+      actions.append(button(item.state === "archived" ? t("common.restore") : t("common.archive"), async () => { await (item.state === "archived" ? api.playbooks.restore : api.playbooks.archive)({ playbookId: item.id }); await refresh(); }));
+      actions.append(button(t("common.edit"), () => document.dispatchEvent(new CustomEvent("sovereignbot:open-playbook-editor", { detail: { item } }))));
       const teamSelect = document.createElement("select"); for (const team of teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = `Team: ${team.name}`; teamSelect.append(option); }
       const channelSelect = document.createElement("select"); for (const team of teams) for (const channel of team.channels ?? []) { const option = document.createElement("option"); option.value = channel.id; option.textContent = `Channel: ${channel.name}`; channelSelect.append(option); }
-      if (item.state !== "archived" && teams.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.playbooks.assign({ playbookId: item.id, teamId: teamSelect.value }); await refresh(); }));
-      if (item.state !== "archived" && channelSelect.options.length) actions.append(channelSelect, button("Assign Channel / 分配频道", async () => { await api.playbooks.assign({ playbookId: item.id, channelId: channelSelect.value }); await refresh(); }));
+      if (item.state !== "archived" && teams.length) actions.append(teamSelect, button(t("teamPacks.assignTeam"), async () => { await api.playbooks.assign({ playbookId: item.id, teamId: teamSelect.value }); await refresh(); }));
+      if (item.state !== "archived" && channelSelect.options.length) actions.append(channelSelect, button(t("teamPacks.assignChannel"), async () => { await api.playbooks.assign({ playbookId: item.id, channelId: channelSelect.value }); await refresh(); }));
       card.append(actions); root.append(card);
     }
     if (!items.length) { const p = document.createElement("p"); p.textContent = "No playbooks yet. Create the first team method."; root.append(p); }
-    root.append(button("Import / 导入", async () => { const result = await api.playbooks.importViaDialog({}); const status = $("playbook-file-result"); if (result.canceled) { if (status) status.textContent = "Import canceled."; return; } await refresh(); if (status) status.textContent = "Imported " + result.fileName + "."; }));
+    root.append(button(t("common.import"), async () => { const result = await api.playbooks.importViaDialog({}); const status = $("playbook-file-result"); if (result.canceled) { if (status) status.textContent = "Import canceled."; return; } await refresh(); if (status) status.textContent = "Imported " + result.fileName + "."; }));
   }
   function renderArtifacts(items) {
     const root = $("product-artifacts"); clear(root);
@@ -38,10 +39,10 @@
       const h = document.createElement("h3"); h.textContent = item.title || item.fileName; card.append(h);
       card.append(line("Type", item.mimeType), line("Creator", item.creator?.name), line("Team", item.team?.name), line("Channel", item.channel?.name), line("Created", item.createdAt), line("Status", item.status));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Open preview / 预览", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-artifact-preview", { detail: { item } }))));
-      actions.append(button("Open / 打开", async () => { try { await api.artifacts.open({ artifactId: item.id }); } catch (e) { error(root, e); } }));
-      actions.append(button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id })));
-      if (item.conversationId && typeof openConversation === "function") actions.append(button("Go to conversation / 回到会话", () => openConversation(item.conversationId)));
+      actions.append(button(t("projects.openPreview"), () => document.dispatchEvent(new CustomEvent("sovereignbot:open-artifact-preview", { detail: { item } }))));
+      actions.append(button(t("common.open"), async () => { try { await api.artifacts.open({ artifactId: item.id }); } catch (e) { error(root, e); } }));
+      actions.append(button(t("common.reveal"), () => api.artifacts.reveal({ artifactId: item.id })));
+      if (item.conversationId && typeof openConversation === "function") actions.append(button(t("common.goToConversation"), () => openConversation(item.conversationId)));
       card.append(actions); root.append(card);
     }
     if (!items.length) { const p = document.createElement("p"); p.textContent = "No artifacts yet."; root.append(p); }
@@ -64,7 +65,7 @@
       switcher.textContent = "";
       const placeholder = document.createElement("option");
       placeholder.value = "";
-      placeholder.textContent = "Quick switch / 快速切换";
+      placeholder.textContent = t("channels.quickSwitch");
       switcher.append(placeholder);
       for (const channel of items.filter((entry) => !entry.archived)) {
         const option = document.createElement("option");
@@ -91,12 +92,12 @@
       const title = document.createElement("h3");
       title.textContent = channel.name;
       const meta = document.createElement("p");
-      meta.textContent = `${team?.name ?? "Team"} · ${channel.kind} · ${channel.archived ? "Read-only / 只读" : "Available / 可用"}`;
+      meta.textContent = `${team?.name ?? "Team"} · ${channel.kind} · ${channel.archived ? t("state.readOnly") : t("state.available")}`;
       heading.append(title, meta);
       if (conversationUnread(conversation)) {
         const unread = document.createElement("span");
         unread.className = "soft-pill";
-        unread.textContent = "Unread / 未读";
+        unread.textContent = t("channels.unread");
         heading.append(unread);
       }
       card.append(heading);
@@ -105,15 +106,15 @@
       if (conversation?.lastMessage?.textPreview) card.append(line("Latest", conversation.lastMessage.textPreview));
       const actions = document.createElement("div");
       actions.className = "detail-actions";
-      actions.append(button(channel.archived ? "View / 查看" : "Open / 打开", () => {
+      actions.append(button(channel.archived ? t("common.view") : t("common.open"), () => {
         if (channel.conversationId && typeof openConversation === "function") void openConversation(channel.conversationId);
       }));
-      actions.append(button("Duplicate / 复制", async () => {
+      actions.append(button(t("common.duplicate"), async () => {
         await api.channels.create({ teamId: channel.teamId, name: `${channel.name} copy`.slice(0, 120), kind: channel.kind, instructions: channel.instructions, workspaceId: channel.workspaceId, playbookId: channel.playbookId });
         if (typeof refreshConversations === "function" && typeof refreshTeams === "function") await Promise.all([refreshConversations(), refreshTeams()]);
         await refresh();
       }));
-      actions.append(button(channel.archived ? "Restore / 恢复" : "Archive / 归档", async () => {
+      actions.append(button(channel.archived ? t("common.restore") : t("common.archive"), async () => {
         await (channel.archived ? api.channels.restore : api.channels.archive)({ channelId: channel.id });
         if (typeof refreshConversations === "function" && typeof refreshTeams === "function") await Promise.all([refreshConversations(), refreshTeams()]);
         await refresh();
@@ -136,7 +137,7 @@
   function renderSkills(items) {
     const root = $("product-skills"); clear(root);
     for (const item of items) { const card = document.createElement("article"); card.className = "settings-card"; const h = document.createElement("h3"); h.textContent = item.name; card.append(h, line("Status", item.state), line("Assigned", item.assignedTeamIds.length ? "Team" : "Not assigned")); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(button("Export", async () => copy(await api.skills.export({ skillId: item.id })))); actions.append(button("Duplicate", async () => { await api.skills.duplicate({ skillId: item.id }); await refresh(); })); card.append(actions); root.append(card); }
-    root.append(button("Import skill / 导入技能", async () => { await api.skills.importViaDialog({}); await refresh(); }));
+    root.append(button(t("skills.import"), async () => { await api.skills.importViaDialog({}); await refresh(); }));
   }
   function renderConnectedApps(items, teams, coworkers, projects) {
     const root = $("product-connected-apps"); if (!root) return; clear(root);
@@ -149,17 +150,17 @@
       const card = document.createElement("article"); card.className = "settings-card";
       const h = document.createElement("h3"); h.textContent = item.name; card.append(h, line("Connection", item.connection?.state), line("Health", `${item.health?.state ?? item.state} · ${item.health?.summary ?? ""}`), line("Capabilities", (item.capabilities ?? []).join(" · ")), line("Approval", item.approval?.summary || "Governor-controlled"));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      if (item.connectionState === "connected") actions.append(button("Disconnect / 断开", async () => { try { await api.connectedApps.disconnect({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}) }); await refresh(); } catch (e) { error(root, e); } }));
-      else actions.append(button("Connect / 连接", async () => { try { await api.connectedApps.connect({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}) }); await refresh(); } catch (e) { error(root, e); } }));
+      if (item.connectionState === "connected") actions.append(button(t("apps.disconnect"), async () => { try { await api.connectedApps.disconnect({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}) }); await refresh(); } catch (e) { error(root, e); } }));
+      else actions.append(button(t("apps.connect"), async () => { try { await api.connectedApps.connect({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}) }); await refresh(); } catch (e) { error(root, e); } }));
       const teamSelect = document.createElement("select"); teamSelect.setAttribute("aria-label", "Team for " + item.name);
       for (const team of visibleTeams) { const option = document.createElement("option"); option.value = team.id; option.textContent = "Team: " + team.name; teamSelect.append(option); }
-      if (teamSelect.options.length) actions.append(teamSelect, button("Assign team / 分配团队", async () => { try { await api.connectedApps.assign({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}), teamId: teamSelect.value, enabled: !item.assignedTeamIds.includes(teamSelect.value) }); await refresh(); } catch (e) { error(root, e); } }));
+      if (teamSelect.options.length) actions.append(teamSelect, button(t("teamPacks.assignTeam"), async () => { try { await api.connectedApps.assign({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}), teamId: teamSelect.value, enabled: !item.assignedTeamIds.includes(teamSelect.value) }); await refresh(); } catch (e) { error(root, e); } }));
       const coworkerSelect = document.createElement("select"); coworkerSelect.setAttribute("aria-label", "Coworker for " + item.name);
       for (const coworker of visibleCoworkers) { const option = document.createElement("option"); option.value = coworker.id; option.textContent = "Coworker: " + coworker.name; coworkerSelect.append(option); }
-      if (coworkerSelect.options.length) actions.append(coworkerSelect, button("Assign coworker / 分配同事", async () => { try { await api.connectedApps.assign({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}), coworkerId: coworkerSelect.value, enabled: !item.assignedCoworkerIds.includes(coworkerSelect.value) }); await refresh(); } catch (e) { error(root, e); } }));
+      if (coworkerSelect.options.length) actions.append(coworkerSelect, button(t("skills.assignCoworker"), async () => { try { await api.connectedApps.assign({ appId: item.id, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}), coworkerId: coworkerSelect.value, enabled: !item.assignedCoworkerIds.includes(coworkerSelect.value) }); await refresh(); } catch (e) { error(root, e); } }));
       card.append(actions); root.append(card);
     }
-    if (!items.length) { const p = document.createElement("p"); p.textContent = "No connected apps available. / 暂无可用连接。"; root.append(p); }
+    if (!items.length) { const p = document.createElement("p"); p.textContent = t("apps.noneAvailable"); root.append(p); }
   }
   function renderPacks(items) {
     const query = $("team-pack-search")?.value.trim().toLowerCase() ?? "";
@@ -171,9 +172,9 @@
       card.append(h, line("Contents", `${item.coworkerNames?.length ?? 0} coworkers · ${item.channelNames?.length ?? 0} channels · ${item.playbookNames?.length ?? 0} playbooks`), line("Status", item.installed ? "Installed" : "Available"));
       const actions = document.createElement("div"); actions.className = "detail-actions";
       if (!item.installed) actions.append(button("Install", async () => { await api.teams.installPack({ packId: item.id }); await refresh(); }));
-      actions.append(button("Export / 导出", () => document.dispatchEvent(new CustomEvent("sovereignbot:export-team-pack", { detail: { item } }))));
-      actions.append(button("Duplicate / 复制", async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); }));
-      if (item.custom) actions.append(button("Edit recipe / 编辑配方", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-team-pack-editor", { detail: { item } }))));
+      actions.append(button(t("common.export"), () => document.dispatchEvent(new CustomEvent("sovereignbot:export-team-pack", { detail: { item } }))));
+      actions.append(button(t("common.duplicate"), async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); }));
+      if (item.custom) actions.append(button(t("teamPacks.editRecipe"), () => document.dispatchEvent(new CustomEvent("sovereignbot:open-team-pack-editor", { detail: { item } }))));
       card.append(actions); root.append(card);
     }
   }
@@ -186,7 +187,7 @@
     if (!workspaces.length) {
       const option = document.createElement("option");
       option.value = "";
-      option.textContent = "No trusted workspaces / 暂无可信工作区";
+      option.textContent = t("workspaces.noneTrusted");
       select.append(option);
       select.disabled = true;
       return;
@@ -196,8 +197,8 @@
       const option = document.createElement("option");
       option.value = workspace.id;
       option.textContent = workspace.kind === "shared-project"
-        ? "Shared project workspace / 共享项目工作区"
-        : workspace.label || "Private workspace / 私有工作区";
+        ? t("details.workspaceShared")
+        : workspace.label || t("details.workspacePrivate");
       select.append(option);
     }
     if ([...select.options].some((option) => option.value === selected)) select.value = selected;
@@ -216,14 +217,14 @@
       const scope = channels.get(event.conversationId);
       const conversation = (conversations ?? []).find((entry) => entry.id === event.conversationId);
       const summary = event.kind === "handoff.requested" && event.targetCoworker
-        ? `Handoff to ${event.targetCoworker} / 交接给 ${event.targetCoworker}`
-        : event.kind === "work.completed" ? "Result ready / 结果已就绪"
-          : event.kind === "handoff.blocked" ? "Needs attention / 需要处理"
-            : event.kind === "run.stopped" ? "Work stopped / 工作已停止"
-              : event.kind === "run.started" ? "Work started / 工作已开始" : "Team activity / 团队动态";
+        ? t("activity.handoffTo", { name: event.targetCoworker })
+        : event.kind === "work.completed" ? t("activity.resultReady")
+          : event.kind === "handoff.blocked" ? t("state.attention")
+            : event.kind === "run.stopped" ? t("activity.workStopped")
+              : event.kind === "run.started" ? t("activity.workStarted") : t("activity.teamActivity");
       return {
         conversation,
-        sender: event.owner || (event.actorId === "user" ? "You / 你" : "Team / 团队"),
+        sender: event.owner || (event.actorId === "user" ? t("common.you") : t("common.team")),
         coworkerId: event.ownerId,
         teamId: team.id,
         teamName: team.name,
@@ -239,7 +240,7 @@
       .map((conversation) => {
         const scope = channels.get(conversation.id);
         const senderId = conversation.lastMessage.senderId;
-        const sender = senderId === "user" ? "You / 你" : (names.get(senderId) ?? "Coworker / 同事");
+        const sender = senderId === "user" ? t("common.you") : (names.get(senderId) ?? t("common.coworker"));
         return {
           conversation,
           sender,
@@ -267,11 +268,11 @@
       card.append(heading, line("Team", entry.teamName), line("Owner", entry.event?.owner), line("Stage", entry.event?.stage), line("Activity", entry.summary), line("Result", entry.event?.artifactIds?.length ? `${entry.event.artifactIds.length} artifact(s)` : undefined), line("Time", entry.time), line("Status", entry.status));
       const actions = document.createElement("div");
       actions.className = "detail-actions";
-      if (entry.conversation?.id && typeof openConversation === "function") actions.append(button("Open conversation / 打开会话", () => openConversation(entry.conversation.id)));
+      if (entry.conversation?.id && typeof openConversation === "function") actions.append(button(t("notifications.navTarget.conversation"), () => openConversation(entry.conversation.id)));
       card.append(actions);
       root.append(card);
     }
-    if (!entries.length) { const p = document.createElement("p"); p.textContent = "No recent coworker activity yet. / 暂无最近同事动态。"; root.append(p); }
+    if (!entries.length) { const p = document.createElement("p"); p.textContent = t("activity.emptyCoworker"); root.append(p); }
   }
   function renderRecentProjects(projects) {
     const root = $("product-recent-projects");
@@ -287,10 +288,10 @@
       heading.append(title);
       card.append(heading, line("Teams", project.counts?.teams), line("Channels", project.counts?.channels), line("Coworkers", project.counts?.coworkers), line("Status", project.state), line("Updated", project.updatedAt));
       const conversationId = project.teams?.[0]?.channels?.[0]?.conversationId;
-      if (conversationId && typeof openConversation === "function") card.append(button("Open project / 打开项目", async () => { await api.projects.open({ projectId: project.projectId }); openConversation(conversationId); }));
+      if (conversationId && typeof openConversation === "function") card.append(button(t("projects.openProject"), async () => { await api.projects.open({ projectId: project.projectId }); openConversation(conversationId); }));
       root.append(card);
     }
-    if (!(projects ?? []).length) { const p = document.createElement("p"); p.textContent = "No Projects yet. / 暂无项目。"; root.append(p); }
+    if (!(projects ?? []).length) { const p = document.createElement("p"); p.textContent = t("projects.empty"); root.append(p); }
   }
   async function refresh() {
     const [teams, coworkers, workspaces, projects] = await Promise.all([
@@ -305,7 +306,7 @@
     if (connectedAppsProject) {
       const selectedProject = connectedAppsProject.value;
       connectedAppsProject.textContent = "";
-      connectedAppsProject.append(new Option("All Projects / 全部项目", ""));
+      connectedAppsProject.append(new Option(t("projects.allProjects"), ""));
       for (const project of (projects.projects ?? []).filter((entry) => entry.state === "active")) connectedAppsProject.append(new Option(project.name, project.projectId));
       connectedAppsProject.value = [...connectedAppsProject.options].some((option) => option.value === selectedProject) ? selectedProject : "";
       connectedAppsProjectId = connectedAppsProject.value;
@@ -313,18 +314,18 @@
     const filter = $("artifact-hub-filter");
     if (filter && filter.options.length === 1) {
       for (const team of teams.teams ?? []) {
-        const option = document.createElement("option"); option.value = `team:${team.id}`; option.textContent = `By Team / 团队: ${team.name}`; filter.append(option);
-        for (const channel of team.channels ?? []) { const channelOption = document.createElement("option"); channelOption.value = `channel:${channel.id}`; channelOption.textContent = `By Channel / 频道: ${channel.name}`; filter.append(channelOption); }
+        const option = document.createElement("option"); option.value = `team:${team.id}`; option.textContent = t("projects.byTeam", { name: team.name }); filter.append(option);
+        for (const channel of team.channels ?? []) { const channelOption = document.createElement("option"); channelOption.value = `channel:${channel.id}`; channelOption.textContent = t("projects.byChannel", { name: channel.name }); filter.append(channelOption); }
       }
-      for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = `coworker:${coworker.id}`; option.textContent = `By Coworker / 同事: ${coworker.name}`; filter.append(option); }
+      for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = `coworker:${coworker.id}`; option.textContent = t("projects.byCoworker", { name: coworker.name }); filter.append(option); }
     }
     const scope = filter?.value ?? "recent"; const artifactPayload = { limit: 100 }; if (scope.startsWith("team:")) artifactPayload.teamId = scope.slice(5); if (scope.startsWith("channel:")) artifactPayload.channelId = scope.slice(8); if (scope.startsWith("coworker:")) artifactPayload.coworkerId = scope.slice(9);
     const historyFilter = $("computer-history-filter");
-    if (historyFilter && historyFilter.options.length === 1) for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = coworker.id; option.textContent = `By Coworker / 同事: ${coworker.name}`; historyFilter.append(option); }
+    if (historyFilter && historyFilter.options.length === 1) for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = coworker.id; option.textContent = t("projects.byCoworker", { name: coworker.name }); historyFilter.append(option); }
     const activityFilter = $("product-activity-filter");
     if (activityFilter && activityFilter.options.length === 1) {
-      for (const team of teams.teams ?? []) { const option = document.createElement("option"); option.value = `team:${team.id}`; option.textContent = `By Team / 团队: ${team.name}`; activityFilter.append(option); }
-      for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = `coworker:${coworker.id}`; option.textContent = `By Coworker / 同事: ${coworker.name}`; activityFilter.append(option); }
+      for (const team of teams.teams ?? []) { const option = document.createElement("option"); option.value = `team:${team.id}`; option.textContent = t("projects.byTeam", { name: team.name }); activityFilter.append(option); }
+      for (const coworker of coworkers.coworkers ?? []) { const option = document.createElement("option"); option.value = `coworker:${coworker.id}`; option.textContent = t("projects.byCoworker", { name: coworker.name }); activityFilter.append(option); }
     }
     const connectedAppPayload = { limit: 64, ...(connectedAppsProjectId ? { projectId: connectedAppsProjectId } : {}), ...($("connected-app-search")?.value.trim() ? { query: $("connected-app-search").value.trim() } : {}) };
     const [playbooks, artifacts, history, skills, channels, conversations, connectedApps] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history({ limit: 100 }), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations.list({}), api.connectedApps.search(connectedAppPayload)]);
@@ -336,18 +337,18 @@
   function setup() {
     const artifactRoot = $("product-artifacts");
     const heading = artifactRoot?.parentElement?.querySelector(".card-heading");
-    if (heading && !$("artifact-hub-filter")) { const filter = document.createElement("select"); filter.id = "artifact-hub-filter"; filter.setAttribute("aria-label", "Artifact filter"); const option = document.createElement("option"); option.value = "recent"; option.textContent = "Recent / 最近"; filter.append(option); heading.append(filter); }
+    if (heading && !$("artifact-hub-filter")) { const filter = document.createElement("select"); filter.id = "artifact-hub-filter"; filter.setAttribute("aria-label", "Artifact filter"); const option = document.createElement("option"); option.value = "recent"; option.textContent = t("common.recent"); filter.append(option); heading.append(filter); }
     const skillRoot = $("product-skills");
     if (skillRoot && !$("product-connected-apps")) {
       const section = document.createElement("section"); section.className = "settings-card";
       const heading = document.createElement("div"); heading.className = "card-heading";
-      const copy = document.createElement("div"); const title = document.createElement("h2"); title.textContent = "Connected Apps / 已连接应用"; const description = document.createElement("p"); description.textContent = "Governed capabilities assigned to a Team or Coworker; every action remains task-bound."; copy.append(title, description);
-      const controls = document.createElement("div"); controls.className = "detail-actions"; const search = document.createElement("input"); search.id = "connected-app-search"; search.type = "search"; search.maxLength = 120; search.placeholder = "Search apps / 搜索应用"; search.setAttribute("aria-label", "Search Connected Apps"); const project = document.createElement("select"); project.id = "connected-app-project"; project.setAttribute("aria-label", "Project scope for Connected Apps"); project.append(new Option("All Projects / 全部项目", "")); controls.append(search, project); heading.append(copy, controls);
+      const copy = document.createElement("div"); const title = document.createElement("h2"); title.textContent = t("apps.title"); const description = document.createElement("p"); description.textContent = "Governed capabilities assigned to a Team or Coworker; every action remains task-bound."; copy.append(title, description);
+      const controls = document.createElement("div"); controls.className = "detail-actions"; const search = document.createElement("input"); search.id = "connected-app-search"; search.type = "search"; search.maxLength = 120; search.placeholder = t("apps.searchPlaceholder"); search.setAttribute("aria-label", "Search Connected Apps"); const project = document.createElement("select"); project.id = "connected-app-project"; project.setAttribute("aria-label", "Project scope for Connected Apps"); project.append(new Option(t("projects.allProjects"), "")); controls.append(search, project); heading.append(copy, controls);
       const root = document.createElement("div"); root.id = "product-connected-apps"; root.className = "workspace-cards"; section.append(heading, root); skillRoot.closest(".settings-grid")?.insertBefore(section, skillRoot.closest(".settings-card")?.nextElementSibling);
       search.addEventListener("input", () => void refresh()); project.addEventListener("change", () => { connectedAppsProjectId = project.value; void refresh(); });
     }
     const channelFilter = $("product-channel-filter");
-    if (channelFilter && ![...channelFilter.options].some((option) => option.value === "unread")) { const option = document.createElement("option"); option.value = "unread"; option.textContent = "Unread / 未读"; channelFilter.insertBefore(option, channelFilter.options[channelFilter.options.length - 1] ?? null); }
+    if (channelFilter && ![...channelFilter.options].some((option) => option.value === "unread")) { const option = document.createElement("option"); option.value = "unread"; option.textContent = t("channels.unread"); channelFilter.insertBefore(option, channelFilter.options[channelFilter.options.length - 1] ?? null); }
     $("nav-product-hubs")?.addEventListener("click", async () => { switchView("product-hubs"); try { await refresh(); } catch (e) { error($("product-playbooks"), e); } }); $("product-hubs-refresh")?.addEventListener("click", () => void refresh()); $("artifact-hub-filter")?.addEventListener("change", () => void refresh()); $("product-channel-filter")?.addEventListener("change", () => void refresh()); $("product-channel-switch")?.addEventListener("change", (event) => { if (event.target.value && typeof openConversation === "function") void openConversation(event.target.value); }); $("playbook-create")?.addEventListener("click", () => void createPlaybook());
   }
   setup();
@@ -359,7 +360,7 @@
     input.id = "team-pack-search";
     input.type = "search";
     input.maxLength = 120;
-    input.placeholder = "Search packs / 搜索团队包";
+    input.placeholder = t("teamPacks.searchPlaceholder");
     input.setAttribute("aria-label", "Search Team Packs");
     input.addEventListener("input", () => void refresh());
     heading.append(input);
@@ -373,7 +374,7 @@
     filter.setAttribute("aria-label", "Recent activity filter");
     const all = document.createElement("option");
     all.value = "all";
-    all.textContent = "All activity / 全部动态";
+    all.textContent = t("activity.allActivity");
     filter.append(all);
     filter.addEventListener("change", () => void refresh());
     heading.append(filter);
@@ -387,7 +388,7 @@
     filter.setAttribute("aria-label", "Computer activity coworker filter");
     const option = document.createElement("option");
     option.value = "all";
-    option.textContent = "All coworkers / 全部同事";
+    option.textContent = t("computerHistory.allCoworkers");
     filter.append(option);
     filter.addEventListener("change", () => void refresh());
     heading.append(filter);
@@ -404,7 +405,7 @@
     const template = document.createElement("select");
     template.id = "product-channel-template";
     template.setAttribute("aria-label", "Channel template");
-    const add = button("From template / 从模板创建", async () => {
+    const add = button(t("playbooks.fromTemplate"), async () => {
       if (!team.value || !template.value) return;
       try {
         const result = await api.teams.createChannelFromTemplate({ teamId: team.value, templateId: template.value });
@@ -430,20 +431,20 @@
   const setResult = (value) => { const node = $("project-result"); if (node) node.textContent = value; };
   const button = (label, fn, { disabled = false, className = "quiet-action" } = {}) => { const node = document.createElement("button"); node.type = "button"; node.className = className; node.textContent = label; node.disabled = disabled; if (!disabled) node.addEventListener("click", () => Promise.resolve().then(fn).catch(error)); return node; };
   const element = (tag, textContent) => { const node = document.createElement(tag); if (textContent !== undefined) node.textContent = textContent; return node; };
-  async function exportProject(projectId) { const result = await api.projects.exportViaDialog({ projectId }); setResult(result.canceled ? "Project export canceled / 已取消项目导出" : `Project exported: ${result.fileName} / 项目已导出`); }
+  async function exportProject(projectId) { const result = await api.projects.exportViaDialog({ projectId }); setResult(result.canceled ? t("projects.exportCanceled") : t("projects.exported", { name: result.fileName })); }
   function navigateCanonical(kind, entry) {
     if (kind === "channels" && entry.conversationId && typeof openConversation === "function") { void openConversation(entry.conversationId); return; }
     if (kind === "memory") { document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: state.selectedProjectId, memoryId: entry.id } })); return; }
     const target = kind === "triggers" ? $("nav-triggers") : kind === "connectedApps" ? $("nav-apps") : kind === "files" || kind === "artifacts" ? $("nav-artifacts") : kind === "skills" ? $("nav-skills") : kind === "playbooks" ? $("nav-playbooks") : kind === "routines" ? $("nav-routines") : kind === "coworkers" ? $("nav-settings") : $("nav-work");
     if (target) target.click(); else if (typeof switchView === "function") switchView(kind === "coworkers" ? "settings" : kind === "connectedApps" ? "apps" : kind === "triggers" ? "triggers" : "work");
-    const surfaceLabels = { triggers: "Triggers / 触发器", connectedApps: "Connected Apps / 已连接应用", files: "Files / 文件", artifacts: "Artifacts / 成果", skills: "Skills / 技能", playbooks: "Playbooks / 工作方法", routines: "Routines / 例行任务", coworkers: "Coworkers / 同事", teams: "Teams / 团队" };
-    setResult(`${surfaceLabels[kind] ?? kind} canonical surface opened / 已打开标准页面`);
+    const surfaceLabels = { triggers: t("nav.triggers"), connectedApps: t("apps.title"), files: t("workspace.files"), artifacts: t("thisPc.artifactsLabel"), skills: t("skills.title"), playbooks: t("playbooks.title"), routines: t("nav.routines"), coworkers: t("common.coworkers"), teams: t("common.teams") };
+    setResult(t("projects.surfaceOpened", { name: surfaceLabels[kind] ?? kind }));
   }
   function renderContentSection(root, kind, label, section) {
     const card = element("section"); card.className = "project-content-section";
     const heading = element("div"); heading.className = "card-heading";
-    const title = element("h3", `${label} / ${section.total ?? 0}${section.truncated ? " · showing first 50 / 仅显示前 50 项" : ""}`);
-    const summary = element("p", section.total ? "Bounded Project contents / 已按项目范围限制" : `No ${label} yet / 暂无${label}`);
+    const title = element("h3", `${label} / ${section.total ?? 0}${section.truncated ? t("common.showingFirst50") : ""}`);
+    const summary = element("p", section.total ? t("projects.boundedContents") : t("projects.noItemsYet", { label }));
     heading.append(title, summary); card.append(heading);
     const list = element("div"); list.className = "project-content-list";
     for (const entry of section.items ?? []) {
@@ -454,51 +455,51 @@
       copy.append(name, meta); row.append(copy);
       const actions = element("div"); actions.className = "detail-actions";
       const canNavigate = kind !== "teams" || entry.navigation;
-      const actionLabels = { teams: "Open Team / 打开团队", channels: "Open Channel / 打开频道", coworkers: "Open Coworker / 打开同事", files: "Open File / 打开文件", artifacts: "Open Artifact / 打开成果", skills: "Open Skill / 打开技能", playbooks: "Open Playbook / 打开工作方法", routines: "Open Routine / 打开例行任务", triggers: "Open Trigger / 打开触发器", memory: "Open Memory / 打开记忆", connectedApps: "Open Connected Apps / 打开已连接应用" };
+      const actionLabels = { teams: t("projects.openTeam"), channels: t("projects.openChannel"), coworkers: t("projects.openCoworker"), files: t("projects.openFile"), artifacts: t("projects.openArtifact"), skills: t("projects.openSkill"), playbooks: t("projects.openPlaybook"), routines: t("projects.openRoutine"), triggers: t("projects.openTrigger"), memory: t("projects.openMemory"), connectedApps: t("projects.openConnectedApps") };
       actions.append(button(actionLabels[kind] ?? `Open ${label}`, () => navigateCanonical(kind, entry), { disabled: !canNavigate }));
-      if ((kind === "files" || kind === "artifacts") && entry.conversationId) actions.append(button("Source conversation / 来源会话", () => { if (typeof openConversation === "function") void openConversation(entry.conversationId); }));
+      if ((kind === "files" || kind === "artifacts") && entry.conversationId) actions.append(button(t("projects.sourceConversation"), () => { if (typeof openConversation === "function") void openConversation(entry.conversationId); }));
       row.append(actions); list.append(row);
     }
-    if (!section.items?.length) list.append(element("p", `No ${label} in this Project / 此项目暂无${label}`));
+    if (!section.items?.length) list.append(element("p", t("projects.noItemsInProject", { label })));
     card.append(list); root.append(card);
   }
   function renderDetail(project) {
     const root = $("project-detail"); if (!root) return; clear(root);
-    if (!project) { root.append(element("p", "Choose a Project to inspect its command center / 请选择项目查看项目指挥中心")); return; }
+    if (!project) { root.append(element("p", t("projects.chooseToInspect"))); return; }
     const heading = element("div"); heading.className = "project-workbench-heading";
-    heading.append(element("h2", project.name), element("p", `${project.state === "archived" ? "Archived / 已归档" : "Active / 活跃"} · ${project.available ? "Available / 可用" : "Unavailable / 不可用"} · ${project.summary ?? ""}`));
-    if (project.lastOpenedAt || project.updatedAt) heading.append(element("p", `Recent activity / 最近活动: ${project.lastOpenedAt ?? project.updatedAt}`));
+    heading.append(element("h2", project.name), element("p", `${project.state === "archived" ? t("state.archived") : t("state.active")} · ${project.available ? t("state.available") : t("state.unavailable")} · ${project.summary ?? ""}`));
+    if (project.lastOpenedAt || project.updatedAt) heading.append(element("p", t("projects.recentActivity", { time: project.lastOpenedAt ?? project.updatedAt })));
     root.append(heading);
-    if (!project.available) { const unavailable = element("p", "This Project is inspectable but read-only until its trusted workspace is available. / 此项目可查看，但可信工作区不可用期间为只读。"); unavailable.className = "inline-error"; root.append(unavailable); }
+    if (!project.available) { const unavailable = element("p", t("projects.readOnlyNotice")); unavailable.className = "inline-error"; root.append(unavailable); }
     const contents = project.contents ?? {};
-    const groups = [["teams", "Teams / 团队"], ["channels", "Channels / 频道"], ["coworkers", "Coworkers / 同事"], ["files", "Files / 文件"], ["artifacts", "Artifacts / 成果"], ["skills", "Skills / 技能"], ["playbooks", "Playbooks / 工作方法"], ["routines", "Routines / 例行任务"], ["triggers", "Triggers / 触发器"], ["memory", "Memory / 记忆"], ["connectedApps", "Connected Apps / 已连接应用"]];
+    const groups = [["teams", t("common.teams")], ["channels", t("common.channels")], ["coworkers", t("common.coworkers")], ["files", t("workspace.files")], ["artifacts", t("thisPc.artifactsLabel")], ["skills", t("skills.title")], ["playbooks", t("playbooks.title")], ["routines", t("nav.routines")], ["triggers", t("nav.triggers")], ["memory", t("memory.title")], ["connectedApps", t("apps.title")]];
     for (const [kind, label] of groups) renderContentSection(root, kind, label, contents[kind] ?? { items: [], total: 0, truncated: false });
   }
-  function selectProject(projectId, message = true) { state.selectedProjectId = projectId || ""; const project = state.projects.find((entry) => entry.projectId === state.selectedProjectId); renderDetail(project); const switcher = $("project-switcher"); if (switcher) switcher.value = state.selectedProjectId; if (message && project) setResult(`Selected ${project.name} / 已选择项目`); }
+  function selectProject(projectId, message = true) { state.selectedProjectId = projectId || ""; const project = state.projects.find((entry) => entry.projectId === state.selectedProjectId); renderDetail(project); const switcher = $("project-switcher"); if (switcher) switcher.value = state.selectedProjectId; if (message && project) setResult(t("projects.selected", { name: project.name })); }
   function openProjectCreateDialog() { const form = $("project-create-form"); const errorNode = $("project-create-form-error"); form?.reset(); if (errorNode) { errorNode.textContent = ""; errorNode.classList.add("hidden"); } const dialog = $("project-create-dialog"); if (dialog?.showModal) { dialog.showModal(); $("project-create-name")?.focus(); } }
   async function createProjectFromDialog(event) {
     event.preventDefault();
     const name = $("project-create-name")?.value.trim() ?? "";
     const errorNode = $("project-create-form-error");
-    if (!name) { if (errorNode) { errorNode.textContent = "Enter a Project name / 请输入项目名称"; errorNode.classList.remove("hidden"); } return; }
+    if (!name) { if (errorNode) { errorNode.textContent = t("projects.enterName"); errorNode.classList.remove("hidden"); } return; }
     if (errorNode) { errorNode.textContent = ""; errorNode.classList.add("hidden"); }
     const saveButton = $("project-create-save"); if (saveButton) saveButton.disabled = true;
-    try { const created = await api.projects.create({ name }); $("project-create-dialog")?.close(); $("project-create-form")?.reset(); setResult("Project created / 项目已创建"); await refresh(created?.projectId); }
+    try { const created = await api.projects.create({ name }); $("project-create-dialog")?.close(); $("project-create-form")?.reset(); setResult(t("projects.created")); await refresh(created?.projectId); }
     catch (reason) { if (errorNode) { errorNode.textContent = String(reason?.message ?? reason).replace(/^.*Error: /, "").slice(0, 240); errorNode.classList.remove("hidden"); } }
     finally { if (saveButton) saveButton.disabled = false; }
   }
   function ensureView() {
     if ($("nav-projects") && $("view-projects")) return;
-    const nav = document.createElement("button"); nav.id = "nav-projects"; nav.type = "button"; nav.className = "utility-nav"; nav.textContent = "◈ Projects / 项目";
+    const nav = document.createElement("button"); nav.id = "nav-projects"; nav.type = "button"; nav.className = "utility-nav"; nav.textContent = `◈ ${t("projects.title")}`;
     nav.addEventListener("click", () => { if (typeof switchView === "function") switchView("projects"); document.querySelectorAll(".utility-nav").forEach((item) => item.classList.toggle("active", item === nav)); void refresh(); });
     $("nav-work")?.parentElement?.prepend(nav);
     const view = document.createElement("section"); view.id = "view-projects"; view.className = "main-view settings-view hidden";
     const header = element("header"); header.className = "page-header";
-    const intro = element("div"); const eyebrow = element("span", "PROJECTS / 项目"); eyebrow.className = "eyebrow"; intro.append(eyebrow, element("h1", "Projects"), element("p", "Projects organize Teams, Channels, Coworkers, Files, Artifacts, Skills, Playbooks, Routines, Triggers, Memory, and Connected Apps."));
-    const controls = element("div"); controls.className = "detail-actions"; const switcher = element("select"); switcher.id = "project-switcher"; switcher.setAttribute("aria-label", "Project switcher"); switcher.append(element("option", "Choose a Project / 选择项目")); const refreshButton = element("button", "Refresh / 刷新"); refreshButton.id = "project-refresh"; refreshButton.type = "button"; refreshButton.className = "quiet-action"; const createButton = element("button", "New Project / 新建项目"); createButton.id = "project-create"; createButton.type = "button"; createButton.className = "hero-action"; controls.append(switcher, refreshButton, createButton); header.append(intro, controls);
+    const intro = element("div"); const eyebrow = element("span", t("projects.title").toUpperCase()); eyebrow.className = "eyebrow"; intro.append(eyebrow, element("h1", "Projects"), element("p", "Projects organize Teams, Channels, Coworkers, Files, Artifacts, Skills, Playbooks, Routines, Triggers, Memory, and Connected Apps."));
+    const controls = element("div"); controls.className = "detail-actions"; const switcher = element("select"); switcher.id = "project-switcher"; switcher.setAttribute("aria-label", "Project switcher"); switcher.append(element("option", t("projects.chooseProject"))); const refreshButton = element("button", t("common.refresh")); refreshButton.id = "project-refresh"; refreshButton.type = "button"; refreshButton.className = "quiet-action"; const createButton = element("button", t("projects.newProject")); createButton.id = "project-create"; createButton.type = "button"; createButton.className = "hero-action"; controls.append(switcher, refreshButton, createButton); header.append(intro, controls);
     const result = element("p"); result.id = "project-result"; result.className = "setting-feedback";
-    const card = element("section"); card.className = "settings-card span-2"; const cardHeading = element("div"); cardHeading.className = "card-heading"; const cardCopy = element("div"); cardCopy.append(element("h2", "Projects / 项目"), element("p", "Select a Project to inspect its command center. Trusted workspace details remain hidden.")); cardHeading.append(cardCopy); const list = element("div"); list.id = "project-list"; list.className = "project-list"; card.append(cardHeading, list);
-    const detailCard = element("section"); detailCard.className = "settings-card span-2"; const detailHeading = element("div"); detailHeading.className = "card-heading"; const detailCopy = element("div"); detailCopy.append(element("h2", "Project Command Center / 项目指挥中心"), element("p", "One bounded view of the selected Project and its canonical related surfaces.")); detailHeading.append(detailCopy); const detail = element("div"); detail.id = "project-detail"; detail.className = "project-workbench"; detailCard.append(detailHeading, detail); view.append(header, result, card, detailCard);
+    const card = element("section"); card.className = "settings-card span-2"; const cardHeading = element("div"); cardHeading.className = "card-heading"; const cardCopy = element("div"); cardCopy.append(element("h2", t("projects.title")), element("p", "Select a Project to inspect its command center. Trusted workspace details remain hidden.")); cardHeading.append(cardCopy); const list = element("div"); list.id = "project-list"; list.className = "project-list"; card.append(cardHeading, list);
+    const detailCard = element("section"); detailCard.className = "settings-card span-2"; const detailHeading = element("div"); detailHeading.className = "card-heading"; const detailCopy = element("div"); detailCopy.append(element("h2", t("projects.commandCenter")), element("p", "One bounded view of the selected Project and its canonical related surfaces.")); detailHeading.append(detailCopy); const detail = element("div"); detail.id = "project-detail"; detail.className = "project-workbench"; detailCard.append(detailHeading, detail); view.append(header, result, card, detailCard);
     $("view-product-hubs")?.parentElement?.insertBefore(view, $("view-product-hubs"));
     $("project-switcher")?.addEventListener("change", (event) => selectProject(event.target.value));
     $("project-refresh")?.addEventListener("click", () => void refresh());
@@ -508,26 +509,26 @@
   function render(projects, preferredProjectId = state.selectedProjectId) {
     state.projects = Array.isArray(projects) ? projects : [];
     const root = $("project-list"); if (!root) return; clear(root);
-    const switcher = $("project-switcher"); if (switcher) { switcher.textContent = ""; const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Choose a Project / 选择项目"; switcher.append(placeholder); for (const project of state.projects) { const option = document.createElement("option"); option.value = project.projectId; option.textContent = `${project.name}${project.state === "archived" ? " · Archived / 已归档" : ""}${!project.available ? " · Unavailable / 不可用" : ""}`; switcher.append(option); } }
+    const switcher = $("project-switcher"); if (switcher) { switcher.textContent = ""; const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = t("projects.chooseProject"); switcher.append(placeholder); for (const project of state.projects) { const option = document.createElement("option"); option.value = project.projectId; option.textContent = `${project.name}${project.state === "archived" ? ` · ${t("state.archived")}` : ""}${!project.available ? ` · ${t("state.unavailable")}` : ""}`; switcher.append(option); } }
     const selectedId = state.projects.some((entry) => entry.projectId === preferredProjectId) ? preferredProjectId : state.projects[0]?.projectId ?? "";
     for (const project of projects) {
       const card = document.createElement("article"); card.className = "project-card";
       const title = document.createElement("h3"); title.textContent = project.name;
-      const status = document.createElement("p"); status.textContent = `${project.state === "archived" ? "Archived / 已归档" : "Active / 活跃"} · ${project.available ? "Available / 可用" : "Unavailable / 不可用"}`;
+      const status = document.createElement("p"); status.textContent = `${project.state === "archived" ? t("state.archived") : t("state.active")} · ${project.available ? t("state.available") : t("state.unavailable")}`;
       card.classList.toggle("selected", project.projectId === selectedId);
       const counts = document.createElement("p"); counts.className = "project-counts"; counts.textContent = Object.entries(project.counts ?? {}).map(([key, value]) => `${key}: ${value}`).join(" · ");
-      const contents = document.createElement("p"); contents.textContent = project.summary ?? ((project.teams ?? []).map((team) => `${team.name} (${team.channels?.length ?? 0} channels)`).join(" · ") || "No Teams yet / 暂无团队");
+      const contents = document.createElement("p"); contents.textContent = project.summary ?? ((project.teams ?? []).map((team) => `${team.name} (${team.channels?.length ?? 0} channels)`).join(" · ") || t("teams.empty"));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Inspect / 查看", () => selectProject(project.projectId), { className: "hero-action" }));
-      actions.append(button("Open / 打开", async () => { await api.projects.open({ projectId: project.projectId }); setResult(`Opened ${project.name} / 已打开`); await refresh(project.projectId); }, { disabled: project.state === "archived" || !project.available }));
-      actions.append(button(project.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (project.state === "archived" ? api.projects.restore : api.projects.archive)({ projectId: project.projectId }); await refresh(project.projectId); }, { disabled: !project.available }));
-      actions.append(button("Export / 导出", () => exportProject(project.projectId), { disabled: !project.available }));
-      actions.append(button("Backup / 备份", async () => { await api.projects.backup({ projectId: project.projectId }); setResult("Portable Project backup created / 可移植项目备份已创建"); }, { disabled: !project.available }));
-      actions.append(button("Memory / 记忆", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId } }))));
-      actions.append(button("Add fact / 添加事实", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId, addFact: true } })), { disabled: project.state === "archived" || !project.available }));
+      actions.append(button(t("common.inspect"), () => selectProject(project.projectId), { className: "hero-action" }));
+      actions.append(button(t("common.open"), async () => { await api.projects.open({ projectId: project.projectId }); setResult(t("projects.opened", { name: project.name })); await refresh(project.projectId); }, { disabled: project.state === "archived" || !project.available }));
+      actions.append(button(project.state === "archived" ? t("common.restore") : t("common.archive"), async () => { await (project.state === "archived" ? api.projects.restore : api.projects.archive)({ projectId: project.projectId }); await refresh(project.projectId); }, { disabled: !project.available }));
+      actions.append(button(t("common.export"), () => exportProject(project.projectId), { disabled: !project.available }));
+      actions.append(button(t("projects.backup"), async () => { await api.projects.backup({ projectId: project.projectId }); setResult(t("projects.backupCreated")); }, { disabled: !project.available }));
+      actions.append(button(t("memory.title"), () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId } }))));
+      actions.append(button(t("memory.addFactBtn"), () => document.dispatchEvent(new CustomEvent("sovereignbot:open-memory", { detail: { view: "memory", scope: "project", ownerId: project.projectId, addFact: true } })), { disabled: project.state === "archived" || !project.available }));
       card.append(title, status, counts, contents, actions); root.append(card);
     }
-    if (!projects.length) { const empty = document.createElement("p"); empty.textContent = "No Projects yet / 暂无项目"; root.append(empty); }
+    if (!projects.length) { const empty = document.createElement("p"); empty.textContent = t("projects.empty"); root.append(empty); }
     if (switcher) switcher.value = selectedId;
     selectProject(selectedId, false);
   }
@@ -633,24 +634,24 @@
   function appendPlaybookPlan(card, item) {
     const plan = playbookSemanticPlan(item); const hasPlan = Object.keys(plan).length > 0; if (!hasPlan) return;
     const details = document.createElement("details"); details.className = "playbook-plan";
-    const summary = document.createElement("summary"); summary.textContent = `Plan / 计划 · ${item.stages?.length ?? 0} stages · ${item.reviewPoints?.length ?? 0} review points`; details.append(summary);
-    details.append(text("Guidance / 使用方式", "Current owner may skip or reorder stages, bring in a specialist, or request review. Recommendations are advisory."));
-    if (item.expectedOutput) details.append(text("Expected output / 预期产出", item.expectedOutput));
-    if (item.recommendedCoworkerRoles?.length) details.append(text("Recommended Coworker roles / 推荐同事角色", item.recommendedCoworkerRoles.join(", ")));
-    if (item.recommendedSkillIds?.length) details.append(text("Recommended Skills / 推荐技能", item.recommendedSkillIds.join(", ")));
+    const summary = document.createElement("summary"); summary.textContent = t("playbooks.planSummary", { stages: item.stages?.length ?? 0, reviews: item.reviewPoints?.length ?? 0 }); details.append(summary);
+    details.append(text(t("playbooks.guidance"), "Current owner may skip or reorder stages, bring in a specialist, or request review. Recommendations are advisory."));
+    if (item.expectedOutput) details.append(text(t("playbooks.expectedOutput"), item.expectedOutput));
+    if (item.recommendedCoworkerRoles?.length) details.append(text(t("playbooks.recommendedRoles"), item.recommendedCoworkerRoles.join(", ")));
+    if (item.recommendedSkillIds?.length) details.append(text(t("playbooks.recommendedSkills"), item.recommendedSkillIds.join(", ")));
     for (const [index, stage] of (item.stages ?? []).entries()) {
       const stageNode = document.createElement("div"); stageNode.className = "playbook-stage";
-      stageNode.append(text(`Stage ${index + 1} / 阶段 ${index + 1}`, stage.name), text("Instructions / 指引", stage.instructions));
-      if (stage.expectedOutput) stageNode.append(text("Stage output / 阶段产出", stage.expectedOutput));
-      if (stage.recommendedCoworkerRole) stageNode.append(text("Coworker role / 同事角色", stage.recommendedCoworkerRole));
-      if (stage.recommendedSkillIds?.length) stageNode.append(text("Skills / 技能", stage.recommendedSkillIds.join(", ")));
+      stageNode.append(text(t("playbooks.stageNumber", { number: index + 1 }), stage.name), text(t("common.instructions"), stage.instructions));
+      if (stage.expectedOutput) stageNode.append(text(t("playbooks.stageOutput"), stage.expectedOutput));
+      if (stage.recommendedCoworkerRole) stageNode.append(text(t("playbooks.coworkerRole"), stage.recommendedCoworkerRole));
+      if (stage.recommendedSkillIds?.length) stageNode.append(text(t("skills.title"), stage.recommendedSkillIds.join(", ")));
       details.append(stageNode);
     }
     for (const [index, point] of (item.reviewPoints ?? []).entries()) {
       const pointNode = document.createElement("div"); pointNode.className = "playbook-review-point";
-      pointNode.append(text(`Review point ${index + 1} / 复核点 ${index + 1}`, point.name), text("Review instructions / 复核指引", point.instructions));
-      if (point.recommendedCoworkerRole) pointNode.append(text("Reviewer role / 复核角色", point.recommendedCoworkerRole));
-      if (point.recommendedSkillIds?.length) pointNode.append(text("Skills / 技能", point.recommendedSkillIds.join(", ")));
+      pointNode.append(text(t("playbooks.reviewPointNumber", { number: index + 1 }), point.name), text(t("playbooks.reviewInstructions"), point.instructions));
+      if (point.recommendedCoworkerRole) pointNode.append(text(t("playbooks.reviewerRole"), point.recommendedCoworkerRole));
+      if (point.recommendedSkillIds?.length) pointNode.append(text(t("skills.title"), point.recommendedSkillIds.join(", ")));
       details.append(pointNode);
     }
     card.append(details);
@@ -705,7 +706,7 @@
   function renderPlaybookEditor(playbook) {
     editingPlaybook = playbookEditorClone(playbook);
     $("playbook-editor-id").value = editingPlaybook.id ?? "";
-    $("playbook-editor-title").textContent = editingPlaybook.id ? "Edit playbook / 编辑工作方法" : "New playbook / 新建工作方法";
+    $("playbook-editor-title").textContent = editingPlaybook.id ? t("playbooks.editPlaybook") : t("playbooks.newPlaybook");
     $("playbook-editor-name").value = editingPlaybook.name ?? "";
     $("playbook-editor-description").value = editingPlaybook.description ?? "";
     $("playbook-editor-output").value = editingPlaybook.expectedOutput ?? "";
@@ -715,20 +716,20 @@
     const stepsRoot = $("playbook-editor-steps"); clear(stepsRoot);
     for (const [index, step] of (editingPlaybook.steps ?? []).entries()) {
       const row = document.createElement("div"); row.className = "playbook-editor-row playbook-editor-step-row";
-      row.append(playbookEditorField("Step " + (index + 1) + " / 步骤", step, "playbook-editor-step-value", { maxLength: 128 }));
-      const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(playbookEditorButton("↑", () => movePlaybookEditorEntry("steps", index, -1)), playbookEditorButton("↓", () => movePlaybookEditorEntry("steps", index, 1)), playbookEditorButton("Remove / 删除", () => { const next = readPlaybookEditor(); next.steps.splice(index, 1); renderPlaybookEditor(next); })); row.append(actions); stepsRoot.append(row);
+      row.append(playbookEditorField(`Step ${index + 1}`, step, "playbook-editor-step-value", { maxLength: 128 }));
+      const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(playbookEditorButton("↑", () => movePlaybookEditorEntry("steps", index, -1)), playbookEditorButton("↓", () => movePlaybookEditorEntry("steps", index, 1)), playbookEditorButton(t("common.remove"), () => { const next = readPlaybookEditor(); next.steps.splice(index, 1); renderPlaybookEditor(next); })); row.append(actions); stepsRoot.append(row);
     }
     const stagesRoot = $("playbook-editor-stages"); clear(stagesRoot);
     for (const [index, stage] of (editingPlaybook.stages ?? []).entries()) {
       const row = document.createElement("article"); row.className = "playbook-editor-row"; row.dataset.id = stage.id;
-      const heading = document.createElement("div"); heading.className = "playbook-editor-heading"; const title = document.createElement("strong"); title.textContent = stage.name || "Stage"; const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(playbookEditorButton("↑", () => movePlaybookEditorEntry("stages", index, -1)), playbookEditorButton("↓", () => movePlaybookEditorEntry("stages", index, 1)), playbookEditorButton("Remove / 删除", () => { const next = readPlaybookEditor(); next.stages.splice(index, 1); renderPlaybookEditor(next); })); heading.append(title, actions); row.append(heading);
-      const grid = document.createElement("div"); grid.className = "playbook-editor-grid"; grid.append(playbookEditorField("Name / 名称", stage.name, "playbook-editor-stage-name", { maxLength: 120 }), playbookEditorField("Expected output / 阶段产出", stage.expectedOutput, "playbook-editor-stage-output", { maxLength: 500 }), playbookEditorField("Recommended role / 推荐角色", stage.recommendedCoworkerRole, "playbook-editor-stage-role", { maxLength: 120 }), playbookEditorField("Recommended Skills / 推荐技能", (stage.recommendedSkillIds ?? []).join(", "), "playbook-editor-stage-skills", { maxLength: 1000 })); row.append(grid, playbookEditorField("Instructions / 指引", stage.instructions, "playbook-editor-stage-instructions", { textarea: true, maxLength: 2000 })); stagesRoot.append(row);
+      const heading = document.createElement("div"); heading.className = "playbook-editor-heading"; const title = document.createElement("strong"); title.textContent = stage.name || "Stage"; const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(playbookEditorButton("↑", () => movePlaybookEditorEntry("stages", index, -1)), playbookEditorButton("↓", () => movePlaybookEditorEntry("stages", index, 1)), playbookEditorButton(t("common.remove"), () => { const next = readPlaybookEditor(); next.stages.splice(index, 1); renderPlaybookEditor(next); })); heading.append(title, actions); row.append(heading);
+      const grid = document.createElement("div"); grid.className = "playbook-editor-grid"; grid.append(playbookEditorField(t("common.name"), stage.name, "playbook-editor-stage-name", { maxLength: 120 }), playbookEditorField(t("playbooks.stageOutput"), stage.expectedOutput, "playbook-editor-stage-output", { maxLength: 500 }), playbookEditorField(t("playbooks.recommendedRole"), stage.recommendedCoworkerRole, "playbook-editor-stage-role", { maxLength: 120 }), playbookEditorField(t("playbooks.recommendedSkills"), (stage.recommendedSkillIds ?? []).join(", "), "playbook-editor-stage-skills", { maxLength: 1000 })); row.append(grid, playbookEditorField(t("common.instructions"), stage.instructions, "playbook-editor-stage-instructions", { textarea: true, maxLength: 2000 })); stagesRoot.append(row);
     }
     const reviewsRoot = $("playbook-editor-reviews"); clear(reviewsRoot);
     for (const [index, point] of (editingPlaybook.reviewPoints ?? []).entries()) {
       const row = document.createElement("article"); row.className = "playbook-editor-row"; row.dataset.id = point.id;
-      const heading = document.createElement("div"); heading.className = "playbook-editor-heading"; const title = document.createElement("strong"); title.textContent = point.name || "Review point"; const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(playbookEditorButton("↑", () => movePlaybookEditorEntry("reviewPoints", index, -1)), playbookEditorButton("↓", () => movePlaybookEditorEntry("reviewPoints", index, 1)), playbookEditorButton("Remove / 删除", () => { const next = readPlaybookEditor(); next.reviewPoints.splice(index, 1); renderPlaybookEditor(next); })); heading.append(title, actions); row.append(heading);
-      const grid = document.createElement("div"); grid.className = "playbook-editor-grid"; grid.append(playbookEditorField("Name / 名称", point.name, "playbook-editor-review-name", { maxLength: 120 }), playbookEditorField("Recommended role / 推荐角色", point.recommendedCoworkerRole, "playbook-editor-review-role", { maxLength: 120 }), playbookEditorField("Recommended Skills / 推荐技能", (point.recommendedSkillIds ?? []).join(", "), "playbook-editor-review-skills", { maxLength: 1000 })); row.append(grid, playbookEditorField("Instructions / 复核指引", point.instructions, "playbook-editor-review-instructions", { textarea: true, maxLength: 2000 })); reviewsRoot.append(row);
+      const heading = document.createElement("div"); heading.className = "playbook-editor-heading"; const title = document.createElement("strong"); title.textContent = point.name || "Review point"; const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(playbookEditorButton("↑", () => movePlaybookEditorEntry("reviewPoints", index, -1)), playbookEditorButton("↓", () => movePlaybookEditorEntry("reviewPoints", index, 1)), playbookEditorButton(t("common.remove"), () => { const next = readPlaybookEditor(); next.reviewPoints.splice(index, 1); renderPlaybookEditor(next); })); heading.append(title, actions); row.append(heading);
+      const grid = document.createElement("div"); grid.className = "playbook-editor-grid"; grid.append(playbookEditorField(t("common.name"), point.name, "playbook-editor-review-name", { maxLength: 120 }), playbookEditorField(t("playbooks.recommendedRole"), point.recommendedCoworkerRole, "playbook-editor-review-role", { maxLength: 120 }), playbookEditorField(t("playbooks.recommendedSkills"), (point.recommendedSkillIds ?? []).join(", "), "playbook-editor-review-skills", { maxLength: 1000 })); row.append(grid, playbookEditorField(t("playbooks.reviewInstructions"), point.instructions, "playbook-editor-review-instructions", { textarea: true, maxLength: 2000 })); reviewsRoot.append(row);
     }
     $("playbook-dialog")?.showModal?.();
     $("playbook-editor-name")?.focus();
@@ -746,13 +747,13 @@
       const title = document.createElement("h3"); title.textContent = item.name;
       card.append(title, text("Description", item.description), text("Steps", item.steps.join(" → ")), text("Teams", item.assignedTeams.map((entry) => entry.name).join(", ") || "None"), text("Channels", item.assignedChannels.map((entry) => entry.name).join(", ") || "None"), text("State", item.state), text("Updated", item.updatedAt)); appendPlaybookPlan(card, item);
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Export / 导出", () => exportPlaybookToFile(item), root), button("Duplicate / 复制", async () => { await api.playbooks.duplicate({ playbookId: item.id }); await refresh(); }, root), button(item.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (item.state === "archived" ? api.playbooks.restore : api.playbooks.archive)({ playbookId: item.id }); await refresh(); }, root), button("Edit / 编辑", () => editPlaybook(item), root));
+      actions.append(button(t("common.export"), () => exportPlaybookToFile(item), root), button(t("common.duplicate"), async () => { await api.playbooks.duplicate({ playbookId: item.id }); await refresh(); }, root), button(item.state === "archived" ? t("common.restore") : t("common.archive"), async () => { await (item.state === "archived" ? api.playbooks.restore : api.playbooks.archive)({ playbookId: item.id }); await refresh(); }, root), button(t("common.edit"), () => editPlaybook(item), root));
       const teamSelect = select("Team for playbook " + item.name);
       for (const team of cache.teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = "Team: " + team.name; teamSelect.append(option); }
       const channelSelect = select("Channel for playbook " + item.name);
       for (const team of cache.teams) for (const channel of team.channels ?? []) { const option = document.createElement("option"); option.value = channel.id; option.textContent = "Channel: " + team.name + " / " + channel.name; channelSelect.append(option); }
-      if (item.state !== "archived" && teamSelect.options.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.playbooks.assign({ playbookId: item.id, teamId: teamSelect.value }); await refresh(); }, root));
-      if (item.state !== "archived" && channelSelect.options.length) actions.append(channelSelect, button("Assign Channel / 分配频道", async () => { await api.playbooks.assign({ playbookId: item.id, channelId: channelSelect.value }); await refresh(); }, root));
+      if (item.state !== "archived" && teamSelect.options.length) actions.append(teamSelect, button(t("teamPacks.assignTeam"), async () => { await api.playbooks.assign({ playbookId: item.id, teamId: teamSelect.value }); await refresh(); }, root));
+      if (item.state !== "archived" && channelSelect.options.length) actions.append(channelSelect, button(t("teamPacks.assignChannel"), async () => { await api.playbooks.assign({ playbookId: item.id, channelId: channelSelect.value }); await refresh(); }, root));
       card.append(actions); root.append(card);
     }
     if (!items.length) root.append(text("Playbooks", "No methods yet. Create the first human-readable method."));
@@ -767,13 +768,13 @@
       card.append(title, text("Type", item.mimeType), text("Version", item.version ? `v${item.version}` : "Original"), text("Creator", item.creator?.name), text("Team", item.team?.name), text("Channel", item.channel?.name), text("Created", item.createdAt), text("History", item.history?.map((entry) => `${entry.event} · ${entry.timestamp}`).join(", ")), text("Status", item.status));
       const actions = document.createElement("div"); actions.className = "detail-actions";
       const exportStatus = document.createElement("p"); exportStatus.className = "setting-feedback"; exportStatus.setAttribute("role", "status");
-      actions.append(button("Preview / 预览", () => openArtifactPreview(item), root), button("Open / 打开", () => api.artifacts.open({ artifactId: item.id }), root), button("Reveal / 显示", () => api.artifacts.reveal({ artifactId: item.id }), root), button(item.archived ? "Restore / 恢复" : "Archive / 归档", async () => {
+      actions.append(button(t("common.preview"), () => openArtifactPreview(item), root), button(t("common.open"), () => api.artifacts.open({ artifactId: item.id }), root), button(t("common.reveal"), () => api.artifacts.reveal({ artifactId: item.id }), root), button(item.archived ? t("common.restore") : t("common.archive"), async () => {
         await (item.archived ? api.artifacts.restore : api.artifacts.archive)({ artifactId: item.id });
         await refresh();
-      }, root), button("Export copy / 导出副本", async () => {
+      }, root), button(t("artifacts.exportCopy"), async () => {
         const result = await api.artifacts.exportViaDialog({ artifactId: item.id });
-        exportStatus.textContent = result?.canceled ? "Export canceled / 已取消导出" : `Exported ${result.fileName} / 已导出副本`;
-      }, root), button("History / 历史", async () => {
+        exportStatus.textContent = result?.canceled ? t("artifacts.exportCanceled") : t("artifacts.exported", { name: result.fileName });
+      }, root), button(t("common.history"), async () => {
         const existing = card.querySelector(".artifact-history-panel");
         if (existing) { existing.remove(); return; }
         const result = await api.artifacts.history({ artifactId: item.id });
@@ -781,17 +782,17 @@
         for (const entry of result.artifacts ?? []) {
           const row = document.createElement("div"); row.className = "artifact-history-row";
           row.append(text("Version", `v${entry.version ?? 1}`), text("Created", entry.createdAt), text("State", entry.parentArtifactId ? "Restored" : "Original"));
-          row.append(button(`Restore v${entry.version ?? 1} as new version / 恢复为新版本`, async () => { await api.artifacts.restoreAsNewVersion({ artifactId: entry.id }); await refresh(); }, root));
+          row.append(button(t("artifacts.restoreVersionAsNew", { version: entry.version ?? 1 }), async () => { await api.artifacts.restoreAsNewVersion({ artifactId: entry.id }); await refresh(); }, root));
           panel.append(row);
         }
         if (!result.artifacts?.length) panel.append(text("History", "No history available."));
         card.append(panel);
-      }, root), button("Restore as new version / 恢复为新版本", async () => { await api.artifacts.restoreAsNewVersion({ artifactId: item.id }); await refresh(); }, root), button("Revise with local file / 选择文件生成修订版", async () => {
+      }, root), button(t("artifacts.restoreAsNew"), async () => { await api.artifacts.restoreAsNewVersion({ artifactId: item.id }); await refresh(); }, root), button(t("artifacts.reviseWithFile"), async () => {
         const result = await api.artifacts.reviseViaDialog({ artifactId: item.id });
         if (result?.error) throw new Error(result.error);
         if (!result?.canceled && result?.artifact) await refresh();
       }, root));
-      if (item.conversationId) actions.append(button("Go to conversation / 前往会话", () => openConversationSafe(item.conversationId), root));
+      if (item.conversationId) actions.append(button(t("common.goToConversation"), () => openConversationSafe(item.conversationId), root));
       card.append(actions, exportStatus); root.append(card);
       if (item.id === focusedArtifactId) requestAnimationFrame(() => card.scrollIntoView?.({ block: "center" }));
     }
@@ -822,11 +823,11 @@
   }
   function moveSkillEditorEntry(collection, index, delta) { const next = readSkillEditor(); const list = next[collection] ?? []; const target = index + delta; if (target < 0 || target >= list.length) return; [list[index], list[target]] = [list[target], list[index]]; next[collection] = list; renderSkillEditor(next); }
   function renderSkillEditor(skill) {
-    editingSkill = skillEditorClone(skill); const archived = editingSkill.state === "archived"; $("skill-editor-id").value = editingSkill.id ?? ""; $("skill-editor-title").textContent = editingSkill.id ? "Edit skill / 编辑技能" : "New skill / 新建技能"; $("skill-editor-name").value = editingSkill.name ?? ""; $("skill-editor-description").value = editingSkill.description ?? ""; $("skill-editor-instructions").value = editingSkill.instructions ?? ""; $("skill-editor-source").value = editingSkill.source ?? "manual"; $("skill-editor-output").value = editingSkill.expectedOutput ?? "";
+    editingSkill = skillEditorClone(skill); const archived = editingSkill.state === "archived"; $("skill-editor-id").value = editingSkill.id ?? ""; $("skill-editor-title").textContent = editingSkill.id ? t("skills.editSkill") : t("skills.newSkill"); $("skill-editor-name").value = editingSkill.name ?? ""; $("skill-editor-description").value = editingSkill.description ?? ""; $("skill-editor-instructions").value = editingSkill.instructions ?? ""; $("skill-editor-source").value = editingSkill.source ?? "manual"; $("skill-editor-output").value = editingSkill.expectedOutput ?? "";
     for (const field of document.querySelectorAll("#skill-form input, #skill-form textarea, #skill-form select")) field.disabled = archived; $("skill-save").disabled = archived; $("skill-editor-readonly").classList.toggle("hidden", !archived); skillEditorError(); for (const field of document.querySelectorAll(".skill-editor-capability")) field.checked = (editingSkill.requestedCapabilities ?? []).includes(field.value);
-    const inputsRoot = $("skill-editor-inputs"); clear(inputsRoot); for (const [index, entry] of (editingSkill.inputs ?? []).entries()) { const row = document.createElement("article"); row.className = "skill-editor-row"; row.append(skillEditorField("Name / 名称", entry.name, "skill-editor-input-name", { maxLength: 80 }), skillEditorField("Type / 类型", entry.type, "skill-editor-input-type", { maxLength: 40 }), skillEditorField("Description / 描述", entry.description, "skill-editor-input-description", { maxLength: 240 })); const required = document.createElement("label"); required.textContent = "Required / 必填 "; const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.className = "skill-editor-input-required"; checkbox.checked = entry.required !== false; required.append(checkbox); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(skillEditorButton("↑", () => moveSkillEditorEntry("inputs", index, -1)), skillEditorButton("↓", () => moveSkillEditorEntry("inputs", index, 1)), skillEditorButton("Remove / 删除", () => { const next = readSkillEditor(); next.inputs.splice(index, 1); renderSkillEditor(next); })); row.append(required, actions); inputsRoot.append(row); }
-    const stepsRoot = $("skill-editor-steps"); clear(stepsRoot); for (const [index, value] of (editingSkill.steps ?? []).entries()) { const row = document.createElement("div"); row.className = "skill-editor-row"; row.append(skillEditorField("Step " + (index + 1) + " / 步骤", value, "skill-editor-step-value", { maxLength: 800 })); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(skillEditorButton("↑", () => moveSkillEditorEntry("steps", index, -1)), skillEditorButton("↓", () => moveSkillEditorEntry("steps", index, 1)), skillEditorButton("Remove / 删除", () => { const next = readSkillEditor(); next.steps.splice(index, 1); renderSkillEditor(next); })); row.append(actions); stepsRoot.append(row); }
-    const validatorsRoot = $("skill-editor-validators"); clear(validatorsRoot); for (const [index, value] of (editingSkill.validators ?? []).entries()) { const row = document.createElement("div"); row.className = "skill-editor-row"; row.append(skillEditorField("Validator " + (index + 1) + " / 验证器", value, "skill-editor-validator-value", { maxLength: 500 })); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(skillEditorButton("↑", () => moveSkillEditorEntry("validators", index, -1)), skillEditorButton("↓", () => moveSkillEditorEntry("validators", index, 1)), skillEditorButton("Remove / 删除", () => { const next = readSkillEditor(); next.validators.splice(index, 1); renderSkillEditor(next); })); row.append(actions); validatorsRoot.append(row); }
+    const inputsRoot = $("skill-editor-inputs"); clear(inputsRoot); for (const [index, entry] of (editingSkill.inputs ?? []).entries()) { const row = document.createElement("article"); row.className = "skill-editor-row"; row.append(skillEditorField(t("common.name"), entry.name, "skill-editor-input-name", { maxLength: 80 }), skillEditorField(t("common.type"), entry.type, "skill-editor-input-type", { maxLength: 40 }), skillEditorField(t("common.description"), entry.description, "skill-editor-input-description", { maxLength: 240 })); const required = document.createElement("label"); required.textContent = t("common.required") + " "; const checkbox = document.createElement("input"); checkbox.type = "checkbox"; checkbox.className = "skill-editor-input-required"; checkbox.checked = entry.required !== false; required.append(checkbox); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(skillEditorButton("↑", () => moveSkillEditorEntry("inputs", index, -1)), skillEditorButton("↓", () => moveSkillEditorEntry("inputs", index, 1)), skillEditorButton(t("common.remove"), () => { const next = readSkillEditor(); next.inputs.splice(index, 1); renderSkillEditor(next); })); row.append(required, actions); inputsRoot.append(row); }
+    const stepsRoot = $("skill-editor-steps"); clear(stepsRoot); for (const [index, value] of (editingSkill.steps ?? []).entries()) { const row = document.createElement("div"); row.className = "skill-editor-row"; row.append(skillEditorField(`Step ${index + 1}`, value, "skill-editor-step-value", { maxLength: 800 })); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(skillEditorButton("↑", () => moveSkillEditorEntry("steps", index, -1)), skillEditorButton("↓", () => moveSkillEditorEntry("steps", index, 1)), skillEditorButton(t("common.remove"), () => { const next = readSkillEditor(); next.steps.splice(index, 1); renderSkillEditor(next); })); row.append(actions); stepsRoot.append(row); }
+    const validatorsRoot = $("skill-editor-validators"); clear(validatorsRoot); for (const [index, value] of (editingSkill.validators ?? []).entries()) { const row = document.createElement("div"); row.className = "skill-editor-row"; row.append(skillEditorField(`Validator ${index + 1}`, value, "skill-editor-validator-value", { maxLength: 500 })); const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(skillEditorButton("↑", () => moveSkillEditorEntry("validators", index, -1)), skillEditorButton("↓", () => moveSkillEditorEntry("validators", index, 1)), skillEditorButton(t("common.remove"), () => { const next = readSkillEditor(); next.validators.splice(index, 1); renderSkillEditor(next); })); row.append(actions); validatorsRoot.append(row); }
     $("skill-dialog")?.showModal?.(); $("skill-editor-name")?.focus();
   }
   function newSkill() { renderSkillEditor({ name: "", description: "", instructions: "", inputs: [], steps: [], validators: [], expectedOutput: "", requestedCapabilities: [], source: "manual" }); }
@@ -840,19 +841,19 @@
       const assigned = [...(item.assignedTeamIds ?? []).map((id) => `Team: ${cache.teams.find((entry) => entry.id === id)?.name ?? id}`), ...(item.assignedCoworkerIds ?? []).map((id) => `Coworker: ${cache.coworkers.find((entry) => entry.id === id)?.name ?? id}`)];
       card.append(title, text("Description", item.description), text("Source", item.source), text("Status", item.state), text("Assigned", assigned.join(", ") || "Not assigned"), text("Last definition test", item.lastTestedAt));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      actions.append(button("Edit / 编辑", () => editSkill(item), root));
-      actions.append(button("Export / 导出", () => api.skills.exportViaDialog({ skillId: item.id }), root), button("Duplicate / 复制", async () => { await api.skills.duplicate({ skillId: item.id }); await refresh(); }, root), button("Retest definition / 重测定义", async () => { await api.skills.retest({ skillId: item.id }); await refresh(); }, root), button(item.state === "archived" ? "Restore / 恢复" : "Archive / 归档", async () => { await (item.state === "archived" ? api.skills.restore : api.skills.archive)({ skillId: item.id }); await refresh(); }, root));
-      if (item.state === "active") actions.append(button("Create Routine / 创建例行任务", () => {
+      actions.append(button(t("common.edit"), () => editSkill(item), root));
+      actions.append(button(t("common.export"), () => api.skills.exportViaDialog({ skillId: item.id }), root), button(t("common.duplicate"), async () => { await api.skills.duplicate({ skillId: item.id }); await refresh(); }, root), button(t("skills.retestDefinition"), async () => { await api.skills.retest({ skillId: item.id }); await refresh(); }, root), button(item.state === "archived" ? t("common.restore") : t("common.archive"), async () => { await (item.state === "archived" ? api.skills.restore : api.skills.archive)({ skillId: item.id }); await refresh(); }, root));
+      if (item.state === "active") actions.append(button(t("skills.createRoutine"), () => {
         document.dispatchEvent(new CustomEvent("sovereignbot:create-routine-from-skill", { detail: { skillId: item.id } }));
       }, root));
       const teamSelect = select("Team for skill " + item.name); for (const team of cache.teams) { const option = document.createElement("option"); option.value = team.id; option.textContent = `Team: ${team.name}`; teamSelect.append(option); }
-      if (item.state === "active" && teamSelect.options.length) actions.append(teamSelect, button("Assign Team / 分配团队", async () => { await api.skills.assign({ skillId: item.id, targetKind: "team", targetId: teamSelect.value, enabled: !(item.assignedTeamIds ?? []).includes(teamSelect.value) }); await refresh(); }, root));
+      if (item.state === "active" && teamSelect.options.length) actions.append(teamSelect, button(t("teamPacks.assignTeam"), async () => { await api.skills.assign({ skillId: item.id, targetKind: "team", targetId: teamSelect.value, enabled: !(item.assignedTeamIds ?? []).includes(teamSelect.value) }); await refresh(); }, root));
       const coworkerSelect = select("Coworker for skill " + item.name); for (const coworker of cache.coworkers) { const option = document.createElement("option"); option.value = coworker.id; option.textContent = `Coworker: ${coworker.name}`; coworkerSelect.append(option); }
-      if (item.state === "active" && coworkerSelect.options.length) actions.append(coworkerSelect, button("Assign Coworker / 分配同事", async () => { await api.skills.assign({ skillId: item.id, targetKind: "coworker", targetId: coworkerSelect.value, enabled: !(item.assignedCoworkerIds ?? []).includes(coworkerSelect.value) }); await refresh(); }, root));
+      if (item.state === "active" && coworkerSelect.options.length) actions.append(coworkerSelect, button(t("skills.assignCoworker"), async () => { await api.skills.assign({ skillId: item.id, targetKind: "coworker", targetId: coworkerSelect.value, enabled: !(item.assignedCoworkerIds ?? []).includes(coworkerSelect.value) }); await refresh(); }, root));
       card.append(actions); root.append(card);
     }
     if (!items.length) root.append(text("Skills", "No skills yet. Create a declarative skill."));
-    root.append(button("Import skill / 导入技能", async () => { await api.skills.importViaDialog({}); await refresh(); }, root));
+    root.append(button(t("skills.import"), async () => { await api.skills.importViaDialog({}); await refresh(); }, root));
   }
 
   let editingPack;
@@ -915,28 +916,28 @@
     const coworkersRoot = editorRoot("team-pack-editor-coworkers"); clear(coworkersRoot);
     for (const entry of editingPack.coworkers) {
       const row = document.createElement("article"); row.className = "team-pack-editor-row"; row.dataset.key = entry.key;
-      const heading = document.createElement("div"); heading.className = "team-pack-editor-heading"; const title = document.createElement("strong"); title.textContent = entry.name || "Coworker"; heading.append(title); heading.append(editorAction("Remove / 删除", () => { if (editingPack.coworkers.length <= 2) return editorError("A Team Pack needs at least two coworkers."); const next = readPackEditor(); next.coworkers = next.coworkers.filter((item) => item.key !== entry.key); next.playbooks = next.playbooks.map((book) => ({ ...book, steps: book.steps.filter((step) => step !== entry.key) })); renderPackEditor(next); })); row.append(heading);
+      const heading = document.createElement("div"); heading.className = "team-pack-editor-heading"; const title = document.createElement("strong"); title.textContent = entry.name || "Coworker"; heading.append(title); heading.append(editorAction(t("common.remove"), () => { if (editingPack.coworkers.length <= 2) return editorError("A Team Pack needs at least two coworkers."); const next = readPackEditor(); next.coworkers = next.coworkers.filter((item) => item.key !== entry.key); next.playbooks = next.playbooks.map((book) => ({ ...book, steps: book.steps.filter((step) => step !== entry.key) })); renderPackEditor(next); })); row.append(heading);
       const grid = document.createElement("div"); grid.className = "team-pack-editor-grid";
-      grid.append(editorTextField("Name / 名称", entry.name, "team-pack-editor-coworker-name", { maxLength: 80 }), editorTextField("Role / 角色", entry.role, "team-pack-editor-coworker-role", { maxLength: 120 }), editorSelectField("Model profile / 模型档位", entry.modelBinding?.profile ?? "automatic", "team-pack-editor-coworker-profile", ["automatic", "efficient", "deep", "economy", "custom"].map((value) => ({ value, label: value })))); row.append(grid);
-      row.append(editorTextField("Instructions / 指引", entry.instructions, "team-pack-editor-coworker-instructions", { textarea: true, maxLength: 12000 }));
+      grid.append(editorTextField(t("common.name"), entry.name, "team-pack-editor-coworker-name", { maxLength: 80 }), editorTextField(t("common.role"), entry.role, "team-pack-editor-coworker-role", { maxLength: 120 }), editorSelectField(t("settings.modelProfile"), entry.modelBinding?.profile ?? "automatic", "team-pack-editor-coworker-profile", ["automatic", "efficient", "deep", "economy", "custom"].map((value) => ({ value, label: value })))); row.append(grid);
+      row.append(editorTextField(t("common.instructions"), entry.instructions, "team-pack-editor-coworker-instructions", { textarea: true, maxLength: 12000 }));
       if (entry.modelBinding?.profile === "custom") row.append(document.createElement("div"));
-      const customGrid = document.createElement("div"); customGrid.className = "team-pack-editor-grid"; customGrid.append(editorTextField("Custom provider id / 自定义提供方", entry.modelBinding?.provider, "team-pack-editor-coworker-provider", { maxLength: 128 }), editorTextField("Custom model id / 自定义模型", entry.modelBinding?.model, "team-pack-editor-coworker-model", { maxLength: 128 })); row.append(customGrid);
+      const customGrid = document.createElement("div"); customGrid.className = "team-pack-editor-grid"; customGrid.append(editorTextField(t("settings.customProviderId"), entry.modelBinding?.provider, "team-pack-editor-coworker-provider", { maxLength: 128 }), editorTextField(t("settings.customModelId"), entry.modelBinding?.model, "team-pack-editor-coworker-model", { maxLength: 128 })); row.append(customGrid);
       coworkersRoot.append(row);
     }
     const channelsRoot = editorRoot("team-pack-editor-channels"); clear(channelsRoot);
     for (const entry of editingPack.channels) {
       const row = document.createElement("article"); row.className = "team-pack-editor-row"; row.dataset.key = entry.key;
-      const heading = document.createElement("div"); heading.className = "team-pack-editor-heading"; const title = document.createElement("strong"); title.textContent = entry.name || "Channel"; heading.append(title); heading.append(editorAction("Remove / 删除", () => { if (editingPack.channels.length <= 1) return editorError("A Team Pack needs at least one channel."); const next = readPackEditor(); next.channels = next.channels.filter((item) => item.key !== entry.key); renderPackEditor(next); })); row.append(heading);
-      const grid = document.createElement("div"); grid.className = "team-pack-editor-grid"; grid.append(editorTextField("Name / 名称", entry.name, "team-pack-editor-channel-name", { maxLength: 120 }), editorSelectField("Kind / 类型", entry.kind, "team-pack-editor-channel-kind", [{ value: "work", label: "Work" }, { value: "personal", label: "Personal" }, { value: "project", label: "Project" }]), editorSelectField("Playbook / 工作方法", entry.playbookId, "team-pack-editor-channel-playbook", editingPack.playbooks.map((book) => ({ value: book.id, label: book.name })))); row.append(grid); row.append(editorTextField("Instructions / 指引", entry.instructions, "team-pack-editor-channel-instructions", { textarea: true, maxLength: 12000 })); channelsRoot.append(row);
+      const heading = document.createElement("div"); heading.className = "team-pack-editor-heading"; const title = document.createElement("strong"); title.textContent = entry.name || "Channel"; heading.append(title); heading.append(editorAction(t("common.remove"), () => { if (editingPack.channels.length <= 1) return editorError("A Team Pack needs at least one channel."); const next = readPackEditor(); next.channels = next.channels.filter((item) => item.key !== entry.key); renderPackEditor(next); })); row.append(heading);
+      const grid = document.createElement("div"); grid.className = "team-pack-editor-grid"; grid.append(editorTextField(t("common.name"), entry.name, "team-pack-editor-channel-name", { maxLength: 120 }), editorSelectField(t("common.kind"), entry.kind, "team-pack-editor-channel-kind", [{ value: "work", label: "Work" }, { value: "personal", label: "Personal" }, { value: "project", label: "Project" }]), editorSelectField(t("playbooks.title"), entry.playbookId, "team-pack-editor-channel-playbook", editingPack.playbooks.map((book) => ({ value: book.id, label: book.name })))); row.append(grid); row.append(editorTextField(t("common.instructions"), entry.instructions, "team-pack-editor-channel-instructions", { textarea: true, maxLength: 12000 })); channelsRoot.append(row);
     }
     const playbooksRoot = editorRoot("team-pack-editor-playbooks"); clear(playbooksRoot);
     for (const entry of editingPack.playbooks) {
       const row = document.createElement("article"); row.className = "team-pack-editor-row"; row.dataset.id = entry.id;
-      const heading = document.createElement("div"); heading.className = "team-pack-editor-heading"; const title = document.createElement("strong"); title.textContent = entry.name || "Playbook"; heading.append(title); heading.append(editorAction("Remove / 删除", () => { if (editingPack.playbooks.length <= 1) return editorError("A Team Pack needs at least one playbook."); const next = readPackEditor(); next.playbooks = next.playbooks.filter((item) => item.id !== entry.id); const fallback = next.playbooks[0]?.id; next.channels = next.channels.map((channel) => channel.playbookId === entry.id ? { ...channel, playbookId: fallback } : channel); renderPackEditor(next); })); row.append(heading);
-      const grid = document.createElement("div"); grid.className = "team-pack-editor-grid"; grid.append(editorTextField("Name / 名称", entry.name, "team-pack-editor-playbook-name", { maxLength: 120 }), editorTextField("Description / 描述", entry.description, "team-pack-editor-playbook-description", { maxLength: 500 }), editorTextField("Expected output / 预期产出", entry.expectedOutput, "team-pack-editor-playbook-output", { maxLength: 500 }), editorTextField("Recommended roles / 推荐角色", (entry.recommendedCoworkerRoles ?? []).join(", "), "team-pack-editor-playbook-roles", { maxLength: 1000 })); row.append(grid);
-      const steps = document.createElement("div"); steps.className = "team-pack-editor-step-list"; const stepsHeading = document.createElement("strong"); stepsHeading.textContent = "Ordered steps / 顺序步骤"; steps.append(stepsHeading);
+      const heading = document.createElement("div"); heading.className = "team-pack-editor-heading"; const title = document.createElement("strong"); title.textContent = entry.name || "Playbook"; heading.append(title); heading.append(editorAction(t("common.remove"), () => { if (editingPack.playbooks.length <= 1) return editorError("A Team Pack needs at least one playbook."); const next = readPackEditor(); next.playbooks = next.playbooks.filter((item) => item.id !== entry.id); const fallback = next.playbooks[0]?.id; next.channels = next.channels.map((channel) => channel.playbookId === entry.id ? { ...channel, playbookId: fallback } : channel); renderPackEditor(next); })); row.append(heading);
+      const grid = document.createElement("div"); grid.className = "team-pack-editor-grid"; grid.append(editorTextField(t("common.name"), entry.name, "team-pack-editor-playbook-name", { maxLength: 120 }), editorTextField(t("common.description"), entry.description, "team-pack-editor-playbook-description", { maxLength: 500 }), editorTextField(t("playbooks.expectedOutput"), entry.expectedOutput, "team-pack-editor-playbook-output", { maxLength: 500 }), editorTextField(t("playbooks.recommendedRoles"), (entry.recommendedCoworkerRoles ?? []).join(", "), "team-pack-editor-playbook-roles", { maxLength: 1000 })); row.append(grid);
+      const steps = document.createElement("div"); steps.className = "team-pack-editor-step-list"; const stepsHeading = document.createElement("strong"); stepsHeading.textContent = t("teamPacks.orderedSteps"); steps.append(stepsHeading);
       for (const step of entry.steps ?? []) { const line = document.createElement("div"); line.className = "team-pack-editor-step"; const select = document.createElement("select"); select.className = "team-pack-editor-step-select"; for (const coworker of editingPack.coworkers) { const option = document.createElement("option"); option.value = coworker.key; option.textContent = coworker.name; select.append(option); } select.value = step; line.append(select, editorAction("Remove", () => { const next = readPackEditor(); const book = next.playbooks.find((item) => item.id === entry.id); book.steps = book.steps.filter((value, index) => !(value === step && index === [...(entry.steps ?? [])].indexOf(step))); renderPackEditor(next); })); steps.append(line); }
-      steps.append(editorAction("Add step / 添加步骤", () => { const next = readPackEditor(); const book = next.playbooks.find((item) => item.id === entry.id); book.steps.push(next.coworkers[0]?.key); renderPackEditor(next); })); row.append(steps); playbooksRoot.append(row);
+      steps.append(editorAction(t("teamPacks.addStep"), () => { const next = readPackEditor(); const book = next.playbooks.find((item) => item.id === entry.id); book.steps.push(next.coworkers[0]?.key); renderPackEditor(next); })); row.append(steps); playbooksRoot.append(row);
     }
   }
 
@@ -966,21 +967,21 @@
       const card = document.createElement("article"); card.className = "settings-card"; card.dataset.teamPackId = item.id; const title = document.createElement("h3"); title.textContent = item.name;
       card.append(title, text("Category", item.category), text("Contents", `${item.coworkerNames?.length ?? 0} coworkers · ${item.channelNames?.length ?? 0} channels · ${item.playbookNames?.length ?? 0} playbooks`), text("Status", item.installed ? "Installed" : "Available"));
       const actions = document.createElement("div"); actions.className = "detail-actions";
-      if (!item.installed) actions.append(button("Install / 安装", async () => { await api.teams.installPack({ packId: item.id }); await refreshHost(); await refresh(); }, root));
-      actions.append(button("Preview / 预览", async () => {
+      if (!item.installed) actions.append(button(t("teamPacks.install"), async () => { await api.teams.installPack({ packId: item.id }); await refreshHost(); await refresh(); }, root));
+      actions.append(button(t("common.preview"), async () => {
         const existing = card.querySelector(".team-pack-preview");
         if (existing) { existing.remove(); return; }
         const recipe = await api.teams.exportPackRecipe({ packId: item.id });
         const panel = document.createElement("div"); panel.className = "team-pack-preview";
-        const heading = document.createElement("h4"); heading.textContent = "Composition / 组成"; panel.append(heading);
+        const heading = document.createElement("h4"); heading.textContent = t("teamPacks.composition"); panel.append(heading);
         panel.append(text("Description", recipe.description));
         for (const coworker of recipe.coworkers ?? []) panel.append(text("Coworker", `${coworker.name} — ${coworker.role}`));
         for (const channel of recipe.channels ?? []) panel.append(text("Channel", `${channel.name} — ${channel.instructions}`));
         for (const playbook of recipe.playbooks ?? []) panel.append(text("Playbook", `${playbook.name}: ${playbook.steps.join(" → ")}`));
         card.insertBefore(panel, actions);
       }, root));
-      actions.append(button("Export / 导出", () => exportPackToFile(item), root), button("Duplicate / 复制", async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); }, root));
-      if (item.custom) actions.append(button("Edit recipe / 编辑配方", () => openPackEditor(item), root));
+      actions.append(button(t("common.export"), () => exportPackToFile(item), root), button(t("common.duplicate"), async () => { await api.teams.duplicatePack({ packId: item.id }); await refresh(); }, root));
+      if (item.custom) actions.append(button(t("teamPacks.editRecipe"), () => openPackEditor(item), root));
       card.append(actions); root.append(card);
     }
     if (!visible.length) root.append(text("Team Packs", "No matching recipes."));
@@ -992,10 +993,10 @@
     const conversations = new Map(cache.conversations.map((entry) => [entry.id, entry]));
     const teams = new Map(cache.teams.map((entry) => [entry.id, entry]));
     const visible = items.filter((channel) => { const conversation = conversations.get(channel.conversationId); if (mode === "unread") return !channel.archived && unread(conversation); return mode === "all" || (mode === "archived" ? channel.archived : !channel.archived); });
-    const switcher = $("product-channel-switch-page"); if (switcher) { const current = switcher.value; switcher.textContent = ""; const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Quick switch / 快速切换"; switcher.append(placeholder); for (const channel of items.filter((entry) => !entry.archived)) { const option = document.createElement("option"); option.value = channel.conversationId; option.textContent = `${unread(conversations.get(channel.conversationId)) ? "• " : ""}${channel.name}`; switcher.append(option); } if ([...switcher.options].some((option) => option.value === current)) switcher.value = current; }
+    const switcher = $("product-channel-switch-page"); if (switcher) { const current = switcher.value; switcher.textContent = ""; const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = t("channels.quickSwitch"); switcher.append(placeholder); for (const channel of items.filter((entry) => !entry.archived)) { const option = document.createElement("option"); option.value = channel.conversationId; option.textContent = `${unread(conversations.get(channel.conversationId)) ? "• " : ""}${channel.name}`; switcher.append(option); } if ([...switcher.options].some((option) => option.value === current)) switcher.value = current; }
     for (const channel of visible) {
-      const team = teams.get(channel.teamId); const conversation = conversations.get(channel.conversationId); const card = document.createElement("article"); card.className = "settings-card"; const title = document.createElement("h3"); title.textContent = channel.name; const meta = document.createElement("p"); meta.textContent = `${team?.name ?? "Team"} · ${channel.kind} · ${channel.archived ? "Read-only / 只读" : "Available / 可用"}`; card.append(title, meta); if (unread(conversation)) { const badge = document.createElement("span"); badge.className = "soft-pill"; badge.textContent = "Unread / 未读"; card.append(badge); } card.append(text("Instructions", channel.instructions), text("Last activity", conversation?.updatedAt || channel.updatedAt), text("Latest", conversation?.lastMessage?.textPreview));
-      const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(button(channel.archived ? "View / 查看" : "Open / 打开", () => openConversationSafe(channel.conversationId), root), button("Edit / 编辑", () => void openEditor(channel.teamId, channel.id).catch((reason) => error(root, reason)), root), button("Duplicate / 复制", async () => { await api.channels.create({ teamId: channel.teamId, name: `${channel.name} copy`.slice(0, 120), kind: channel.kind, instructions: channel.instructions, workspaceId: channel.workspaceId, playbookId: channel.playbookId }); await refreshHost(); await refresh(); }, root), button(channel.archived ? "Restore / 恢复" : "Archive / 归档", async () => { await (channel.archived ? api.channels.restore : api.channels.archive)({ channelId: channel.id }); await refreshHost(); await refresh(); }, root));
+      const team = teams.get(channel.teamId); const conversation = conversations.get(channel.conversationId); const card = document.createElement("article"); card.className = "settings-card"; const title = document.createElement("h3"); title.textContent = channel.name; const meta = document.createElement("p"); meta.textContent = `${team?.name ?? "Team"} · ${channel.kind} · ${channel.archived ? t("state.readOnly") : t("state.available")}`; card.append(title, meta); if (unread(conversation)) { const badge = document.createElement("span"); badge.className = "soft-pill"; badge.textContent = t("channels.unread"); card.append(badge); } card.append(text("Instructions", channel.instructions), text("Last activity", conversation?.updatedAt || channel.updatedAt), text("Latest", conversation?.lastMessage?.textPreview));
+      const actions = document.createElement("div"); actions.className = "detail-actions"; actions.append(button(channel.archived ? t("common.view") : t("common.open"), () => openConversationSafe(channel.conversationId), root), button(t("common.edit"), () => void openEditor(channel.teamId, channel.id).catch((reason) => error(root, reason)), root), button(t("common.duplicate"), async () => { await api.channels.create({ teamId: channel.teamId, name: `${channel.name} copy`.slice(0, 120), kind: channel.kind, instructions: channel.instructions, workspaceId: channel.workspaceId, playbookId: channel.playbookId }); await refreshHost(); await refresh(); }, root), button(channel.archived ? t("common.restore") : t("common.archive"), async () => { await (channel.archived ? api.channels.restore : api.channels.archive)({ channelId: channel.id }); await refreshHost(); await refresh(); }, root));
       card.append(actions); root.append(card);
     }
     if (!visible.length) root.append(text("Channels", mode === "archived" ? "No archived channels." : mode === "unread" ? "No unread channels." : "No active channels yet."));
@@ -1031,16 +1032,16 @@
     cache.teams = teams.teams ?? []; cache.coworkers = coworkers.coworkers ?? []; cache.workspaces = workspaces.workspaces ?? []; cache.templates = teams.channelTemplates ?? [];
     const artifactScope = artifactScopeOverride || selected("artifact-hub-filter-page", "recent");
     const artifactVisibility = selected("artifact-hub-visibility-page", "active");
-    const artifactOptions = [{ value: "recent", label: "Recent / 最近" }, ...cache.teams.flatMap((team) => [{ value: `team:${team.id}`, label: `By Team / 团队: ${team.name}` }, ...(team.channels ?? []).map((channel) => ({ value: `channel:${channel.id}`, label: `By Channel / 频道: ${channel.name}` }))]), ...cache.coworkers.map((coworker) => ({ value: `coworker:${coworker.id}`, label: `By Coworker / 同事: ${coworker.name}` }))];
+    const artifactOptions = [{ value: "recent", label: t("common.recent") }, ...cache.teams.flatMap((team) => [{ value: `team:${team.id}`, label: t("projects.byTeam", { name: team.name }) }, ...(team.channels ?? []).map((channel) => ({ value: `channel:${channel.id}`, label: t("projects.byChannel", { name: channel.name }) }))]), ...cache.coworkers.map((coworker) => ({ value: `coworker:${coworker.id}`, label: t("projects.byCoworker", { name: coworker.name }) }))];
     populate("artifact-hub-filter-page", artifactOptions, artifactScope);
-    populate("artifact-hub-visibility-page", [{ value: "active", label: "Active / 活跃" }, { value: "archived", label: "Archived / 已归档" }, { value: "all", label: "All / 全部" }], artifactVisibility);
+    populate("artifact-hub-visibility-page", [{ value: "active", label: t("state.active") }, { value: "archived", label: t("state.archived") }, { value: "all", label: t("common.all") }], artifactVisibility);
     const artifactCatalog = await api.artifacts.hub({ limit: 500, visibility: artifactVisibility });
     const artifactTypes = [...new Set((artifactCatalog.artifacts ?? []).map((entry) => entry.mimeType).filter(Boolean))].sort();
     const artifactType = selected("artifact-hub-type-page", "");
-    populate("artifact-hub-type-page", [{ value: "", label: "All types / 全部类型" }, ...artifactTypes.map((value) => ({ value, label: value }))], artifactType);
+    populate("artifact-hub-type-page", [{ value: "", label: t("artifacts.allTypes") }, ...artifactTypes.map((value) => ({ value, label: value }))], artifactType);
     const artifactPayload = { limit: 100, visibility: selected("artifact-hub-visibility-page", artifactVisibility) }; const resolvedScope = selected("artifact-hub-filter-page", artifactScope); if (resolvedScope.startsWith("team:")) artifactPayload.teamId = resolvedScope.slice(5); if (resolvedScope.startsWith("channel:")) artifactPayload.channelId = resolvedScope.slice(8); if (resolvedScope.startsWith("coworker:")) artifactPayload.coworkerId = resolvedScope.slice(9); const resolvedType = selected("artifact-hub-type-page", artifactType); if (resolvedType) artifactPayload.type = resolvedType;
     const historyScope = historyScopeOverride || selected("computer-history-filter-page", "all");
-    populate("computer-history-filter-page", [{ value: "all", label: "All coworkers / 全部同事" }, ...cache.coworkers.map((coworker) => ({ value: coworker.id, label: `By Coworker / 同事: ${coworker.name}` }))], historyScope);
+    populate("computer-history-filter-page", [{ value: "all", label: t("computerHistory.allCoworkers") }, ...cache.coworkers.map((coworker) => ({ value: coworker.id, label: t("projects.byCoworker", { name: coworker.name }) }))], historyScope);
     const historyPayload = { limit: 100, ...(historyScope !== "all" && safeOpaqueId(historyScope) ? { coworkerId: historyScope } : {}) };
     let [playbookResult, artifactResult, historyResult, skillResult, channelResult, conversations] = await Promise.all([api.playbooks.list({ includeArchived: true }), api.artifacts.hub(artifactPayload), api.computer.history(historyPayload), api.skills.list({ includeArchived: true }), api.channels.list({ includeArchived: true }), api.conversations?.list ? api.conversations.list({}) : Promise.resolve({ conversations: [] })]);
     const requestedArtifactId = pendingArtifactId;
@@ -1130,13 +1131,13 @@
     document.addEventListener("sovereignbot:open-artifacts", (event) => {
       const coworkerId = safeOpaqueId(event.detail?.coworkerId);
       artifactScopeOverride = coworkerId ? `coworker:${coworkerId}` : "recent";
-      artifactDeepLinkNotice = coworkerId ? "Showing artifacts created by this Coworker / 已显示此同事创建的成果" : "Showing recent artifacts / 已显示最近成果";
+      artifactDeepLinkNotice = coworkerId ? t("artifacts.showingCoworker") : t("artifacts.showingRecent");
       nav("artifacts");
     });
     document.addEventListener("sovereignbot:open-computer-history", (event) => {
       const coworkerId = safeOpaqueId(event.detail?.coworkerId);
       historyScopeOverride = coworkerId || "all";
-      historyDeepLinkNotice = coworkerId ? "Showing activity for this Coworker / 已显示此同事的动态" : "Showing all Coworker activity / 已显示全部同事动态";
+      historyDeepLinkNotice = coworkerId ? t("computerHistory.showingCoworker") : t("computerHistory.showingAll");
       nav("computer-history");
     });
     window.refreshIndependentProductPages = refresh;

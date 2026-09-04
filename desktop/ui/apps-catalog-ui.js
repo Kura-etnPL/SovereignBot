@@ -4,6 +4,7 @@
   const api = window.sovereignbot;
   if (!api?.connectedApps?.search || !api.connectedApps.review) return;
   const $ = (id) => document.getElementById(id);
+  const t = (key, params) => globalThis.SovereignI18n?.t(key, params) ?? key;
   const clear = (node) => { if (node) node.textContent = ""; };
   const text = (value, fallback = "—") => String(value ?? fallback);
   let projects = [];
@@ -29,15 +30,15 @@
   }
   function reviewDetails(app, reviewRoot, review) {
     clear(reviewRoot); reviewRoot.classList.remove("hidden");
-    const heading = document.createElement("strong"); heading.textContent = "Review before connecting / 连接前审查"; reviewRoot.append(heading);
-    addLine(reviewRoot, "Trusted source / 可信来源", review.trustedSource);
-    addLine(reviewRoot, "Version / 版本", review.version);
-    addLine(reviewRoot, "Capabilities / 能力", (review.capabilities ?? []).join(" · "));
-    addLine(reviewRoot, "Approval / 审批", review.approval?.summary);
-    addLine(reviewRoot, "Cost / 费用", review.cost?.summary);
+    const heading = document.createElement("strong"); heading.textContent = t("apps.reviewBeforeConnect"); reviewRoot.append(heading);
+    addLine(reviewRoot, t("apps.trustedSource"), review.trustedSource);
+    addLine(reviewRoot, t("apps.version"), review.version);
+    addLine(reviewRoot, t("apps.capabilities"), (review.capabilities ?? []).join(" · "));
+    addLine(reviewRoot, t("apps.approval"), review.approval?.summary);
+    addLine(reviewRoot, t("apps.cost"), review.cost?.summary);
     const actions = document.createElement("div"); actions.className = "detail-actions apps-catalog-review-actions";
-    actions.append(action("Cancel / 取消", () => reviewRoot.classList.add("hidden")));
-    actions.append(action("Approve & connect / 同意并连接", async (button) => {
+    actions.append(action(t("common.cancel"), () => reviewRoot.classList.add("hidden")));
+    actions.append(action(t("apps.approveAndConnect"), async (button) => {
       button.disabled = true;
       try { await api.connectedApps.connect({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}), ...(review.cost?.metered ? { approveMetered: true } : {}) }); await refresh(); }
       catch (error) { setFeedback(error?.message || error, true); button.disabled = false; }
@@ -46,17 +47,17 @@
   }
   function assignmentControls(card, app) {
     const section = document.createElement("div"); section.className = "apps-catalog-assignment";
-    const title = document.createElement("strong"); title.textContent = "Assign scope / 分配范围"; section.append(title);
+    const title = document.createElement("strong"); title.textContent = t("apps.assignScope"); section.append(title);
     const team = document.createElement("select"); team.setAttribute("aria-label", `Team assignment for ${app.name}`);
     const coworker = document.createElement("select"); coworker.setAttribute("aria-label", `Coworker assignment for ${app.name}`);
-    setOptions(team, teams.map((item) => ({ value: item.id, label: `Team: ${item.name}` })), "Choose Team / 选择团队");
-    setOptions(coworker, coworkers.map((item) => ({ value: item.id, label: `Coworker: ${item.name}` })), "Choose Coworker / 选择同事");
-    const assignTeam = action("Assign Team / 分配团队", async (button) => {
+    setOptions(team, teams.map((item) => ({ value: item.id, label: `Team: ${item.name}` })), t("apps.chooseTeam"));
+    setOptions(coworker, coworkers.map((item) => ({ value: item.id, label: `Coworker: ${item.name}` })), t("apps.chooseCoworker"));
+    const assignTeam = action(t("apps.assignTeam"), async (button) => {
       if (!team.value) return; button.disabled = true;
       try { await api.connectedApps.assign({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}), teamId: team.value, enabled: true }); await refresh(); }
       catch (error) { setFeedback(error?.message || error, true); button.disabled = false; }
     });
-    const assignCoworker = action("Assign Coworker / 分配同事", async (button) => {
+    const assignCoworker = action(t("apps.assignCoworker"), async (button) => {
       if (!coworker.value) return; button.disabled = true;
       try { await api.connectedApps.assign({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}), coworkerId: coworker.value, enabled: true }); await refresh(); }
       catch (error) { setFeedback(error?.message || error, true); button.disabled = false; }
@@ -68,7 +69,7 @@
     const addUnassign = (kind, id, name) => {
       const row = document.createElement("div"); row.className = "apps-catalog-assigned-row";
       const label = document.createElement("span"); label.textContent = `${kind}: ${name}`;
-      const remove = action(`Unassign ${kind} / 解除${kind === "Team" ? "团队" : "同事"}`, async (button) => {
+      const remove = action(t("apps.unassign", { kind }), async (button) => {
         button.disabled = true;
         try { await api.connectedApps.assign({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}), [kind === "Team" ? "teamId" : "coworkerId"]: id, enabled: false }); await refresh(); }
         catch (error) { setFeedback(error?.message || error, true); button.disabled = false; }
@@ -77,13 +78,13 @@
     };
     for (const [index, id] of (app.assignedTeamIds ?? []).entries()) addUnassign("Team", id, assignedTeams[index]);
     for (const [index, id] of (app.assignedCoworkerIds ?? []).entries()) addUnassign("Coworker", id, assignedCoworkers[index]);
-    if (!assigned.children.length) { const empty = document.createElement("small"); empty.textContent = "No assignments in this scope. / 此范围暂无分配。"; assigned.append(empty); }
+    if (!assigned.children.length) { const empty = document.createElement("small"); empty.textContent = t("apps.noAssignments"); assigned.append(empty); }
     section.append(assigned);
     return section;
   }
   function render(items) {
     const root = $("apps-catalog-list"); if (!root) return; clear(root);
-    if (!items.length) { const empty = document.createElement("p"); empty.className = "setting-feedback"; empty.textContent = "No apps match these filters. / 没有符合筛选条件的应用。"; root.append(empty); return; }
+    if (!items.length) { const empty = document.createElement("p"); empty.className = "setting-feedback"; empty.textContent = t("apps.noMatch"); root.append(empty); return; }
     for (const app of items) {
       const card = document.createElement("article"); card.className = "apps-catalog-card";
       const header = document.createElement("div"); header.className = "apps-catalog-card-head";
@@ -91,21 +92,21 @@
       const status = document.createElement("span"); status.className = `soft-pill apps-catalog-status ${app.status}`; status.textContent = text(app.status); header.append(title, status); card.append(header);
       const summary = document.createElement("p"); summary.className = "apps-catalog-description"; summary.textContent = app.description; card.append(summary);
       const facts = document.createElement("div"); facts.className = "apps-catalog-facts";
-      addLine(facts, "Trusted source / 可信来源", app.trustedSource); addLine(facts, "Version / 版本", app.version); addLine(facts, "Catalog / 目录", app.availability?.summary); addLine(facts, "Installation / 安装", app.installationState); addLine(facts, "Connection / 连接", app.connection?.summary); addLine(facts, "Health / 健康", app.health?.summary); addLine(facts, "Capabilities / 能力", app.capabilitySummary); addLine(facts, "Approval / 审批", app.approvalSummary); addLine(facts, "Cost / 费用", `${app.cost?.summary ?? "—"}${app.cost?.metered ? " Metered fee / 按量计费" : ""}`); card.append(facts);
+      addLine(facts, t("apps.trustedSource"), app.trustedSource); addLine(facts, t("apps.version"), app.version); addLine(facts, t("apps.catalog"), app.availability?.summary); addLine(facts, t("apps.installation"), app.installationState); addLine(facts, t("apps.connection"), app.connection?.summary); addLine(facts, t("apps.health"), app.health?.summary); addLine(facts, t("apps.capabilities"), app.capabilitySummary); addLine(facts, t("apps.approval"), app.approvalSummary); addLine(facts, t("apps.cost"), `${app.cost?.summary ?? "—"}${app.cost?.metered ? ` ${t("apps.meteredFee")}` : ""}`); card.append(facts);
       const capabilities = document.createElement("p"); capabilities.className = "apps-catalog-capabilities"; capabilities.textContent = `Capabilities: ${(app.capabilities ?? []).join(" · ")}`; card.append(capabilities);
       const reviewRoot = document.createElement("div"); reviewRoot.className = "apps-catalog-review hidden"; card.append(reviewRoot);
       const actions = document.createElement("div"); actions.className = "detail-actions apps-catalog-actions";
-      if (app.connectionState === "connected") actions.append(action("Disconnect / 断开", async (button) => { button.disabled = true; try { await api.connectedApps.disconnect({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}) }); await refresh(); } catch (error) { setFeedback(error?.message || error, true); button.disabled = false; } }));
-      else if (app.connectable !== false && app.availability?.state === "available") actions.append(action("Review connection / 审查连接", async (button) => { button.disabled = true; try { const result = await api.connectedApps.review({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}) }); reviewDetails(app, reviewRoot, result.review); } catch (error) { setFeedback(error?.message || error, true); } finally { button.disabled = false; } }));
-      if (app.connectionState !== "disabled") actions.append(action("Disable / 禁用", async (button) => { button.disabled = true; try { await api.connectedApps.disable({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}) }); await refresh(); } catch (error) { setFeedback(error?.message || error, true); button.disabled = false; } }));
-      else if (app.connectable !== false) actions.append(action("Review & enable / 审查并启用", async (button) => { button.disabled = true; try { const result = await api.connectedApps.review({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}) }); reviewDetails(app, reviewRoot, result.review); } catch (error) { setFeedback(error?.message || error, true); } finally { button.disabled = false; } }, "hero-action"));
+      if (app.connectionState === "connected") actions.append(action(t("apps.disconnect"), async (button) => { button.disabled = true; try { await api.connectedApps.disconnect({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}) }); await refresh(); } catch (error) { setFeedback(error?.message || error, true); button.disabled = false; } }));
+      else if (app.connectable !== false && app.availability?.state === "available") actions.append(action(t("apps.reviewConnection"), async (button) => { button.disabled = true; try { const result = await api.connectedApps.review({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}) }); reviewDetails(app, reviewRoot, result.review); } catch (error) { setFeedback(error?.message || error, true); } finally { button.disabled = false; } }));
+      if (app.connectionState !== "disabled") actions.append(action(t("apps.disable"), async (button) => { button.disabled = true; try { await api.connectedApps.disable({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}) }); await refresh(); } catch (error) { setFeedback(error?.message || error, true); button.disabled = false; } }));
+      else if (app.connectable !== false) actions.append(action(t("apps.reviewAndEnable"), async (button) => { button.disabled = true; try { const result = await api.connectedApps.review({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}) }); reviewDetails(app, reviewRoot, result.review); } catch (error) { setFeedback(error?.message || error, true); } finally { button.disabled = false; } }, "hero-action"));
       card.append(actions);
       if (app.status !== "unavailable") card.append(assignmentControls(card, app));
       root.append(card);
     }
   }
   async function refresh() {
-    const resultRoot = $("apps-catalog-result"); if (resultRoot) resultRoot.textContent = "Refreshing… / 刷新中…";
+    const resultRoot = $("apps-catalog-result"); if (resultRoot) resultRoot.textContent = t("common.refreshing");
     try {
       const query = $("apps-catalog-search")?.value.trim() || "";
       const category = $("apps-catalog-category")?.value || "";
@@ -114,14 +115,14 @@
       const result = await api.connectedApps.search(payload);
       const healthy = await Promise.all((result.apps ?? []).map((app) => api.connectedApps.health({ appId: app.id, ...(selectedProjectId ? { projectId: selectedProjectId } : {}) }).catch(() => app)));
       render(healthy);
-      setFeedback(`${healthy.length} app${healthy.length === 1 ? "" : "s"} in the trusted catalog. / 可信目录中有 ${healthy.length} 个应用。`);
+      setFeedback(t("apps.catalogCount", { count: healthy.length }));
     } catch (error) { clear($("apps-catalog-list")); setFeedback(error?.message || error, true); }
   }
   async function loadContext() {
     try {
       const [projectResult, teamResult, coworkerResult] = await Promise.all([api.projects?.list ? api.projects.list({ includeArchived: false, limit: 50 }) : { projects: [] }, api.teams?.list ? api.teams.list({}) : { teams: [] }, api.coworkers?.list ? api.coworkers.list({}) : { coworkers: [] }]);
       projects = (projectResult.projects ?? []).filter((item) => item.state !== "archived"); teams = (teamResult.teams ?? []).filter((item) => item.state !== "archived"); coworkers = (coworkerResult.coworkers ?? []).filter((item) => item.state !== "archived");
-      setOptions($("apps-catalog-project"), projects.map((item) => ({ value: item.projectId, label: item.name })), "All Projects / 全部项目", selectedProjectId);
+      setOptions($("apps-catalog-project"), projects.map((item) => ({ value: item.projectId, label: item.name })), t("apps.allProjects"), selectedProjectId);
     } catch (error) { setFeedback(error?.message || error, true); }
   }
   function setup() {

@@ -2,17 +2,17 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
-  const t = (key, fallback) => globalThis.SovereignI18n?.t(key) ?? fallback ?? key;
+  const t = (key, params) => globalThis.SovereignI18n?.t(key, params) ?? key;
   let currentVisibleIds = [];
   let pollTimer;
   let refreshGeneration = 0;
 
   const CATEGORY_LABELS = Object.freeze({
-    "attention": "Attention / 需关注",
-    "routine-completed": "Routine completed / 例行完成",
-    "trigger-fired": "Trigger fired / 触发器执行",
-    "coworker-finished": "Coworker finished / 同事完成",
-    "channel-unread": "Channel unread / 频道未读",
+    "attention": "notifications.categoryAttention",
+    "routine-completed": "notifications.categoryRoutineCompleted",
+    "trigger-fired": "notifications.categoryTriggerFired",
+    "coworker-finished": "notifications.categoryCoworkerFinished",
+    "channel-unread": "notifications.categoryChannelUnread",
   });
 
   const CATEGORY_ICONS = Object.freeze({
@@ -24,12 +24,12 @@
   });
 
   const NAV_TARGET_LABELS = Object.freeze({
-    "attention": "View Attention / 查看需关注",
-    "routines": "View Routines / 查看例行",
-    "triggers": "View Triggers / 查看触发器",
-    "work": "View Work / 查看工作",
-    "artifacts": "View Files & Artifacts / 查看文件成果",
-    "conversation": "Open Conversation / 打开会话",
+    "attention": "notifications.navTarget.attention",
+    "routines": "notifications.navTarget.routines",
+    "triggers": "notifications.navTarget.triggers",
+    "work": "notifications.navTarget.work",
+    "artifacts": "notifications.navTarget.artifacts",
+    "conversation": "notifications.navTarget.conversation",
   });
 
   function formatRelativeTime(isoString) {
@@ -38,13 +38,13 @@
     if (isNaN(date.getTime())) return '';
     const now = Date.now();
     const diffSec = Math.max(0, Math.floor((now - date.getTime()) / 1000));
-    if (diffSec < 60) return "Just now / 刚刚";
+    if (diffSec < 60) return t("notifications.time.justNow");
     const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return diffMin + "m ago / " + diffMin + "分钟前";
+    if (diffMin < 60) return t("notifications.time.minutesAgo", { count: diffMin });
     const diffHours = Math.floor(diffMin / 60);
-    if (diffHours < 24) return diffHours + "h ago / " + diffHours + "小时前";
+    if (diffHours < 24) return t("notifications.time.hoursAgo", { count: diffHours });
     const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 7) return diffDays + "d ago / " + diffDays + "天前";
+    if (diffDays < 7) return t("notifications.time.daysAgo", { count: diffDays });
     return date.toLocaleDateString();
   }
 
@@ -129,7 +129,7 @@
     iconSpan.textContent = CATEGORY_ICONS[item.category] || "•";
     badgeSpan.append(iconSpan);
     const labelSpan = document.createElement("span");
-    labelSpan.textContent = CATEGORY_LABELS[item.category] || item.category;
+    labelSpan.textContent = CATEGORY_LABELS[item.category] ? t(CATEGORY_LABELS[item.category]) : (item.category || "");
     badgeSpan.append(labelSpan);
     header.append(badgeSpan);
 
@@ -138,7 +138,7 @@
 
     const readPill = document.createElement("span");
     readPill.className = "notification-read-pill " + (item.read ? "read" : "unread");
-    readPill.textContent = item.read ? "Read / 已读" : "Unread / 未读";
+    readPill.textContent = item.read ? t("state.read") : t("state.unread");
     metaRight.append(readPill);
 
     const timeSpan = document.createElement("time");
@@ -172,7 +172,7 @@
     const toggleReadBtn = document.createElement("button");
     toggleReadBtn.type = "button";
     toggleReadBtn.className = "quiet-action";
-    toggleReadBtn.textContent = item.read ? "Mark unread / 标为未读" : "Mark read / 标为已读";
+    toggleReadBtn.textContent = item.read ? t("notifications.markUnread") : t("notifications.markRead");
     toggleReadBtn.addEventListener("click", async () => {
       try {
         await window.sovereignbot.notifications.markRead({ id: item.id, read: !item.read });
@@ -187,7 +187,7 @@
     const dismissBtn = document.createElement("button");
     dismissBtn.type = "button";
     dismissBtn.className = "quiet-action";
-    dismissBtn.textContent = "Dismiss / 清除";
+    dismissBtn.textContent = t("common.dismiss");
     dismissBtn.addEventListener("click", async () => {
       try {
         await window.sovereignbot.notifications.clear({ id: item.id });
@@ -210,7 +210,7 @@
         const navBtn = document.createElement("button");
         navBtn.type = "button";
         navBtn.className = "hero-action";
-        navBtn.textContent = NAV_TARGET_LABELS[item.source.target];
+        navBtn.textContent = t(NAV_TARGET_LABELS[item.source.target]);
         navBtn.addEventListener("click", () => navigateToSource(item.source));
         actionsRow.append(navBtn);
       }
@@ -237,7 +237,7 @@
     else if (readVal === "read") params.read = true;
 
     try {
-      setStatus("Loading notifications… / 正在加载通知…");
+      setStatus(t("notifications.loading"));
       const res = await window.sovereignbot.notifications.list(params);
       if (generation !== refreshGeneration) {
         return;
@@ -248,7 +248,7 @@
       updateBadge(res.unreadCount);
 
       if (countSummary) {
-        countSummary.textContent = "Total: " + (res.totalCount ?? 0) + " · Unread: " + (res.unreadCount ?? 0) + " / 总计: " + (res.totalCount ?? 0) + " · 未读: " + (res.unreadCount ?? 0);
+        countSummary.textContent = t("notifications.countSummary", { total: res.totalCount ?? 0, unread: res.unreadCount ?? 0 });
       }
 
       if (listEl) {
@@ -262,8 +262,8 @@
           const p = document.createElement("p");
           p.className = "detail-help";
           p.textContent = (category !== "all" || readVal !== "all")
-            ? "No notifications match this filter / 没有符合条件的通知"
-            : "No notifications yet / 暂无通知";
+            ? t("notifications.noMatch")
+            : t("notifications.empty");
           emptyCard.append(p);
           listEl.append(emptyCard);
         } else {

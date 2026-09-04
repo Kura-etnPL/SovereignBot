@@ -4,17 +4,21 @@
   const api = window.sovereignbot;
   if (!api?.thisPc || !api.projects) return;
   const $ = (id) => document.getElementById(id);
+  const t = (key, params) => globalThis.SovereignI18n?.t(key, params) ?? key;
   const root = $("this-pc-list");
   const projectSelect = $("this-pc-project");
   let projects = [];
-  const STATUS_LABELS = new Map([
-    ["working", "Working / 工作中"],
-    ["takeover", "You have control / 你正在控制"],
-    ["idle", "Ready / 就绪"],
-    ["attention", "Needs attention / 需要处理"],
-    ["unavailable", "Unavailable / 暂不可用"],
-  ]);
-  const HEALTH_LABELS = new Map([["ready", "Ready / 正常"], ["unavailable", "Unavailable / 暂不可用"]]);
+  const STATUS_KEY_MAP = {
+    working: "state.working",
+    takeover: "thisPc.takeoverStatus",
+    idle: "state.ready",
+    attention: "state.attention",
+    unavailable: "state.unavailable",
+  };
+  const HEALTH_KEY_MAP = {
+    ready: "state.ready",
+    unavailable: "state.unavailable",
+  };
 
   const clear = (node) => { if (node) node.textContent = ""; };
   const text = (label, value) => {
@@ -43,8 +47,8 @@
     return node;
   };
   const currentProjectId = () => projectSelect?.value || projects.find((entry) => entry.state === "active")?.projectId;
-  const statusLabel = (value) => STATUS_LABELS.get(value) || "Status unknown / 状态未知";
-  const healthLabel = (value) => HEALTH_LABELS.get(value) || "Unavailable / 暂不可用";
+  const statusLabel = (value) => STATUS_KEY_MAP[value] ? t(STATUS_KEY_MAP[value]) : t("thisPc.statusUnknown");
+  const healthLabel = (value) => HEALTH_KEY_MAP[value] ? t(HEALTH_KEY_MAP[value]) : t("state.unavailable");
 
   function populateProjects() {
     if (!projectSelect) return;
@@ -80,32 +84,32 @@
     const facts = document.createElement("div");
     facts.className = "this-pc-facts";
     facts.append(
-      text("Health / 健康", healthLabel(computer.health?.status)),
-      text("Context / 上下文", [computer.context?.label, computer.context?.detail].filter(Boolean).join(" · ")),
-      text("Current work / 当前工作", computer.currentWork),
-      text("Current app / 当前应用", computer.currentApp),
-      text("Current site / 当前站点", computer.currentSite),
+      text(t("thisPc.healthLabel"), healthLabel(computer.health?.status)),
+      text(t("thisPc.contextLabel"), [computer.context?.label, computer.context?.detail].filter(Boolean).join(" · ")),
+      text(t("thisPc.currentWorkLabel"), computer.currentWork),
+      text(t("thisPc.currentAppLabel"), computer.currentApp),
+      text(t("thisPc.currentSiteLabel"), computer.currentSite),
     );
     card.append(facts);
 
     const actions = document.createElement("div");
     actions.className = "detail-actions";
-    if (computer.canTakeOver) actions.append(button("Take Over / 接管", async () => { window.sovereignbotStopVoice?.(); await api.thisPc.takeOver({ projectId, coworkerId: computer.coworkerId }); result("Coworker actions are paused while you have control / 你控制期间已暂停同事操作"); await refresh(); }, "hero-action"));
-    if (computer.canHandBack) actions.append(button("Hand Back / 交还", async () => { await api.thisPc.handBack({ projectId, coworkerId: computer.coworkerId }); result("Control handed back; the Coworker can continue when ready / 已交还控制权，同事准备好后可继续"); await refresh(); }, "hero-action"));
-    actions.append(button("Show latest screen / 查看最新画面", async () => {
+    if (computer.canTakeOver) actions.append(button(t("thisPc.takeControl"), async () => { window.sovereignbotStopVoice?.(); await api.thisPc.takeOver({ projectId, coworkerId: computer.coworkerId }); result(t("thisPc.takeOverFeedback")); await refresh(); }, "hero-action"));
+    if (computer.canHandBack) actions.append(button(t("thisPc.handBack"), async () => { await api.thisPc.handBack({ projectId, coworkerId: computer.coworkerId }); result(t("thisPc.handBackFeedback")); await refresh(); }, "hero-action"));
+    actions.append(button(t("thisPc.showLatestScreen"), async () => {
       const frame = await api.thisPc.frame({ projectId, coworkerId: computer.coworkerId });
       const image = card.querySelector(".this-pc-screen");
       if (image) { image.src = `data:${frame.mimeType};base64,${frame.data}`; image.classList.remove("hidden"); }
       const site = card.querySelector(".this-pc-frame-site");
-      if (site) site.textContent = frame.site ? `Current site / 当前站点: ${frame.site}` : "No current site to show.";
+      if (site) site.textContent = frame.site ? `${t("thisPc.currentSiteLabel")}: ${frame.site}` : t("thisPc.noCurrentSite");
     }));
-    actions.append(button("Show page details / 查看页面详情", async () => {
+    actions.append(button(t("thisPc.showPageDetails"), async () => {
       const snapshot = await api.thisPc.snapshot({ projectId, coworkerId: computer.coworkerId });
       const summary = card.querySelector(".this-pc-snapshot-summary");
       if (summary) summary.textContent = `${snapshot.elements?.length ?? 0} page controls${snapshot.site ? ` · ${snapshot.site}` : ""}`;
     }));
-    if (computer.artifacts?.length) actions.append(button("Open artifacts / 查看成果", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-artifacts", { detail: { projectId, coworkerId: computer.coworkerId } }))));
-    actions.append(button("Open activity / 查看动态", () => document.dispatchEvent(new CustomEvent("sovereignbot:open-computer-history", { detail: { projectId, coworkerId: computer.coworkerId } }))));
+    if (computer.artifacts?.length) actions.append(button(t("thisPc.openArtifacts"), () => document.dispatchEvent(new CustomEvent("sovereignbot:open-artifacts", { detail: { projectId, coworkerId: computer.coworkerId } }))));
+    actions.append(button(t("thisPc.openActivity"), () => document.dispatchEvent(new CustomEvent("sovereignbot:open-computer-history", { detail: { projectId, coworkerId: computer.coworkerId } }))));
     card.append(actions);
 
     const image = document.createElement("img");
@@ -123,18 +127,18 @@
 
     const files = document.createElement("div");
     files.className = "this-pc-subsection";
-    files.append(document.createElement("h3"), text("Files / 文件", computer.files?.length ? computer.files.map((entry) => `${entry.name} · ${entry.type}`).join(", ") : "No files to show yet"));
-    files.querySelector("h3").textContent = "Recent files / 最近文件";
+    files.append(document.createElement("h3"), text(t("thisPc.filesLabel"), computer.files?.length ? computer.files.map((entry) => `${entry.name} · ${entry.type}`).join(", ") : "No files to show yet"));
+    files.querySelector("h3").textContent = t("thisPc.recentFiles");
     card.append(files);
     const artifacts = document.createElement("div");
     artifacts.className = "this-pc-subsection";
-    artifacts.append(document.createElement("h3"), text("Artifacts / 成果", computer.artifacts?.length ? computer.artifacts.map((entry) => entry.title || entry.fileName).join(", ") : "No artifacts in this Project yet"));
-    artifacts.querySelector("h3").textContent = "Artifacts / 成果";
+    artifacts.append(document.createElement("h3"), text(t("thisPc.artifactsLabel"), computer.artifacts?.length ? computer.artifacts.map((entry) => entry.title || entry.fileName).join(", ") : "No artifacts in this Project yet"));
+    artifacts.querySelector("h3").textContent = t("thisPc.artifactsHeading");
     card.append(artifacts);
     const history = document.createElement("div");
     history.className = "this-pc-subsection";
-    history.append(document.createElement("h3"), text("Activity / 动态", computer.history?.length ? computer.history.slice(0, 5).map((entry) => `${entry.activity} · ${entry.status}`).join("; ") : "No activity to show yet"));
-    history.querySelector("h3").textContent = "Recent activity / 最近动态";
+    history.append(document.createElement("h3"), text(t("thisPc.activityLabel"), computer.history?.length ? computer.history.slice(0, 5).map((entry) => `${entry.activity} · ${entry.status}`).join("; ") : "No activity to show yet"));
+    history.querySelector("h3").textContent = t("thisPc.recentActivity");
     card.append(history);
     return card;
   }
@@ -142,7 +146,7 @@
   function render(items, projectId) {
     clear(root);
     for (const computer of items) root?.append(renderCard(computer, projectId));
-    if (!items.length) root?.append(text("This PC / 此电脑", "No active Coworkers in this Project yet."));
+    if (!items.length) root?.append(text(t("thisPc.title"), t("thisPc.emptyProject")));
   }
 
   async function refresh() {
@@ -152,7 +156,7 @@
       projects = listed.projects ?? [];
       populateProjects();
       const projectId = currentProjectId();
-      if (!projectId) { render([], ""); result("Create or select a Project to see its Coworkers / 请先创建或选择项目"); return; }
+      if (!projectId) { render([], ""); result(t("thisPc.createOrSelectProject")); return; }
       const computers = await api.thisPc.list({ projectId, limit: 50 });
       render(computers.computers ?? [], projectId);
       result("");

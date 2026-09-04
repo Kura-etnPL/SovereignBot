@@ -136,8 +136,8 @@ test("Routine cards keep Run now and Restore feedback in-product and guard pendi
 
 test("Apps Catalog is an independent user surface with honest lifecycle review", () => {
     for (const id of ["view-apps", "apps-catalog-search", "apps-catalog-category", "apps-catalog-status", "apps-catalog-project", "apps-catalog-list"]) assert.match(html, new RegExp(`id="${id}"`), id);
-    for (const expression of [/connectedApps\.search/, /connectedApps\.review/, /connectedApps\.connect/, /connectedApps\.disconnect/, /connectedApps\.disable/, /Assign Team/, /Assign Coworker/, /Unassign \$\{kind\}/, /enabled: false/, /trustedSource/, /installationState/, /metered/]) assert.match(appsCatalog, expression);
-    assert.match(appsCatalog, /Review before connecting/);
+    for (const expression of [/connectedApps\.search/, /connectedApps\.review/, /connectedApps\.connect/, /connectedApps\.disconnect/, /connectedApps\.disable/, /(?:Assign Team|apps\.assignTeam)/, /(?:Assign Coworker|apps\.assignCoworker)/, /(?:Unassign \$\{kind\}|apps\.unassign)/, /enabled: false/, /trustedSource/, /installationState/, /metered/]) assert.match(appsCatalog, expression);
+    assert.match(appsCatalog, /(?:Review before connecting|apps\.reviewBeforeConnect)/);
     assert.doesNotMatch(appsCatalog, /providerToken|sessionId|rawPath|workspacePath|adapter|transport|credential/);
     assert.match(css, /\.apps-catalog-card/);
 });
@@ -160,7 +160,7 @@ test("Team activity consumes the safe collaboration ledger projection", () => {
     assert.match(productHubs, /flow\?\.activity/);
     assert.match(productHubs, /Owner/);
     assert.match(productHubs, /Stage/);
-    assert.match(productHubs, /Handoff to/);
+    assert.match(productHubs, /(?:Handoff to|activity\.handoffTo)/);
     assert.doesNotMatch(productHubs, /cwd|sessionId|providerToken|workspacePath/);
 });
 
@@ -212,16 +212,16 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         /playbooks\.assign/,
         /playbookSemanticPlan/,
         /reviewPoints/,
-        /Recommended Skills/,
+        /(?:Recommended Skills|t\("playbooks\.recommendedSkills"\))/,
         /artifacts\.hub/,
-        /History \/ 历史/,
-        /Go to conversation \/ 前往会话/,
+        /(?:History \/ 历史|t\("common\.history"\))/,
+        /(?:Go to conversation \/ 前往会话|t\("common\.goToConversation"\))/,
         /computer\.history/,
         /artifactScopeOverride/,
         /historyScopeOverride/,
         /event\.detail\?\.coworkerId/,
         /skills\.retest/,
-        /Create Routine/,
+        /(?:Create Routine|t\("skills\.createRoutine"\))/,
         /create-routine-from-skill/,
         /item\.state === "active"/,
         /detail: \{ skillId: item\.id \}/,
@@ -229,7 +229,7 @@ test("Product burst exposes independent Playbooks, Artifacts, History, Skills, P
         /teams\.exportPackRecipe/,
         /teams\.importPackViaDialog/,
         /teams\.exportPackViaDialog/,
-        /Preview \/ 预览/,
+        /(?:Preview \/ 预览|t\("common\.preview"\))/,
         /openProductChannelEditor/,
         /team-pack-page-import/,
         /openPackEditor/,
@@ -262,7 +262,7 @@ test("Team Pack gallery includes differentiated first-party categories and safe 
     for (const category of ["Product", "Sales", "Support"]) assert.match(html, new RegExp(`value="${category}"`), category);
     assert.match(html, /Product, Sales, and Support/);
     assert.match(productHubs, /team-pack-preview/);
-    assert.match(productHubs, /Composition \/ 组成/);
+    assert.match(productHubs, /(?:Composition \/ 组成|t\("teamPacks\.composition"\))/);
     assert.match(productHubs, /team-pack-file-result/);
     assert.doesNotMatch(productHubs, /Paste Team Pack JSON/);
     assert.doesNotMatch(productHubs, /innerHTML\s*=/);
@@ -273,8 +273,8 @@ test("This PC is a status-first Coworker surface with safe detail entry points",
     assert.match(html, /See what each Coworker is doing/);
     for (const expression of [
         /computer\.health\?\.status/,
-        /Show latest screen \/ 查看最新画面/,
-        /Show page details \/ 查看页面详情/,
+        /(?:Show latest screen \/ 查看最新画面|t\("thisPc\.showLatestScreen"\))/,
+        /(?:Show page details \/ 查看页面详情|t\("thisPc\.showPageDetails"\))/,
         /sovereignbot:open-artifacts/,
         /sovereignbot:open-computer-history/,
         /No latest screen yet/,

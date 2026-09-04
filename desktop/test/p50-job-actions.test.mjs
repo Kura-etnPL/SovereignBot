@@ -34,9 +34,9 @@ test("P50 Work and Job Details use safe public identity projections", () => {
     /function workspaceLabel\(job\)/,
     /Worker Node:/,
     /Worker workspace:/,
-    /Assigned Coworker \/ 已分配同事/,
-    /Trusted workspace \/ 受信工作区/,
-    /Dismiss attention \/ 消退关注/,
+    /(?:Assigned Coworker \/ 已分配同事|t\("(?:jobs|work)\.assignedCoworker")/,
+    /(?:Trusted workspace \/ 受信工作区|t\("(?:jobs|work)\.trustedWorkspace")/,
+    /(?:Dismiss attention \/ 消退关注|t\("(?:jobs|attention)\.dismissAttention")/,
     /safePublicText\(job\.error/,
   ]) assert.match(ui, expression);
   assert.match(ui, /safePublicText\(error\?\.message/);

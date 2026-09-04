@@ -83,10 +83,10 @@
       button.disabled = !state.recognitionSupported;
       button.classList?.toggle?.("recording", state.listening);
       button.setAttribute?.("aria-pressed", String(state.listening));
-      button.textContent = state.listening ? "■" : "🎙";
+      const t = globalThis.SovereignI18n?.t || ((k) => k);
       button.title = state.listening
-        ? "Release to finish / 松开完成"
-        : state.recognitionSupported ? "Hold to talk / 按住说话" : "Voice input unavailable / 当前环境不支持语音输入";
+        ? t("voice.status.listening")
+        : state.recognitionSupported ? t("conversation.holdToTalk") : t("voice.status.unsupported");
     }
 
     function clearSpeakingButton() {
@@ -124,17 +124,18 @@
     }
 
     function startListening() {
+      const t = globalThis.SovereignI18n?.t || ((k) => k);
       const conversationId = context().conversationId;
       if (!conversationId) {
-        inputError("no-conversation", "Open a conversation before using voice / 请先打开会话再使用语音");
+        inputError("no-conversation", t("voice.status.noConversation"));
         return false;
       }
       if (state.voiceMuted) {
-        inputError("muted", "Voice is muted / 语音已静音");
+        inputError("muted", t("voice.status.muted"));
         return false;
       }
       if (!state.recognitionSupported || !recognition) {
-        inputError("unsupported", "Voice input is unavailable in this environment / 当前环境不支持语音输入");
+        inputError("unsupported", t("voice.status.unsupported"));
         return false;
       }
       if (state.listening) return true;
@@ -146,7 +147,7 @@
         return true;
       } catch (error) {
         held = false;
-        if (error?.name !== "InvalidStateError") inputError("error", "Voice input could not start; check microphone permission / 语音输入无法启动，请检查麦克风权限");
+        if (error?.name !== "InvalidStateError") inputError("error", t("voice.status.permissionDenied"));
         return false;
       }
     }
@@ -226,7 +227,8 @@
           state.permission = "denied";
           state.listening = false;
         }
-        if (event?.error !== "aborted" && event?.error !== "no-speech") inputError(state.permission === "denied" ? "permission-denied" : "error", state.permission === "denied" ? "Voice permission was denied; allow the microphone and try again / 麦克风权限被拒绝，请允许后重试" : "Voice input needs permission or is unavailable / 语音输入需要权限或暂不可用");
+        const t = globalThis.SovereignI18n?.t || ((k) => k);
+        if (event?.error !== "aborted" && event?.error !== "no-speech") inputError(state.permission === "denied" ? "permission-denied" : "error", state.permission === "denied" ? t("voice.status.permissionDenied") : t("voice.status.error"));
         updateButton();
       };
       recognition.onend = () => { state.listening = false; updateButton(); };

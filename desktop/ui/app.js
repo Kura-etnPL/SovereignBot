@@ -51,26 +51,31 @@ try {
 } catch {}
 
 const $ = (id) => document.getElementById(id);
+const t = (key, params) => globalThis.SovereignI18n?.t(key, params) ?? (typeof params === "string" ? params : key);
 const show = (el) => el?.classList.remove("hidden");
 const hide = (el) => el?.classList.add("hidden");
 
-const VOICE_STATUS_TEXT = Object.freeze({
-  ready: "Voice ready / 语音已就绪",
-  listening: "Listening — release to finish / 正在聆听——松开完成",
-  transcribed: "Transcript added to this conversation / 转写已加入当前会话",
-  unsupported: "Voice is unavailable in this environment / 当前环境不支持语音",
-  "permission-denied": "Microphone permission was denied / 麦克风权限被拒绝",
-  "no-conversation": "Open a conversation before using voice / 请先打开会话",
-  muted: "Voice is muted / 语音已静音",
-  stopped: "Voice stopped / 语音已停止",
-  "conversation-switch": "Voice stopped after conversation change / 会话切换后已停止语音",
-  "view-switch": "Voice stopped / 语音已停止",
-  "app-quit": "Voice stopped / 语音已停止",
-  error: "Voice is unavailable / 语音暂不可用",
-});
+function getVoiceStatusText(code) {
+  const map = {
+    ready: "voice.status.ready",
+    listening: "voice.status.listening",
+    transcribed: "voice.status.transcribed",
+    unsupported: "voice.status.unsupported",
+    "permission-denied": "voice.status.permissionDenied",
+    "no-conversation": "voice.status.noConversation",
+    muted: "voice.status.muted",
+    stopped: "voice.status.stopped",
+    "conversation-switch": "voice.status.conversationSwitch",
+    "view-switch": "voice.status.stopped",
+    "app-quit": "voice.status.stopped",
+    error: "voice.status.error",
+  };
+  const key = map[code] || "voice.status.error";
+  return t(key);
+}
 
 function renderVoiceStatus({ code = "ready", detail = "" } = {}) {
-  const value = VOICE_STATUS_TEXT[code] || (detail ? `Voice unavailable: ${detail}` : VOICE_STATUS_TEXT.error);
+  const value = getVoiceStatusText(code) || (detail ? `Voice unavailable: ${detail}` : t("voice.status.error"));
   for (const id of ["voice-input-status", "voice-settings-status", "voice-status"]) {
     const target = $(id);
     if (target) target.textContent = value;
@@ -144,18 +149,18 @@ function updateConversationPageControls() {
   const current = page?.conversationId === state.selectedConversationId ? page : undefined;
   button.classList.toggle("hidden", !current?.hasOlder);
   button.disabled = Boolean(current?.loadingOlder);
-  button.textContent = current?.loadingOlder ? "Loading older messages… / 正在加载更早消息…" : "Load older messages / 加载更早消息";
+  button.textContent = current?.loadingOlder ? t("conversation.loadingOlder") : t("conversation.loadOlder");
   if (latestButton) {
     const showLatest = Boolean(current?.historyMode || current?.newMessagesAvailable);
     latestButton.classList.toggle("hidden", !showLatest);
     latestButton.disabled = Boolean(current?.loadingLatest);
     latestButton.textContent = current?.newMessagesAvailable
-      ? `${current.newMessagesAvailable} new message${current.newMessagesAvailable === 1 ? "" : "s"} · Back to latest / ${current.newMessagesAvailable} 条新消息 · 回到最新`
-      : "Back to latest / 回到最新";
+      ? t("chat.newMessagesAvailable", { count: current.newMessagesAvailable, plural: current.newMessagesAvailable === 1 ? "" : "s" })
+      : t("conversation.backToLatest");
   }
   status.textContent = current && current.total > current.messages.length
-    ? `${current.messages.length} of ${current.total} messages loaded / 已加载 ${current.messages.length} / ${current.total} 条消息`
-    : current?.historyMode ? "Browsing older messages / 正在浏览更早消息" : "";
+    ? t("chat.messagesLoaded", { loaded: current.messages.length, total: current.total })
+    : current?.historyMode ? t("conversation.browsingOlder") : "";
 }
 
 function mergeConversationPage(pageResponse, mode = "latest") {
@@ -296,11 +301,11 @@ function syncEconomyControls() {
 }
 
 function humanModelProfile(profile) {
-  if (profile === "efficient") return "Efficient / 高效";
-  if (profile === "deep") return "Deep / 深度";
-  if (profile === "economy") return "Economy / 经济";
-  if (profile === "custom") return "Custom / 自定义";
-  return "Automatic / 自动";
+  if (profile === "efficient") return t("modelProfile.efficient");
+  if (profile === "deep") return t("modelProfile.deep");
+  if (profile === "economy") return t("modelProfile.economy");
+  if (profile === "custom") return t("modelProfile.custom");
+  return t("modelProfile.auto");
 }
 
 function formatTime(iso) {
@@ -365,7 +370,7 @@ function makeNavItem({ avatar, title, subtitle, meta, status, statusLabel, unrea
     const badge = document.createElement("span");
     badge.className = "nav-unread";
     badge.textContent = "1";
-    badge.title = "Unread activity / 未读动态";
+    badge.title = t("activity.unreadActivity");
     button.append(badge);
   }
   button.addEventListener("click", onClick);
@@ -397,7 +402,7 @@ function renderCoworkers() {
     if (bindingFor(coworker.id)?.ready === true) return "available";
     return "active";
   };
-  const statusLabel = { active: "Active / 活跃", working: "Working / 工作中", available: "Available / 可用", attention: "Attention / 需关注", paused: "Paused / 已暂停" };
+  const statusLabel = { active: t("state.active"), working: t("state.working"), available: t("state.available"), attention: t("state.attention"), paused: t("state.paused") };
   const priority = { attention: 0, working: 1, available: 2, active: 3, paused: 4 };
   const all = state.coworkers.filter((entry) => entry.state !== "archived").map((coworker, index) => ({ coworker, index, status: statusFor(coworker) }));
   const filtered = all.filter(({ coworker, status }) => {
@@ -414,7 +419,7 @@ function renderCoworkers() {
   const count = $("coworker-count");
   if (count) count.textContent = `${total} persistent coworker${total === 1 ? "" : "s"} · ${counts.active} active · ${counts.available} available`;
   const summary = $("coworker-roster-summary");
-  if (summary) summary.textContent = `${total} coworkers / ${total} 位同事 · ${counts.working} working / 工作中 · ${counts.attention} attention / 需关注 · ${counts.paused} paused / 已暂停`;
+  if (summary) summary.textContent = t("coworkers.coworkerSummary", { total, working: counts.working, attention: counts.attention, paused: counts.paused });
   const selectedCoworkerId = [...directByCoworker.entries()].find(([, conversation]) => conversation.id === state.selectedConversationId)?.[0];
   const renderLimit = roster.expanded ? filtered.length : 14;
   const shown = filtered.slice(0, renderLimit);
@@ -441,12 +446,12 @@ function renderCoworkers() {
   if (more) {
     const hiddenCount = Math.max(0, filtered.length - shown.length);
     more.classList.toggle("hidden", filtered.length <= 14);
-    more.textContent = roster.expanded ? "Collapse / 收起" : `Show ${hiddenCount} more / 显示其余 ${hiddenCount} 位`;
+    more.textContent = roster.expanded ? t("coworkers.collapse") : t("coworkers.showMore", { count: hiddenCount });
   }
   const empty = $("coworker-empty");
   if (empty) {
     empty.classList.toggle("hidden", filtered.length > 0);
-    empty.textContent = total === 0 ? "Create your first coworker / 请先创建同事" : "No coworkers match this search / 没有匹配的同事";
+    empty.textContent = total === 0 ? t("coworkers.createFirst") : t("coworkers.noMatch");
   }
 }
 
@@ -534,7 +539,7 @@ function renderTeamPackActions() {
   const importButton = document.createElement("button");
   importButton.type = "button";
   importButton.className = "quiet-action";
-  importButton.textContent = "Import recipe / 导入配方…";
+  importButton.textContent = t("teamPacks.importRecipe");
   importButton.addEventListener("click", () => openTeamPackDialog());
   container.append(importButton);
 }
@@ -569,7 +574,7 @@ function renderProjects() {
   if (!activeProjects.length) {
     const empty = document.createElement("p");
     empty.className = "sidebar-empty";
-    empty.textContent = "No projects yet / 暂无项目";
+    empty.textContent = t("projects.empty");
     list.append(empty);
     return;
   }
@@ -777,7 +782,7 @@ function renderReplyComposer(conversation) {
   const clear = document.createElement("button");
   clear.type = "button";
   clear.className = "quiet-action reply-clear";
-  clear.textContent = "Cancel / 取消";
+  clear.textContent = t("common.cancel");
   clear.addEventListener("click", () => {
     state.replyTo = undefined;
     renderReplyComposer(conversation);
@@ -849,7 +854,7 @@ function renderConversationHeader(conversation) {
   if (redirectButton) {
     if (!pending.size) state.redirectMode = false;
     redirectButton.classList.toggle("hidden", pending.size === 0);
-    redirectButton.textContent = state.redirectMode ? "Cancel redirect / 取消" : "Redirect / 重定向";
+    redirectButton.textContent = state.redirectMode ? t("handoff.cancelRedirect") : t("conversation.redirect");
   }
   const hint = $("composer-hint");
   if (hint) hint.textContent = state.redirectMode
@@ -891,7 +896,7 @@ async function refreshInlineAttention(conversationId, force = false) {
         const retry = document.createElement("button");
         retry.type = "button";
         retry.className = "hero-action";
-        retry.textContent = "Retry / 重试";
+        retry.textContent = t("common.retry");
         retry.addEventListener("click", async () => { retry.disabled = true; try { await window.sovereignbot.jobs.approve({ jobId: job.id }); await refreshInlineAttention(conversationId, true); } finally { retry.disabled = false; } });
         actions.push(retry);
       }
@@ -899,7 +904,7 @@ async function refreshInlineAttention(conversationId, force = false) {
         const dismiss = document.createElement("button");
         dismiss.type = "button";
         dismiss.className = "quiet-action";
-        dismiss.textContent = "Dismiss / 忽略";
+        dismiss.textContent = t("common.dismiss");
         dismiss.addEventListener("click", async () => { dismiss.disabled = true; try { await window.sovereignbot.jobs.dismiss({ jobId: job.id }); await refreshInlineAttention(conversationId, true); } finally { dismiss.disabled = false; } });
         actions.push(dismiss);
       }
@@ -962,7 +967,7 @@ function renderMessage(conversation, message) {
     if (target) {
       const handoff = document.createElement("div");
       handoff.className = "handoff-card";
-      handoff.textContent = `Handoff → ${target.name} / 交接 → ${target.name}`;
+      handoff.textContent = t("handoff.handoffTo", { name: target.name });
       content.append(handoff);
     }
   }
@@ -976,7 +981,7 @@ function renderMessage(conversation, message) {
   const reply = document.createElement("button");
   reply.type = "button";
   reply.className = "message-action";
-  reply.textContent = "Reply / 回复";
+  reply.textContent = t("chat.reply");
   reply.addEventListener("click", () => {
     state.replyTo = message.id;
     renderReplyComposer(conversation);
@@ -987,8 +992,8 @@ function renderMessage(conversation, message) {
     const speak = document.createElement("button");
     speak.type = "button";
     speak.className = "message-action";
-    speak.textContent = "Speak / 播放";
-    speak.setAttribute("aria-label", "Speak final reply / 播放最终回复");
+    speak.textContent = t("voice.speak");
+    speak.setAttribute("aria-label", t("voice.speakFinalReply"));
     speak.addEventListener("click", () => voiceController?.speakReply(conversation.id, message, speak));
     actions.append(speak);
   }
@@ -1015,7 +1020,7 @@ function renderMessage(conversation, message) {
       delivery.textContent = `Needs Attention: ${attentionEntry.detail || attentionEntry.reason}`;
       delivery.classList.add("delivery-attention");
     } else if (redirected) {
-      delivery.textContent = "Redirected / 已重定向";
+      delivery.textContent = t("chat.redirected");
     } else if (failed) {
       delivery.textContent = `${failed} delivery failed`;
     } else {
@@ -1287,7 +1292,7 @@ function renderCollaborationControls(conversation, team) {
     || (protocol?.kind === "review" && protocol.state === "submitted");
   const parallelActive = Boolean(flow.activeFanout);
   submit.disabled = !owner || !targets.length || waitingForProtocol || parallelActive;
-  submit.textContent = $("collaboration-type")?.value === "review" ? "Ask for review / 请求审阅" : "Send to teammate / 发给同事";
+  submit.textContent = $("collaboration-type")?.value === "review" ? t("teams.askForReview") : t("teams.sendToTeammate");
   submit.title = parallelActive ? "Finish parallel work first" : waitingForProtocol ? "Finish the current collaboration first" : "Send a bounded task to the selected teammate";
 }
 
@@ -1337,7 +1342,7 @@ function ensureParallelControls() {
   section.className = "detail-section hidden";
   const label = document.createElement("span");
   label.className = "detail-label";
-  label.textContent = "Parallel Specialists / 并行专家";
+  label.textContent = t("parallel.title");
   const help = document.createElement("p");
   help.id = "parallel-collaboration-help";
   help.className = "detail-help";
@@ -1357,7 +1362,7 @@ function ensureParallelControls() {
   add.id = "parallel-add-specialist";
   add.type = "button";
   add.className = "quiet-action";
-  add.textContent = "Add Specialist / 添加专家";
+  add.textContent = t("parallel.addSpecialist");
   add.addEventListener("click", () => {
     const list = $("parallel-specialist-list");
     if (!list || list.children.length >= 4) return;
@@ -1373,16 +1378,16 @@ function ensureParallelControls() {
   const reason = document.createElement("input");
   reason.id = "parallel-reason";
   reason.maxLength = 400;
-  reason.placeholder = "Why split this work? / 为什么并行？";
+  reason.placeholder = t("parallel.whySplit");
   const submit = document.createElement("button");
   submit.id = "parallel-submit";
   submit.type = "button";
   submit.className = "hero-action";
-  submit.textContent = "Start parallel work / 开始并行";
+  submit.textContent = t("parallel.startWork");
   const error = document.createElement("p");
   error.id = "parallel-form-error";
   error.className = "inline-error hidden";
-  form.append(rows, rowActions, makeParallelLabel("Independent reviewer / 独立审阅者", reviewer), makeParallelLabel("Reason / 原因", reason), submit, error);
+  form.append(rows, rowActions, makeParallelLabel(t("parallel.independentReviewer"), reviewer), makeParallelLabel(t("parallel.reason"), reason), submit, error);
   section.append(label, help, progress, progressList, form);
   collaboration.after(section);
   submit.addEventListener("click", submitParallelCollaboration);
@@ -1395,7 +1400,7 @@ function makeParallelRow() {
   row.className = "parallel-specialist-row";
   const title = document.createElement("span");
   title.className = "detail-label";
-  title.textContent = "Specialist / 专家";
+  title.textContent = t("parallel.specialist");
   const target = document.createElement("select");
   target.className = "detail-select parallel-target";
   target.addEventListener("change", () => renderParallelControls(state.selectedConversation, teamForConversation(state.selectedConversation?.id)));
@@ -1403,17 +1408,17 @@ function makeParallelRow() {
   task.className = "parallel-task";
   task.maxLength = 800;
   task.rows = 2;
-  task.placeholder = "Bounded subtask / 有界子任务";
+  task.placeholder = t("parallel.subtask");
   const computerLabel = document.createElement("label");
   computerLabel.className = "parallel-computer-label";
   const computer = document.createElement("input");
   computer.type = "checkbox";
   computer.className = "parallel-computer";
-  computerLabel.append(computer, document.createTextNode(" Needs Computer / 需要电脑"));
+  computerLabel.append(computer, document.createTextNode(" " + t("parallel.needsComputer")));
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "quiet-action parallel-remove";
-  remove.textContent = "Remove / 移除";
+  remove.textContent = t("common.remove");
   remove.addEventListener("click", () => {
     const list = $("parallel-specialist-list");
     if (list?.children.length <= 2) return;
@@ -1554,14 +1559,14 @@ function renderDetails(conversation) {
     const edit = document.createElement("button");
     edit.type = "button";
     edit.className = "message-action member-edit";
-    edit.textContent = "Edit / 编辑";
+    edit.textContent = t("common.edit");
     edit.addEventListener("click", () => openCoworkerDialog(coworker));
     row.append(avatar, name, edit);
     membersEl.append(row);
   }
 
   const profiles = [...new Set(members.map((entry) => bindingFor(entry.id)?.profile).filter(Boolean))];
-  $("details-provider").textContent = profiles.length ? profiles.map(humanModelProfile).join(" + ") : "Automatic / 自动";
+  $("details-provider").textContent = profiles.length ? profiles.map(humanModelProfile).join(" + ") : t("modelProfile.auto");
   const team = teamForConversation(conversation.id);
   $("details-workspace").textContent = team ? "Shared project workspace" : "Private workspace";
   renderCoworkerConnectedApps(conversation.kind === "direct" ? members[0] : undefined);
@@ -1584,7 +1589,7 @@ function renderDetails(conversation) {
     for (const channel of team?.channels ?? []) {
       const option = document.createElement("option");
       option.value = channel.conversationId;
-      option.textContent = `${channel.name} / ${channel.kind}${channel.archived ? " · archived / 已归档" : ""}`;
+      option.textContent = `${channel.name} / ${channel.kind}${channel.archived ? ` · ${t("state.archived")}` : ""}`;
       option.selected = channel.conversationId === conversation.id;
       channelSelect.append(option);
     }
@@ -1904,9 +1909,9 @@ async function addChannelFromTemplate() {
 function populateChannelDialog(channel, team) {
   state.editingChannelId = channel?.id;
   state.editingChannelTeamId = team?.id;
-  $("channel-dialog-eyebrow").textContent = channel ? "EDIT CHANNEL / 编辑频道" : "NEW CHANNEL / 新建频道";
+  $("channel-dialog-eyebrow").textContent = channel ? t("dialog.channel.titleEdit") : t("dialog.channel.titleNew");
   $("channel-dialog-title").textContent = channel ? "Shape this channel" : "Create a channel";
-  $("channel-save").textContent = channel ? "Save changes / 保存修改" : "Create channel / 创建频道";
+  $("channel-save").textContent = channel ? t("common.saveChanges") : t("channels.createChannel");
   $("channel-name").value = channel?.name ?? "";
   $("channel-kind").value = channel?.kind ?? "project";
   $("channel-instructions").value = channel?.instructions ?? "";
@@ -1915,7 +1920,7 @@ function populateChannelDialog(channel, team) {
   for (const entry of state.workspaces?.workspaces ?? []) {
     const option = document.createElement("option");
     option.value = entry.id;
-    option.textContent = entry.kind === "shared-project" ? "Shared project workspace / 共享项目工作区" : entry.label || "Private workspace / 私有工作区";
+    option.textContent = entry.kind === "shared-project" ? t("details.workspaceShared") : entry.label || t("details.workspacePrivate");
     option.selected = (channel?.workspaceId ?? team?.sharedWorkspaceId) === entry.id;
     workspace.append(option);
   }
@@ -2038,7 +2043,7 @@ function renderConnectedApps() {
     head.className = "card-heading";
     const copy = document.createElement("div");
     const title = document.createElement("h2");
-    title.textContent = "Connected Apps / 已连接应用";
+    title.textContent = t("apps.title");
     const description = document.createElement("p");
     description.textContent = "Assign governed product connections to a team or coworker. Runtime authority remains with the Governor.";
     copy.append(title, description);
@@ -2080,19 +2085,19 @@ function renderConnectedApps() {
     const approval = document.createElement("small");
     approval.className = "connected-app-approval";
     approval.textContent = app.approval?.mode === "governed"
-      ? "Approval: Governor review when required / 审批：需要时由 Governor 审核"
-      : "Approval: not specified / 审批：未说明";
+      ? t("channels.approvalGovernor")
+      : t("channels.approvalUnspecified");
     card.append(head, service, description, capabilities, approval);
 
     const assignment = document.createElement("div");
     assignment.className = "connected-app-assignment";
     const assignmentTitle = document.createElement("span");
     assignmentTitle.className = "detail-label";
-    assignmentTitle.textContent = "Available to / 可分配给";
+    assignmentTitle.textContent = t("apps.availableTo");
     assignment.append(assignmentTitle);
     const targets = [
-      ...(state.teams ?? []).map((team) => ({ kind: "team", id: team.id, label: team.name + " / Team" })),
-      ...(state.coworkers ?? []).filter((coworker) => coworker.state !== "archived").map((coworker) => ({ kind: "coworker", id: coworker.id, label: coworker.name + " / Coworker" })),
+      ...(state.teams ?? []).map((team) => ({ kind: "team", id: team.id, label: team.name + " · " + t("common.team") })),
+      ...(state.coworkers ?? []).filter((coworker) => coworker.state !== "archived").map((coworker) => ({ kind: "coworker", id: coworker.id, label: coworker.name + " · " + t("common.coworker") })),
     ];
     if (!targets.length) {
       const none = document.createElement("small");
@@ -2190,7 +2195,7 @@ function openDialog(id) {
 function resetCoworkerDialog() {
   state.editingCoworkerId = undefined;
   state.editingCoworkerSnapshot = undefined;
-  $("coworker-dialog-eyebrow").textContent = "NEW COWORKER / 新建同事";
+  $("coworker-dialog-eyebrow").textContent = t("dialog.coworker.eyebrow");
   $("coworker-dialog-title").textContent = "Who are you adding?";
   $("coworker-save").textContent = "Create coworker";
   $("coworker-advanced-help").textContent = "Optional safe binding hints. These select a provider/model; they never grant tools or permissions.";
@@ -2204,9 +2209,9 @@ function openCoworkerDialog(coworker) {
   populateCoworkerAdvanced();
   state.editingCoworkerId = coworker?.id;
   state.editingCoworkerSnapshot = coworker ? structuredClone(coworker) : undefined;
-  $("coworker-dialog-eyebrow").textContent = "EDIT COWORKER / 编辑同事";
+  $("coworker-dialog-eyebrow").textContent = t("coworkers.editCoworkerTitle");
   $("coworker-dialog-title").textContent = "Shape how this coworker works";
-  $("coworker-save").textContent = "Save changes / 保存修改";
+  $("coworker-save").textContent = t("common.saveChanges");
   $("coworker-advanced-help").textContent = "Existing provider/account/model binding is preserved while editing. Change the profile above to replace it safely.";
   $("coworker-state-field").classList.remove("hidden");
   document.querySelector("#coworker-dialog .quick-role-row")?.classList.add("hidden");
@@ -2235,12 +2240,12 @@ function populateCoworkerAdvanced() {
   select.textContent = "";
   const defaultOption = document.createElement("option");
   defaultOption.value = "";
-  defaultOption.textContent = "Coworker default / 同事默认";
+  defaultOption.textContent = t("dialog.coworker.defaultWorkspace");
   select.append(defaultOption);
   for (const workspace of state.workspaces?.workspaces ?? []) {
     const option = document.createElement("option");
     option.value = workspace.id;
-    option.textContent = workspace.kind === "shared-project" ? "Shared project workspace / 共享项目工作区" : workspace.label || "Private workspace / 私有工作区";
+    option.textContent = workspace.kind === "shared-project" ? t("details.workspaceShared") : workspace.label || t("details.workspacePrivate");
     select.append(option);
   }
 }
@@ -2384,6 +2389,18 @@ function applyLocale(setting, systemLocale) {
     const key = el.getAttribute("data-i18n");
     if (key) el.textContent = I18n.t(key);
   }
+  for (const el of document.querySelectorAll("[data-i18n-placeholder]")) {
+    const key = el.getAttribute("data-i18n-placeholder");
+    if (key) el.placeholder = I18n.t(key);
+  }
+  for (const el of document.querySelectorAll("[data-i18n-title]")) {
+    const key = el.getAttribute("data-i18n-title");
+    if (key) el.title = I18n.t(key);
+  }
+  for (const el of document.querySelectorAll("[data-i18n-aria-label]")) {
+    const key = el.getAttribute("data-i18n-aria-label");
+    if (key) el.setAttribute("aria-label", I18n.t(key));
+  }
   const t = I18n.t.bind(I18n);
   const langEl = $("setting-language");
   if (langEl) langEl.value = setting ?? "system";
@@ -2391,6 +2408,11 @@ function applyLocale(setting, systemLocale) {
   if (placeholder) placeholder.placeholder = t("chat.placeholder");
   const hint = $("composer-hint");
   if (hint) hint.textContent = t("chat.hint");
+  document.dispatchEvent(new CustomEvent("sovereignbot:locale-changed", { detail: { locale } }));
+  renderSidebar();
+  renderReadiness();
+  if (state.selectedConversation) renderConversationHeader(state.selectedConversation);
+  if (state.selectedConversation) renderDetails(state.selectedConversation);
   return locale;
 }
 function renderSettings() {
@@ -2529,7 +2551,7 @@ function ensureVoiceSettingsCard() {
   heading.className = "card-heading";
   const copy = document.createElement("div");
   const title = document.createElement("h2");
-  title.textContent = "Voice / 语音";
+  title.textContent = t("voice.title");
   const description = document.createElement("p");
   description.textContent = "Uses this device's Web Speech support. Voice input only fills the open conversation composer; no audio is saved.";
   copy.append(title, description);
@@ -2537,16 +2559,16 @@ function ensureVoiceSettingsCard() {
   stop.id = "voice-stop";
   stop.type = "button";
   stop.className = "quiet-action";
-  stop.textContent = "Stop / 停止";
-  stop.setAttribute("aria-label", "Stop voice playback or input / 停止语音播放或输入");
+  stop.textContent = t("common.stop");
+  stop.setAttribute("aria-label", t("voice.stopPlaybackOrInput"));
   heading.append(copy, stop);
   const languageLabel = document.createElement("label");
   languageLabel.className = "setting-field";
-  languageLabel.textContent = "Voice language / 语音语言";
+  languageLabel.textContent = t("voice.language");
   const language = document.createElement("select");
   language.id = "setting-voice-language";
-  language.setAttribute("aria-label", "Voice language / 语音语言");
-  for (const [value, label] of [["system", "System / 系统"], ["zh-CN", "简体中文"], ["en", "English"]]) {
+  language.setAttribute("aria-label", t("voice.language"));
+  for (const [value, label] of [["system", t("settings.language.system")], ["zh-CN", "简体中文"], ["en", "English"]]) {
     const option = document.createElement("option");
     option.value = value;
     option.textContent = label;
@@ -2568,14 +2590,14 @@ function ensureVoiceSettingsCard() {
     row.append(span, input);
     return row;
   };
-  const speak = toggle("setting-speak-replies", "Speak replies / 朗读回复", "Only final Coworker replies; off by default / 仅朗读同事最终回复，默认关闭");
-  const muted = toggle("setting-voice-muted", "Mute voice / 静音语音", "Stops current speech and blocks new playback / 停止当前播放并阻止新播放");
+  const speak = toggle("setting-speak-replies", t("voice.speakReplies"), t("voice.speakRepliesHelp"));
+  const muted = toggle("setting-voice-muted", t("voice.mute"), t("voice.muteHelp"));
   const status = document.createElement("p");
   status.id = "voice-status";
   status.className = "setting-feedback";
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
-  status.textContent = "Voice is ready / 语音已就绪";
+  status.textContent = t("voice.ready");
   card.append(heading, languageLabel, speak, muted, status);
   grid.insertBefore(card, grid.firstElementChild);
   stop.addEventListener("click", () => voiceController?.stop("stopped"));
@@ -2622,10 +2644,10 @@ function ensureSettingsPreferences() {
   const model = document.createElement("label");
   model.className = "setting-field";
   const modelLabel = document.createElement("span");
-  modelLabel.textContent = "Default Model Profile / 默认模型档位";
+  modelLabel.textContent = t("settings.defaultModelProfile");
   const modelSelect = document.createElement("select");
   modelSelect.id = "setting-default-model-profile";
-  for (const [value, label] of [["automatic", "Automatic / 自动"], ["efficient", "Efficient / 高效"], ["deep", "Deep / 深度"], ["economy", "Economy / 经济"]]) {
+  for (const [value, label] of [["automatic", t("modelProfile.auto")], ["efficient", t("modelProfile.efficient")], ["deep", t("modelProfile.deep")], ["economy", t("modelProfile.economy")]]) {
     const option = document.createElement("option");
     option.value = value;
     option.textContent = label;
@@ -2673,29 +2695,29 @@ function ensureDataLifecycleCard() {
   restoreDialog.className = "modal";
   const restoreForm = document.createElement("form"); restoreForm.id = "data-lifecycle-restore-form"; restoreForm.method = "dialog"; restoreForm.className = "modal-card";
   const restoreHeading = document.createElement("div"); restoreHeading.className = "modal-heading";
-  const restoreHeadingCopy = document.createElement("div"); const restoreEyebrow = document.createElement("span"); restoreEyebrow.className = "eyebrow"; restoreEyebrow.textContent = "BACKUP LIFECYCLE / 备份生命周期"; const restoreTitle = document.createElement("h2"); restoreTitle.textContent = "Restore backup? / 恢复备份？"; restoreHeadingCopy.append(restoreEyebrow, restoreTitle);
+  const restoreHeadingCopy = document.createElement("div"); const restoreEyebrow = document.createElement("span"); restoreEyebrow.className = "eyebrow"; restoreEyebrow.textContent = t("backup.lifecycleTitle"); const restoreTitle = document.createElement("h2"); restoreTitle.textContent = t("backup.restoreConfirmTitle"); restoreHeadingCopy.append(restoreEyebrow, restoreTitle);
   const restoreClose = document.createElement("button"); restoreClose.className = "modal-x"; restoreClose.dataset.closeDialog = "data-lifecycle-restore-dialog"; restoreClose.type = "button"; restoreClose.textContent = "×"; restoreHeading.append(restoreHeadingCopy, restoreClose);
   const restoreName = document.createElement("p"); restoreName.id = "data-lifecycle-restore-name"; restoreName.className = "setting-feedback";
-  const restoreDescription = document.createElement("p"); restoreDescription.textContent = "Current product state will be backed up first. Protected credentials, browser profiles, leases, and private computer state stay local. / 当前产品状态会先备份；受保护的凭据、浏览器配置、租约和私有电脑状态会保留在本地。";
+  const restoreDescription = document.createElement("p"); restoreDescription.textContent = t("backup.restoreConfirmDesc");
   const restoreError = document.createElement("p"); restoreError.id = "data-lifecycle-restore-error"; restoreError.className = "inline-error hidden"; restoreError.setAttribute("role", "alert");
   const restoreActions = document.createElement("div"); restoreActions.className = "modal-actions";
-  const restoreCancel = document.createElement("button"); restoreCancel.className = "quiet-action"; restoreCancel.dataset.closeDialog = "data-lifecycle-restore-dialog"; restoreCancel.type = "button"; restoreCancel.textContent = "Cancel / 取消";
-  const restoreConfirm = document.createElement("button"); restoreConfirm.id = "data-lifecycle-restore-confirm"; restoreConfirm.className = "hero-action"; restoreConfirm.type = "submit"; restoreConfirm.textContent = "Restore backup / 恢复备份"; restoreActions.append(restoreCancel, restoreConfirm);
+  const restoreCancel = document.createElement("button"); restoreCancel.className = "quiet-action"; restoreCancel.dataset.closeDialog = "data-lifecycle-restore-dialog"; restoreCancel.type = "button"; restoreCancel.textContent = t("common.cancel");
+  const restoreConfirm = document.createElement("button"); restoreConfirm.id = "data-lifecycle-restore-confirm"; restoreConfirm.className = "hero-action"; restoreConfirm.type = "submit"; restoreConfirm.textContent = t("backup.restoreBackupBtn"); restoreActions.append(restoreCancel, restoreConfirm);
   restoreForm.append(restoreHeading, restoreName, restoreDescription, restoreError, restoreActions); restoreDialog.append(restoreForm);
   const resetDialog = document.createElement("dialog");
   resetDialog.id = "data-lifecycle-reset-dialog";
   resetDialog.className = "modal";
   const resetForm = document.createElement("form"); resetForm.id = "data-lifecycle-reset-form"; resetForm.method = "dialog"; resetForm.className = "modal-card";
   const resetHeading = document.createElement("div"); resetHeading.className = "modal-heading";
-  const resetHeadingCopy = document.createElement("div"); const resetEyebrow = document.createElement("span"); resetEyebrow.className = "eyebrow"; resetEyebrow.textContent = "PRODUCT STATE / 产品状态"; const resetTitle = document.createElement("h2"); resetTitle.textContent = "Clean reset? / 清理重置？"; resetHeadingCopy.append(resetEyebrow, resetTitle);
+  const resetHeadingCopy = document.createElement("div"); const resetEyebrow = document.createElement("span"); resetEyebrow.className = "eyebrow"; resetEyebrow.textContent = t("backup.productStateTitle"); const resetTitle = document.createElement("h2"); resetTitle.textContent = t("backup.cleanResetTitle"); resetHeadingCopy.append(resetEyebrow, resetTitle);
   const resetClose = document.createElement("button"); resetClose.className = "modal-x"; resetClose.dataset.closeDialog = "data-lifecycle-reset-dialog"; resetClose.type = "button"; resetClose.textContent = "×"; resetHeading.append(resetHeadingCopy, resetClose);
-  const resetDescription = document.createElement("p"); resetDescription.textContent = "This creates a fresh local backup, then removes product state and reloads the runtime surfaces. Protected credentials, browser profiles, leases, and private computer state stay local. / 此操作会先创建新的本地备份，再移除产品状态并重新加载运行时界面；受保护的凭据、浏览器配置、租约和私有电脑状态会保留在本地。";
-  const resetLabel = document.createElement("label"); const resetLabelText = document.createElement("span"); resetLabelText.textContent = "Type RESET to confirm / 输入 RESET 确认"; const resetPhrase = document.createElement("input"); resetPhrase.id = "data-lifecycle-reset-phrase"; resetPhrase.maxLength = 5; resetPhrase.autocomplete = "off"; resetPhrase.spellcheck = false; resetPhrase.setAttribute("aria-describedby", "data-lifecycle-reset-help"); resetLabel.append(resetLabelText, resetPhrase);
-  const resetHelp = document.createElement("p"); resetHelp.id = "data-lifecycle-reset-help"; resetHelp.className = "setting-feedback"; resetHelp.textContent = "The confirmation button activates only for the exact word RESET. / 只有精确输入 RESET 后，确认按钮才会启用。";
+  const resetDescription = document.createElement("p"); resetDescription.textContent = t("backup.cleanResetDesc");
+  const resetLabel = document.createElement("label"); const resetLabelText = document.createElement("span"); resetLabelText.textContent = t("backup.typeResetToConfirm"); const resetPhrase = document.createElement("input"); resetPhrase.id = "data-lifecycle-reset-phrase"; resetPhrase.maxLength = 5; resetPhrase.autocomplete = "off"; resetPhrase.spellcheck = false; resetPhrase.setAttribute("aria-describedby", "data-lifecycle-reset-help"); resetLabel.append(resetLabelText, resetPhrase);
+  const resetHelp = document.createElement("p"); resetHelp.id = "data-lifecycle-reset-help"; resetHelp.className = "setting-feedback"; resetHelp.textContent = t("backup.typeResetHelp");
   const resetError = document.createElement("p"); resetError.id = "data-lifecycle-reset-error"; resetError.className = "inline-error hidden"; resetError.setAttribute("role", "alert");
   const resetActions = document.createElement("div"); resetActions.className = "modal-actions";
-  const resetCancel = document.createElement("button"); resetCancel.className = "quiet-action"; resetCancel.dataset.closeDialog = "data-lifecycle-reset-dialog"; resetCancel.type = "button"; resetCancel.textContent = "Cancel / 取消";
-  const resetConfirm = document.createElement("button"); resetConfirm.id = "data-lifecycle-reset-confirm"; resetConfirm.className = "hero-action"; resetConfirm.type = "submit"; resetConfirm.disabled = true; resetConfirm.textContent = "Clean reset / 清理重置"; resetActions.append(resetCancel, resetConfirm);
+  const resetCancel = document.createElement("button"); resetCancel.className = "quiet-action"; resetCancel.dataset.closeDialog = "data-lifecycle-reset-dialog"; resetCancel.type = "button"; resetCancel.textContent = t("common.cancel");
+  const resetConfirm = document.createElement("button"); resetConfirm.id = "data-lifecycle-reset-confirm"; resetConfirm.className = "hero-action"; resetConfirm.type = "submit"; resetConfirm.disabled = true; resetConfirm.textContent = t("backup.cleanResetBtn"); resetActions.append(resetCancel, resetConfirm);
   resetForm.append(resetHeading, resetDescription, resetLabel, resetHelp, resetError, resetActions); resetDialog.append(resetForm);
   card.append(heading, status, actions, backups, result, restoreDialog, resetDialog);
   settingsGrid.prepend(card);
@@ -2715,14 +2737,14 @@ function ensureDataLifecycleCard() {
     for (const dialog of [restoreDialog, resetDialog]) for (const button of dialog.querySelectorAll("[data-close-dialog]")) button.disabled = busy;
     const phrase = $("data-lifecycle-reset-phrase");
     const resetConfirm = $("data-lifecycle-reset-confirm");
-    if (phrase && resetConfirm) { phrase.disabled = pending.has("reset"); resetConfirm.disabled = pending.has("reset") || phrase.value !== "RESET"; resetConfirm.textContent = pending.has("reset") ? "Resetting… / 重置中…" : "Clean reset / 清理重置"; }
+    if (phrase && resetConfirm) { phrase.disabled = pending.has("reset"); resetConfirm.disabled = pending.has("reset") || phrase.value !== "RESET"; resetConfirm.textContent = pending.has("reset") ? t("backup.resetting") : t("backup.cleanResetBtn"); }
   };
   const renderBackups = () => {
     clearNode(backups);
     for (const backup of listedBackups) {
       const row = document.createElement("div"); row.className = "workspace-card";
       const label = document.createElement("span"); label.textContent = `${backup.id} · ${backup.files} files · ${backup.createdAt}`;
-      const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = pending.has(`restore:${backup.id}`) ? "Restoring… / 恢复中…" : "Restore / 恢复"; restore.disabled = pending.size > 0; restore.addEventListener("click", () => openRestoreDialog(backup));
+      const restore = document.createElement("button"); restore.className = "quiet-action"; restore.type = "button"; restore.textContent = pending.has(`restore:${backup.id}`) ? t("backup.restoring") : t("common.restore"); restore.disabled = pending.size > 0; restore.addEventListener("click", () => openRestoreDialog(backup));
       row.append(label, restore); backups.append(row);
     }
     setControls();
@@ -2733,7 +2755,7 @@ function ensureDataLifecycleCard() {
       status.textContent = `State V${lifecycleStatus.stateVersion} · ${listed.backups.length} validated backup(s)`;
       listedBackups = listed.backups ?? [];
       renderBackups();
-    } catch (error) { status.textContent = safeError(error, "Local lifecycle state is unavailable. Refresh and try again. / 本地生命周期状态不可用，请刷新后重试。"); }
+    } catch (error) { status.textContent = safeError(error, t("backup.stateUnavailable")); }
   };
   function openRestoreDialog(backup) {
     if (pending.size > 0) return;
@@ -2753,10 +2775,10 @@ function ensureDataLifecycleCard() {
     try {
       await window.sovereignbot.dataLifecycle.restore({ id: backup.id });
       restoreDialog.close();
-      setResult("Backup restored. Restarting runtime surfaces is required. / 备份已恢复，需要重启运行时界面。", "success");
+      setResult(t("backup.restoredNotice"), "success");
       await refresh();
     } catch (error) {
-      setDialogError(restoreDialog, safeError(error, "Backup could not be restored. No product state was changed; retry when ready. / 备份未恢复，产品状态未改变，请稍后重试。"));
+      setDialogError(restoreDialog, safeError(error, t("backup.restoreFailed")));
     } finally {
       pending.delete(key); renderBackups();
       if (restoreDialog.open) $("data-lifecycle-restore-confirm").disabled = false;
@@ -2772,7 +2794,7 @@ function ensureDataLifecycleCard() {
   async function submitReset(event) {
     event.preventDefault();
     const phrase = $("data-lifecycle-reset-phrase");
-    if (phrase.value !== "RESET") { setDialogError(resetDialog, "Type RESET exactly to continue. / 必须精确输入 RESET 才能继续。"); setControls(); return; }
+    if (phrase.value !== "RESET") { setDialogError(resetDialog, t("backup.mustTypeReset")); setControls(); return; }
     if (pending.size > 0) return;
     pending.add("reset"); setControls();
     try {
@@ -2780,10 +2802,10 @@ function ensureDataLifecycleCard() {
       if (!prepared?.confirmation || !prepared?.backupId) throw new Error("reset preparation did not return a valid confirmation");
       await window.sovereignbot.dataLifecycle.reset({ confirmation: prepared.confirmation, backupId: prepared.backupId });
       resetDialog.close();
-      setResult("Product state reset completed. / 产品状态已完成清理重置。", "success");
+      setResult(t("backup.resetCompleted"), "success");
       await refresh();
     } catch (error) {
-      setDialogError(resetDialog, safeError(error, "Clean reset could not be completed. No reset was applied; retry when ready. / 清理重置未完成，未应用重置，请稍后重试。"));
+      setDialogError(resetDialog, safeError(error, t("backup.resetFailed")));
     } finally {
       pending.delete("reset"); setControls();
     }
@@ -2795,8 +2817,8 @@ function ensureDataLifecycleCard() {
   resetDialog.querySelector("#data-lifecycle-reset-phrase")?.addEventListener("input", () => { setDialogError(resetDialog, ""); setControls(); });
   $("data-lifecycle-reset").addEventListener("click", openResetDialog);
   $("data-lifecycle-refresh").addEventListener("click", refresh);
-  $("data-lifecycle-backup").addEventListener("click", async () => { try { const backup = await window.sovereignbot.dataLifecycle.backup({}); setResult(`Backup ${backup.id} created.`, "success"); await refresh(); } catch (error) { setResult(safeError(error, "Backup could not be created. Retry when ready. / 备份未创建，请稍后重试。"), "error"); } });
-  $("data-lifecycle-export").addEventListener("click", async () => { try { const exported = await window.sovereignbot.dataLifecycle.export({}); setResult(`Redacted export ${exported.id} created.`, "success"); } catch (error) { setResult(safeError(error, "Redacted export could not be created. Retry when ready. / 脱敏导出未创建，请稍后重试。"), "error"); } });
+  $("data-lifecycle-backup").addEventListener("click", async () => { try { const backup = await window.sovereignbot.dataLifecycle.backup({}); setResult(`Backup ${backup.id} created.`, "success"); await refresh(); } catch (error) { setResult(safeError(error, t("backup.createFailed")), "error"); } });
+  $("data-lifecycle-export").addEventListener("click", async () => { try { const exported = await window.sovereignbot.dataLifecycle.export({}); setResult(`Redacted export ${exported.id} created.`, "success"); } catch (error) { setResult(safeError(error, t("backup.redactedFailed")), "error"); } });
   void refresh();
 }
 
@@ -2808,7 +2830,7 @@ function ensureUpdateCard() {
   const heading = document.createElement("div"); heading.className = "card-heading";
   const copy = document.createElement("div"); const title = document.createElement("h2"); title.textContent = "Release updates"; const description = document.createElement("p"); description.textContent = "Stable updates are verified locally before staging. Nothing downloads or applies automatically."; copy.append(title, description);
   const refresh = document.createElement("button"); refresh.id = "update-check"; refresh.type = "button"; refresh.className = "quiet-action"; refresh.textContent = "Check for updates"; heading.append(copy, refresh);
-  const channelLabel = document.createElement("label"); channelLabel.textContent = "Channel / 通道 "; const channel = document.createElement("select"); channel.id = "update-channel";
+  const channelLabel = document.createElement("label"); channelLabel.textContent = t("updates.channel"); const channel = document.createElement("select"); channel.id = "update-channel";
   for (const [value, label] of [["stable", "Stable"], ["preview", "Preview"], ["off", "Off"]]) { const option = document.createElement("option"); option.value = value; option.textContent = label; channel.append(option); }
   channelLabel.append(channel);
   const status = document.createElement("div"); status.id = "update-status"; status.className = "setting-feedback";
@@ -2818,32 +2840,32 @@ function ensureUpdateCard() {
   const applyDialog = document.createElement("dialog"); applyDialog.id = "update-apply-dialog"; applyDialog.className = "modal";
   const applyForm = document.createElement("form"); applyForm.id = "update-apply-form"; applyForm.method = "dialog"; applyForm.className = "modal-card";
   const applyHeading = document.createElement("div"); applyHeading.className = "modal-heading";
-  const applyHeadingCopy = document.createElement("div"); const applyEyebrow = document.createElement("span"); applyEyebrow.className = "eyebrow"; applyEyebrow.textContent = "RELEASE UPDATE / 发布更新"; const applyTitle = document.createElement("h2"); applyTitle.textContent = "Apply verified update? / 应用已验证更新？"; applyHeadingCopy.append(applyEyebrow, applyTitle);
+  const applyHeadingCopy = document.createElement("div"); const applyEyebrow = document.createElement("span"); applyEyebrow.className = "eyebrow"; applyEyebrow.textContent = t("updates.releaseTitle"); const applyTitle = document.createElement("h2"); applyTitle.textContent = t("updates.applyConfirmTitle"); applyHeadingCopy.append(applyEyebrow, applyTitle);
   const applyClose = document.createElement("button"); applyClose.id = "update-apply-close"; applyClose.className = "modal-x"; applyClose.type = "button"; applyClose.textContent = "×"; applyHeading.append(applyHeadingCopy, applyClose);
   const applySummary = document.createElement("p"); applySummary.id = "update-apply-summary"; applySummary.className = "setting-feedback";
-  const applyDescription = document.createElement("p"); applyDescription.className = "setting-feedback"; applyDescription.textContent = "The verified update will be handed to the existing restart path. No update is applied until you confirm. / 已验证更新将交给现有重启路径；确认前不会应用更新。";
+  const applyDescription = document.createElement("p"); applyDescription.className = "setting-feedback"; applyDescription.textContent = t("updates.applyConfirmDesc");
   const applyError = document.createElement("p"); applyError.id = "update-apply-error"; applyError.className = "inline-error hidden"; applyError.setAttribute("role", "alert"); applyError.setAttribute("aria-live", "assertive");
   const applyFeedback = document.createElement("p"); applyFeedback.id = "update-apply-feedback"; applyFeedback.className = "setting-feedback hidden"; applyFeedback.setAttribute("role", "status"); applyFeedback.setAttribute("aria-live", "polite");
   const applyActions = document.createElement("div"); applyActions.className = "modal-actions";
-  const applyCancel = document.createElement("button"); applyCancel.id = "update-apply-cancel"; applyCancel.className = "quiet-action"; applyCancel.type = "button"; applyCancel.textContent = "Cancel / 取消";
-  const applyConfirm = document.createElement("button"); applyConfirm.id = "update-apply-confirm"; applyConfirm.className = "hero-action"; applyConfirm.type = "submit"; applyConfirm.textContent = "Apply and restart / 应用并重启"; applyActions.append(applyCancel, applyConfirm);
+  const applyCancel = document.createElement("button"); applyCancel.id = "update-apply-cancel"; applyCancel.className = "quiet-action"; applyCancel.type = "button"; applyCancel.textContent = t("common.cancel");
+  const applyConfirm = document.createElement("button"); applyConfirm.id = "update-apply-confirm"; applyConfirm.className = "hero-action"; applyConfirm.type = "submit"; applyConfirm.textContent = t("updates.applyAndRestart"); applyActions.append(applyCancel, applyConfirm);
   applyForm.append(applyHeading, applySummary, applyDescription, applyError, applyFeedback, applyActions); applyDialog.append(applyForm); card.append(heading, channelLabel, status, actions, applyDialog); grid.prepend(card);
   let applyPending = false;
   const setStatus = (message, kind = "") => { status.textContent = message || ""; status.dataset.kind = kind; };
   const safeError = (error, fallback) => { const message = String(error?.message || error).replace(/^.*Error:\s*/, "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/[A-Za-z]:\\[^\s,;)}]+/g, "selected local update").replace(/\\\\[^\s,;)}]+/g, "selected local update").replace(/\b(?:token|secret|password|credential|session|authorization|provider|cwd|workspacePath|storageRelativePath|sourceRelativePath)\b/gi, "protected detail").trim(); return !message || message === "protected detail" || message.length > 240 ? fallback : message; };
   const setApplyError = (message) => { applyError.textContent = message || ""; applyError.classList.toggle("hidden", !message); };
   const setApplyFeedback = (message) => { applyFeedback.textContent = message || ""; applyFeedback.classList.toggle("hidden", !message); };
-  const setApplyControls = () => { applyConfirm.disabled = applyPending; applyCancel.disabled = applyPending; applyClose.disabled = applyPending; apply.textContent = applyPending ? "Applying… / 应用中…" : "Apply on restart"; refresh.disabled = applyPending; stage.disabled = applyPending; channel.disabled = applyPending; };
-  const showError = (error) => setStatus(safeError(error, "The update action could not be completed. Retry when ready. / 更新操作未完成，请稍后重试。"), "error");
+  const setApplyControls = () => { applyConfirm.disabled = applyPending; applyCancel.disabled = applyPending; applyClose.disabled = applyPending; apply.textContent = applyPending ? t("updates.applying") : "Apply on restart"; refresh.disabled = applyPending; stage.disabled = applyPending; channel.disabled = applyPending; };
+  const showError = (error) => setStatus(safeError(error, t("updates.actionFailed")), "error");
   const render = (value) => { state.updateStatus = value; channel.value = value.channel ?? "stable"; const a = value.available; const staged = value.staged; setStatus(`Current ${value.currentVersion} · ${value.channel} · ${a ? `Available ${a.version} · ${a.signature?.status ?? "unknown"} / verified` : "No verified update"}${staged ? ` · Backup ${staged.backupId} · restart required` : ""}`); };
-  const openApplyDialog = () => { if (applyPending) return; const staged = state.updateStatus?.staged; const available = state.updateStatus?.available; applySummary.textContent = staged ? `Version ${staged.version} is staged with backup ${staged.backupId}. / 版本 ${staged.version} 已暂存，备份为 ${staged.backupId}。` : available ? `Verified version ${available.version} is ready to apply. / 已验证版本 ${available.version} 已准备应用。` : "No staged update is currently available. / 当前没有已暂存的更新。"; setApplyError(""); setApplyFeedback(""); setApplyControls(); applyDialog.showModal?.(); };
+  const openApplyDialog = () => { if (applyPending) return; const staged = state.updateStatus?.staged; const available = state.updateStatus?.available; applySummary.textContent = staged ? t("updates.stagedWithBackup", { version: staged.version, backupId: staged.backupId }) : available ? t("updates.readyToApply", { version: available.version }) : t("updates.noneStaged"); setApplyError(""); setApplyFeedback(""); setApplyControls(); applyDialog.showModal?.(); };
   channel.addEventListener("change", async () => { try { render(await window.sovereignbot.updates.setChannel({ channel: channel.value })); } catch (error) { showError(error); } });
   refresh.addEventListener("click", async () => { refresh.disabled = true; try { render(await window.sovereignbot.updates.check({})); } catch (error) { showError(error); } finally { if (!applyPending) refresh.disabled = false; } });
   stage.addEventListener("click", async () => { try { render(await window.sovereignbot.updates.stage({})); } catch (error) { showError(error); } });
   apply.addEventListener("click", openApplyDialog);
   applyClose.addEventListener("click", () => { if (!applyPending) applyDialog.close(); });
   applyCancel.addEventListener("click", () => { if (!applyPending) applyDialog.close(); });
-  applyForm.addEventListener("submit", async (event) => { event.preventDefault(); if (applyPending) return; applyPending = true; setApplyError(""); setApplyFeedback(""); setApplyControls(); try { const result = await window.sovereignbot.updates.apply({}); applyDialog.close(); setStatus(`Update ${result.version} requested; restart required. / 更新 ${result.version} 已请求应用，需要重启。`, "success"); } catch (error) { setApplyError(safeError(error, "The verified update could not be applied. No restart was requested; retry when ready. / 已验证更新未能应用，未请求重启，请稍后重试。")); setApplyFeedback("The staged update remains available to retry. / 已暂存更新仍可重试。"); } finally { applyPending = false; setApplyControls(); } });
+  applyForm.addEventListener("submit", async (event) => { event.preventDefault(); if (applyPending) return; applyPending = true; setApplyError(""); setApplyFeedback(""); setApplyControls(); try { const result = await window.sovereignbot.updates.apply({}); applyDialog.close(); setStatus(t("updates.restartRequired", { version: result.version }), "success"); } catch (error) { setApplyError(safeError(error, t("updates.applyFailed"))); setApplyFeedback(t("updates.remainsAvailable", "The staged update remains available to retry.")); } finally { applyPending = false; setApplyControls(); } });
   void window.sovereignbot.updates.status({}).then(render).catch(showError);
 }
 
@@ -2896,16 +2918,20 @@ async function saveSimpleSetting(key, value) {
   }
 }
 
-const ACTIVITY_STATUS_LABELS = Object.freeze({
-  working: "Working / 工作中",
-  active: "Active / 活跃",
-  completed: "Complete / 已完成",
-  available: "Complete / 已完成",
-  attention: "Attention / 需处理",
-  "needs-attention": "Attention / 需处理",
-  stopped: "Stopped / 已停止",
-  waiting: "Waiting / 等待中",
-});
+function activityStatusLabel(value) {
+  const map = {
+    working: "state.working",
+    active: "state.active",
+    completed: "status.complete",
+    available: "status.complete",
+    attention: "state.attention",
+    "needs-attention": "state.attention",
+    stopped: "status.stopped",
+    waiting: "status.waiting",
+  };
+  const key = map[value];
+  return key ? t(key) : t("activity.teamActivity");
+}
 
 const ACTIVITY_STAGE_LABELS = Object.freeze({
   chief: "Chief",
@@ -2916,13 +2942,10 @@ const ACTIVITY_STAGE_LABELS = Object.freeze({
   complete: "Complete",
 });
 
-function activityStatusLabel(value) {
-  return ACTIVITY_STATUS_LABELS[value] ?? "Team activity / 团队动态";
+function activityStageLabel(value) {
+  return ACTIVITY_STAGE_LABELS[value] ?? t("teams.unassignedPhase");
 }
 
-function activityStageLabel(value) {
-  return ACTIVITY_STAGE_LABELS[value] ?? "Unassigned phase / 未分配阶段";
-}
 
 function renderActivityTeamSelector(context = activityContext()) {
   const select = $("activity-team-select");
@@ -2930,7 +2953,7 @@ function renderActivityTeamSelector(context = activityContext()) {
   select.textContent = "";
   if (!state.teams.length) {
     const option = document.createElement("option");
-    option.textContent = "No managed Teams / 没有受管团队";
+    option.textContent = t("teams.noManaged");
     option.value = "";
     select.append(option);
     select.disabled = true;
@@ -2965,10 +2988,10 @@ function renderTeamActivitySummary(context = activityContext()) {
   if (!summary) return;
   summary.textContent = "";
   if (!context.team) {
-    if (contextEl) contextEl.textContent = "Choose a managed Team to inspect its bounded collaboration history. / 请选择受管团队以查看有界协作历史。";
+    if (contextEl) contextEl.textContent = t("teams.chooseToInspect");
     const empty = document.createElement("p");
     empty.className = "activity-empty-copy";
-    empty.textContent = "No managed Team is available yet. / 当前还没有可用的受管团队。";
+    empty.textContent = t("teams.noneAvailable");
     summary.append(empty);
     return;
   }
@@ -2976,22 +2999,22 @@ function renderTeamActivitySummary(context = activityContext()) {
   const flow = context.team.flow ?? {};
   if (contextEl) contextEl.textContent = channel
     ? `Context: ${context.team.name} · ${channel.name}${channel.archived ? " · Archived / 已归档" : ""}`
-    : `Scope: ${context.team.name} · all Team Channels / 全部团队频道`;
-  appendActivitySummaryRow(summary, "Team / 团队", context.team.name);
-  appendActivitySummaryRow(summary, "Status / 状态", activityStatusLabel(flow.status ?? "waiting"));
-  appendActivitySummaryRow(summary, "Phase / 阶段", activityStageLabel(flow.stage));
-  appendActivitySummaryRow(summary, "Current owner / 当前负责人", flow.currentOwner ?? "No active owner / 当前无负责人");
+    : `Scope: ${context.team.name} · ${t("teams.allTeamChannels")}`;
+  appendActivitySummaryRow(summary, t("common.team"), context.team.name);
+  appendActivitySummaryRow(summary, t("thisPc.statusLabel"), activityStatusLabel(flow.status ?? "waiting"));
+  appendActivitySummaryRow(summary, t("status.phase"), activityStageLabel(flow.stage));
+  appendActivitySummaryRow(summary, t("details.currentOwner"), flow.currentOwner ?? t("teams.noActiveOwner"));
   if (flow.activeFanout?.children?.length) {
     const children = flow.activeFanout.children;
     const done = children.filter((entry) => entry.status === "completed").length;
     const progress = `${done}/${children.length} specialists complete · ${flow.activeFanout.state === "reviewing" ? "Reviewing" : flow.activeFanout.state === "joining" || flow.activeFanout.state === "join_requested" ? "Joining results" : "Parallel work"}`;
-    appendActivitySummaryRow(summary, "Parallel / 并行", progress);
+    appendActivitySummaryRow(summary, t("teams.parallel"), progress);
   } else if (flow.activeProtocol) {
     const protocol = flow.activeProtocol;
     const kind = protocol.kind === "review" ? "Review" : "Handoff";
-    appendActivitySummaryRow(summary, "Collaboration / 协作", `${kind} · ${protocol.targetCoworker ?? "teammate"} · ${protocol.state}`);
+    appendActivitySummaryRow(summary, t("teams.collaboration"), `${kind} · ${protocol.targetCoworker ?? "teammate"} · ${protocol.state}`);
   } else {
-    appendActivitySummaryRow(summary, "Collaboration / 协作", flow.status === "needs-attention" ? (flow.attentionReason ?? "Needs a decision / 需要决策") : "No active request / 当前无活动请求");
+    appendActivitySummaryRow(summary, t("teams.collaboration"), flow.status === "needs-attention" ? (flow.attentionReason ?? t("teams.needsDecision")) : t("teams.noActiveRequest"));
   }
 }
 
@@ -3011,10 +3034,10 @@ function renderTeamActivityEvents(events, context) {
   timeline.textContent = "";
   status.className = "activity-status";
   if (!events.length) {
-    status.textContent = "No Team events in this scope yet. / 当前范围暂无团队动态。";
+    status.textContent = t("teams.noEventsInScope");
     return;
   }
-  status.textContent = `Showing ${events.length} bounded event${events.length === 1 ? "" : "s"}, newest first. / 显示 ${events.length} 条有界动态，最新在前。`;
+  status.textContent = t("teams.showingBoundedEvents", { count: events.length, plural: events.length === 1 ? "" : "s" });
   for (const event of events) {
     const row = document.createElement("article");
     row.className = `team-activity-row status-${event.status ?? "working"}`;
@@ -3032,7 +3055,7 @@ function renderTeamActivityEvents(events, context) {
       time.dateTime = timestamp.toISOString();
       time.textContent = formatTime(event.at) || "Time";
       time.title = timestamp.toLocaleString();
-    } else time.textContent = "Time unavailable / 时间不可用";
+    } else time.textContent = t("teams.timeUnavailable");
     header.append(title, badge, time);
     row.append(header);
     const people = [];
@@ -3063,9 +3086,9 @@ function renderTeamActivityEvents(events, context) {
     const actions = document.createElement("div");
     actions.className = "team-activity-row-actions";
     const sourceChannel = state.channels.find((channel) => channel.teamId === context.teamId && channel.conversationId === event.conversationId);
-    if (sourceChannel) appendActivityAction(actions, `Open ${sourceChannel.name} / 打开频道`, async () => { hide($("activity-drawer")); await openConversation(sourceChannel.conversationId); });
-    if (event.artifactIds?.length) appendActivityAction(actions, `Files & Artifacts (${event.artifactIds.length}) / 文件成果`, () => { hide($("activity-drawer")); $("nav-artifacts")?.click(); });
-    if (event.status === "attention" || event.label === "Attention") appendActivityAction(actions, "Open Attention / 打开需关注", () => { hide($("activity-drawer")); $("nav-attention")?.click(); });
+    if (sourceChannel) appendActivityAction(actions, t("channels.openNamed", { name: sourceChannel.name }), async () => { hide($("activity-drawer")); await openConversation(sourceChannel.conversationId); });
+    if (event.artifactIds?.length) appendActivityAction(actions, t("teams.filesArtifacts", { count: event.artifactIds.length }), () => { hide($("activity-drawer")); $("nav-artifacts")?.click(); });
+    if (event.status === "attention" || event.label === "Attention") appendActivityAction(actions, t("teams.openAttention"), () => { hide($("activity-drawer")); $("nav-attention")?.click(); });
     if (actions.childElementCount) row.append(actions);
     timeline.append(row);
   }
@@ -3076,7 +3099,7 @@ function renderTeamActivityLoading(context) {
   renderTeamActivitySummary(context);
   const status = $("team-activity-status");
   const timeline = $("team-activity-timeline");
-  if (status) { status.className = "activity-status loading"; status.textContent = "Loading Team activity… / 正在加载团队动态……"; }
+  if (status) { status.className = "activity-status loading"; status.textContent = t("teams.loadingActivity"); }
   if (timeline) timeline.textContent = "";
 }
 
@@ -3098,7 +3121,7 @@ async function refreshActivity() {
   else {
     const status = $("team-activity-status");
     const timeline = $("team-activity-timeline");
-    if (status) { status.className = "activity-status error"; status.textContent = "Team activity is unavailable right now. / 团队动态暂不可用。"; }
+    if (status) { status.className = "activity-status error"; status.textContent = t("teams.activityUnavailable"); }
     if (timeline) timeline.textContent = "";
   }
   if (runtimeResult.status === "fulfilled") {
@@ -3163,7 +3186,7 @@ function bindEvents() {
   $("collaboration-submit")?.addEventListener("click", submitCollaborationRequest);
   $("collaboration-type")?.addEventListener("change", () => {
     const button = $("collaboration-submit");
-    if (button) button.textContent = $("collaboration-type").value === "review" ? "Ask for review / 请求审阅" : "Send to teammate / 发给同事";
+    if (button) button.textContent = $("collaboration-type").value === "review" ? t("teams.askForReview") : t("teams.sendToTeammate");
   });
   $("composer-input").addEventListener("input", autoSizeComposer);
   $("composer-input").addEventListener("keydown", (event) => {
