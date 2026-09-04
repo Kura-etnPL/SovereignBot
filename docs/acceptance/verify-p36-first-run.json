@@ -32,15 +32,15 @@
     },
     "Create Coworker persists through the canonical IPC path": {
       "ok": true,
-      "detail": "{\"id\":\"coworker_8741e72f923ec511\",\"dialogOpen\":false}"
+      "detail": "{\"id\":\"coworker_88a5f24828d437ae\",\"dialogOpen\":false}"
     },
     "created coworker opens a real Direct conversation": {
       "ok": true,
-      "detail": "{\"conversation\":\"conv_db6b3c7f71824898\",\"title\":\"P36 Local Coworker\"}"
+      "detail": "{\"conversation\":\"conv_ec26e1cea0628629\",\"title\":\"P36 Local Coworker\"}"
     },
     "coworker and Direct conversation survive a real UI reload": {
       "ok": true,
-      "detail": "{\"coworker\":\"coworker_8741e72f923ec511\",\"conversation\":\"conv_db6b3c7f71824898\",\"title\":\"P36 Local Coworker\"}"
+      "detail": "{\"coworker\":\"coworker_88a5f24828d437ae\",\"conversation\":\"conv_ec26e1cea0628629\",\"title\":\"P36 Local Coworker\"}"
     }
   },
   "notes": [
@@ -51,9 +51,9 @@
     "PASS disconnected Codex is projected as Connect Codex {\"visible\":true,\"createCoworker\":\"Create a coworker\",\"installSoftwareTeam\":\"Install Software Team\",\"providerSummary\":\"Connect Codex\",\"providerDetail\":\"Deep unavailable · Connect ChatGPT Web\",\"language\":\"en\"}",
     "PASS disconnected Deep is honest and actionable {\"visible\":true,\"createCoworker\":\"Create a coworker\",\"installSoftwareTeam\":\"Install Software Team\",\"providerSummary\":\"Connect Codex\",\"providerDetail\":\"Deep unavailable · Connect ChatGPT Web\",\"language\":\"en\"}",
     "PASS Create Coworker opens the canonical creation dialog {\"open\":true,\"name\":\"\",\"advancedWorkspace\":true,\"save\":true}",
-    "PASS Create Coworker persists through the canonical IPC path {\"id\":\"coworker_8741e72f923ec511\",\"dialogOpen\":false}",
-    "PASS created coworker opens a real Direct conversation {\"conversation\":\"conv_db6b3c7f71824898\",\"title\":\"P36 Local Coworker\"}",
-    "PASS coworker and Direct conversation survive a real UI reload {\"coworker\":\"coworker_8741e72f923ec511\",\"conversation\":\"conv_db6b3c7f71824898\",\"title\":\"P36 Local Coworker\"}"
+    "PASS Create Coworker persists through the canonical IPC path {\"id\":\"coworker_88a5f24828d437ae\",\"dialogOpen\":false}",
+    "PASS created coworker opens a real Direct conversation {\"conversation\":\"conv_ec26e1cea0628629\",\"title\":\"P36 Local Coworker\"}",
+    "PASS coworker and Direct conversation survive a real UI reload {\"coworker\":\"coworker_88a5f24828d437ae\",\"conversation\":\"conv_ec26e1cea0628629\",\"title\":\"P36 Local Coworker\"}"
   ],
   "externalActions": [],
   "ok": true
