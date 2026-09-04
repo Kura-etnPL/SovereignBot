@@ -5,7 +5,7 @@
 .attachment-chip { background: var(--panel-2); color: var(--text-2); }
 .skill-modal-card { width: min(620px, calc(100vw - 32px)); max-height: min(760px, calc(100vh - 40px)); overflow: auto; }
 .skill-modal-copy { margin: -4px 0 12px; color: var(--text-3); font-size: 11px; line-height: 1.5; }
-.skill-list { display: grid; gap: 7px; max-height: 300px; overflow: auto; scrollbar-width: thin; }
+.skill-list { display: grid; gap: 7px; max-height: 300px; overflow: auto; }
 .skill-option { display: grid; grid-template-columns: auto 32px minmax(0, 1fr); gap: 8px; align-items: center; padding: 9px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); cursor: pointer; }
 .skill-option:hover, .skill-option.selected { border-color: var(--line-strong); background: var(--panel-3); }
 .skill-option input { accent-color: var(--text); }

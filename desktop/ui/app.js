@@ -750,6 +750,9 @@ async function openConversation(conversationId, { messageId } = {}) {
   updateConversationPageControls();
   switchView("conversation");
   hide($("details-panel"));
+  if (!channelForConversation(conversationId) || !state.conversations.some((c) => c.id === conversationId)) {
+    try { await Promise.all([refreshCoworkers(), refreshTeams(), refreshConversations()]); } catch {}
+  }
   renderSidebar();
   await refreshConversation(true);
   try { $("composer-input")?.focus({ preventScroll: true }); } catch { $("composer-input")?.focus(); }
@@ -1143,6 +1146,13 @@ async function refreshConversation(forceScroll = false) {
     state.selectedConversation = conversation;
     state.teamActivity = activity ?? { events: [] };
     markConversationRead(conversation);
+    const hasUnknownCoworker = (conversation.participants ?? []).some((pid) => pid !== "user" && !coworkerById(pid))
+      || (conversation.messages ?? []).some((msg) => msg.senderId && msg.senderId !== "user" && !coworkerById(msg.senderId));
+    if (hasUnknownCoworker || (conversation.kind === "team" && !channelForConversation(id))) {
+      try {
+        await Promise.all([refreshCoworkers(), refreshTeams()]);
+      } catch {}
+    }
     renderConversationHeader(conversation);
     renderMessages(conversation, forceScroll, { voiceMessages: freshMessages });
     if (aroundMessageId) {
@@ -1651,7 +1661,7 @@ function renderDetails(conversation, force = false) {
   }
 
   if ($("details-owner-name")) $("details-owner-name").textContent = ownerName;
-  if ($("details-owner-role")) $("details-owner-role").textContent = ownerRole;
+  if ($("details-owner-role")) $("details-owner-role").textContent = displayCoworkerRole(ownerRole);
   if ($("details-owner-avatar")) $("details-owner-avatar").textContent = ownerAvatar;
   if ($("details-owner-status")) $("details-owner-status").textContent = ownerStatus;
 

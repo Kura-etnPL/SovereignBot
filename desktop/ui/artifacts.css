@@ -64,7 +64,6 @@
   font: 11px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
   white-space: pre-wrap;
   word-break: break-word;
-  scrollbar-width: thin;
 }
 
 .artifact-rail-list { display: grid; gap: 7px; margin-top: 8px; }

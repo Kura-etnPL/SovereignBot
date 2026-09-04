@@ -28,13 +28,15 @@
       }
       section.classList.remove("hidden");
       if (!section.querySelector(".computer-context-help")) {
-        const productTitle = document.createElement("strong");
-        productTitle.className = "computer-product-title";
-        productTitle.textContent = t("thisPc.title");
+        if (!section.querySelector(".focus-card-header, .detail-label")) {
+          const productTitle = document.createElement("strong");
+          productTitle.className = "computer-product-title";
+          productTitle.textContent = t("thisPc.title");
+          section.insertBefore(productTitle, section.querySelector("#details-computers"));
+        }
         const help = document.createElement("p");
         help.className = "computer-context-help computer-note";
         help.textContent = t("thisPc.contextOptions");
-        section.insertBefore(productTitle, section.querySelector("#details-computers"));
         section.insertBefore(help, section.querySelector("#details-computers"));
       }
       return section;
@@ -53,7 +55,13 @@
           const card = document.createElement("article"); card.className = "computer-card";
           const name = document.createElement("strong"); name.textContent = computer.coworkerName || "Coworker";
           const mode = document.createElement("span"); mode.textContent = `${t("thisPc.profileLabel")}: ${computer.context?.kind === "private" ? t("thisPc.privateContext") : t("thisPc.sharedContext")}`;
-          const status = document.createElement("span"); status.textContent = `${t("thisPc.statusLabel")}: ${computer.status} · ${computer.statusMessage}`;
+          const statusText = computer.statusMessage === "Ready when this Coworker starts work"
+            ? t("thisPc.readyWhenStarts")
+            : (computer.statusMessage || computer.status);
+          const statusLabel = computer.status === "unavailable"
+            ? t("state.unavailable")
+            : (computer.status === "ready" ? t("state.ready") : computer.status);
+          const status = document.createElement("span"); status.textContent = `${t("thisPc.statusLabel")}: ${statusLabel} · ${statusText}`;
           card.append(name, mode, status);
           const actions = document.createElement("div"); actions.className = "computer-actions-row";
           if (computer.canTakeOver) actions.append(Object.assign(document.createElement("button"), { type: "button", className: "computer-action primary", textContent: t("thisPc.takeControl"), onclick: async () => { window.sovereignbotStopVoice?.(); await window.sovereignbot.thisPc.takeOver({ projectId: project.projectId, coworkerId: computer.coworkerId }); await safeRender(conversation); } }));

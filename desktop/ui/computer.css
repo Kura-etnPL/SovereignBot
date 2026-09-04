@@ -1,5 +1,31 @@
 .computer-list { display: grid; gap: 8px; margin-top: 8px; }
-.computer-card { padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.computer-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+.computer-card strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.computer-card span {
+  display: block;
+  font-size: 11px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+.computer-context-help {
+  margin: 0 0 6px;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.45;
+}
 .computer-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 .computer-identity { min-width: 0; display: flex; gap: 8px; align-items: center; }
 .computer-icon { width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 9px; background: var(--panel-3); font-size: 13px; }
