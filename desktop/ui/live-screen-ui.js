@@ -59,9 +59,11 @@
     footer.append(url, refresh);
 
     section.append(head, tabs, viewport, footer);
+    const targetContainer = document.getElementById("details-body") || panel;
     const computer = document.getElementById("details-computer-section");
-    const future = panel.querySelector(".future-section");
-    panel.insertBefore(section, computer || future || null);
+    const future = targetContainer.querySelector(".future-section");
+    const refNode = (computer && computer.parentNode === targetContainer) ? computer : ((future && future.parentNode === targetContainer) ? future : null);
+    targetContainer.insertBefore(section, refNode);
     refresh.addEventListener("click", () => pullFrame(generation, true));
     return section;
   }

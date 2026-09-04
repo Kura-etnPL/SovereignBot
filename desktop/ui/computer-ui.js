@@ -20,7 +20,11 @@
         const label = document.createElement("span"); label.className = "detail-label"; label.textContent = t("thisPc.title");
         const root = document.createElement("div"); root.id = "details-computers"; root.className = "computer-list";
         section.append(label, root);
-        panel.insertBefore(section, document.getElementById("details-artifacts-section") || panel.querySelector(".future-section") || null);
+        const targetContainer = document.getElementById("details-body") || panel;
+        const artifacts = document.getElementById("details-artifacts-section");
+        const future = targetContainer.querySelector(".future-section");
+        const ref = (artifacts && artifacts.parentNode === targetContainer) ? artifacts : ((future && future.parentNode === targetContainer) ? future : null);
+        targetContainer.insertBefore(section, ref);
       }
       if (!section.querySelector(".computer-context-help")) {
         const productTitle = document.createElement("strong");
@@ -81,9 +85,11 @@
       root.id = "details-computers";
       root.className = "computer-list";
       section.append(label, root);
+      const targetContainer = document.getElementById("details-body") || panel;
       const artifacts = document.getElementById("details-artifacts-section");
-      const future = panel.querySelector(".future-section");
-      panel.insertBefore(section, artifacts || future || null);
+      const future = targetContainer.querySelector(".future-section");
+      const ref = (artifacts && artifacts.parentNode === targetContainer) ? artifacts : ((future && future.parentNode === targetContainer) ? future : null);
+      targetContainer.insertBefore(section, ref);
     }
     for (const chip of panel.querySelectorAll(".future-chip-row span")) {
       if (chip.textContent.trim() === "Computer") chip.remove();

@@ -51,7 +51,145 @@
     <dialog id="memory-delete-dialog" class="modal"><form id="memory-delete-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="dialog.memoryDelete.eyebrow">MEMORY LIFECYCLE</span><h2 data-i18n="dialog.memoryDelete.title">Delete memory?</h2></div><button class="modal-x" data-close-dialog="memory-delete-dialog" type="button">×</button></div><p id="memory-delete-scope" class="setting-feedback"></p><p id="memory-delete-summary" class="setting-feedback"></p><p id="memory-delete-impact" data-i18n="dialog.memoryDelete.impact">This permanently removes the selected Memory from its current scope. It does not remove the source conversation or grant any authority.</p><p id="memory-delete-form-error" class="inline-error hidden" role="alert"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="memory-delete-dialog" type="button" data-i18n="common.cancel">Cancel</button><button id="memory-delete-confirm" class="hero-action" type="submit" data-i18n="dialog.memoryDelete.submit">Delete memory</button></div></form></dialog>
     <dialog id="project-create-dialog" class="modal"><form id="project-create-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="dialog.project.eyebrow">PROJECTS</span><h2 data-i18n="dialog.project.title">New Project</h2></div><button class="modal-x" data-close-dialog="project-create-dialog" type="button">×</button></div><p class="setting-feedback">Give the Project a name. Its trusted workspace is created and owned by the main process; no path or permission is entered here.</p><label class="setting-field"><span data-i18n="dialog.project.name">Name</span><input id="project-create-name" maxlength="120" placeholder="e.g. Product launch" required></label><p id="project-create-form-error" class="inline-error hidden" role="alert"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="project-create-dialog" type="button" data-i18n="common.cancel">Cancel</button><button id="project-create-save" class="hero-action" type="submit" data-i18n="dialog.project.submit">Create Project</button></div></form></dialog>
     <dialog id="routine-run-dialog" class="modal routine-run-modal"><form id="routine-run-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span class="eyebrow" data-i18n="dialog.routineRun.eyebrow">ROUTINES</span><h2 data-i18n="dialog.routineRun.title">Run a Routine</h2></div><button class="modal-x" data-close-dialog="routine-run-dialog" type="button">×</button></div><p class="setting-feedback">Choose an active, enabled Routine. Archived, disabled, unavailable, or completed one-time Routines stay visible with a clear reason and cannot be run.</p><label class="setting-field"><span data-i18n="common.filter">Filter</span><input id="routine-run-search" type="search" maxlength="120" placeholder="Search Routine name or schedule…" autocomplete="off"></label><div id="routine-run-list" class="routine-run-list" role="listbox" aria-label="Runnable routines"></div><p id="routine-run-status" class="setting-feedback" role="status" aria-live="polite"></p><p id="routine-run-form-error" class="inline-error hidden" role="alert"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="routine-run-dialog" type="button" data-i18n="common.cancel">Cancel</button><button id="routine-run-confirm" class="hero-action" type="submit" disabled data-i18n="dialog.routineRun.confirm">Run selected</button></div></form></dialog>
-    <aside id="details-panel" class="details-panel hidden" aria-label="Conversation details"><div class="details-header"><h2 data-i18n="details.title">Details</h2><button id="close-details" class="icon-button" type="button">×</button></div><section class="detail-section"><span class="detail-label" data-i18n="details.members">Members</span><div id="details-members" class="member-list"></div></section><section class="detail-section"><span class="detail-label" data-i18n="details.roster">Roster</span><div id="details-roster" class="member-list"></div></section><section class="detail-section"><span class="detail-label" data-i18n="details.modelProfile">Model profile</span><div id="details-provider" class="detail-value" data-i18n="modelProfile.auto">Automatic</div></section><section class="detail-section"><span class="detail-label" data-i18n="details.workspace">Workspace</span><div id="details-workspace" class="detail-value" data-i18n="details.workspacePrivate">Private workspace</div></section><section class="detail-section"><span class="detail-label" data-i18n="details.currentOwner">Current owner</span><div id="details-current-work" class="detail-value" data-i18n="details.ready">Ready</div></section><section id="details-coworker-memory" class="detail-section hidden"><span class="detail-label" data-i18n="details.memory">Memory</span><p class="detail-help" data-i18n="details.memoryCoworkerHelp">Private memory for this coworker. Sources are shown without internal IDs or paths.</p><div id="details-coworker-memory-list" class="member-list"></div></section><section id="details-team-memory" class="detail-section hidden"><span class="detail-label" data-i18n="details.memoryTeam">Shared Memory</span><p class="detail-help" data-i18n="details.memoryTeamHelp">Shared only with this Team.</p><div id="details-team-memory-list" class="member-list"></div></section><section id="details-project-memory" class="detail-section hidden"><span class="detail-label" data-i18n="details.memoryProject">Project Memory</span><p class="detail-help" data-i18n="details.memoryProjectHelp">Shared only with this project.</p><div id="details-project-memory-list" class="member-list"></div></section><section id="details-connected-apps" class="detail-section hidden"><span class="detail-label" data-i18n="details.connectedApps">Connected Apps</span><p class="detail-help" data-i18n="details.connectedAppsHelp">Assign governed product connections to this coworker. Actions remain task-bound and Governor-controlled.</p><div id="details-connected-app-list" class="member-list"></div></section><section id="details-team-tools" class="detail-section hidden"><span class="detail-label" data-i18n="details.channels">Channels</span><select id="team-channel-select" class="detail-select"></select><div class="detail-actions"><button id="team-edit-channel" class="quiet-action" type="button" data-i18n="dialog.channel.editTitle">Edit channel</button><button id="team-archive-channel" class="quiet-action" type="button" data-i18n="common.archive">Archive</button><button id="team-restore-channel" class="quiet-action hidden" type="button" data-i18n="common.restore">Restore</button></div><span class="detail-label detail-sub-label" data-i18n="details.addChannel">Add channel</span><select id="team-channel-template-select" class="detail-select"></select><div class="detail-actions"><button id="team-add-channel-from-template" class="quiet-action" type="button" data-i18n="channels.addFromTemplate">Add from template</button><button id="team-create-channel" class="hero-action" type="button" data-i18n="details.customChannel">Custom channel</button></div><span class="detail-label detail-sub-label" data-i18n="details.teamPack">Team Pack</span><p class="detail-help" data-i18n="details.teamPackHelp">Share the team recipe without sharing private workspaces or sign-in sessions.</p><div class="detail-actions"><button id="team-export-pack" class="quiet-action" type="button" data-i18n="details.exportPack">Export</button><button id="team-import-pack" class="quiet-action" type="button" data-i18n="details.importPack">Import</button></div><p id="team-pack-transfer-result" class="setting-feedback"></p><span class="detail-label detail-sub-label" data-i18n="details.playbooks">Playbooks</span><select id="team-playbook-select" class="detail-select"></select><div class="detail-actions"><button id="team-export-playbook" class="quiet-action" type="button" data-i18n="playbooks.exportMethod">Export method</button><button id="team-import-playbook" class="quiet-action" type="button" data-i18n="playbooks.importMethod">Import method</button></div></section><section id="details-collaboration" class="detail-section hidden"><span class="detail-label" data-i18n="details.collaborate">Collaborate</span><p class="detail-help" data-i18n="details.collaborateHelp">The current owner can send a bounded task to any available teammate or ask for a review.</p><label><span data-i18n="details.teammate">Teammate</span><select id="collaboration-target" class="detail-select"></select></label><label><span data-i18n="details.actionType">Action</span><select id="collaboration-type" class="detail-select"><option value="handoff" data-i18n="details.actionHandoff">Send task</option><option value="review" data-i18n="details.actionReview">Ask for review</option></select></label><label><span data-i18n="details.boundedTask">Bounded task</span><textarea id="collaboration-task" maxlength="800" rows="3" data-i18n-placeholder="details.boundedTaskPlaceholder" placeholder="What should the teammate do?"></textarea></label><label><span data-i18n="details.reason">Reason</span><input id="collaboration-reason" maxlength="400" data-i18n-placeholder="details.reasonPlaceholder" placeholder="Why this teammate?"></label><button id="collaboration-submit" class="hero-action" type="button" data-i18n="details.sendToTeammate">Send to teammate</button><p id="collaboration-form-error" class="inline-error hidden" role="alert"></p></section></aside>
+    <aside id="details-panel" class="details-panel hidden" aria-label="Conversation details">
+      <div class="details-header">
+        <h2 data-i18n="details.title">Details</h2>
+        <button id="close-details" class="icon-button" type="button">×</button>
+      </div>
+      <div id="details-body" class="details-body">
+        <!-- 1. Owner & Core Team Card -->
+        <section id="details-owner-card" class="detail-focus-card">
+          <div class="focus-card-header">
+            <span class="detail-label" data-i18n="details.currentOwner">Current owner</span>
+            <span id="details-owner-status" class="member-status">Ready</span>
+          </div>
+          <div id="details-owner-info" class="details-owner-info">
+            <div id="details-owner-avatar" class="avatar">🤖</div>
+            <div class="owner-meta">
+              <strong id="details-owner-name">Ready</strong>
+              <span id="details-owner-role" class="owner-role"></span>
+            </div>
+          </div>
+          <div class="detail-meta-row">
+            <span class="detail-sublabel" data-i18n="details.modelProfile">Model profile</span>
+            <div id="details-provider" class="detail-value" data-i18n="modelProfile.auto">Automatic</div>
+          </div>
+          <div class="detail-meta-row">
+            <span class="detail-sublabel" data-i18n="details.workspace">Workspace</span>
+            <div id="details-workspace" class="detail-value" data-i18n="details.workspacePrivate">Private workspace</div>
+          </div>
+          <div class="details-divider"></div>
+          <div class="focus-card-sub">
+            <span class="detail-label" data-i18n="details.members">Members</span>
+            <div id="details-members" class="member-list"></div>
+          </div>
+          <div id="details-roster-wrap" class="focus-card-sub hidden">
+            <span class="detail-label" data-i18n="details.roster">Roster</span>
+            <div id="details-roster" class="member-list"></div>
+          </div>
+        </section>
+
+        <!-- 2. Progress Card (Only visible when active work is running) -->
+        <section id="details-progress-card" class="detail-focus-card hidden">
+          <div class="focus-card-header">
+            <span class="detail-label" data-i18n="details.progress">Progress</span>
+          </div>
+          <div id="details-current-work" class="detail-value" data-i18n="details.ready">Ready</div>
+        </section>
+
+        <!-- 3. Action Required Card (Only visible when human attention/review is needed) -->
+        <section id="details-action-card" class="detail-focus-card hidden">
+          <div class="focus-card-header">
+            <span class="detail-label" data-i18n="details.actionRequired">Action Required</span>
+          </div>
+          <div id="details-action-content" class="detail-action-content"></div>
+        </section>
+
+        <!-- 4. Computer Section (Dynamic) -->
+        <section id="details-computer-section" class="detail-focus-card computer-section hidden">
+          <div class="focus-card-header">
+            <span class="detail-label" data-i18n="thisPc.title">Computer</span>
+          </div>
+          <div id="details-computers" class="computer-list"></div>
+        </section>
+
+        <!-- 5. Artifacts Section (Dynamic) -->
+        <section id="details-artifacts-section" class="detail-focus-card hidden">
+          <div class="focus-card-header">
+            <span class="detail-label" data-i18n="dialog.artifactPreview.title">Artifacts</span>
+          </div>
+          <div id="details-artifacts" class="artifact-rail-list"></div>
+        </section>
+
+        <!-- Secondary Administration (Folded) -->
+        <details id="details-admin-fold" class="details-admin-fold">
+          <summary>
+            <span data-i18n="details.adminTools">Settings & Tools</span>
+            <span class="fold-chevron">▾</span>
+          </summary>
+          <div class="admin-fold-body">
+            <section id="details-coworker-memory" class="detail-section hidden">
+              <span class="detail-label" data-i18n="details.memory">Memory</span>
+              <p class="detail-help" data-i18n="details.memoryCoworkerHelp">Private memory for this coworker. Sources are shown without internal IDs or paths.</p>
+              <div id="details-coworker-memory-list" class="member-list"></div>
+            </section>
+            <section id="details-team-memory" class="detail-section hidden">
+              <span class="detail-label" data-i18n="details.memoryTeam">Shared Memory</span>
+              <p class="detail-help" data-i18n="details.memoryTeamHelp">Shared only with this Team.</p>
+              <div id="details-team-memory-list" class="member-list"></div>
+            </section>
+            <section id="details-project-memory" class="detail-section hidden">
+              <span class="detail-label" data-i18n="details.memoryProject">Project Memory</span>
+              <p class="detail-help" data-i18n="details.memoryProjectHelp">Shared only with this project.</p>
+              <div id="details-project-memory-list" class="member-list"></div>
+            </section>
+            <section id="details-connected-apps" class="detail-section hidden">
+              <span class="detail-label" data-i18n="details.connectedApps">Connected Apps</span>
+              <p class="detail-help" data-i18n="details.connectedAppsHelp">Assign governed product connections to this coworker. Actions remain task-bound and Governor-controlled.</p>
+              <div id="details-connected-app-list" class="member-list"></div>
+            </section>
+            <section id="details-team-tools" class="detail-section hidden">
+              <span class="detail-label" data-i18n="details.channels">Channels</span>
+              <select id="team-channel-select" class="detail-select"></select>
+              <div class="detail-actions">
+                <button id="team-edit-channel" class="quiet-action" type="button" data-i18n="dialog.channel.editTitle">Edit channel</button>
+                <button id="team-archive-channel" class="quiet-action" type="button" data-i18n="common.archive">Archive</button>
+                <button id="team-restore-channel" class="quiet-action hidden" type="button" data-i18n="common.restore">Restore</button>
+              </div>
+              <span class="detail-label detail-sub-label" data-i18n="details.addChannel">Add channel</span>
+              <select id="team-channel-template-select" class="detail-select"></select>
+              <div class="detail-actions">
+                <button id="team-add-channel-from-template" class="quiet-action" type="button" data-i18n="channels.addFromTemplate">Add from template</button>
+                <button id="team-create-channel" class="hero-action" type="button" data-i18n="details.customChannel">Custom channel</button>
+              </div>
+              <span class="detail-label detail-sub-label" data-i18n="details.teamPack">Team Pack</span>
+              <p class="detail-help" data-i18n="details.teamPackHelp">Share the team recipe without sharing private workspaces or sign-in sessions.</p>
+              <div class="detail-actions">
+                <button id="team-export-pack" class="quiet-action" type="button" data-i18n="details.exportPack">Export</button>
+                <button id="team-import-pack" class="quiet-action" type="button" data-i18n="details.importPack">Import</button>
+              </div>
+              <p id="team-pack-transfer-result" class="setting-feedback"></p>
+              <span class="detail-label detail-sub-label" data-i18n="details.playbooks">Playbooks</span>
+              <select id="team-playbook-select" class="detail-select"></select>
+              <div class="detail-actions">
+                <button id="team-export-playbook" class="quiet-action" type="button" data-i18n="playbooks.exportMethod">Export method</button>
+                <button id="team-import-playbook" class="quiet-action" type="button" data-i18n="playbooks.importMethod">Import method</button>
+              </div>
+            </section>
+            <section id="details-collaboration" class="detail-section hidden">
+              <span class="detail-label" data-i18n="details.collaborate">Collaborate</span>
+              <p class="detail-help" data-i18n="details.collaborateHelp">The current owner can send a bounded task to any available teammate or ask for a review.</p>
+              <label><span data-i18n="details.teammate">Teammate</span><select id="collaboration-target" class="detail-select"></select></label>
+              <label><span data-i18n="details.actionType">Action</span><select id="collaboration-type" class="detail-select"><option value="handoff" data-i18n="details.actionHandoff">Send task</option><option value="review" data-i18n="details.actionReview">Ask for review</option></select></label>
+              <label><span data-i18n="details.boundedTask">Bounded task</span><textarea id="collaboration-task" maxlength="800" rows="3" data-i18n-placeholder="details.boundedTaskPlaceholder" placeholder="What should the teammate do?"></textarea></label>
+              <label><span data-i18n="details.reason">Reason</span><input id="collaboration-reason" maxlength="400" data-i18n-placeholder="details.reasonPlaceholder" placeholder="Why this teammate?"></label>
+              <button id="collaboration-submit" class="hero-action" type="button" data-i18n="details.sendToTeammate">Send to teammate</button>
+              <p id="collaboration-form-error" class="inline-error hidden" role="alert"></p>
+            </section>
+          </div>
+        </details>
+      </div>
+    </aside>
   </div>
   <aside id="activity-drawer" class="activity-drawer hidden" aria-label="Team activity"><div class="activity-header"><div><span class="eyebrow" data-i18n="activity.eyebrow">TEAM ACTIVITY</span><h2 data-i18n="activity.title">Activity</h2></div><button id="close-activity" class="icon-button" type="button">×</button></div><section class="activity-section team-activity-section" aria-labelledby="team-activity-heading"><div class="activity-section-heading"><div><span data-i18n="activity.sectionEyebrow">TEAM COLLABORATION</span><h3 id="team-activity-heading" data-i18n="activity.teamTimeline">Team timeline</h3></div><div class="detail-actions"><select id="activity-team-select" class="detail-select" aria-label="Team activity scope"></select><button id="activity-refresh" class="quiet-action" type="button" data-i18n="common.refresh">Refresh</button></div></div><p id="team-activity-context" class="activity-context"></p><div id="team-activity-summary" class="team-activity-summary" role="status"></div><p id="team-activity-bound" class="activity-bound" data-i18n="activity.teamBound">Newest first · showing up to 24 Team events</p><div id="team-activity-status" class="activity-status" role="status" aria-live="polite"></div><div id="team-activity-timeline" class="team-activity-timeline" role="list" aria-live="polite"></div></section><section class="activity-section activity-secondary"><span data-i18n="activity.overview">Runtime overview</span><pre id="overview-block"></pre></section><section class="activity-section activity-secondary"><span data-i18n="activity.audit">Security history</span><pre id="audit-block"></pre></section></aside>
   <dialog id="coworker-dialog" class="modal"><form id="coworker-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span id="coworker-dialog-eyebrow" class="eyebrow" data-i18n="dialog.coworker.eyebrow">NEW COWORKER</span><h2 id="coworker-dialog-title" data-i18n="dialog.coworker.title">Who are you adding?</h2></div><button class="modal-x" data-close-dialog="coworker-dialog" type="button">×</button></div><div class="quick-role-row"><span class="form-label" data-i18n="dialog.coworker.quickRoles">Start from a role</span><div><button class="quiet-action quick-role" type="button" data-role="chief" data-i18n="coworker.chief">Chief of Staff</button><button class="quiet-action quick-role" type="button" data-role="coding-lead" data-i18n="coworker.codingLead">Coding Lead</button><button class="quiet-action quick-role" type="button" data-role="reviewer" data-i18n="coworker.reviewer">Reviewer</button><button class="quiet-action quick-role" type="button" data-role="researcher" data-i18n="coworker.researcher">Researcher</button></div></div><label><span data-i18n="dialog.coworker.name">Name</span><input id="coworker-name" maxlength="80" data-i18n-placeholder="dialog.coworker.namePlaceholder" placeholder="e.g. Growth Operator" required></label><label><span data-i18n="dialog.coworker.role">Role</span><input id="coworker-role" maxlength="120" data-i18n-placeholder="dialog.coworker.rolePlaceholder" placeholder="What this coworker owns" required></label><label><span data-i18n="dialog.coworker.instructions">Instructions</span><textarea id="coworker-instructions" maxlength="12000" rows="5" data-i18n-placeholder="dialog.coworker.instructionsPlaceholder" placeholder="How this coworker should work, decide, and report…"></textarea></label><label><span data-i18n="dialog.coworker.modelProfile">Model profile</span><select id="coworker-provider"><option value="automatic" data-i18n="modelProfile.auto">Automatic</option><option value="efficient" data-i18n="modelProfile.efficient">Efficient</option><option value="deep" data-i18n="modelProfile.deep">Deep</option><option id="coworker-economy-option" value="economy" hidden data-i18n="modelProfile.economy">Economy</option></select></label><label id="coworker-state-field" class="hidden"><span data-i18n="dialog.coworker.availability">Availability</span><select id="coworker-state"><option value="active" data-i18n="state.available">Available</option><option value="paused" data-i18n="state.paused">Paused</option></select></label><details class="coworker-advanced"><summary data-i18n="dialog.coworker.advanced">Advanced</summary><p id="coworker-advanced-help" data-i18n="dialog.coworker.advancedHelp">Optional safe binding hints. These select a provider/model; they never grant tools or permissions.</p><label><span data-i18n="dialog.coworker.provider">Provider</span><select id="coworker-advanced-provider"><option value="" data-i18n="dialog.coworker.autoRouting">Automatic routing</option><option value="codex">Codex</option><option value="chatgpt-web">ChatGPT Web</option><option value="claude">Claude Code</option><option value="antigravity">Antigravity</option><option id="coworker-economy-provider-option" value="economy" hidden data-i18n="modelProfile.economy">Economy</option></select></label><label id="coworker-advanced-account-field"><span data-i18n="dialog.coworker.antigravityAccount">Antigravity account</span><select id="coworker-advanced-account"><option value="" data-i18n="dialog.coworker.noAccountPin">No account pin</option><option value="A">Account A</option><option value="B">Account B</option><option value="C">Account C</option></select></label><label><span data-i18n="dialog.coworker.modelOpaque">Model (opaque id)</span><input id="coworker-advanced-model" maxlength="128" data-i18n-placeholder="dialog.coworker.modelPlaceholder" placeholder="Optional configured model"></label><label><span data-i18n="dialog.coworker.privateWorkspace">Private workspace</span><select id="coworker-workspace"><option value="" data-i18n="dialog.coworker.defaultWorkspace">Coworker default</option></select></label><label><span data-i18n="dialog.coworker.computerProfile">Computer profile (opaque id)</span><input id="coworker-computer-profile" maxlength="128" data-i18n-placeholder="dialog.coworker.profilePlaceholder" placeholder="Optional configured profile"></label></details><p id="coworker-form-error" class="inline-error hidden"></p><div class="modal-actions"><button class="quiet-action" data-close-dialog="coworker-dialog" type="button" data-i18n="common.cancel">Cancel</button><button id="coworker-save" class="hero-action" type="submit" data-i18n="dialog.coworker.submitCreate">Create coworker</button></div></form></dialog>

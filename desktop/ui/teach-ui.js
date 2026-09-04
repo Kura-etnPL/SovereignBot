@@ -34,8 +34,11 @@
     button.type = "button";
     button.addEventListener("click", () => openDialog());
     section.append(label, copy, button);
+    const targetContainer = $("details-body") || panel;
     const computer = $("details-computer-section");
-    panel.insertBefore(section, computer?.nextSibling || panel.querySelector(".future-section") || null);
+    const future = targetContainer.querySelector(".future-section");
+    const ref = (computer?.nextSibling && computer.nextSibling.parentNode === targetContainer) ? computer.nextSibling : ((future && future.parentNode === targetContainer) ? future : null);
+    targetContainer.insertBefore(section, ref);
     return section;
   }
 

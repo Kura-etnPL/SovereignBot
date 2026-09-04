@@ -164,8 +164,10 @@
     list.id = "details-artifacts";
     list.className = "artifact-rail-list";
     section.append(label, list);
-    const future = panel.querySelector(".future-section");
-    panel.insertBefore(section, future || null);
+    const targetContainer = document.getElementById("details-body") || panel;
+    const future = targetContainer.querySelector(".future-section");
+    const ref = (future && future.parentNode === targetContainer) ? future : null;
+    targetContainer.insertBefore(section, ref);
     for (const chip of panel.querySelectorAll(".future-chip-row span")) {
       if (chip.textContent.trim() === "Artifacts") chip.remove();
     }
@@ -187,19 +189,14 @@
       list.textContent = "";
       const artifacts = result?.artifacts ?? [];
       if (!artifacts.length) {
-        const empty = document.createElement("span");
-        empty.className = "artifact-rail-empty";
-        empty.textContent = "No files yet";
-        list.append(empty);
+        section.classList.add("hidden");
         return;
       }
+      section.classList.remove("hidden");
       for (const artifact of artifacts) list.append(renderArtifactCard(artifact.id, { compact: true }));
     } catch (error) {
       list.textContent = "";
-      const failed = document.createElement("span");
-      failed.className = "artifact-rail-empty";
-      failed.textContent = "Artifacts unavailable";
-      list.append(failed);
+      section.classList.add("hidden");
     }
   }
 

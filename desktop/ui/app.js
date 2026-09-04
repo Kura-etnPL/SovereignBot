@@ -1283,6 +1283,27 @@ async function sendMessage(event) {
   }
 }
 
+function updateSelectOptionsIfChanged(select, optionsData, currentValue) {
+  if (!select) return;
+  if (document.activeElement === select) return;
+  const currentItems = [...select.options].map((opt) => `${opt.value}:${opt.textContent}`);
+  const nextItems = optionsData.map((opt) => `${opt.value}:${opt.textContent}`);
+  const isSame = currentItems.length === nextItems.length && currentItems.every((val, idx) => val === nextItems[idx]);
+  if (!isSame) {
+    select.textContent = "";
+    for (const opt of optionsData) {
+      const option = document.createElement("option");
+      option.value = opt.value;
+      option.textContent = opt.textContent;
+      if (opt.selected) option.selected = true;
+      select.append(option);
+    }
+  }
+  if (currentValue !== undefined && select.value !== currentValue && optionsData.some((o) => o.value === currentValue)) {
+    select.value = currentValue;
+  }
+}
+
 function renderCollaborationControls(conversation, team) {
   const section = $("details-collaboration");
   const targetSelect = $("collaboration-target");
@@ -1294,14 +1315,8 @@ function renderCollaborationControls(conversation, team) {
   const targets = members.filter((entry) => entry.id !== flow.currentOwnerId && entry.state === "active");
   section.classList.toggle("hidden", conversation.kind !== "team" || !team || !owner);
   const previous = targetSelect.value;
-  targetSelect.textContent = "";
-  for (const coworker of targets) {
-    const option = document.createElement("option");
-    option.value = coworker.id;
-    option.textContent = coworker.name;
-    targetSelect.append(option);
-  }
-  if (targets.some((entry) => entry.id === previous)) targetSelect.value = previous;
+  const options = targets.map((coworker) => ({ value: coworker.id, textContent: coworker.name }));
+  updateSelectOptionsIfChanged(targetSelect, options, targets.some((entry) => entry.id === previous) ? previous : undefined);
   const protocol = flow.activeProtocol;
   const waitingForProtocol = ["requested", "review_requested", "accepted", "review_accepted", "working", "reviewing"].includes(protocol?.state)
     || (protocol?.kind === "review" && protocol.state === "submitted");
@@ -1453,14 +1468,10 @@ function refreshParallelReviewerOptions(members, ownerId) {
   if (!reviewer) return;
   const previous = reviewer.value;
   const selected = new Set(parallelRows().map((row) => row.querySelector(".parallel-target")?.value).filter(Boolean));
-  reviewer.textContent = "";
-  for (const coworker of members.filter((entry) => entry.state === "active" && entry.id !== ownerId && !selected.has(entry.id))) {
-    const option = document.createElement("option");
-    option.value = coworker.id;
-    option.textContent = coworker.name;
-    reviewer.append(option);
-  }
-  if ([...reviewer.options].some((option) => option.value === previous)) reviewer.value = previous;
+  const options = members
+    .filter((entry) => entry.state === "active" && entry.id !== ownerId && !selected.has(entry.id))
+    .map((coworker) => ({ value: coworker.id, textContent: coworker.name }));
+  updateSelectOptionsIfChanged(reviewer, options, options.some((entry) => entry.value === previous) ? previous : undefined);
 }
 
 function renderParallelControls(conversation, team) {
@@ -1559,106 +1570,265 @@ async function submitParallelCollaboration() {
   }
 }
 
-function renderDetails(conversation) {
-  const membersEl = $("details-members");
-  clearNode(membersEl);
+function computeDetailsSignature(conversation, team) {
+  if (!conversation) return "";
   const members = participantCoworkers(conversation);
-  for (const coworker of members) {
-    const row = document.createElement("div");
-    row.className = "member-row";
-    const avatar = document.createElement("div");
-    avatar.className = "avatar";
-    avatar.textContent = avatarFor(coworker);
-    const name = document.createElement("span");
-    name.textContent = coworker.name;
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "message-action member-edit";
-    edit.textContent = t("common.edit");
-    edit.addEventListener("click", () => openCoworkerDialog(coworker));
-    row.append(avatar, name, edit);
-    membersEl.append(row);
+  const memberSig = members.map((m) => `${m.id}:${m.name}:${m.state}:${bindingFor(m.id)?.profile || ""}`).join(",");
+  const flow = team?.flow ?? {};
+  const activeFanout = flow.activeFanout;
+  const fanoutSig = activeFanout ? `${activeFanout.state}:${activeFanout.children?.map((c) => `${c.coworkerId}:${c.status}`).join(",")}` : "";
+  const channelsSig = team?.channels?.map((c) => `${c.conversationId}:${c.name}:${c.archived}`).join(",") ?? "";
+  const playbooksSig = team?.playbooks?.map((p) => `${p.id}:${p.name}`).join(",") ?? "";
+  const currentOwnerSig = `${flow.currentOwnerId || ""}:${flow.currentOwner || ""}:${flow.status || ""}:${flow.stage || ""}:${flow.activeProtocol?.state || ""}`;
+  const appsSig = state.connectedApps?.apps?.map((a) => `${a.id}:${(a.assignedCoworkerIds || []).join("-")}`).join(",") ?? "";
+  const langSig = state.locale || "en";
+  const activitySig = state.teamActivity?.events?.[0]?.id || "";
+  const pendingSig = pendingUserRecipients(conversation).size;
+  return [
+    conversation.id,
+    conversation.kind,
+    memberSig,
+    team?.id || "",
+    currentOwnerSig,
+    fanoutSig,
+    channelsSig,
+    playbooksSig,
+    appsSig,
+    langSig,
+    activitySig,
+    pendingSig
+  ].join("|");
+}
+
+function renderDetails(conversation, force = false) {
+  const panel = $("details-panel");
+  if (!panel || panel.classList.contains("hidden")) return;
+  if (!conversation) return;
+
+  const team = teamForConversation(conversation.id);
+  const currentSig = computeDetailsSignature(conversation, team);
+  if (!force && state.detailsSignature === currentSig) return;
+
+  const body = $("details-body");
+  const prevScrollTop = body ? body.scrollTop : 0;
+
+  const members = participantCoworkers(conversation);
+  const flow = team?.flow ?? {};
+
+  // 1. Owner & Core Team Card
+  let ownerName = t("details.ready");
+  let ownerRole = "";
+  let ownerAvatar = "🤖";
+  let ownerStatus = t("details.ready");
+
+  if (team) {
+    const owner = flow.currentOwnerId ? coworkerById(flow.currentOwnerId) : (members[0] || null);
+    ownerName = owner?.name || flow.currentOwner || t("details.ready");
+    ownerRole = owner?.role || (team ? t("dialog.team.eyebrow") : "");
+    ownerAvatar = owner ? avatarFor(owner) : "👥";
+    ownerStatus = flow.status === "needs-attention"
+      ? t("state.attention")
+      : flow.status === "active"
+      ? t("state.active")
+      : flow.status === "stopped"
+      ? t("state.attention")
+      : flow.currentOwnerId
+      ? t("state.waiting")
+      : t("details.ready");
+  } else if (members.length) {
+    const owner = members[0];
+    ownerName = owner.name;
+    ownerRole = owner.role || "";
+    ownerAvatar = avatarFor(owner);
+    ownerStatus = owner.state === "active" ? t("state.available") : (owner.state ? t(`state.${owner.state}`) : t("details.ready"));
   }
 
+  if ($("details-owner-name")) $("details-owner-name").textContent = ownerName;
+  if ($("details-owner-role")) $("details-owner-role").textContent = ownerRole;
+  if ($("details-owner-avatar")) $("details-owner-avatar").textContent = ownerAvatar;
+  if ($("details-owner-status")) $("details-owner-status").textContent = ownerStatus;
+
+  // Model profiles & workspace
   const profiles = [...new Set(members.map((entry) => bindingFor(entry.id)?.profile).filter(Boolean))];
-  $("details-provider").textContent = profiles.length ? profiles.map(humanModelProfile).join(" + ") : t("modelProfile.auto");
-  const team = teamForConversation(conversation.id);
-  $("details-workspace").textContent = team ? t("details.workspaceShared") : t("details.workspacePrivate");
+  if ($("details-provider")) $("details-provider").textContent = profiles.length ? profiles.map(humanModelProfile).join(" + ") : t("modelProfile.auto");
+  if ($("details-workspace")) $("details-workspace").textContent = team ? t("details.workspaceShared") : t("details.workspacePrivate");
+
+  // Members list
+  const membersEl = $("details-members");
+  if (membersEl) {
+    clearNode(membersEl);
+    for (const coworker of members) {
+      const row = document.createElement("div");
+      row.className = "member-row";
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = avatarFor(coworker);
+      const name = document.createElement("span");
+      name.textContent = coworker.name;
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "message-action member-edit";
+      edit.textContent = t("common.edit");
+      edit.addEventListener("click", () => openCoworkerDialog(coworker));
+      row.append(avatar, name, edit);
+      membersEl.append(row);
+    }
+  }
+
+  // Roster list
+  const rosterWrap = $("details-roster-wrap");
+  const roster = $("details-roster");
+  if (rosterWrap) rosterWrap.classList.toggle("hidden", !team);
+  if (roster) {
+    clearNode(roster);
+    if (team) {
+      const attention = new Set(flow.attentionCoworkerIds ?? []);
+      for (const member of team.coworkers ?? members.map((entry) => ({ id: entry.id, name: entry.name }))) {
+        const row = document.createElement("div");
+        row.className = "member-row";
+        const name = document.createElement("span");
+        name.textContent = member.name;
+        const status = document.createElement("small");
+        status.className = "member-status";
+        status.textContent = attention.has(member.id)
+          ? t("state.attention")
+          : member.id === flow.currentOwnerId && flow.status === "active"
+          ? t("state.active")
+          : member.id === flow.currentOwnerId
+          ? t("state.waiting")
+          : t("state.available");
+        row.append(name, status);
+        roster.append(row);
+      }
+    }
+  }
+
+  // 2. Progress Card (Only visible when active work is running)
+  const parallel = team?.flow?.activeFanout;
+  const pending = pendingUserRecipients(conversation);
+  const isProgressActive = Boolean(parallel?.children?.length)
+    || (team?.flow?.status === "active" || team?.flow?.status === "needs-attention" || team?.flow?.status === "stopped")
+    || pending.size > 0;
+  const progressCard = $("details-progress-card");
+  progressCard?.classList.toggle("hidden", !isProgressActive);
+
+  if (isProgressActive) {
+    const latestActivity = state.teamActivity?.events?.[0];
+    const activitySuffix = latestActivity?.targetCoworker && latestActivity.label?.toLowerCase().includes("handoff")
+      ? ` · ${latestActivity.label} → ${latestActivity.targetCoworker}`
+      : latestActivity?.label ? ` · ${latestActivity.label}` : "";
+
+    if (parallel?.children?.length) {
+      const done = parallel.children.filter((entry) => entry.status === "completed").length;
+      const parallelStatus = parallel.state === "stopped" || parallel.state === "blocked"
+        ? t("state.attention")
+        : parallel.state === "reviewing"
+        ? t("state.reviewing")
+        : parallel.state === "join_requested" || parallel.state === "joining"
+        ? t("state.joining")
+        : t("state.parallel");
+      if ($("details-current-work")) {
+        $("details-current-work").textContent = `${t("details.specialistsComplete", { done, total: parallel.children.length })} · ${parallelStatus}`;
+      }
+    } else if (team?.flow?.currentOwner) {
+      const st = team.flow.status === "needs-attention"
+        ? t("state.attention")
+        : team.flow.status === "active"
+        ? t("state.active")
+        : team.flow.status === "stopped"
+        ? t("state.attention")
+        : t("state.waiting");
+      if ($("details-current-work")) {
+        $("details-current-work").textContent = `${st} · ${team.flow.currentOwner}${activitySuffix}`;
+      }
+    } else if (pending.size) {
+      if ($("details-current-work")) {
+        $("details-current-work").textContent = t("details.coworkersWorking", { count: pending.size, suffix: pending.size === 1 ? "" : "s" });
+      }
+    }
+  }
+
+  // 3. Action Required Card (Only visible when attention/review is required)
+  const isAttention = flow.status === "needs-attention" || flow.status === "stopped" || parallel?.state === "blocked" || parallel?.state === "stopped";
+  const isReview = flow.activeProtocol?.state === "review_requested" || flow.activeProtocol?.state === "submitted";
+  const needsAction = isAttention || isReview;
+  const actionCard = $("details-action-card");
+  actionCard?.classList.toggle("hidden", !needsAction);
+
+  const actionContent = $("details-action-content");
+  if (actionContent) {
+    clearNode(actionContent);
+    if (isAttention) {
+      const div = document.createElement("div");
+      div.className = "action-attention";
+      const icon = document.createElement("span");
+      icon.textContent = "⚠️";
+      const desc = document.createElement("span");
+      desc.textContent = `${t("state.attention")} · ${flow.statusMessage || t("dialog.routineRun.title")}`;
+      div.append(icon, desc);
+      actionContent.append(div);
+    } else if (isReview) {
+      const div = document.createElement("div");
+      div.className = "action-attention";
+      const icon = document.createElement("span");
+      icon.textContent = "👀";
+      const desc = document.createElement("span");
+      desc.textContent = `${t("state.reviewing")} · ${flow.activeProtocol?.summary || t("teams.askForReview")}`;
+      div.append(icon, desc);
+      actionContent.append(div);
+    }
+  }
+
+  // 4. Secondary Administration Tools
+>>>>>>> Stashed changes
   renderCoworkerConnectedApps(conversation.kind === "direct" ? members[0] : undefined);
   const teamTools = $("details-team-tools");
   teamTools?.classList.toggle("hidden", !team);
-  if (!team) $("team-pack-transfer-result") && ($("team-pack-transfer-result").textContent = "");
+  if (!team && $("team-pack-transfer-result")) $("team-pack-transfer-result").textContent = "";
+
   const playbookSelect = $("team-playbook-select");
   if (playbookSelect) {
-    playbookSelect.textContent = "";
-    for (const playbook of team?.playbooks ?? []) {
-      const option = document.createElement("option");
-      option.value = playbook.id;
-      option.textContent = playbook.name;
-      playbookSelect.append(option);
-    }
+    const playbookOptions = (team?.playbooks ?? []).map((p) => ({ value: p.id, textContent: p.name }));
+    updateSelectOptionsIfChanged(playbookSelect, playbookOptions);
   }
+
   const channelSelect = $("team-channel-select");
   if (channelSelect) {
-    channelSelect.textContent = "";
-    for (const channel of team?.channels ?? []) {
-      const option = document.createElement("option");
-      option.value = channel.conversationId;
-      option.textContent = `${channel.name} / ${channel.kind}${channel.archived ? ` · ${t("state.archived")}` : ""}`;
-      option.selected = channel.conversationId === conversation.id;
-      channelSelect.append(option);
-    }
+    const channelOptions = (team?.channels ?? []).map((c) => ({
+      value: c.conversationId,
+      textContent: `${c.name} / ${c.kind}${c.archived ? ` · ${t("state.archived")}` : ""}`,
+      selected: c.conversationId === conversation.id
+    }));
+    updateSelectOptionsIfChanged(channelSelect, channelOptions, conversation.id);
   }
+
   const selectedChannel = team?.channels?.find((entry) => entry.conversationId === conversation.id);
   $("team-edit-channel")?.classList.toggle("hidden", !selectedChannel);
   $("team-archive-channel")?.classList.toggle("hidden", !selectedChannel || selectedChannel.archived);
   $("team-restore-channel")?.classList.toggle("hidden", !selectedChannel?.archived);
+
   const templateSelect = $("team-channel-template-select");
   if (templateSelect) {
-    templateSelect.textContent = "";
-    for (const template of state.channelTemplates) {
-      const option = document.createElement("option");
-      option.value = template.id;
-      option.textContent = `${template.name} / ${template.kind}`;
-      templateSelect.append(option);
-    }
+    const templateOptions = state.channelTemplates.map((tpl) => ({
+      value: tpl.id,
+      textContent: `${tpl.name} / ${tpl.kind}`
+    }));
+    updateSelectOptionsIfChanged(templateSelect, templateOptions);
   }
-  const roster = $("details-roster");
-  clearNode(roster);
-  if (team) {
-    const flow = team.flow ?? {};
-    const attention = new Set(flow.attentionCoworkerIds ?? []);
-    for (const member of team.coworkers ?? members.map((entry) => ({ id: entry.id, name: entry.name }))) {
-      const row = document.createElement("div");
-      row.className = "member-row";
-      const name = document.createElement("span");
-      name.textContent = member.name;
-      const status = document.createElement("small");
-      status.className = "member-status";
-      status.textContent = attention.has(member.id) ? "Attention" : member.id === flow.currentOwnerId && flow.status === "active" ? "Active" : member.id === flow.currentOwnerId ? "Waiting" : "Available";
-      row.append(name, status);
-      roster.append(row);
-    }
-  }
-  const pending = pendingUserRecipients(conversation);
-  const latestActivity = state.teamActivity?.events?.[0];
-  const activitySuffix = latestActivity?.targetCoworker && latestActivity.label?.toLowerCase().includes("handoff")
-    ? ` · ${latestActivity.label} → ${latestActivity.targetCoworker}`
-    : latestActivity?.label ? ` · ${latestActivity.label}` : "";
-  const parallel = team?.flow?.activeFanout;
-  if (parallel?.children?.length) {
-    const done = parallel.children.filter((entry) => entry.status === "completed").length;
-    const parallelStatus = parallel.state === "stopped" || parallel.state === "blocked"
-      ? "Attention"
-      : parallel.state === "reviewing" ? "Reviewing" : parallel.state === "join_requested" || parallel.state === "joining" ? "Joining results" : "Parallel work";
-    $("details-current-work").textContent = `${done}/${parallel.children.length} specialists complete · ${parallelStatus}`;
-  } else $("details-current-work").textContent = team?.flow?.currentOwner
-    ? `${team.flow.status === "needs-attention" ? "Attention" : team.flow.status === "active" ? "Active" : team.flow.status === "stopped" ? "Attention" : "Waiting"} · ${team.flow.currentOwner}${activitySuffix}`
-    : pending.size ? `${pending.size} coworker${pending.size === 1 ? "" : "s"} working` : "Ready";
+
   renderCollaborationControls(conversation, team);
   renderParallelControls(conversation, team);
-  void renderMemorySections(conversation, team);
+
+  const memoryScopeKey = `${conversation.id}:${team?.id || ""}`;
+  if (force || state.renderedMemoryScope !== memoryScopeKey) {
+    state.renderedMemoryScope = memoryScopeKey;
+    void renderMemorySections(conversation, team);
+  }
+
+  if (body && prevScrollTop > 0) body.scrollTop = prevScrollTop;
+  state.detailsSignature = currentSig;
 }
+
 
 function memoryTarget(scope, ownerId) { return { scope, ownerId, limit: 20 }; }
 function memoryScopeTarget(scope, ownerId) { return { scope, ownerId }; }
@@ -3224,7 +3394,14 @@ function bindEvents() {
   $("conversation-redirect")?.addEventListener("click", toggleRedirectMode);
   $("conversation-load-older")?.addEventListener("click", () => { void loadOlderMessages(); });
   $("conversation-latest-messages")?.addEventListener("click", () => { void jumpToLatestMessages(); });
-  $("open-details").addEventListener("click", () => $("details-panel").classList.toggle("hidden"));
+  $("open-details").addEventListener("click", () => {
+    const panel = $("details-panel");
+    const wasHidden = panel.classList.contains("hidden");
+    panel.classList.toggle("hidden");
+    if (wasHidden && state.selectedConversation) {
+      renderDetails(state.selectedConversation, true);
+    }
+  });
   $("close-details").addEventListener("click", () => hide($("details-panel")));
   $("new-conversation-button")?.addEventListener("click", () => {
     const chief = state.coworkers.find((c) => /chief/i.test(c.name)) ?? state.coworkers[0];
