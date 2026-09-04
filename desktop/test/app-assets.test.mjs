@@ -37,6 +37,17 @@ test("isAppUrl accepts only the app scheme+host", () => {
     assert.equal(isAppUrl(""), false);
 });
 
+test("app protocol allowlists every product UI script referenced by the shell", () => {
+  for (const asset of ["product-hubs-ui.js", "memory-ui.js", "teach-ui.js", "this-pc-ui.js", "this-pc.css"]) {
+    assert.deepEqual(resolveAppAsset(`sovereignbot://app/${asset}`), {
+      ok: true,
+      pathname: `/${asset}`,
+      file: asset,
+      type: asset.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8",
+    });
+  }
+});
+
 test("external links allow only reviewed https GitHub project URLs", () => {
     assert.equal(isAllowedExternalUrl("https://github.com/Kura-etnPL/SovereignBot/releases"), true);
     assert.equal(isAllowedExternalUrl("http://github.com/Kura-etnPL/SovereignBot/releases"), false);

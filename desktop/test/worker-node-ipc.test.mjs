@@ -62,7 +62,7 @@ test("Routines and Event Triggers cannot select a Worker Node", async () => {
     assert.ok(routineStart >= 0 && eventStart > routineStart && workerStart > eventStart);
     const routineValidator = ipcSource.slice(routineStart, eventStart);
     const eventValidator = ipcSource.slice(eventStart, workerStart);
-    assert.match(routineValidator, /exactKeys\(payload, new Set\(\[\"name\", \"coworkerId\", \"instruction\", \"skillId\", \"workspaceId\", \"schedule\"\]\)/);
+    assert.match(routineValidator, /exactKeys\(payload, new Set\(\[\"name\", \"coworkerId\", \"teamId\", \"projectId\", \"instruction\", \"skillId\", \"workspaceId\", \"schedule\"\]\)/);
     assert.match(eventValidator, /exactKeys\(payload, new Set\(\[\"name\", \"routineId\", \"workspaceId\", \"pathPrefix\"\]\)/);
     assert.doesNotMatch(routineValidator, /executionTarget/);
     assert.doesNotMatch(eventValidator, /executionTarget/);

@@ -137,6 +137,51 @@ test("coworker-to-coworker handoff is durable data, not execution authority", ()
     }
 });
 
+test("voice eligibility is a trusted final-reply marker and survives reload", () => {
+    const { root, coworkerStore, conversations, coder } = fixture();
+    try {
+        const direct = conversations.createDirect(coder.id);
+        assert.throws(
+            () => conversations.postUserMessage(direct.id, { text: "pretend final", voiceEligible: true }),
+            /unknown message field/,
+        );
+        const ordinary = conversations.postCoworkerMessage(direct.id, coder.id, { text: "internal or intermediate" });
+        assert.equal(ordinary.voiceEligible, undefined);
+        const final = conversations.postCoworkerMessage(direct.id, coder.id, { text: "The final answer." }, { voiceEligible: true });
+        assert.equal(final.voiceEligible, true);
+
+        const reloaded = createConversationStore({
+            persistPath: join(root, "conversations.json"),
+            coworkerStore,
+        });
+        assert.equal(reloaded.get(direct.id).messages.at(-1).voiceEligible, true);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("artifact references are validated against the conversation before durable append", () => {
+    const { root, conversations, chief, coder } = fixture();
+    try {
+        const team = conversations.createTeam({ title: "Artifact scope", coworkerIds: [chief.id, coder.id] });
+        conversations.setArtifactReferenceValidator(({ conversationId, artifactIds }) => {
+            if (conversationId === team.id && artifactIds.includes("artifact_wrong_channel"))
+                throw new Error("artifact reference does not belong to this conversation");
+        });
+        assert.throws(
+            () => conversations.postUserMessage(team.id, { text: "bad artifact", artifactIds: ["artifact_wrong_channel"] }),
+            /does not belong to this conversation/,
+        );
+        assert.equal(conversations.get(team.id).messages.length, 0);
+        const accepted = conversations.postUserMessage(team.id, { text: "known artifact", artifactIds: ["artifact_in_channel"] });
+        assert.deepEqual(accepted.artifactIds, ["artifact_in_channel"]);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("conversation membership and threading fail closed", () => {
     const { root, coworkerStore, conversations, chief, coder, researcher } = fixture();
     try {
@@ -153,6 +198,69 @@ test("conversation membership and threading fail closed", () => {
 
         coworkerStore.archive(coder.id);
         assert.throws(() => conversations.createTeam({ title: "Archived", coworkerIds: [chief.id, coder.id] }), /archived coworker/);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("conversation pages are bounded, ordered, cursor-safe, and durable", () => {
+    const { root, coworkerStore, conversations, coder, researcher } = fixture();
+    try {
+        const direct = conversations.createDirect(coder.id);
+        const other = conversations.createDirect(researcher.id);
+        const foreignCursor = conversations.postUserMessage(other.id, { text: "Foreign cursor" }).id;
+        for (let index = 0; index < 205; index += 1) conversations.postUserMessage(direct.id, { text: `Message ${index}` });
+
+        const latest = conversations.getPage(direct.id);
+        assert.equal(latest.messages.length, 100);
+        assert.equal(latest.messages[0].text, "Message 105");
+        assert.equal(latest.messages.at(-1).text, "Message 204");
+        assert.deepEqual(latest.pageInfo, { total: 205, hasOlder: true, nextBeforeMessageId: conversations.get(direct.id).messages[105].id });
+
+        const middle = conversations.getPage(direct.id, { limit: 100, beforeMessageId: latest.pageInfo.nextBeforeMessageId });
+        assert.equal(middle.messages[0].text, "Message 5");
+        assert.equal(middle.messages.at(-1).text, "Message 104");
+        assert.equal(middle.pageInfo.hasOlder, true);
+
+        const oldest = conversations.getPage(direct.id, { limit: 100, beforeMessageId: middle.pageInfo.nextBeforeMessageId });
+        assert.equal(oldest.messages.length, 5);
+        assert.equal(oldest.messages[0].text, "Message 0");
+        assert.equal(oldest.pageInfo.hasOlder, false);
+        assert.equal(oldest.pageInfo.nextBeforeMessageId, null);
+
+        assert.throws(() => conversations.getPage(direct.id, { limit: 0 }), /page limit/);
+        assert.throws(() => conversations.getPage(direct.id, { limit: 101 }), /page limit/);
+        assert.throws(() => conversations.getPage(direct.id, { beforeMessageId: "msg_deadbeefdeadbeef" }), /invalid conversation page cursor/);
+        assert.throws(() => conversations.getPage(direct.id, { beforeMessageId: foreignCursor }), /invalid conversation page cursor/);
+        const anchor = conversations.get(direct.id).messages[7].id;
+        const anchored = conversations.getPage(direct.id, { limit: 20, aroundMessageId: anchor });
+        assert.ok(anchored.messages.some((message) => message.id === anchor));
+        assert.ok(anchored.messages.length <= 20);
+        assert.throws(() => conversations.getPage(direct.id, { limit: 20, aroundMessageId: foreignCursor }), /invalid conversation anchor/);
+        assert.throws(() => conversations.getPage(direct.id, { aroundMessageId: "msg_deadbeefdeadbeef" }), /invalid conversation anchor/);
+        assert.throws(() => conversations.getPage(direct.id, { beforeMessageId: anchor, aroundMessageId: anchor }), /ambiguous/);
+
+        const reloaded = createConversationStore({ persistPath: join(root, "conversations.json"), coworkerStore });
+        const afterRestart = reloaded.getPage(direct.id, { limit: 10, beforeMessageId: latest.pageInfo.nextBeforeMessageId });
+        assert.deepEqual(afterRestart.messages.map((message) => message.text), middle.messages.slice(-10).map((message) => message.text));
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("conversation Search projection follows the canonical retention bound", () => {
+    const { root, conversations, coder } = fixture();
+    try {
+        const direct = conversations.createDirect(coder.id);
+        for (let index = 0; index < 5_005; index += 1) conversations.postUserMessage(direct.id, { text: `Bounded message ${index}` });
+        const retained = conversations.get(direct.id).messages;
+        const indexed = [...conversations.searchRecords()].filter((entry) => entry.conversationId === direct.id);
+        assert.equal(retained.length, 5_000);
+        assert.equal(indexed.length, 5_000);
+        assert.equal(retained[0].text, "Bounded message 5");
+        assert.equal(indexed[0].text, "Bounded message 5");
     }
     finally {
         rmSync(root, { recursive: true, force: true });

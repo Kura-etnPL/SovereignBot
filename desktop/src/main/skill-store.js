@@ -13,6 +13,12 @@ const MAX_INPUTS = 16;
 const MAX_STEPS = 64;
 const MAX_VALIDATORS = 24;
 const SKILL_CAPABILITIES = new Set(["computer", "workspace"]);
+const UNSAFE_CONTENT = [
+    /(?:[A-Za-z]:[\\/]|\\\\(?:Users|home|tmp|var|private|workspace|worktrees?)[\\/]|(?:^|\s)\/(?:Users|home|tmp|var|private|workspace|worktrees?)[\\/]|file:\/\/)/i,
+    /(?:bearer|api[_-]?key|access[_-]?token|refresh[_-]?token|cookie|password|secret|credential)\s*[:=]\s*\S+/i,
+    /(?:session[_ -]?id|continuity|provider[_ -]?(?:id|session|account)|webdriver|sidecar|backendRef|rawPath|\bcwd\b)/i,
+    /(?:\bcoordinate(?:s)?\b|screen\s+position|click\s+at|\bx\s*[:=]\s*\d+\b|\by\s*[:=]\s*\d+\b)/i,
+];
 
 function plainObject(value) {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -61,6 +67,13 @@ function boundedText(value, label, max, { required = false } = {}) {
     return trimmed || undefined;
 }
 
+function skillContent(value, label, max, { required = false } = {}) {
+    const normalized = boundedText(value, label, max, { required });
+    if (normalized && UNSAFE_CONTENT.some((pattern) => pattern.test(normalized)))
+        throw new Error(`${label} contains a private path, credential, runtime handle, or coordinate`);
+    return normalized;
+}
+
 function normalizeInputs(value) {
     if (value === undefined) return [];
     if (!Array.isArray(value) || value.length > MAX_INPUTS) throw new Error(`skill inputs must be an array of at most ${MAX_INPUTS} entries`);
@@ -71,7 +84,7 @@ function normalizeInputs(value) {
         const name = boundedText(entry.name, `skill input ${index} name`, 80, { required: true });
         if (!/^[A-Za-z][A-Za-z0-9 _-]{0,79}$/.test(name)) throw new Error(`skill input ${index} name is invalid`);
         const type = boundedText(entry.type ?? "string", `skill input ${index} type`, 40, { required: true });
-        const description = boundedText(entry.description ?? "", `skill input ${index} description`, 240) ?? "";
+        const description = skillContent(entry.description ?? "", `skill input ${index} description`, 240) ?? "";
         if (typeof entry.required !== "boolean" && entry.required !== undefined) throw new Error(`skill input ${index} required must be boolean`);
         return { name, type, description, required: entry.required !== false };
     });
@@ -80,7 +93,7 @@ function normalizeInputs(value) {
 function normalizeStringArray(value, label, max, itemMax) {
     if (value === undefined) return [];
     if (!Array.isArray(value) || value.length > max) throw new Error(`${label} must be an array of at most ${max} entries`);
-    return value.map((entry, index) => boundedText(entry, `${label}[${index}]`, itemMax, { required: true }));
+    return value.map((entry, index) => skillContent(entry, `${label}[${index}]`, itemMax, { required: true }));
 }
 
 function normalizeCapabilities(value) {
@@ -98,10 +111,10 @@ function normalizeMetadata(input) {
     return {
         inputs: normalizeInputs(input.inputs),
         steps: normalizeStringArray(input.steps, "skill steps", MAX_STEPS, 800),
-        expectedOutput: boundedText(input.expectedOutput ?? "", "skill expectedOutput", 1_000) ?? "",
+        expectedOutput: skillContent(input.expectedOutput ?? "", "skill expectedOutput", 1_000) ?? "",
         requestedCapabilities: normalizeCapabilities(input.requestedCapabilities),
         validators: normalizeStringArray(input.validators, "skill validators", MAX_VALIDATORS, 500),
-        source: ["manual", "taught"].includes(input.source) ? input.source : "manual",
+        source: ["manual", "taught", "imported"].includes(input.source) ? input.source : "manual",
     };
 }
 
@@ -113,9 +126,9 @@ function normalizeCreate(input) {
     }
     const metadata = normalizeMetadata(input);
     return {
-        name: text(input.name, "skill name", MAX_NAME, { required: true }),
-        description: text(input.description, "skill description", MAX_DESCRIPTION) ?? "",
-        instructions: text(input.instructions, "skill instructions", MAX_INSTRUCTIONS, { required: true }),
+        name: skillContent(input.name, "skill name", MAX_NAME, { required: true }),
+        description: skillContent(input.description, "skill description", MAX_DESCRIPTION) ?? "",
+        instructions: skillContent(input.instructions, "skill instructions", MAX_INSTRUCTIONS, { required: true }),
         ...metadata,
         ...(input.lastTestedAt ? { lastTestedAt: text(input.lastTestedAt, "lastTestedAt", 64) } : {}),
     };
@@ -128,16 +141,16 @@ function normalizePatch(input) {
     for (const key of Object.keys(input)) {
         if (!allowed.has(key)) throw new Error(`unknown skill field: ${key}`);
     }
-    if (Object.hasOwn(input, "name")) patch.name = text(input.name, "skill name", MAX_NAME, { required: true });
-    if (Object.hasOwn(input, "description")) patch.description = text(input.description, "skill description", MAX_DESCRIPTION) ?? "";
-    if (Object.hasOwn(input, "instructions")) patch.instructions = text(input.instructions, "skill instructions", MAX_INSTRUCTIONS, { required: true });
+    if (Object.hasOwn(input, "name")) patch.name = skillContent(input.name, "skill name", MAX_NAME, { required: true });
+    if (Object.hasOwn(input, "description")) patch.description = skillContent(input.description, "skill description", MAX_DESCRIPTION) ?? "";
+    if (Object.hasOwn(input, "instructions")) patch.instructions = skillContent(input.instructions, "skill instructions", MAX_INSTRUCTIONS, { required: true });
     if (Object.hasOwn(input, "inputs")) patch.inputs = normalizeInputs(input.inputs);
     if (Object.hasOwn(input, "steps")) patch.steps = normalizeStringArray(input.steps, "skill steps", MAX_STEPS, 800);
-    if (Object.hasOwn(input, "expectedOutput")) patch.expectedOutput = boundedText(input.expectedOutput, "skill expectedOutput", 1_000) ?? "";
+    if (Object.hasOwn(input, "expectedOutput")) patch.expectedOutput = skillContent(input.expectedOutput, "skill expectedOutput", 1_000) ?? "";
     if (Object.hasOwn(input, "requestedCapabilities")) patch.requestedCapabilities = normalizeCapabilities(input.requestedCapabilities);
     if (Object.hasOwn(input, "validators")) patch.validators = normalizeStringArray(input.validators, "skill validators", MAX_VALIDATORS, 500);
     if (Object.hasOwn(input, "source")) {
-        if (!["manual", "taught"].includes(input.source)) throw new Error("skill source must be manual or taught");
+        if (!["manual", "taught", "imported"].includes(input.source)) throw new Error("skill source must be manual, taught, or imported");
         patch.source = input.source;
     }
     if (Object.hasOwn(input, "state")) {
@@ -213,6 +226,7 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
         ? loaded.assignments.map(sanitizeAssignment).filter((entry) => entry && skills.some((skill) => skill.id === entry.skillId)).slice(-MAX_ASSIGNMENTS)
         : [];
     let targetResolver;
+    let retestRunner;
 
     function save() {
         saveJsonState(persistPath, { schema: SKILLS_SCHEMA, skills, invocations, assignments });
@@ -272,6 +286,10 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
                 throw new Error("skill assignment target resolver is invalid");
             targetResolver = resolver;
         },
+        setRetestRunner(runner) {
+            if (runner !== undefined && typeof runner !== "function") throw new Error("skill retest runner must be a function");
+            retestRunner = runner;
+        },
         list({ includeArchived = false } = {}) {
             return { schema: SKILLS_SCHEMA, skills: skills.filter((entry) => includeArchived || entry.state !== "archived").map(publicSkill) };
         },
@@ -291,7 +309,9 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
         },
         update(id, input) {
             const skill = requireSkill(id);
-            Object.assign(skill, normalizePatch(input), { updatedAt: now() });
+            const patch = normalizePatch(input);
+            if (skill.state === "archived" && (patch.state !== "active" || Object.keys(patch).length !== 1)) throw new Error("archived Skill is read-only; restore it before editing");
+            Object.assign(skill, patch, { updatedAt: now() });
             save();
             return publicSkill(skill);
         },
@@ -317,6 +337,51 @@ export function createSkillStore({ persistPath, now = () => new Date().toISOStri
             if (!assignment.coworkerIds.length && !assignment.teamIds.length) assignments.splice(assignments.indexOf(assignment), 1);
             save();
             return publicSkill(skill);
+        },
+        exportSkill(id) {
+            const skill = requireSkill(id);
+            return { schema: "sovereignbot.desktop.skill.v1", name: skill.name, description: skill.description, instructions: skill.instructions, inputs: clone(skill.inputs), steps: [...skill.steps], expectedOutput: skill.expectedOutput, requestedCapabilities: [...skill.requestedCapabilities], validators: [...skill.validators], source: skill.source };
+        },
+        importSkill(input) {
+            if (!plainObject(input)) throw new Error("skill import must be an object");
+            if (input.schema !== "sovereignbot.desktop.skill.v1") throw new Error("skill schema is invalid");
+            const { schema: _schema, ...document } = input;
+            const created = this.create({ ...document, source: "imported" });
+            return { imported: true, skill: created };
+        },
+        duplicateSkill(id) {
+            const skill = requireSkill(id);
+            return this.create({ name: `${skill.name} copy`, description: skill.description, instructions: skill.instructions, inputs: clone(skill.inputs), steps: [...skill.steps], expectedOutput: skill.expectedOutput, requestedCapabilities: [...skill.requestedCapabilities], validators: [...skill.validators], source: "manual" });
+        },
+        retestSkill(id) {
+            const skill = requireSkill(id);
+            if (skill.state !== "active") throw new Error(`skill is archived: ${id}`);
+            // Skills are declarative definitions. A retest validates the complete
+            // stored definition and records the check; executing Computer or
+            // Workspace work still requires a normal governed Job/Routine path.
+            normalizeCreate({
+                name: skill.name,
+                description: skill.description,
+                instructions: skill.instructions,
+                inputs: clone(skill.inputs),
+                steps: [...skill.steps],
+                expectedOutput: skill.expectedOutput,
+                requestedCapabilities: [...skill.requestedCapabilities],
+                validators: [...skill.validators],
+                source: skill.source,
+            });
+            if (retestRunner) {
+                const result = retestRunner(publicSkill(skill));
+                if (!result || typeof result !== "object") throw new Error("governed Skill retest did not return a Job");
+                skill.lastTestedAt = now();
+                skill.updatedAt = skill.lastTestedAt;
+                save();
+                return { tested: true, mode: "governed-job", job: clone(result), skill: publicSkill(skill) };
+            }
+            skill.lastTestedAt = now();
+            skill.updatedAt = skill.lastTestedAt;
+            save();
+            return { tested: true, mode: "declarative-validation", skill: publicSkill(skill) };
         },
         assignedSkillIdsForCoworkers,
         requireActive(id) {

@@ -1,0 +1,117 @@
+{
+  "schema": "sovereignbot.local.acceptance.v1",
+  "kind": "acceptance-evidence",
+  "id": "V4.3-P8-attention-approval-2026-09-02",
+  "date": "2026-09-02",
+  "timezone": "Asia/Shanghai",
+  "branch": "codex/v4-review-directed-handoff-protocol",
+  "canonicalScope": ["§25 Attention / Approval local mainline"],
+  "source": {
+    "commit": "8312c451b576d11983de191226e7f4b1891b47a5",
+    "subject": "feat(desktop): complete local attention approval flow",
+    "treeState": "clean",
+    "changedFiles": [
+      "desktop/src/main/index.js",
+      "desktop/src/main/job-controller.js",
+      "desktop/src/main/lib/ipc-schema.js",
+      "desktop/src/main/preload.cjs",
+      "desktop/src/main/smoke.js",
+      "desktop/src/main/verify-v43-attention.js",
+      "desktop/test/attention-center.test.mjs",
+      "desktop/test/ipc-schema.test.mjs",
+      "desktop/ui/app.js",
+      "desktop/ui/i18n.js",
+      "desktop/ui/jobs-ui.js"
+    ]
+  },
+  "release": {
+    "mode": "rc",
+    "channel": "preview",
+    "signature": { "status": "unsigned" },
+    "publishEligible": false
+  },
+  "delivered": {
+    "attentionCategories": [
+      "login-required",
+      "secret-required",
+      "approval-required",
+      "provider-unavailable",
+      "computer-takeover",
+      "dangerous-action",
+      "real-blocker"
+    ],
+    "snoozeMinutes": [15, 60, 240, 1440],
+    "filters": ["category", "active", "snoozed", "all"],
+    "authority": "existing Desktop Job controller and Governor path",
+    "publicProjection": "bounded and redacted"
+  },
+  "verification": [
+    {
+      "command": "node scripts/verify-v43-attention.mjs",
+      "cwd": "desktop",
+      "status": "PASS",
+      "summary": "26/26 hidden real-Electron checks passed; child exit code 0; BrowserWindow.capturePage visual evidence captured"
+    },
+    {
+      "command": "node --test test/attention-center.test.mjs",
+      "cwd": "desktop",
+      "status": "PASS",
+      "summary": "2 passed, 0 failed"
+    },
+    {
+      "command": "node --test test/ipc-schema.test.mjs",
+      "cwd": "desktop",
+      "status": "PASS",
+      "summary": "10 passed, 0 failed"
+    },
+    {
+      "command": "node --test test/worker-node-job.test.mjs test/p4-worker-computer-canary.test.mjs",
+      "cwd": "desktop",
+      "status": "PASS",
+      "summary": "9 passed, 0 failed"
+    },
+    {
+      "command": "npm test",
+      "cwd": "desktop",
+      "status": "PASS",
+      "summary": "250 passed, 0 failed, 0 skipped"
+    },
+    {
+      "command": "npm run check",
+      "cwd": "desktop",
+      "status": "PASS",
+      "summary": "syntax ok: 158 files"
+    },
+    {
+      "command": "npm test",
+      "cwd": ".",
+      "status": "PASS_WITH_SKIPS",
+      "summary": "232 passed, 0 failed, 2 existing environment-capability skips"
+    },
+    {
+      "command": "npm run check",
+      "cwd": ".",
+      "status": "PASS",
+      "summary": "syntax ok: 152 files"
+    },
+    {
+      "command": "git diff --check",
+      "cwd": ".",
+      "status": "PASS",
+      "summary": "no whitespace errors before source commit"
+    }
+  ],
+  "boundary": {
+    "localOnly": true,
+    "providerOAuthCredentialFlow": "not exercised",
+    "cloudRemoteMobileExpansion": "not claimed",
+    "visibleWindow": "not used",
+    "setupInstaller": "not executed",
+    "publication": "not performed",
+    "temporaryEvidenceDirectory": "removed"
+  },
+  "notes": [
+    "Dependency packages were installed with npm ci --offline --ignore-scripts from local cache.",
+    "The first Electron launch bootstrapped a missing local Electron binary; subsequent gate runs used the local binary. This environment setup does not constitute provider/OAuth/network acceptance."
+  ]
+}

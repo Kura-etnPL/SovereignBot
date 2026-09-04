@@ -1,0 +1,14 @@
+PASS hidden Electron window stays hidden
+PASS real preload exposes Team Activity and the drawer timeline {"activity":"function","drawer":true,"timeline":true,"selector":true}
+PASS uncontextual Activity offers a safe Team selector and bounded accessible rows {"selectorDisabled":false,"rows":12}
+PASS Team selector isolates Beta history and shows parallel progress labels {"rows":11}
+PASS selected Team Channel makes Activity contextual and keeps Alpha isolated {"disabled":true,"rows":12}
+PASS timeline exposes canonical source Team Channel navigation
+PASS stale Alpha response cannot overwrite newly selected Beta context {"context":"Context: P16 Beta Team · Project Channel","timeline":"Completed\nComplete / 已完成\n1:42\n\nOwner: P16 Alpha Owner\n\n1 artifact\n\nOpen Project Channel / 打开频道\nFiles & Artifacts (1) / 文件成果\nJoining results\nWorking / 工作中\n1:42\n\nOwner: P16 Alpha Owner · Target: P16 Alpha Owner\n\nOpen Project Channel / 打开频道\nApproved\nComplete / 已完成\n1:42\n\nOwner: P16 Reviewer · Target: P16 Reviewer\n\nDecision: Approved\n\nOpen Project Channel / 打开频道\nReviewing\nWorking / 工作中\n1:42\n\nOwner: P16 Alpha Owner · Target: P16 Reviewer\n\nOpen Project Channel / 打开频道\nReview requested\nWorking / 工作中\n1:4
+PASS artifact reference opens the existing Files & Artifacts surface
+PASS Attention event opens the existing Attention surface
+PASS forged Team Activity fields and over-limit requests are rejected before the handler {"conversationId":"conv_6720521437c0e0c3","limit":24}
+PASS renderer Team Activity requests contain only opaque scope and bounded limit [{"teamId":"team_a510112bbfe0e830","limit":24},{"teamId":"team_2da9de6288abe832","limit":24},{"conversationId":"conv_6720521437c0e0c3","limit":24},{"conversationId":"conv_6720521437c0e0c3","limit":24},{"conversationId":"conv_6720521437c0e0c3","limit":24},{"conversationId":"conv_6720521437c0e0c3","limit":24},{"conversationId":"conv_4849ad100d24bdb9","limit":24},{"conversationId":"conv_4849ad100d24bdb9","limit":24},{"conversationId":"conv_6720521437c0e0c3","limit":24},{"conversationId":"conv_6720521437c0e0c3","limit":24}]
+PASS restart preserves bounded Team timeline and opaque source conversation {"events":12,"first":{"kind":"attention","label":"Attention","status":"attention","conversationId":"conv_6720521437c0e0c3","targetCoworker":"P16 Reviewer","reason":"P16 attention navigation sample.","at":"2026-09-02T17:42:33.545Z"}}
+PASS Team Activity IPC and persisted ledger remain capped {"ipcMax":100,"eventCount":12}
+[summary] 13/13 PASS

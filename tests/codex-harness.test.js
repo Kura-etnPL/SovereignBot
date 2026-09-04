@@ -117,6 +117,15 @@ test("cancelling a running Codex task preserves cancelled status", async () => {
     assert.equal((await getTask(runtime, task.id)).status, "cancelled");
 });
 
+test("timing out a Codex task reports timeout and preserves the resumable session", async () => {
+    const runtime = await createCodexRuntime({ timeoutMs: 500 });
+    const task = await runtime.orchestrator.submit({ title: "HANG", requiredCapabilities: ["coding"] });
+    const result = await runtime.orchestrator.runNext();
+    assert.equal(result.status, "failed");
+    assert.match(result.error, /Codex execution timed out/);
+    assert.equal(result.harnessState.sessionId, "fake-codex-session-001");
+});
+
 test("missing Codex executable produces an actionable failure", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "sovereign-codex-missing-"));
     const runtime = await createRuntime({

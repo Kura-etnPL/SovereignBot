@@ -1,0 +1,173 @@
+{
+  "at": "2026-09-02T21:29:08.637Z",
+  "publishEligible": false,
+  "channelUnreadStatus": "Channel-unread category is allowlisted and supported in storage, UI, and filters. Automated production event hook remains unwired in main process pending trusted event source.",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "real preload exposes notification center operations": true,
+    "sidebar has notifications button with unread count badge": true,
+    "clicking nav-notifications displays Notification Center": true,
+    "cards render newest-first with bilingual categories, times, titles, and bodies": true,
+    "public notification projections omit internal dedupe key and use opaque IDs": true,
+    "ordinary UI copy contains no storage paths and notes channel-unread limitation": true,
+    "redaction canary enforces secret, token, and path redaction at service boundary without credential tails or key leaks": true,
+    "category filter isolates selected category": true,
+    "routine source navigation button opens Routines surface": true,
+    "attention source navigation button navigates to Attention surface": true,
+    "conversation source navigation button opens intended Conversation identity and content safely": true,
+    "refresh generation guard discards stale async success and failure responses": true,
+    "card markRead action toggles read state and updates badge": true,
+    "read state filter isolates unread vs read": true,
+    "mark visible read marks visible cards as read and updates badge": true,
+    "clear visible dismisses cards from view": true,
+    "forged notification IPC payloads and authority fields are rejected": true,
+    "restart preserves notification state, read status, and dismissals": true,
+    "bounded storage and list limits remain strictly enforced": true
+  },
+  "requests": [
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 1
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "category": "routine-completed",
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "category": "routine-completed",
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 1
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:markRead",
+      "payload": {
+        "id": "notif_1e4df88a66980496",
+        "read": true
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "read": true,
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:markAllRead",
+      "payload": {
+        "ids": [
+          "notif_1e4df88a66980496",
+          "notif_05d06c6a77864e7a",
+          "notif_bea05feedf7bbd4b",
+          "notif_52fefd6d809f5ec7",
+          "notif_cc608628af6cd8b3",
+          "notif_9453292a77fc12e9"
+        ]
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 1
+      }
+    },
+    {
+      "channel": "notification:clearAll",
+      "payload": {
+        "ids": [
+          "notif_1e4df88a66980496",
+          "notif_05d06c6a77864e7a",
+          "notif_bea05feedf7bbd4b",
+          "notif_52fefd6d809f5ec7",
+          "notif_cc608628af6cd8b3",
+          "notif_9453292a77fc12e9"
+        ]
+      }
+    },
+    {
+      "channel": "notification:list",
+      "payload": {
+        "limit": 100
+      }
+    }
+  ]
+}

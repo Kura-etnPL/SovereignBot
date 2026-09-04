@@ -1,0 +1,542 @@
+{
+  "at": "2026-09-02T14:38:25.794Z",
+  "checks": {
+    "gate window stays hidden": true,
+    "renderer exposes the existing Playbook editor and assignment path": true,
+    "renderer creates a semantic Playbook through the existing IPC": true,
+    "renderer edits semantic fields without changing the simple steps contract": true,
+    "existing Team and Channel primitives remain available for assignment": true,
+    "Team and Channel assignment preserve the semantic definition": true,
+    "Playbook page shows a structured human-readable plan": true,
+    "export, duplicate, and import preserve semantic fields": true,
+    "imported semantic content rejects authority and path fields": true,
+    "public Playbook and Team projections remain authority-free": true,
+    "semantic definitions are durable in the existing stores": true,
+    "restart preserves semantic Playbooks and their assignment": true,
+    "restart serialized public state remains authority-free": true
+  },
+  "created": {
+    "schema": "sovereignbot.desktop.playbook.v1",
+    "id": "playbook_850ed35e08de22c6",
+    "name": "Semantic Discovery",
+    "description": "A reusable decision method.",
+    "steps": [
+      "chief",
+      "reviewer"
+    ],
+    "stages": [
+      {
+        "id": "discover",
+        "name": "Discover",
+        "instructions": "Clarify the decision.",
+        "expectedOutput": "Decision brief",
+        "recommendedCoworkerRole": "Product Lead",
+        "recommendedSkillIds": [
+          "skill_research"
+        ]
+      },
+      {
+        "id": "review",
+        "name": "Review",
+        "instructions": "Check the evidence.",
+        "recommendedCoworkerRole": "Reviewer"
+      }
+    ],
+    "reviewPoints": [
+      {
+        "id": "evidence-check",
+        "name": "Evidence check",
+        "instructions": "Current owner reviews before proceeding.",
+        "recommendedCoworkerRole": "Reviewer"
+      }
+    ],
+    "expectedOutput": "A bounded product decision.",
+    "recommendedCoworkerRoles": [
+      "Product Lead",
+      "Reviewer"
+    ],
+    "recommendedSkillIds": [
+      "skill_research",
+      "skill_synthesis"
+    ],
+    "state": "active",
+    "createdAt": "2026-09-02T14:38:24.665Z",
+    "updatedAt": "2026-09-02T14:38:24.665Z",
+    "assignedTeams": [],
+    "assignedChannels": []
+  },
+  "exported": {
+    "schema": "sovereignbot.desktop.playbook.v1",
+    "id": "playbook_850ed35e08de22c6",
+    "name": "Semantic Discovery",
+    "description": "A reusable decision method.",
+    "steps": [
+      "chief",
+      "reviewer"
+    ],
+    "stages": [
+      {
+        "id": "discover",
+        "name": "Discover",
+        "instructions": "Clarify the decision.",
+        "expectedOutput": "Decision brief",
+        "recommendedCoworkerRole": "Product Lead",
+        "recommendedSkillIds": [
+          "skill_research"
+        ]
+      },
+      {
+        "id": "review",
+        "name": "Review",
+        "instructions": "Check the evidence.",
+        "recommendedCoworkerRole": "Reviewer"
+      }
+    ],
+    "reviewPoints": [],
+    "expectedOutput": "An approved product decision.",
+    "recommendedCoworkerRoles": [
+      "Product Lead",
+      "Reviewer"
+    ],
+    "recommendedSkillIds": [
+      "skill_research",
+      "skill_synthesis"
+    ]
+  },
+  "duplicated": {
+    "schema": "sovereignbot.desktop.playbook.v1",
+    "id": "playbook_189501e12ae3419c",
+    "name": "Semantic Discovery copy",
+    "description": "A reusable decision method.",
+    "steps": [
+      "chief",
+      "reviewer"
+    ],
+    "stages": [
+      {
+        "id": "discover",
+        "name": "Discover",
+        "instructions": "Clarify the decision.",
+        "expectedOutput": "Decision brief",
+        "recommendedCoworkerRole": "Product Lead",
+        "recommendedSkillIds": [
+          "skill_research"
+        ]
+      },
+      {
+        "id": "review",
+        "name": "Review",
+        "instructions": "Check the evidence.",
+        "recommendedCoworkerRole": "Reviewer"
+      }
+    ],
+    "reviewPoints": [],
+    "expectedOutput": "An approved product decision.",
+    "recommendedCoworkerRoles": [
+      "Product Lead",
+      "Reviewer"
+    ],
+    "recommendedSkillIds": [
+      "skill_research",
+      "skill_synthesis"
+    ],
+    "state": "active",
+    "createdAt": "2026-09-02T14:38:24.792Z",
+    "updatedAt": "2026-09-02T14:38:24.792Z",
+    "assignedTeams": [],
+    "assignedChannels": []
+  },
+  "imported": {
+    "imported": true,
+    "playbook": {
+      "schema": "sovereignbot.desktop.playbook.v1",
+      "id": "semantic-imported",
+      "name": "Semantic Discovery",
+      "description": "A reusable decision method.",
+      "steps": [
+        "chief",
+        "reviewer"
+      ],
+      "stages": [
+        {
+          "id": "discover",
+          "name": "Discover",
+          "instructions": "Clarify the decision.",
+          "expectedOutput": "Decision brief",
+          "recommendedCoworkerRole": "Product Lead",
+          "recommendedSkillIds": [
+            "skill_research"
+          ]
+        },
+        {
+          "id": "review",
+          "name": "Review",
+          "instructions": "Check the evidence.",
+          "recommendedCoworkerRole": "Reviewer"
+        }
+      ],
+      "reviewPoints": [],
+      "expectedOutput": "An approved product decision.",
+      "recommendedCoworkerRoles": [
+        "Product Lead",
+        "Reviewer"
+      ],
+      "recommendedSkillIds": [
+        "skill_research",
+        "skill_synthesis"
+      ],
+      "state": "active",
+      "createdAt": "2026-09-02T14:38:24.794Z",
+      "updatedAt": "2026-09-02T14:38:24.794Z",
+      "assignedTeams": [],
+      "assignedChannels": []
+    }
+  },
+  "restart": {
+    "playbooks": {
+      "schema": "sovereignbot.desktop.playbook.v1",
+      "playbooks": [
+        {
+          "schema": "sovereignbot.desktop.playbook.v1",
+          "id": "software-delivery",
+          "name": "Software Delivery",
+          "description": "Chief scopes → Coding Lead implements → Reviewer reviews → Chief synthesizes.",
+          "steps": [
+            "chief",
+            "coding-lead",
+            "reviewer",
+            "chief"
+          ],
+          "state": "active",
+          "createdAt": "2026-09-02T14:38:24.681Z",
+          "updatedAt": "2026-09-02T14:38:24.689Z",
+          "assignedTeams": [
+            {
+              "id": "team_f7fd9cd6d7ea99af",
+              "name": "Software Team"
+            }
+          ],
+          "assignedChannels": []
+        },
+        {
+          "schema": "sovereignbot.desktop.playbook.v1",
+          "id": "playbook_850ed35e08de22c6",
+          "name": "Semantic Discovery",
+          "description": "A reusable decision method.",
+          "steps": [
+            "chief",
+            "reviewer"
+          ],
+          "stages": [
+            {
+              "id": "discover",
+              "name": "Discover",
+              "instructions": "Clarify the decision.",
+              "expectedOutput": "Decision brief",
+              "recommendedCoworkerRole": "Product Lead",
+              "recommendedSkillIds": [
+                "skill_research"
+              ]
+            },
+            {
+              "id": "review",
+              "name": "Review",
+              "instructions": "Check the evidence.",
+              "recommendedCoworkerRole": "Reviewer"
+            }
+          ],
+          "reviewPoints": [],
+          "expectedOutput": "An approved product decision.",
+          "recommendedCoworkerRoles": [
+            "Product Lead",
+            "Reviewer"
+          ],
+          "recommendedSkillIds": [
+            "skill_research",
+            "skill_synthesis"
+          ],
+          "state": "active",
+          "createdAt": "2026-09-02T14:38:24.681Z",
+          "updatedAt": "2026-09-02T14:38:24.689Z",
+          "assignedTeams": [
+            {
+              "id": "team_f7fd9cd6d7ea99af",
+              "name": "Software Team"
+            }
+          ],
+          "assignedChannels": [
+            {
+              "id": "channel_f4b49d2df3bdb1dc",
+              "name": "Project Channel",
+              "teamId": "team_f7fd9cd6d7ea99af",
+              "teamName": "Software Team"
+            }
+          ]
+        }
+      ]
+    },
+    "teams": {
+      "schema": "sovereignbot.desktop.teams.v1",
+      "teams": [
+        {
+          "id": "team_f7fd9cd6d7ea99af",
+          "packId": "software-team",
+          "name": "Software Team",
+          "coworkerIds": [
+            "coworker_f5ba0226ac7fb8eb",
+            "coworker_68f73bd9de46182d",
+            "coworker_b4ab629c878d7ee3"
+          ],
+          "coworkers": [
+            {
+              "id": "coworker_f5ba0226ac7fb8eb",
+              "name": "Chief of Staff"
+            },
+            {
+              "id": "coworker_68f73bd9de46182d",
+              "name": "Coding Lead"
+            },
+            {
+              "id": "coworker_b4ab629c878d7ee3",
+              "name": "Reviewer"
+            }
+          ],
+          "channelIds": [
+            "channel_f4b49d2df3bdb1dc"
+          ],
+          "channels": [
+            {
+              "id": "channel_f4b49d2df3bdb1dc",
+              "teamId": "team_f7fd9cd6d7ea99af",
+              "kind": "project",
+              "name": "Project Channel",
+              "instructions": "Software Delivery: Chief scopes the outcome, Coding Lead implements, Reviewer reviews, and Chief synthesizes the result.",
+              "coworkerIds": [
+                "coworker_f5ba0226ac7fb8eb",
+                "coworker_68f73bd9de46182d",
+                "coworker_b4ab629c878d7ee3"
+              ],
+              "workspaceId": "ws_38243be0fe754933",
+              "conversationId": "conv_4138b022377da2fa",
+              "playbookId": "playbook_850ed35e08de22c6",
+              "archived": false,
+              "createdAt": "2026-09-02T14:38:24.681Z",
+              "updatedAt": "2026-09-02T14:38:24.689Z"
+            }
+          ],
+          "sharedWorkspaceId": "ws_38243be0fe754933",
+          "sharedWorkspaceLabel": "Software Team project",
+          "privateWorkspaceLabel": "Private workspace",
+          "playbooks": [
+            {
+              "id": "software-delivery",
+              "name": "Software Delivery",
+              "description": "Chief scopes → Coding Lead implements → Reviewer reviews → Chief synthesizes.",
+              "steps": [
+                "chief",
+                "coding-lead",
+                "reviewer",
+                "chief"
+              ]
+            },
+            {
+              "id": "playbook_850ed35e08de22c6",
+              "name": "Semantic Discovery",
+              "description": "A reusable decision method.",
+              "steps": [
+                "chief",
+                "reviewer"
+              ],
+              "stages": [
+                {
+                  "id": "discover",
+                  "name": "Discover",
+                  "instructions": "Clarify the decision.",
+                  "expectedOutput": "Decision brief",
+                  "recommendedCoworkerRole": "Product Lead",
+                  "recommendedSkillIds": [
+                    "skill_research"
+                  ]
+                },
+                {
+                  "id": "review",
+                  "name": "Review",
+                  "instructions": "Check the evidence.",
+                  "recommendedCoworkerRole": "Reviewer"
+                }
+              ],
+              "reviewPoints": [],
+              "expectedOutput": "An approved product decision.",
+              "recommendedCoworkerRoles": [
+                "Product Lead",
+                "Reviewer"
+              ],
+              "recommendedSkillIds": [
+                "skill_research",
+                "skill_synthesis"
+              ]
+            }
+          ],
+          "flow": {
+            "stage": "complete",
+            "status": "available",
+            "pendingCoworkerIds": [],
+            "attentionCoworkerIds": [],
+            "channelId": "channel_f4b49d2df3bdb1dc",
+            "activity": []
+          },
+          "createdAt": "2026-09-02T14:38:24.681Z",
+          "updatedAt": "2026-09-02T14:38:24.689Z"
+        }
+      ],
+      "packs": [
+        {
+          "id": "software-team",
+          "name": "Software Team",
+          "description": "A small delivery team that scopes, implements, reviews, and reports the result.",
+          "category": "Software",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Coding Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Project Channel"
+          ],
+          "playbookNames": [
+            "Software Delivery"
+          ],
+          "installed": true
+        },
+        {
+          "id": "research-team",
+          "name": "Research Team",
+          "description": "A focused research team that frames a question, investigates it, reviews evidence, and reports the result.",
+          "category": "Research",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Research Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Research Room"
+          ],
+          "playbookNames": [
+            "Research Brief"
+          ],
+          "installed": false
+        },
+        {
+          "id": "content-team",
+          "name": "Content Team",
+          "description": "A compact content team that shapes a brief, drafts the piece, reviews it, and delivers a polished result.",
+          "category": "Content",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Content Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Content Studio"
+          ],
+          "playbookNames": [
+            "Content Delivery"
+          ],
+          "installed": false
+        },
+        {
+          "id": "operations-team",
+          "name": "Operations Team",
+          "description": "A practical operations team that scopes a runbook, carries out bounded work, reviews it, and reports status.",
+          "category": "Operations",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Operations Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Operations Room"
+          ],
+          "playbookNames": [
+            "Operations Runbook"
+          ],
+          "installed": false
+        },
+        {
+          "id": "product-team",
+          "name": "Product Discovery Team",
+          "description": "A product discovery team that frames user problems, shapes a decision-ready brief, reviews trade-offs, and reports next steps.",
+          "category": "Product",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Product Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Product Discovery"
+          ],
+          "playbookNames": [
+            "Product Discovery"
+          ],
+          "installed": false
+        },
+        {
+          "id": "revenue-team",
+          "name": "Revenue Planning Team",
+          "description": "A revenue planning team that organizes account context, evaluates commercial options, reviews assumptions, and reports a bounded plan.",
+          "category": "Sales",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Revenue Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Revenue Planning"
+          ],
+          "playbookNames": [
+            "Revenue Planning"
+          ],
+          "installed": false
+        },
+        {
+          "id": "support-team",
+          "name": "Customer Support Team",
+          "description": "A customer support team that triages supplied cases, drafts grounded replies, reviews risks, and recommends escalation.",
+          "category": "Support",
+          "coworkerNames": [
+            "Chief of Staff",
+            "Support Lead",
+            "Reviewer"
+          ],
+          "channelNames": [
+            "Support Triage"
+          ],
+          "playbookNames": [
+            "Support Triage"
+          ],
+          "installed": false
+        }
+      ],
+      "channelTemplates": [
+        {
+          "id": "work",
+          "name": "Work Channel",
+          "kind": "work",
+          "instructions": "A focused work room for bounded tasks, progress updates, and teammate handoffs."
+        },
+        {
+          "id": "personal",
+          "name": "Personal Channel",
+          "kind": "personal",
+          "instructions": "A private-feeling planning room for the user's own context and next actions."
+        },
+        {
+          "id": "project",
+          "name": "Project Channel",
+          "kind": "project",
+          "instructions": "A shared project room for goals, artifacts, ownership, and a visible final result."
+        }
+      ]
+    }
+  }
+}

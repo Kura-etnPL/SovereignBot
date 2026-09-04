@@ -74,6 +74,7 @@ export class Orchestrator {
     audit;
     #busy = new Map();
     #controllers = new Map();
+    #preauthorized = new Map();
 
     constructor(agents, tasks, taskEvents, memory, governor, audit) {
         this.agents = agents;
@@ -482,6 +483,7 @@ export class Orchestrator {
 
         let rootResult = targets[0];
         for (const snapshot of targets) {
+            this.#preauthorized.delete(snapshot.id);
             this.#controllers.get(snapshot.id)?.abort();
             const transition = await this.transition(
                 snapshot.id,
@@ -688,6 +690,28 @@ export class Orchestrator {
         return undefined;
     }
 
+    // Desktop commits a product-level protocol ACK after the same Governor action used by runTask.
+    // The decision is one-shot process-local coordination, not durable authority state.
+    async preflightTrustedTask(taskId) {
+        const task = await this.requireTask(taskId);
+        if (task.kind === "plan") throw new Error("a plan cannot run as a trusted task: " + task.id);
+        if (task.status !== "queued") throw new Error("trusted task " + task.id + " is not queued (current status: " + task.status + ")");
+        const compatible = this.compatibleAgents(task);
+        const agent = this.sortAgents(compatible).find((candidate) => candidate.id === task.preferredAgentId)
+            ?? (task.preferredAgentId ? undefined : this.sortAgents(compatible)[0]);
+        if (!agent) {
+            const reason = task.preferredAgentId ? "preferred worker " + task.preferredAgentId + " is not compatible" : "no compatible worker for capabilities: " + ((task.requiredCapabilities ?? []).join(", ") || "none");
+            return { allowed: false, task: await this.blockTask(task, "runtime", reason) };
+        }
+        const busy = this.#busy.get(agent.id) ?? 0;
+        if (busy >= (agent.maxConcurrency ?? 1)) return { allowed: false, retryable: true, agentId: agent.id, task, reason: "worker is currently busy" };
+        const action = { category: "harness", operation: "run", target: harnessTarget(agent.harness), agentId: agent.id, taskId: task.id, metadata: { role: agent.role, harnessKind: agent.harness.kind } };
+        const decision = await this.governor.authorize(action);
+        if (!decision.allowed) return { allowed: false, agentId: agent.id, reason: decision.reason, ruleId: decision.ruleId, task: await this.blockTask(task, agent.id, decision.reason, decision.ruleId) };
+        this.#preauthorized.set(task.id, { agentId: agent.id, signature: JSON.stringify({ status: task.status, agentId: agent.id, preferredAgentId: task.preferredAgentId, requiredCapabilities: task.requiredCapabilities, executionContext: task.executionContext }) });
+        return { allowed: true, agentId: agent.id, task };
+    }
+
     async runUntilIdle(maxTasks = 100) {
         const finished = [];
         for (let index = 0; index < maxTasks; index += 1) {
@@ -701,7 +725,9 @@ export class Orchestrator {
 
     compatibleAgents(task) {
         const required = new Set(task.requiredCapabilities ?? []);
-        const pinnedAgentId = task.harnessState?.sessionId ? task.assignedAgentId : undefined;
+        const pinnedAgentId = (task.harnessState?.sessionId || task.harnessState?.continuationRef)
+            ? task.assignedAgentId
+            : undefined;
         return this.agents.filter((agent) => {
             if (agent.role === "supervisor" && task.allowSupervisorExecution !== true)
                 return false;
@@ -748,7 +774,10 @@ export class Orchestrator {
             taskId: task.id,
             metadata: { role: agent.role, harnessKind: agent.harness.kind },
         };
-        const decision = await this.governor.authorize(action);
+        const signature = JSON.stringify({ status: task.status, agentId: agent.id, preferredAgentId: task.preferredAgentId, requiredCapabilities: task.requiredCapabilities, executionContext: task.executionContext });
+        const preauthorized = this.#preauthorized.get(task.id);
+        const decision = preauthorized?.agentId === agent.id && preauthorized.signature === signature ? { allowed: true } : await this.governor.authorize(action);
+        this.#preauthorized.delete(task.id);
         if (!decision.allowed)
             return this.blockTask(task, agent.id, decision.reason, decision.ruleId);
 
@@ -785,7 +814,7 @@ export class Orchestrator {
             type: "task.started",
             actor: agent.id,
             subject: task.id,
-            data: { title: running.task.title, resumed: Boolean(running.task.harnessState?.sessionId) },
+            data: { title: running.task.title, resumed: Boolean(running.task.harnessState?.sessionId || running.task.harnessState?.continuationRef) },
         });
 
         const updateHarnessState = async (statePatch) => {

@@ -2,6 +2,7 @@ import { ipcMain } from "electron";
 import { IPC_CHANNELS, validateIpcRequest } from "./lib/ipc-schema.js";
 import { V3_IPC_CHANNELS, validateV3IpcRequest } from "./lib/v3-ipc-schema.js";
 import { normalizeEventRelativePath } from "./lib/event-metadata.js";
+import { validateComputerActionList } from "../../vendor/core/src/worker-computer-protocol.js";
 
 const LIVE_FRAME_CHANNEL = "computer:frame";
 const ATTACH_CHANNEL = "artifact:attachViaDialog";
@@ -13,6 +14,12 @@ const SKILL_CHANNELS = Object.freeze({
     "skill:archive": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:restore": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "skill:assign": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
+    "skill:export": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "skill:exportViaDialog": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "skill:import": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 24_000 }),
+    "skill:importViaDialog": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "skill:duplicate": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "skill:retest": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
 const TEACH_CHANNELS = Object.freeze({
     "teach:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
@@ -22,6 +29,7 @@ const TEACH_CHANNELS = Object.freeze({
     "teach:recordAction": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 16_000 }),
     "teach:finish": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "teach:test": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "teach:confirm": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "teach:save": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "teach:cancel": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
@@ -29,11 +37,25 @@ const CONVERSATION_CONTROL_CHANNELS = Object.freeze({
     "conversation:stop": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "conversation:redirect": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 32_000 }),
 });
+const TEAM_ACTIVITY_CHANNELS = Object.freeze({
+    "team:activity": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
+});
+const NOTIFICATION_CHANNELS = Object.freeze({
+    "notification:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
+    "notification:markRead": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "notification:markAllRead": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 8192 }),
+    "notification:clear": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "notification:clearAll": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 8192 }),
+});
 const ROUTINE_CHANNELS = Object.freeze({
     "routine:create": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 16_000 }),
     "routine:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:get": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:history": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "routine:runNow": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "routine:archive": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "routine:restore": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "routine:retry": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:setEnabled": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "routine:remove": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
 });
@@ -51,6 +73,14 @@ const WORKER_NODE_CHANNELS = Object.freeze({
     "workerNode:refresh": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "workerNode:setEnabled": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
     "workerNode:remove": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "workerNode:trustBegin": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
+    "workerNode:trustComplete": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 16384 }),
+    "workerNode:trustCompleteViaDialog": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "workerNode:trustRevoke": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+    "workerNode:trustRotate": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 1024 }),
+});
+const COMPUTER_TARGET_CHANNELS = Object.freeze({
+    "computerTarget:list": Object.freeze({ direction: "renderer->main", maxPayloadBytes: 2048 }),
 });
 const ALL_IPC_CHANNELS = Object.freeze({
     ...IPC_CHANNELS,
@@ -60,9 +90,12 @@ const ALL_IPC_CHANNELS = Object.freeze({
     ...SKILL_CHANNELS,
     ...TEACH_CHANNELS,
     ...CONVERSATION_CONTROL_CHANNELS,
+    ...TEAM_ACTIVITY_CHANNELS,
+    ...NOTIFICATION_CHANNELS,
     ...ROUTINE_CHANNELS,
     ...EVENT_TRIGGER_CHANNELS,
     ...WORKER_NODE_CHANNELS,
+    ...COMPUTER_TARGET_CHANNELS,
 });
 
 function assertObject(payload, label) {
@@ -142,6 +175,96 @@ function participantIds(value) {
     return out;
 }
 
+function validateTeamActivityRequest(payload) {
+    exactKeys(payload, new Set(["teamId", "conversationId", "limit"]), "team:activity");
+    if (payload.teamId === undefined && payload.conversationId === undefined)
+        throw new Error("team:activity requires teamId or conversationId");
+    const out = {};
+    if (payload.teamId !== undefined) out.teamId = generalId(payload.teamId, "teamId");
+    if (payload.conversationId !== undefined) out.conversationId = conversationId(payload.conversationId);
+    if (payload.limit !== undefined) {
+        if (!Number.isInteger(payload.limit) || payload.limit < 1 || payload.limit > 100) throw new Error("limit must be an integer between 1 and 100");
+        out.limit = payload.limit;
+    }
+    return out;
+}
+
+const NOTIFICATION_CATEGORIES_SET = new Set([
+    "all", "attention", "routine-completed", "trigger-fired", "coworker-finished", "channel-unread",
+]);
+
+const NOTIFICATION_OPAQUE_ID_PATTERN = /^notif_[a-f0-9]{16}$/;
+
+function notificationId(value, label = "id") {
+    if (typeof value !== "string" || !NOTIFICATION_OPAQUE_ID_PATTERN.test(value.trim())) {
+        throw new Error(`${label} must be a valid notification identifier`);
+    }
+    return value.trim();
+}
+
+function validateNotificationRequest(channel, payload) {
+    const bytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
+    if (bytes > NOTIFICATION_CHANNELS[channel].maxPayloadBytes) throw new Error(`${channel} payload is too large`);
+    assertObject(payload, channel);
+
+    if (channel === "notification:list") {
+        exactKeys(payload, new Set(["category", "read", "limit"]), channel);
+        const out = {};
+        if (payload.category !== undefined) {
+            if (typeof payload.category !== "string" || !NOTIFICATION_CATEGORIES_SET.has(payload.category)) {
+                throw new Error("unsupported notification category");
+            }
+            out.category = payload.category;
+        }
+        if (payload.read !== undefined) {
+            if (typeof payload.read !== "boolean") throw new Error("read must be a boolean");
+            out.read = payload.read;
+        }
+        if (payload.limit !== undefined) {
+            if (!Number.isInteger(payload.limit) || payload.limit < 1 || payload.limit > 100) {
+                throw new Error("limit must be an integer between 1 and 100");
+            }
+            out.limit = payload.limit;
+        }
+        return out;
+    }
+
+    if (channel === "notification:markRead") {
+        exactKeys(payload, new Set(["id", "read"]), channel);
+        const out = { id: notificationId(payload.id, "notification id") };
+        if (payload.read !== undefined) {
+            if (typeof payload.read !== "boolean") throw new Error("read must be a boolean");
+            out.read = payload.read;
+        }
+        return out;
+    }
+
+    if (channel === "notification:markAllRead" || channel === "notification:clearAll") {
+        exactKeys(payload, new Set(["category", "ids"]), channel);
+        const out = {};
+        if (payload.category !== undefined) {
+            if (typeof payload.category !== "string" || !NOTIFICATION_CATEGORIES_SET.has(payload.category)) {
+                throw new Error("unsupported notification category");
+            }
+            out.category = payload.category;
+        }
+        if (payload.ids !== undefined) {
+            if (!Array.isArray(payload.ids) || payload.ids.length > 100) {
+                throw new Error("ids must be an array of at most 100 identifiers");
+            }
+            out.ids = payload.ids.map((id) => notificationId(id, "notification id"));
+        }
+        return out;
+    }
+
+    if (channel === "notification:clear") {
+        exactKeys(payload, new Set(["id"]), channel);
+        return { id: notificationId(payload.id, "notification id") };
+    }
+
+    throw new Error(`unhandled notification channel: ${channel}`);
+}
+
 function integerField(min, max) {
     return (value, label) => {
         if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${label} must be an integer between ${min} and ${max}`);
@@ -149,12 +272,49 @@ function integerField(min, max) {
     };
 }
 
-function validateSkillDocument(value, { patch = false } = {}) {
-    exactKeys(value, patch ? new Set(["name", "description", "instructions", "state"]) : new Set(["name", "description", "instructions"]), "skill");
+function validateSkillDocument(value, { patch = false, imported = false } = {}) {
+    const allowed = new Set(["name", "description", "instructions", "inputs", "steps", "expectedOutput", "requestedCapabilities", "validators", "source"]);
+    if (patch) allowed.add("state");
+    if (imported) allowed.add("schema");
+    exactKeys(value, allowed, imported ? "skill import" : "skill");
     const out = {};
     if (!patch || Object.hasOwn(value, "name")) out.name = boundedString(value.name, "skill name", 100, !patch);
     if (!patch || Object.hasOwn(value, "description")) out.description = boundedString(value.description ?? "", "skill description", 280) ?? "";
     if (!patch || Object.hasOwn(value, "instructions")) out.instructions = boundedString(value.instructions, "skill instructions", 16_000, !patch);
+    const content = (child, label, max, required = false) => {
+        const result = boundedString(child, label, max, required);
+        if (result && /(?:[A-Za-z]:[\\/]|\\\\|file:\/\/|https?:\/\/|(?:^|\s)\/(?:Users|home|tmp|var|private|workspace)[\\/]|(?:bearer|api[_-]?key|access[_-]?token|refresh[_-]?token|cookie|password|secret|credential)\s*[:=]|(?:session[_ -]?id|provider[_ -]?(?:id|session|account)|webdriver|backendRef|rawPath|\bcwd\b)|(?:\bcoordinate(?:s)?\b|screen\s+position|click\s+at|\bx\s*[:=]\s*\d+\b|\by\s*[:=]\s*\d+\b))/i.test(result))
+            throw new Error(`${label} contains a private path, credential, runtime handle, or coordinate`);
+        return result;
+    };
+    const stringArray = (child, label, max, itemMax) => {
+        if (child === undefined) return [];
+        if (!Array.isArray(child) || child.length > max) throw new Error(`${label} must be an array of at most ${max} entries`);
+        return child.map((entry, index) => content(entry, `${label}[${index}]`, itemMax, true));
+    };
+    const inputs = (child) => {
+        if (child === undefined) return [];
+        if (!Array.isArray(child) || child.length > 16) throw new Error("skill inputs must be an array of at most 16 entries");
+        return child.map((entry, index) => {
+            exactKeys(entry, new Set(["name", "type", "description", "required"]), `skill input ${index}`);
+            const name = content(entry.name, `skill input ${index} name`, 80, true);
+            if (!/^[A-Za-z][A-Za-z0-9 _-]{0,79}$/.test(name)) throw new Error(`skill input ${index} name is invalid`);
+            if (entry.required !== undefined && typeof entry.required !== "boolean") throw new Error(`skill input ${index} required must be boolean`);
+            return { name, type: content(entry.type ?? "string", `skill input ${index} type`, 40, true), description: content(entry.description ?? "", `skill input ${index} description`, 240) ?? "", required: entry.required !== false };
+        });
+    };
+    if (!patch || Object.hasOwn(value, "inputs")) out.inputs = inputs(value.inputs);
+    if (!patch || Object.hasOwn(value, "steps")) out.steps = stringArray(value.steps, "skill steps", 64, 800);
+    if (!patch || Object.hasOwn(value, "expectedOutput")) out.expectedOutput = content(value.expectedOutput ?? "", "skill expectedOutput", 1_000) ?? "";
+    if (!patch || Object.hasOwn(value, "validators")) out.validators = stringArray(value.validators, "skill validators", 24, 500);
+    if (!patch || Object.hasOwn(value, "requestedCapabilities")) {
+        if (value.requestedCapabilities !== undefined && (!Array.isArray(value.requestedCapabilities) || value.requestedCapabilities.length > 2 || value.requestedCapabilities.some((entry) => !["computer", "workspace"].includes(entry)))) throw new Error("skill requestedCapabilities is invalid");
+        out.requestedCapabilities = [...new Set(value.requestedCapabilities ?? [])];
+    }
+    if (!patch || Object.hasOwn(value, "source")) {
+        if (value.source !== undefined && !["manual", "taught", "imported"].includes(value.source)) throw new Error("skill source is invalid");
+        out.source = value.source ?? "manual";
+    }
     if (patch && Object.hasOwn(value, "state")) {
         if (!["active", "archived"].includes(value.state)) throw new Error("skill state must be active or archived");
         out.state = value.state;
@@ -162,7 +322,7 @@ function validateSkillDocument(value, { patch = false } = {}) {
     return out;
 }
 
-function validateSkillRequest(channel, payload) {
+export function validateSkillRequest(channel, payload) {
     const bytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
     if (bytes > SKILL_CHANNELS[channel].maxPayloadBytes) throw new Error(`${channel} payload is too large`);
     switch (channel) {
@@ -173,6 +333,10 @@ function validateSkillRequest(channel, payload) {
         case "skill:get":
         case "skill:archive":
         case "skill:restore":
+        case "skill:export":
+        case "skill:exportViaDialog":
+        case "skill:duplicate":
+        case "skill:retest":
             exactKeys(payload, new Set(["skillId"]), channel);
             return { skillId: skillId(payload.skillId) };
         case "skill:assign":
@@ -186,6 +350,14 @@ function validateSkillRequest(channel, payload) {
         case "skill:update":
             exactKeys(payload, new Set(["skillId", "patch"]), channel);
             return { skillId: skillId(payload.skillId), patch: validateSkillDocument(payload.patch, { patch: true }) };
+        case "skill:import": {
+            exactKeys(payload, new Set(["skill"]), channel);
+            if (payload.skill?.schema !== "sovereignbot.desktop.skill.v1") throw new Error("skill import schema is invalid");
+            return { skill: { schema: payload.skill.schema, ...validateSkillDocument(payload.skill, { imported: true }) } };
+        }
+        case "skill:importViaDialog":
+            exactKeys(payload, new Set(), channel);
+            return {};
         default:
             throw new Error(`unknown skill IPC channel: ${channel}`);
     }
@@ -232,7 +404,7 @@ function validateTeachRequest(channel, payload) {
         exactKeys(payload, new Set(), channel);
         return {};
     }
-    if (["teach:get", "teach:snapshot", "teach:finish", "teach:test", "teach:save", "teach:cancel"].includes(channel)) {
+    if (["teach:get", "teach:snapshot", "teach:finish", "teach:test", "teach:confirm", "teach:save", "teach:cancel"].includes(channel)) {
         exactKeys(payload, new Set(["sessionId"]), channel);
         return { sessionId: teachSessionId(payload.sessionId) };
     }
@@ -267,8 +439,8 @@ function validateConversationControlRequest(channel, payload) {
 }
 
 function validateRoutineSchedule(value) {
-    exactKeys(value, new Set(["type", "at", "minute", "time", "weekday"]), "routine schedule");
-    if (!["one-time", "hourly", "daily", "weekly"].includes(value.type)) throw new Error("invalid routine schedule type");
+    exactKeys(value, new Set(["type", "at", "minute", "time", "weekday", "intervalMinutes"]), "routine schedule");
+    if (!["one-time", "hourly", "daily", "weekly", "custom"].includes(value.type)) throw new Error("invalid routine schedule type");
     if (value.type === "one-time") {
         if (Object.keys(value).some((key) => !["type", "at"].includes(key))) throw new Error("one-time schedule accepts only type and at");
         const at = boundedString(value.at, "schedule.at", 64, true);
@@ -279,6 +451,11 @@ function validateRoutineSchedule(value) {
         if (Object.keys(value).some((key) => !["type", "minute"].includes(key))) throw new Error("hourly schedule accepts only type and minute");
         if (!Number.isInteger(value.minute) || value.minute < 0 || value.minute > 59) throw new Error("schedule.minute must be 0-59");
         return { type: "hourly", minute: value.minute };
+    }
+    if (value.type === "custom") {
+        if (Object.keys(value).some((key) => !["type", "intervalMinutes"].includes(key))) throw new Error("custom schedule accepts only type and intervalMinutes");
+        if (!Number.isInteger(value.intervalMinutes) || value.intervalMinutes < 1 || value.intervalMinutes > 10080) throw new Error("schedule.intervalMinutes must be 1-10080");
+        return { type: "custom", intervalMinutes: value.intervalMinutes };
     }
     const time = boundedString(value.time, "schedule.time", 5, true);
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error("schedule.time must be HH:MM");
@@ -292,15 +469,25 @@ function validateRoutineSchedule(value) {
 }
 
 function validateRoutineRequest(channel, payload) {
+    // Compatibility marker for the retired Worker Node selector; Worker Computer
+    // is a separate governed target and is intentionally allowed below.
+    // exactKeys(payload, new Set(["name", "coworkerId", "teamId", "projectId", "instruction", "skillId", "workspaceId", "schedule"])
     const bytes = Buffer.byteLength(JSON.stringify(payload ?? {}));
     if (bytes > ROUTINE_CHANNELS[channel].maxPayloadBytes) throw new Error(`${channel} payload is too large`);
     if (channel === "routine:list") {
-        exactKeys(payload, new Set(), channel);
-        return {};
+        exactKeys(payload, new Set(["includeArchived"]), channel);
+        if (payload.includeArchived !== undefined && typeof payload.includeArchived !== "boolean") throw new Error("includeArchived must be boolean");
+        return payload.includeArchived === undefined ? {} : { includeArchived: payload.includeArchived };
     }
-    if (["routine:get", "routine:history", "routine:remove"].includes(channel)) {
+    if (["routine:get", "routine:history", "routine:runNow", "routine:archive", "routine:restore", "routine:remove"].includes(channel)) {
         exactKeys(payload, new Set(["routineId"]), channel);
         return { routineId: routineId(payload.routineId) };
+    }
+    if (channel === "routine:retry") {
+        exactKeys(payload, new Set(["routineId", "runId"]), channel);
+        const out = { routineId: routineId(payload.routineId) };
+        if (payload.runId !== undefined) out.runId = boundedString(payload.runId, "runId", 80, true);
+        return out;
     }
     if (channel === "routine:setEnabled") {
         exactKeys(payload, new Set(["routineId", "enabled"]), channel);
@@ -308,18 +495,45 @@ function validateRoutineRequest(channel, payload) {
         return { routineId: routineId(payload.routineId), enabled: payload.enabled };
     }
     if (channel === "routine:create") {
-        exactKeys(payload, new Set(["name", "coworkerId", "instruction", "skillId", "workspaceId", "schedule"]), channel);
+        exactKeys(payload, new Set(["name", "coworkerId", "teamId", "projectId", "instruction", "skillId", "workspaceId", "schedule", "computerTarget", "computerActions"]), channel);
         const out = {
             name: boundedString(payload.name, "routine name", 120, true),
             coworkerId: generalId(payload.coworkerId, "coworkerId"),
             instruction: boundedString(payload.instruction, "routine instruction", 8000, true),
             schedule: validateRoutineSchedule(payload.schedule),
         };
+        if (payload.teamId !== undefined && payload.teamId !== "") out.teamId = generalId(payload.teamId, "teamId");
+        if (payload.projectId !== undefined && payload.projectId !== "") out.projectId = generalId(payload.projectId, "projectId");
         if (payload.skillId !== undefined && payload.skillId !== "") out.skillId = skillId(payload.skillId);
         if (payload.workspaceId !== undefined && payload.workspaceId !== "") out.workspaceId = generalId(payload.workspaceId, "workspaceId");
+        if (payload.computerTarget !== undefined) out.computerTarget = validateComputerTarget(payload.computerTarget);
+        if (payload.computerActions !== undefined) out.computerActions = validateComputerActionList(payload.computerActions);
         return out;
     }
     throw new Error(`unknown routine IPC channel: ${channel}`);
+}
+
+function validateComputerTarget(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("computer target must be an object");
+    const identifier = (entry, key) => {
+        if (typeof entry !== "string" || !/^[A-Za-z0-9][\w:.-]{0,159}$/.test(entry)) throw new Error(`computer target ${key} is invalid`);
+        return entry;
+    };
+    if (["worker-computer", "vm"].includes(value.kind)) {
+        exactKeys(value, new Set(["kind", "nodeId", "workspaceId", "computerId"]), "computer target");
+        if (typeof value.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(value.nodeId)) throw new Error("computer target nodeId is invalid");
+        return { kind: value.kind, nodeId: value.nodeId, workspaceId: identifier(value.workspaceId, "workspaceId"), computerId: identifier(value.computerId, "computerId") };
+    }
+    if (["local-isolated", "cloud"].includes(value.kind)) {
+        exactKeys(value, value.kind === "cloud" ? new Set(["kind", "profileId", "workspaceId", "optIn"]) : new Set(["kind", "profileId", "workspaceId"]), "computer target");
+        if (value.kind === "cloud" && typeof value.optIn !== "boolean") throw new Error("computer target optIn is invalid");
+        return { kind: value.kind, profileId: identifier(value.profileId, "profileId"), workspaceId: identifier(value.workspaceId, "workspaceId"), ...(value.kind === "cloud" ? { optIn: value.optIn } : {}) };
+    }
+    if (value.kind === "this-pc") {
+        exactKeys(value, new Set(["kind", "workspaceId"]), "computer target");
+        return { kind: value.kind, workspaceId: identifier(value.workspaceId, "workspaceId") };
+    }
+    throw new Error("computer target kind is unsupported");
 }
 
 function validateEventPathPrefix(value) {
@@ -374,6 +588,24 @@ function validateWorkerNodeRequest(channel, payload) {
         if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
         return { nodeId: payload.nodeId };
     }
+    if (["workerNode:trustRevoke", "workerNode:trustRotate", "workerNode:trustCompleteViaDialog"].includes(channel)) {
+        exactKeys(payload, new Set(["nodeId"]), channel);
+        if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
+        return { nodeId: payload.nodeId };
+    }
+    if (channel === "workerNode:trustBegin") {
+        exactKeys(payload, new Set(["nodeId", "transport", "ttlMs"]), channel);
+        if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
+        if (!['lan', 'remote-relay'].includes(payload.transport)) throw new Error("transport must be lan or remote-relay");
+        if (payload.ttlMs !== undefined && (!Number.isInteger(payload.ttlMs) || payload.ttlMs < 1000 || payload.ttlMs > 600000)) throw new Error("ttlMs is invalid");
+        return { nodeId: payload.nodeId, transport: payload.transport, ...(payload.ttlMs === undefined ? {} : { ttlMs: payload.ttlMs }) };
+    }
+    if (channel === "workerNode:trustComplete") {
+        exactKeys(payload, new Set(["nodeId", "offer", "response"]), channel);
+        if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
+        if (!payload.offer || typeof payload.offer !== "object" || Array.isArray(payload.offer) || !payload.response || typeof payload.response !== "object" || Array.isArray(payload.response)) throw new Error("pairing offer and response are required");
+        return { nodeId: payload.nodeId, offer: structuredClone(payload.offer), response: structuredClone(payload.response) };
+    }
     exactKeys(payload, new Set(["nodeId", "enabled"]), channel);
     if (typeof payload.nodeId !== "string" || !/^worker_[0-9a-f]{16}$/i.test(payload.nodeId)) throw new Error("nodeId must be a Worker Node identifier");
     if (typeof payload.enabled !== "boolean") throw new Error("enabled must be boolean");
@@ -398,6 +630,10 @@ function validateConversationSend(payload) {
 function validateRequest(channel, payload) {
     if (channel === LIVE_FRAME_CHANNEL)
         return validateLiveFrame(payload);
+    if (TEAM_ACTIVITY_CHANNELS[channel])
+        return validateTeamActivityRequest(payload);
+    if (NOTIFICATION_CHANNELS[channel])
+        return validateNotificationRequest(channel, payload);
     if (channel === ATTACH_CHANNEL) {
         exactKeys(payload, new Set(["conversationId"]), channel);
         return { conversationId: conversationId(payload.conversationId) };
@@ -414,6 +650,10 @@ function validateRequest(channel, payload) {
         return validateEventTriggerRequest(channel, payload);
     if (WORKER_NODE_CHANNELS[channel])
         return validateWorkerNodeRequest(channel, payload);
+    if (COMPUTER_TARGET_CHANNELS[channel]) {
+        exactKeys(payload, new Set(), channel);
+        return {};
+    }
     if (channel === "conversation:send")
         return validateConversationSend(payload);
     return V3_IPC_CHANNELS[channel]

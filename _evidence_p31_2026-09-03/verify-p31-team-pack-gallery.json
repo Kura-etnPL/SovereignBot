@@ -1,0 +1,166 @@
+{
+  "at": "2026-09-03T04:49:46.203Z",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "ordinary Product hubs navigation reaches the older Team Pack gallery": true,
+    "older first-party gallery entry is read-only and guides Duplicate": true,
+    "older gallery Duplicate creates an editable custom recipe": true,
+    "older gallery Edit opens the P21 structured recipe editor": true,
+    "older gallery edit writes through the shared typed Team Pack service": true,
+    "older gallery editor Cancel performs no write": true,
+    "dedicated Team Pack page exposes the same editable recipe": true,
+    "both visible entries converge on one persisted recipe": true,
+    "older gallery Export uses native bounded JSON IO without clipboard": true,
+    "native import rejects authority-bearing Team Pack JSON in product UI": true,
+    "restart preserves the single shared editor result": true,
+    "restart shows the edited recipe in the older gallery entry": true
+  },
+  "duplicateRecipeId": "custom-pack-51af1095632d",
+  "restart": {
+    "schema": "sovereignbot.desktop.team-pack.v1",
+    "id": "custom-pack-51af1095632d",
+    "name": "P31 Dedicated Gallery Edited",
+    "description": "A product discovery team that frames user problems, shapes a decision-ready brief, reviews trade-offs, and reports next steps.",
+    "coworkers": [
+      {
+        "key": "chief",
+        "name": "Chief of Staff",
+        "role": "Own the outcome and coordinate the team.",
+        "instructions": "Scope the desired outcome, delegate the work to Product Lead, ask the Reviewer to check it, then synthesize the final answer for the user.",
+        "avatar": "✦",
+        "modelBinding": {
+          "profile": "automatic"
+        }
+      },
+      {
+        "key": "specialist",
+        "name": "Product Lead",
+        "role": "Turn user needs and evidence into a bounded product decision.",
+        "instructions": "Frame the user problem, distinguish evidence from assumptions, propose a concise product brief with acceptance criteria and trade-offs, and return a decision-ready draft for review. Do not promise implementation or access external systems.",
+        "avatar": "⌘",
+        "modelBinding": {
+          "profile": "efficient",
+          "provider": "codex",
+          "model": "luna"
+        }
+      },
+      {
+        "key": "reviewer",
+        "name": "Reviewer",
+        "role": "Review the specialist result and report risks or approval.",
+        "instructions": "Review the specialist result independently, identify concrete issues, and give the Chief a concise go/no-go assessment.",
+        "avatar": "✓",
+        "modelBinding": {
+          "profile": "efficient",
+          "provider": "codex",
+          "model": "luna"
+        }
+      }
+    ],
+    "channels": [
+      {
+        "key": "project",
+        "name": "Product Discovery",
+        "kind": "project",
+        "instructions": "Product Discovery: Chief frames the outcome, Product Lead shapes the problem brief and criteria, Reviewer checks assumptions and trade-offs, and Chief reports the decision path.",
+        "playbookId": "product-discovery"
+      }
+    ],
+    "playbooks": [
+      {
+        "id": "product-discovery",
+        "name": "Product Discovery",
+        "description": "Chief frames → Product Lead shapes the brief → Reviewer checks trade-offs → Chief reports.",
+        "steps": [
+          "chief",
+          "specialist",
+          "reviewer",
+          "chief"
+        ]
+      }
+    ]
+  },
+  "rendererDiagnostics": [
+    {
+      "level": 3,
+      "message": "The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.",
+      "line": 5
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-OcaN82/Me8x/waNg77E1Mdzh2WcOy0apdCcdHPeGKLg='), or a nonce ('nonce-...') is required to e",
+      "line": 31
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-OcaN82/Me8x/waNg77E1Mdzh2WcOy0apdCcdHPeGKLg='), or a nonce ('nonce-...') is required to e",
+      "line": 35
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-5VN3Gh0ECXqJyYyxcdIBYRxYEqJFUs8lixdmhbCZtF0='), or a nonce ('nonce-...') is required to e",
+      "line": 39
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-aeK9Qu/HK2d3ha2s3E6WFhUsvUUw5y29B7+k5s3+7Zs='), or a nonce ('nonce-...') is required to e",
+      "line": 49
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-UKLH0nU8O1ppp5yffHbmEGSSKPRGCqykbddelkdZZBc='), or a nonce ('nonce-...') is required to e",
+      "line": 65
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-OcaN82/Me8x/waNg77E1Mdzh2WcOy0apdCcdHPeGKLg='), or a nonce ('nonce-...') is required to e",
+      "line": 356
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-OcaN82/Me8x/waNg77E1Mdzh2WcOy0apdCcdHPeGKLg='), or a nonce ('nonce-...') is required to e",
+      "line": 14
+    },
+    {
+      "level": 3,
+      "message": "The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.",
+      "line": 5
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-OcaN82/Me8x/waNg77E1Mdzh2WcOy0apdCcdHPeGKLg='), or a nonce ('nonce-...') is required to e",
+      "line": 31
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-OcaN82/Me8x/waNg77E1Mdzh2WcOy0apdCcdHPeGKLg='), or a nonce ('nonce-...') is required to e",
+      "line": 35
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-5VN3Gh0ECXqJyYyxcdIBYRxYEqJFUs8lixdmhbCZtF0='), or a nonce ('nonce-...') is required to e",
+      "line": 39
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-aeK9Qu/HK2d3ha2s3E6WFhUsvUUw5y29B7+k5s3+7Zs='), or a nonce ('nonce-...') is required to e",
+      "line": 49
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-UKLH0nU8O1ppp5yffHbmEGSSKPRGCqykbddelkdZZBc='), or a nonce ('nonce-...') is required to e",
+      "line": 65
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-OcaN82/Me8x/waNg77E1Mdzh2WcOy0apdCcdHPeGKLg='), or a nonce ('nonce-...') is required to e",
+      "line": 356
+    },
+    {
+      "level": 3,
+      "message": "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-OcaN82/Me8x/waNg77E1Mdzh2WcOy0apdCcdHPeGKLg='), or a nonce ('nonce-...') is required to e",
+      "line": 14
+    }
+  ],
+  "rendererHealth": []
+}

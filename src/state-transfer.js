@@ -430,6 +430,12 @@ async function validateTopLevelBackupMembership(dataDir) {
         "computers",
         "operator-sessions",
         "tool-bridges",
+        // Desktop product state and managed artifact content are governed by the
+        // Desktop lifecycle service. Core backup intentionally excludes them, but
+        // their presence must not make an otherwise valid core state directory
+        // appear corrupt.
+        "desktop-state",
+        "artifacts",
     ]);
     for (const name of await readdir(dataDir)) {
         if (known.has(name) || runtimeScratchName(name))

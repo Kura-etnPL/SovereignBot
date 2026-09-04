@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { createCoworkerStore } from "../src/main/coworker-store.js";
 import { createConversationStore } from "../src/main/conversation-store.js";
-import { createCoworkerDispatcher } from "../src/main/coworker-dispatcher.js";
+import { createCoworkerDispatcher, classifyCoworkerError } from "../src/main/coworker-dispatcher.js";
 import {
     buildProviderRoster,
     coworkerAgentId,
@@ -293,3 +293,77 @@ test("coworker dispatcher stop cancels active work and closes pending deliveries
         rmSync(root, { recursive: true, force: true });
     }
 });
+
+test("classifyCoworkerError distinguishes transient vs quota vs auth failures", () => {
+    const transient502 = classifyCoworkerError("UnexpectedServerResponse(\"HTTP 502: Bad Gateway\")");
+    assert.equal(transient502.retryable, true);
+    assert.equal(transient502.attention, false);
+    assert.equal(transient502.category, "transient_upstream");
+
+    const transientTimeout = classifyCoworkerError("ETIMEDOUT: network connection timed out");
+    assert.equal(transientTimeout.retryable, true);
+
+    const quota = classifyCoworkerError("You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage");
+    assert.equal(quota.retryable, false);
+    assert.equal(quota.attention, true);
+    assert.equal(quota.category, "quota_exceeded");
+    assert.match(quota.humanReason, /quota reached/i);
+
+    const auth = classifyCoworkerError("Codex authentication is unavailable. Run `codex` and sign in with ChatGPT");
+    assert.equal(auth.retryable, false);
+    assert.equal(auth.attention, true);
+    assert.equal(auth.category, "authentication");
+    assert.match(auth.humanReason, /authentication required/i);
+});
+
+test("coworker dispatcher retries transient error and marks attention on persistent failure", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sb-coworker-retry-"));
+    try {
+        const { store, coder } = makeCoworkers(root);
+        const roster = buildProviderRoster({
+            discovery: { codex: READY(), claude: READY() },
+            settings: {},
+            coworkers: store.list().coworkers,
+        });
+        const runtime = fakeRuntime(roster);
+        let retriesCalled = 0;
+        runtime.orchestrator.retry = async (taskId) => {
+            retriesCalled += 1;
+            const task = runtime._tasks.find((t) => t.id === taskId);
+            if (task) task.status = "queued";
+        };
+        runtime.orchestrator.runUntilIdle = async () => {
+            for (const task of runtime._tasks.filter((entry) => entry.status === "queued")) {
+                task.status = "failed";
+                task.error = "UnexpectedServerResponse(\"HTTP 502: Bad Gateway\")";
+            }
+        };
+        const conversations = createConversationStore({
+            persistPath: join(root, "conversations.json"),
+            coworkerStore: store,
+        });
+        const direct = conversations.createDirect(coder.id);
+        const dispatcher = createCoworkerDispatcher({
+            dataDir: root,
+            runtime,
+            roster: () => roster,
+            coworkerStore: store,
+            conversationStore: conversations,
+            services: { workspacePath() { return undefined; } },
+        });
+
+        const message = conversations.postUserMessage(direct.id, { text: "Run work with glitch" });
+        dispatcher.dispatchMessage(direct.id, message.id);
+        await dispatcher.flush();
+
+        assert.equal(retriesCalled, 2, "dispatcher should have retried up to MAX_COWORKER_RETRIES (2 times)");
+        const view = conversations.get(direct.id);
+        const delivery = view.messages[0].delivery[coder.id];
+        assert.equal(delivery.status, "attention", "should transition to attention rather than hard failed");
+        assert.match(delivery.detail, /temporary network\/gateway glitch/i);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+

@@ -7,6 +7,7 @@ import {
     validateLoopbackEndpoint,
     validateToken,
 } from "./worker-node-protocol.js";
+import { validateComputerEnvelope } from "./worker-computer-protocol.js";
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 
@@ -103,6 +104,12 @@ export function createWorkerNodeClient({ endpoint, token, timeoutMs = DEFAULT_TI
             if (typeof remoteTaskId !== "string" || !/^task_[0-9a-f-]{16,64}$/i.test(remoteTaskId))
                 throw new WorkerNodeProtocolError("remoteTaskId is invalid", 400, "invalid_request");
             return requestJson(cleanEndpoint, privateToken, "POST", `/v1/tasks/${encodeURIComponent(remoteTaskId)}/cancel`, {}, { timeoutMs });
+        },
+        async computerHealth() {
+            return requestJson(cleanEndpoint, privateToken, "GET", "/v1/computer/health", undefined, { timeoutMs });
+        },
+        async computerAction(payload) {
+            return requestJson(cleanEndpoint, privateToken, "POST", "/v1/computer/action", validateComputerEnvelope(payload), { timeoutMs });
         },
     });
 }

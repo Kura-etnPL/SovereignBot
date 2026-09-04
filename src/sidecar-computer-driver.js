@@ -93,6 +93,13 @@ export class SidecarComputerDriver {
         };
     }
 
+    async text() {
+        const result = await this.#request("POST", "/text", {});
+        if (result.leaseId)
+            this.#sessionLease = result.leaseId;
+        return { text: String(result.text ?? "") };
+    }
+
     async navigate(url) {
         const result = await this.#request("POST", "/navigate", { url });
         if (result.leaseId)

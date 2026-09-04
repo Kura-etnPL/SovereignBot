@@ -14,7 +14,38 @@ function fixture() {
     const conversations = createConversationStore({ persistPath: join(root, "conversations.json"), coworkerStore: coworkers });
     const services = createDesktopServices({ dataDir: root, dialog: {} });
     const teams = createTeamService({ dataDir: root, coworkerStore: coworkers, conversationStore: conversations, services });
+    teams.setRuntimeHandoffPreflight(({ conversationId, targetCoworkerId, workspaceId }) => ({
+        targetCoworkerId,
+        agentId: "test-agent",
+        workspaceId: workspaceId ?? teams.workspaceIdForConversation(conversationId),
+    }));
     return { root, coworkers, conversations, services, teams };
+}
+
+function commitHandoff(teams, args) {
+    const target = teams.previewHandoff(args);
+    if (!target) return teams.nextHandoff(args);
+    const context = teams.collaborationContextForConversation(args.conversation.id);
+    const runtimeProof = teams.authorizeHandoffTarget({
+        conversationId: args.conversation.id,
+        sourceCoworkerId: args.coworkerId,
+        targetCoworkerId: target,
+        expectedVersion: context.version,
+        expectedRunId: context.runId,
+        expectedRequestId: context.requestId,
+        expectedOperationId: context.operationId,
+        expectedOperationToken: context.operationToken,
+    });
+    return teams.nextHandoff({
+        ...args,
+        runtimeProof,
+        expectedTargetCoworkerId: target,
+        expectedVersion: context.version,
+        expectedRunId: context.runId,
+        expectedRequestId: context.requestId,
+        expectedOperationId: context.operationId,
+        expectedOperationToken: context.operationToken,
+    });
 }
 
 test("Software Team installation is idempotent and keeps workspace paths out of public state", () => {
@@ -43,14 +74,14 @@ test("Software Team installation is idempotent and keeps workspace paths out of 
         const userMessage = conversations.postUserMessage(conversation.id, { text: "Deliver a small fix." });
         teams.onMessageQueued({ conversation: conversations.get(conversation.id), message: userMessage });
         assert.equal(teams.status(first.team.id).currentOwnerId, first.team.coworkerIds[0]);
-        const chiefHandoff = teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: userMessage });
+        const chiefHandoff = commitHandoff(teams, { conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: userMessage });
         assert.equal(chiefHandoff, first.team.coworkerIds[1]);
         assert.equal(teams.status(first.team.id).routingDecision.targetCoworkerId, first.team.coworkerIds[1]);
         assert.equal(teams.status(first.team.id).routingDecision.handoffType, "delegate");
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: userMessage }), chiefHandoff);
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[1] }), first.team.coworkerIds[2]);
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[2] }), first.team.coworkerIds[0]);
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0] }), undefined);
+        assert.equal(commitHandoff(teams, { conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: userMessage }), chiefHandoff);
+        assert.equal(commitHandoff(teams, { conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[1], source: { id: "message-coding", senderId: first.team.coworkerIds[0], text: "Implement the requested software change." } }), first.team.coworkerIds[2]);
+        assert.equal(commitHandoff(teams, { conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[2], source: { id: "message-review", senderId: first.team.coworkerIds[1], text: "Review the implementation." } }), first.team.coworkerIds[0]);
+        assert.equal(commitHandoff(teams, { conversation: conversations.get(conversation.id), coworkerId: first.team.coworkerIds[0], source: { id: "message-synthesis", senderId: first.team.coworkerIds[2], text: "Synthesize the reviewed result." } }), undefined);
         assert.equal(teams.status(first.team.id).stage, "complete");
 
         const disk = JSON.parse(readFileSync(join(root, "desktop-state", "teams.json"), "utf8"));
@@ -70,6 +101,18 @@ test("declarative secondary Team Packs reuse the governed team path", () => {
             "research-team",
             "content-team",
             "operations-team",
+            "product-team",
+            "revenue-team",
+            "support-team",
+        ]);
+        assert.deepEqual(teams.list().packs.map((entry) => entry.category), [
+            "Software",
+            "Research",
+            "Content",
+            "Operations",
+            "Product",
+            "Sales",
+            "Support",
         ]);
         const installed = teams.installPack("research-team");
         assert.equal(installed.installed, true);
@@ -84,9 +127,33 @@ test("declarative secondary Team Packs reuse the governed team path", () => {
 
         const userMessage = conversations.postUserMessage(installed.team.channels[0].conversationId, { text: "Investigate this bounded question." });
         teams.onMessageQueued({ conversation: conversations.get(installed.team.channels[0].conversationId), message: userMessage });
-        assert.equal(teams.nextHandoff({ conversation: conversations.get(installed.team.channels[0].conversationId), coworkerId: installed.team.coworkerIds[0], source: userMessage }), installed.team.coworkerIds[1]);
+        assert.equal(commitHandoff(teams, { conversation: conversations.get(installed.team.channels[0].conversationId), coworkerId: installed.team.coworkerIds[0], source: userMessage }), installed.team.coworkerIds[1]);
         assert.equal(coworkers.list().coworkers.length, 3);
         assert.equal(JSON.stringify(teams.list()).includes("providerAccountId"), false);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("first-party Product, Revenue, and Support packs stay advisory and use the governed team path", () => {
+    const { root, teams } = fixture();
+    try {
+        for (const [packId, name, channelName, playbookName] of [
+            ["product-team", "Product Discovery Team", "Product Discovery", "Product Discovery"],
+            ["revenue-team", "Revenue Planning Team", "Revenue Planning", "Revenue Planning"],
+            ["support-team", "Customer Support Team", "Support Triage", "Support Triage"],
+        ]) {
+            const result = teams.installPack(packId);
+            assert.equal(result.installed, true);
+            assert.equal(result.team.name, name);
+            assert.equal(result.team.channels[0].name, channelName);
+            assert.equal(result.team.playbooks[0].name, playbookName);
+            assert.equal(result.team.coworkers.length, 3);
+            assert.equal(result.team.channels[0].coworkerIds.length, 3);
+            assert.equal(JSON.stringify(result.team).match(/capabilit|governedTools|credential|session|workspacePath|token/gi), null);
+        }
+        assert.equal(teams.list().teams.length, 3);
     }
     finally {
         rmSync(root, { recursive: true, force: true });
@@ -112,7 +179,7 @@ test("ordinary teams create a Project Channel and route the next user turn to th
         teams.onMessageQueued({ conversation: conversations.get(created.conversation.id), message: first });
         assert.equal(teams.currentOwnerForConversation(created.conversation.id), chief.id);
 
-        const handoff = teams.nextHandoff({
+        const handoff = commitHandoff(teams, {
             conversation: conversations.get(created.conversation.id),
             coworkerId: chief.id,
             source: first,
@@ -150,6 +217,9 @@ test("Team Pack export/import carries only reusable product declarations", () =>
         assert.equal(imported.team.name, "Software Team");
         assert.notEqual(imported.team.id, installed.team.id);
         assert.equal(imported.team.channels[0].name, "Project Channel");
+        const recipe = teams.exportPackRecipe(imported.team.packId);
+        assert.equal(recipe.id, imported.team.packId);
+        assert.equal(teams.list().packs.find((pack) => pack.id === imported.team.packId).custom, true);
         assert.equal(teams.importPack(exported).installed, false);
         assert.equal(conversations.list().conversations.length, 2);
 
@@ -180,6 +250,18 @@ test("Playbook export/import is bounded and idempotent", () => {
         });
         assert.equal(imported.imported, true);
         assert.equal(imported.team.playbooks.some((playbook) => playbook.id === "review-method"), true);
+        const semantic = teams.importPlaybook(installed.team.id, {
+            ...exported,
+            id: "semantic-method",
+            name: "Semantic Method",
+            stages: [{ id: "draft", name: "Draft", instructions: "Prepare the bounded draft.", expectedOutput: "Draft", recommendedCoworkerRole: "Author", recommendedSkillIds: ["skill_writing"] }],
+            reviewPoints: [{ id: "review", name: "Review", instructions: "Current owner reviews before proceeding.", recommendedCoworkerRole: "Reviewer" }],
+            expectedOutput: "Approved result",
+            recommendedCoworkerRoles: ["Author", "Reviewer"],
+            recommendedSkillIds: ["skill_writing"],
+        });
+        assert.equal(semantic.playbook.stages[0].name, "Draft");
+        assert.deepEqual(teams.exportPlaybook(installed.team.id, "semantic-method").reviewPoints, [{ id: "review", name: "Review", instructions: "Current owner reviews before proceeding.", recommendedCoworkerRole: "Reviewer" }]);
         assert.equal(teams.importPlaybook(installed.team.id, {
             ...exported,
             id: "review-method",
@@ -190,6 +272,35 @@ test("Playbook export/import is bounded and idempotent", () => {
             () => teams.importPlaybook(installed.team.id, { ...exported, id: "bad", workspacePath: "E:/private" }),
             /field is not allowed/,
         );
+        assert.throws(
+            () => teams.importPlaybook(installed.team.id, { ...exported, id: "bad-authority", stages: [{ id: "draft", name: "Draft", instructions: "Draft", capabilityGrant: "computer" }] }),
+            /field is not allowed/,
+        );
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("Playbook Library edits update the assigned team's reusable procedure", () => {
+    const { root, teams } = fixture();
+    try {
+        const installed = teams.installPack("software-team");
+        const updated = teams.updatePlaybook(installed.team.id, "software-delivery", {
+            name: "Software Delivery v2",
+            description: "",
+            steps: ["chief", "coding-lead", "reviewer", "chief"],
+            stages: [{ id: "ship", name: "Ship", instructions: "Prepare the bounded change." }],
+            expectedOutput: "Released change",
+        });
+        assert.equal(updated.playbook.name, "Software Delivery v2");
+        assert.equal(updated.playbook.description, "");
+        const current = teams.get(installed.team.id);
+        assert.equal(current.playbooks[0].name, "Software Delivery v2");
+        assert.equal(current.playbooks[0].description, "");
+        assert.deepEqual(current.playbooks[0].steps, ["chief", "coding-lead", "reviewer", "chief"]);
+        assert.equal(current.playbooks[0].stages[0].id, "ship");
+        assert.equal(current.playbooks[0].expectedOutput, "Released change");
     }
     finally {
         rmSync(root, { recursive: true, force: true });
@@ -218,6 +329,41 @@ test("channel templates create governed team channels idempotently", () => {
         assert.equal(repeated.created, false);
         assert.equal(repeated.channel.id, created.channel.id);
         assert.equal(teams.get(installed.team.id).channels.length, 2);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("custom channels support bounded editing and fail-closed archive/restore", () => {
+    const { root, teams } = fixture();
+    try {
+        const installed = teams.installPack("software-team");
+        const created = teams.createChannel({
+            teamId: installed.team.id,
+            name: "Launch Room",
+            kind: "work",
+            instructions: "Coordinate the bounded launch.",
+        });
+        assert.equal(created.created, true);
+        assert.equal(created.channel.kind, "work");
+        assert.equal(created.channel.workspaceId, installed.team.sharedWorkspaceId);
+        assert.equal(created.channel.archived, false);
+        const updated = teams.updateChannel(created.channel.id, {
+            name: "Launch Review",
+            instructions: "Review the bounded launch outcome.",
+        });
+        assert.equal(updated.channel.name, "Launch Review");
+        assert.equal(updated.channel.conversationId, created.channel.conversationId);
+        assert.equal(teams.listChannels({ teamId: installed.team.id }).channels.some((entry) => entry.id === created.channel.id), true);
+        const archived = teams.archiveChannel(created.channel.id);
+        assert.equal(archived.channel.archived, true);
+        assert.equal(teams.listChannels({ teamId: installed.team.id }).channels.some((entry) => entry.id === created.channel.id), false);
+        assert.equal(teams.listChannels({ teamId: installed.team.id, includeArchived: true }).channels.some((entry) => entry.archived), true);
+        assert.throws(() => teams.archiveChannel(installed.team.channels[0].id), /at least one active channel/);
+        const restored = teams.restoreChannel(created.channel.id);
+        assert.equal(restored.channel.archived, false);
+        assert.throws(() => teams.createChannel({ teamId: installed.team.id, name: "Leak", workspaceId: "E:/private" }), /workspaceId must be an identifier/);
     }
     finally {
         rmSync(root, { recursive: true, force: true });

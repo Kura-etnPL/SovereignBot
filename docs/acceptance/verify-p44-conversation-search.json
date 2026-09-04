@@ -1,0 +1,60 @@
+{
+  "schema": "sovereignbot.desktop.p44-conversation-search-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "Search finds the unique message outside the latest 100": {
+      "ok": true,
+      "detail": "{\"total\":1,\"id\":\"conv_c0b0ee1fdc1911b4\",\"messageId\":\"msg_7dd6f327d64205ea\",\"targetMessageId\":\"msg_7dd6f327d64205ea\"}"
+    },
+    "public Conversation result is safe and bounded": {
+      "ok": true,
+      "detail": "{\"keys\":[\"type\",\"id\",\"title\",\"subtitle\",\"projectId\",\"status\",\"updatedAt\",\"navigation\",\"score\",\"matchReason\",\"action\",\"messageId\",\"matchSnippet\"],\"snippetLength\":25}"
+    },
+    "indexed Search evaluates candidates instead of the full message corpus": {
+      "ok": true,
+      "detail": "{\"indexed\":true,\"corpusCount\":455,\"candidateCount\":1,\"matchEvaluations\":1,\"generation\":450,\"indexGeneration\":450,\"buildingGeneration\":null}"
+    },
+    "around-message page includes the target in a bounded page": {
+      "ok": true,
+      "detail": "{\"count\":100,\"targetMessageId\":\"msg_7dd6f327d64205ea\"}"
+    },
+    "foreign and stale anchors fail closed": {
+      "ok": true,
+      "detail": "{\"foreign\":\"Error invoking remote method 'conversation:get': Error: invalid conversation anchor\",\"stale\":\"Error invoking remote method 'conversation:get': Error: invalid conversation anchor\"}"
+    },
+    "Search UI opens the conversation and highlights the historical message": {
+      "ok": true,
+      "detail": "{\"view\":true,\"rows\":100,\"highlighted\":true,\"targetText\":\"You19:54P44 ancient quartz needleReply / 回复Working…\"}"
+    },
+    "canonical Conversation observer invalidates the authoritative fixture Search": {
+      "ok": true,
+      "detail": "{\"before\":{\"indexed\":true,\"corpusCount\":458,\"candidateCount\":1,\"matchEvaluations\":1,\"generation\":451,\"indexGeneration\":451,\"buildingGeneration\":null},\"after\":{\"indexed\":true,\"corpusCount\":458,\"candidateCount\":1,\"matchEvaluations\":1,\"generation\":452,\"indexGeneration\":451,\"buildingGeneration\":null}}"
+    },
+    "new messages invalidate the historical Search index": {
+      "ok": true,
+      "detail": "{\"id\":\"conv_c0b0ee1fdc1911b4\",\"messageId\":\"msg_7c5fa37daf948f53\"}"
+    },
+    "restart rebuilds full-history Search from canonical storage": {
+      "ok": true,
+      "detail": "{\"id\":\"conv_c0b0ee1fdc1911b4\",\"messageId\":\"msg_7dd6f327d64205ea\"}"
+    }
+  },
+  "notes": [
+    "PASS hidden Electron window stays hidden",
+    "PASS Search finds the unique message outside the latest 100 {\"total\":1,\"id\":\"conv_c0b0ee1fdc1911b4\",\"messageId\":\"msg_7dd6f327d64205ea\",\"targetMessageId\":\"msg_7dd6f327d64205ea\"}",
+    "PASS public Conversation result is safe and bounded {\"keys\":[\"type\",\"id\",\"title\",\"subtitle\",\"projectId\",\"status\",\"updatedAt\",\"navigation\",\"score\",\"matchReason\",\"action\",\"messageId\",\"matchSnippet\"],\"snippetLength\":25}",
+    "PASS indexed Search evaluates candidates instead of the full message corpus {\"indexed\":true,\"corpusCount\":455,\"candidateCount\":1,\"matchEvaluations\":1,\"generation\":450,\"indexGeneration\":450,\"buildingGeneration\":null}",
+    "PASS around-message page includes the target in a bounded page {\"count\":100,\"targetMessageId\":\"msg_7dd6f327d64205ea\"}",
+    "PASS foreign and stale anchors fail closed {\"foreign\":\"Error invoking remote method 'conversation:get': Error: invalid conversation anchor\",\"stale\":\"Error invoking remote method 'conversation:get': Error: invalid conversation anchor\"}",
+    "PASS Search UI opens the conversation and highlights the historical message {\"view\":true,\"rows\":100,\"highlighted\":true,\"targetText\":\"You19:54P44 ancient quartz needleReply / 回复Working…\"}",
+    "PASS canonical Conversation observer invalidates the authoritative fixture Search {\"before\":{\"indexed\":true,\"corpusCount\":458,\"candidateCount\":1,\"matchEvaluations\":1,\"generation\":451,\"indexGeneration\":451,\"buildingGeneration\":null},\"after\":{\"indexed\":true,\"corpusCount\":458,\"candidateCount\":1,\"matchEvaluations\":1,\"generation\":452,\"indexGeneration\":451,\"buildingGeneration\":null}}",
+    "PASS new messages invalidate the historical Search index {\"id\":\"conv_c0b0ee1fdc1911b4\",\"messageId\":\"msg_7c5fa37daf948f53\"}",
+    "PASS restart rebuilds full-history Search from canonical storage {\"id\":\"conv_c0b0ee1fdc1911b4\",\"messageId\":\"msg_7dd6f327d64205ea\"}"
+  ],
+  "externalActions": [],
+  "ok": true
+}

@@ -37,7 +37,10 @@ const env = {
     FAKE_PROVIDER_DIR: FAKE_DIR,
     FAKE_PROVIDER_TRANSCRIPT: TRANSCRIPT,
     FAKE_PROVIDER_TEAM_CANARY: "1",
+    FAKE_PROVIDER_FANOUT_CANARY: "1",
+    FAKE_PROVIDER_P1_CANARY: "1",
     FAKE_PROVIDER_INCLUDE_CWD: "0",
+    SOVEREIGNBOT_VERIFY_SOFTWARE_TEAM: "1",
 };
 for (const key of Object.keys(env)) {
     if (/^(OPENAI|ANTHROPIC|AZURE|AWS|GITHUB|GH)_.*/i.test(key) || /(API_KEY|ACCESS_TOKEN|AUTH_TOKEN|PASSWORD|COOKIE|PRIVATE_KEY)/i.test(key))
@@ -53,6 +56,8 @@ const child = spawn(ELECTRON, [...ELECTRON_ARGS, `--user-data-dir=${ELECTRON_USE
     env,
     stdio: ["ignore", "pipe", "pipe"],
     shell: false,
+    windowsHide: true,
+    detached: false,
 });
 let stdout = "";
 let stderr = "";

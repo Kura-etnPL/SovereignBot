@@ -1,0 +1,26 @@
+{
+  "schema": "sovereignbot.desktop.acceptance-evidence.v1",
+  "workItem": "P21 Team Pack structured recipe editor",
+  "at": "2026-09-03",
+  "sourceCommit": "72897c2",
+  "publishEligible": false,
+  "checks": {
+    "electronTeamPackGateP20": "27/27 PASS",
+    "electronTeamPackGateP21": "27/27 PASS",
+    "focusedProductShell": "13/13 PASS",
+    "desktopTests": "278 pass, 1 skipped, 0 fail",
+    "rootTests": "232 pass, 2 skipped, 0 fail",
+    "syntax": "194 files",
+    "secretScan": "clean",
+    "diffCheck": "clean"
+  },
+  "artifacts": [
+    "verify-p11-team-packs.json",
+    "verify-p11-team-packs.log"
+  ],
+  "notes": [
+    "The real hidden Electron path opens the structured editor and persists the full declarative composition through the existing preload IPC and product surface service.",
+    "Cancel is verified as a no-write action; first-party Gallery recipes remain read-only and are duplicated before editing.",
+    "Evidence contains only local bounded public projections and acceptance logs."
+  ]
+}

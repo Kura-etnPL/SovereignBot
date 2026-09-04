@@ -5,6 +5,7 @@ import {
     buildProviderRoster,
     buildPolicyRules,
     chooseCoworkerProvider,
+    coworkerAgentId,
     resolveFakeProviderLaunch,
     validateRoleAssignment,
 } from "../src/main/provider-roster.js";
@@ -87,6 +88,12 @@ test("no usable provider means an empty roster unless Demo Mode is explicitly on
         settings: {},
     });
     assert.equal(signedOut.ready, false);
+
+    const capacityLimited = buildProviderRoster({
+        discovery: discovery(READY({ health: "capacity-limited", auth: { state: "signed-in" } }), { found: false }),
+        settings: {},
+    });
+    assert.equal(capacityLimited.ready, false);
 
     const demo = buildProviderRoster({
         discovery: discovery({ found: false }, { found: false }),
@@ -210,7 +217,7 @@ test("connected app assignments grant only the receiver's governed tool groups",
     assert.deepEqual(roster.coworkerBindings[coworker.id].connectedAppIds, ["sovereignbot-workspace"]);
 });
 
-test("reserved providers fail closed until an explicit executable adapter is registered", () => {
+test("Antigravity is a first-class explicit coworker provider while ChatGPT Web remains a registered target", () => {
     const antigravityCoworker = {
         id: "coworker_aaaaaaaaaaaaaaaa",
         name: "Reserved Provider Coworker",
@@ -227,10 +234,57 @@ test("reserved providers fail closed until an explicit executable adapter is reg
     assert.equal(roster.agents.some((agent) => agent.id.includes("aaaaaaaaaaaaaaaa")), false);
     assert.equal(
         chooseCoworkerProvider(antigravityCoworker, { antigravity: true, claude: true }),
-        undefined,
+        "antigravity",
     );
-    assert.equal(
-        chooseCoworkerProvider({ modelBinding: { profile: "deep" } }, { "chatgpt-web": true, claude: true }),
-        undefined,
-    );
+    assert.equal(chooseCoworkerProvider({ modelBinding: { profile: "deep" } }, { "chatgpt-web": true, claude: true }), "chatgpt-web");
+});
+
+test("ChatGPT Web / Sol fills only an explicit coworker Deep lane, never hidden orchestration roles", () => {
+    const coworker = {
+        id: "coworker_ffffffffffffffff",
+        name: "Sol Coworker",
+        state: "active",
+        modelBinding: { profile: "deep", provider: "chatgpt-web", model: "sol", providerAccountId: "account-a" },
+    };
+    const roster = buildProviderRoster({
+        discovery: { codex: READY(), claude: READY(), "chatgpt-web": READY({ models: ["sol"], capabilities: ["chat", "continuation"] }) },
+        settings: {},
+        coworkers: [coworker],
+    });
+    assert.deepEqual(roster.roles, { planner: "claude-planner", worker: "codex-worker", reviewer: "claude-reviewer", synthesizer: "claude-synthesizer" });
+    const agent = roster.agents.find((entry) => entry.id === "coworker-agent-ffffffffffffffff");
+    assert.equal(agent.harness.kind, "chatgpt-web");
+    assert.equal(agent.harness.model, "sol");
+    assert.match(agent.harness.accountNamespace, /^provider-account-[a-f0-9]{32}$/);
+    assert.equal(JSON.stringify(agent).includes("account-a"), false);
+});
+
+test("an explicit Antigravity coworker lane remains available when goal orchestration is not ready", () => {
+    const coworker = { id: "coworker_9999999999999999", name: "Antigravity Coworker", role: "worker", state: "active", modelBinding: { profile: "custom", provider: "antigravity", model: "antigravity", providerAccountId: "account-b" } };
+    const roster = buildProviderRoster({ discovery: { codex: { found: false }, claude: { found: false }, antigravity: READY() }, settings: {}, coworkers: [coworker] });
+    assert.equal(roster.ready, false);
+    assert.equal(roster.coworkerBindings[coworker.id].ready, true);
+    assert.equal(roster.agents.find((entry) => entry.id === coworkerAgentId(coworker.id)).harness.kind, "antigravity");
+    assert.match(roster.agents.find((entry) => entry.id === coworkerAgentId(coworker.id)).harness.accountNamespace, /^provider-account-[a-f0-9]{32}$/);
+});
+
+test("deep requires an explicit strong Codex target and efficient maps to Luna", () => {
+    const strong = { id: "coworker_cccccccccccccccc", name: "Strong Coworker", state: "active", modelBinding: { profile: "deep", provider: "codex", model: "sol" } };
+    const lighter = { id: "coworker_dddddddddddddddd", name: "Lighter Coworker", state: "active", modelBinding: { profile: "deep", provider: "codex", model: "luna" } };
+    assert.equal(chooseCoworkerProvider(strong, { codex: true }), "codex");
+    assert.equal(chooseCoworkerProvider(lighter, { codex: true }), undefined);
+
+    const roster = buildProviderRoster({
+        discovery: discovery(),
+        settings: {},
+        coworkers: [{
+            id: "coworker_eeeeeeeeeeeeeeee",
+            name: "Efficient Coworker",
+            state: "active",
+            modelBinding: { profile: "efficient", provider: "codex" },
+        }],
+    });
+    const agent = roster.agents.find((entry) => entry.id === "coworker-agent-eeeeeeeeeeeeeeee");
+    assert.equal(agent.harness.model, "gpt-5.3-codex-spark");
+    assert.equal(roster.coworkerBindings["coworker_eeeeeeeeeeeeeeee"].provider, "codex");
 });

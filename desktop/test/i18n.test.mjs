@@ -27,3 +27,17 @@ test("t param interpolation", () => {
   setLocale("en");
   assert.match(t("coworker.persistentCount", { count: 3 }), /3/);
 });
+
+test("first-run Welcome actions and provider states have English and Chinese copy", () => {
+  const keys = [
+    "welcome.installSoftwareTeam",
+    "welcome.createCoworker",
+    "status.connectCodex",
+    "status.deepUnavailable",
+  ];
+  for (const locale of ["en", "zh-CN"]) {
+    setLocale(locale);
+    for (const key of keys) assert.notEqual(t(key), key, `${key} is missing in ${locale}`);
+  }
+  setLocale("en");
+});

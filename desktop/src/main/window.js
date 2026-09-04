@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { isAppUrl } from "./lib/app-assets.js";
 
 const PRELOAD_PATH = fileURLToPath(new URL("./preload.cjs", import.meta.url));
+const ICON_PATH = fileURLToPath(new URL("../../resources/icon.ico", import.meta.url));
 
 export function createMainWindow({ smoke = false } = {}) {
     const win = new BrowserWindow({
@@ -14,6 +15,7 @@ export function createMainWindow({ smoke = false } = {}) {
         backgroundColor: "#0e1116",
         autoHideMenuBar: true,
         title: "SovereignBot",
+        icon: ICON_PATH,
         webPreferences: {
             preload: PRELOAD_PATH,
             contextIsolation: true,

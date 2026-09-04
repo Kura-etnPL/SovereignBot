@@ -1,0 +1,54 @@
+PASS hidden Electron window stays hidden
+PASS ordinary This PC entry exposes the bounded public surface {"nav":true,"view":true,"project":true,"list":true,"api":"function"}
+PASS This PC renders safe status, app/site, context, and artifact/activity actions {"body":"THIS PC / 此电脑\nThis PC / 此电脑\n\nSee what each Coworker is doing, view the latest safe screen, and take control when you need to. Private details stay protected.\n\nP35 This PC Project\nRefresh / 刷新\n\nP35 Chief\nWorking / 工作中\n\nWorking on this Project.\n\nHealth / 健康: Ready / 正常\n\nContext / 上下文: Shared context / 共享上下文 · Shared Coworkers take turns in this Project.\n\nCurrent work / 当前工作: P35 local deep-link fixture\n\nCurrent app / 当前应用: Web browser\n\nCurrent site / 当前站点: example.test\n\nShow latest screen / 查看最新画面\nShow page details / 查看页面详情\nOpen artifacts / 查看成果\nOpen activity / 查看动态\n\nNo latest screen yet. Show it when this Coworker is working.\n\nNo page details loaded.\n\nRecent files / 最近文件\n\nFiles / 文件: No files to show yet\n\nArtifacts / 成果\n\nArtifacts / 成果: P35 Coworker result\n\nRecent activity / 最近动态\n\nActivity / 动态: snapshot · completed","status":"Working / 工作中"}
+PASS This PC renderer projection contains no raw Computer internals THIS PC / 此电脑
+This PC / 此电脑
+
+See what each Coworker is doing, view the latest safe screen, and take control when you need to. Private details stay protected.
+
+P35 This PC Project
+Refresh / 刷新
+
+P35 Chief
+Working / 工作中
+
+Working on this Project.
+
+Health / 健康: Ready / 正常
+
+Context / 上下文: Shared context / 共享上下文 · Shared Coworkers take turns in this Project.
+
+Current work / 当前工作: P35 local deep-link fixture
+
+Current app / 当前应用: Web browser
+
+Current site / 当前站点: example.test
+
+Show latest screen / 查看最新画面
+Show page details / 查看页面详情
+Open artifacts / 查看成果
+Open activity / 查看动态
+
+No latest screen yet. Show it when this Coworker is working.
+
+No page details loaded.
+
+Recent files / 最近文件
+
+Files / 文件: No files to show yet
+
+Artifacts / 成果
+
+Artifacts / 成果: P35 Coworker result
+
+Recent activity / 最近动态
+
+Activity / 动态: snapshot · completed
+PASS This PC activity deep link preserves the Coworker filter and visible scope {"filter":"coworker_192000a0b723fc5f","notice":"Showing activity for this Coworker / 已显示此同事的动态","body":"P35 snapshot\nSource: computerEvent: computer.snapshotCoworker: P15 ChiefActivity: P35 safe snapshotApp: Web browserSite: example.testTime: 2026-09-03T00:00:00.000ZStatus: completed"}
+PASS Computer History receives only the selected opaque Coworker id [{"limit":100,"coworkerId":"coworker_192000a0b723fc5f"}]
+PASS This PC artifact deep link preserves the Coworker filter and visible scope {"filter":"coworker:coworker_192000a0b723fc5f","notice":"Showing artifacts created by this Coworker / 已显示此同事创建的成果","body":"P35 Coworker result\nType: text/markdownVersion: v1Creator: P35 ChiefTeam: —Channel: —Created: —History: —Status: available\nPreview / 预览\nOpen / 打开\nReveal / 显示\nArchive / 归档\nExport copy / 导出副本\nHistory / 历史\nRestore as new version / 恢复为新版本\nRevise with local file / 选择文件生成修订版"}
+PASS Artifact Hub receives the selected opaque Coworker id [{"limit":500,"visibility":"active"},{"limit":100,"visibility":"active"},{"limit":500,"visibility":"active"},{"limit":100,"visibility":"active","coworkerId":"coworker_192000a0b723fc5f"}]
+PASS This PC empty state is understandable and non-destructive
+PASS This PC failure state stays in-product
+PASS ordinary This PC entry survives a renderer/service restart
+[summary] 11/11 PASS

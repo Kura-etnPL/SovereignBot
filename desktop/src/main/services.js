@@ -1,18 +1,48 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createWorkspaceStore, canonicalizeWorkspacePath } from "./lib/workspaces.js";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 
 const WORKSPACES_FILE = "workspaces.json";
 const SETTINGS_FILE = "settings.json";
+const ECONOMY_CONFIG_FILE = "economy-providers.json";
+
+const DEFAULT_ECONOMY_CONFIG = Object.freeze({
+    providers: [],
+    metered: Object.freeze({ enabled: false, budget: 0, perRunCap: 0, totalCap: 0 }),
+});
+
+function loadTrustedEconomyConfig(path) {
+    if (!existsSync(path)) return DEFAULT_ECONOMY_CONFIG;
+    let value;
+    try { value = JSON.parse(readFileSync(path, "utf8")); }
+    catch { throw new Error("[ECONOMY:CONFIG_CORRUPT] Economy provider configuration cannot be parsed; execution is blocked"); }
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        throw new Error("[ECONOMY:CONFIG_CORRUPT] Economy provider configuration is invalid; execution is blocked");
+    return value;
+}
 
 export const DESKTOP_SETTINGS_SCHEMA = Object.freeze({
     theme: Object.freeze(["system", "dark", "light"]),
     closeBehavior: Object.freeze(["ask", "tray", "quit"]),
     notifications: "boolean",
+    notificationPreferences: "notification-preferences",
     demoMode: "boolean",
+    defaultModelProfile: Object.freeze(["automatic", "efficient", "deep", "economy"]),
     language: Object.freeze(["system", "zh-CN", "en"]),
+    voiceLanguage: Object.freeze(["system", "zh-CN", "en"]),
+    speakReplies: "boolean",
+    voiceMuted: "boolean",
+    updateChannel: Object.freeze(["stable", "preview", "off"]),
 });
+
+export const NOTIFICATION_CATEGORIES = Object.freeze([
+    "attention", "routine-completed", "trigger-fired", "coworker-finished", "channel-unread",
+]);
+
+function defaultNotificationPreferences() {
+    return Object.fromEntries(NOTIFICATION_CATEGORIES.map((category) => [category, true]));
+}
 
 function defaultSettings() {
     return {
@@ -20,11 +50,17 @@ function defaultSettings() {
         theme: "system",
         closeBehavior: "ask",
         notifications: true,
+        notificationPreferences: defaultNotificationPreferences(),
         // Explicit Demo Mode is the only non-test place Echo agents may run. Normal
         // production mode always requires a real, enabled provider.
         demoMode: false,
+        defaultModelProfile: "automatic",
         language: "system",
-        providers: { codex: { enabled: true }, claude: { enabled: true } },
+        voiceLanguage: "system",
+        speakReplies: false,
+        voiceMuted: false,
+        updateChannel: "stable",
+        providers: { codex: { enabled: true }, claude: { enabled: true }, "chatgpt-web": { enabled: true }, antigravity: { enabled: true }, economy: { enabled: true } },
         roles: {},
     };
 }
@@ -32,9 +68,22 @@ function defaultSettings() {
 function normalizeSettings(value) {
     const settings = { ...defaultSettings(), ...value };
     if (!["system", "zh-CN", "en"].includes(settings.language)) settings.language = "system";
+    if (!["system", "zh-CN", "en"].includes(settings.voiceLanguage)) settings.voiceLanguage = "system";
+    settings.speakReplies = settings.speakReplies === true;
+    settings.voiceMuted = settings.voiceMuted === true;
+    if (!["stable", "preview", "off"].includes(settings.updateChannel)) settings.updateChannel = "stable";
+    if (![
+        "automatic", "efficient", "deep", "economy",
+    ].includes(settings.defaultModelProfile)) settings.defaultModelProfile = "automatic";
+    settings.notificationPreferences = Object.fromEntries(NOTIFICATION_CATEGORIES.map((category) => [
+        category, value?.notificationPreferences?.[category] !== false,
+    ]));
     settings.providers = {
         codex: { enabled: value?.providers?.codex?.enabled !== false },
         claude: { enabled: value?.providers?.claude?.enabled !== false },
+        "chatgpt-web": { enabled: value?.providers?.["chatgpt-web"]?.enabled !== false },
+        antigravity: { enabled: value?.providers?.antigravity?.enabled !== false },
+        economy: { enabled: value?.providers?.economy?.enabled !== false },
     };
     settings.roles = value?.roles && typeof value.roles === "object" ? { ...value.roles } : {};
     return settings;
@@ -42,7 +91,7 @@ function normalizeSettings(value) {
 
 function validateProvidersPatch(patch) {
     for (const [provider, entry] of Object.entries(patch)) {
-        if (!["codex", "claude"].includes(provider))
+        if (!["codex", "claude", "chatgpt-web", "antigravity", "economy"].includes(provider))
             throw new Error(`unknown provider: ${provider}`);
         if (typeof entry !== "object" || entry === null)
             throw new Error(`${provider} must be an object`);
@@ -62,12 +111,22 @@ function validateRolesPatch(patch) {
     }
 }
 
+function validateNotificationPreferencesPatch(patch) {
+    if (!patch || typeof patch !== "object" || Array.isArray(patch))
+        throw new Error("notificationPreferences must be an object");
+    for (const [category, enabled] of Object.entries(patch)) {
+        if (!NOTIFICATION_CATEGORIES.includes(category)) throw new Error(`unknown notification category: ${category}`);
+        if (typeof enabled !== "boolean") throw new Error(`${category} notification preference must be a boolean`);
+    }
+}
+
 // Main-process services bound to a started runtime host: trusted workspaces, desktop
 // settings, first-run status aggregation, and driver provisioning records.
 export function createDesktopServices({ dataDir, dialog }) {
     const stateDir = join(dataDir, "desktop-state");
     const workspacesPath = join(stateDir, WORKSPACES_FILE);
     const settingsPath = join(stateDir, SETTINGS_FILE);
+    const economyConfigPath = join(stateDir, ECONOMY_CONFIG_FILE);
 
     const persistedWorkspaces = loadJsonState(workspacesPath, null);
     const store = createWorkspaceStore();
@@ -99,6 +158,7 @@ export function createDesktopServices({ dataDir, dialog }) {
         // backfills the new fields so old installs migrate in place, idempotently.
         settings = normalizeSettings(persistedSettings);
     }
+    const economyConfig = loadTrustedEconomyConfig(economyConfigPath);
 
     function workspaceSnapshot() {
         const snapshot = store.snapshot();
@@ -134,6 +194,12 @@ export function createDesktopServices({ dataDir, dialog }) {
                 defaultWorkspaceId: snapshot.defaultWorkspaceId,
                 workspaces: snapshot.workspaces.map(publicWorkspace),
             };
+        },
+
+        // Main-process-only hydration for product registries.  The path is never
+        // returned through IPC; consumers must retain only the trusted opaque id.
+        listWorkspacesInternal() {
+            return structuredClone(workspaceSnapshot());
         },
 
         async addWorkspaceViaDialog(parentWindow) {
@@ -204,11 +270,17 @@ export function createDesktopServices({ dataDir, dialog }) {
             return structuredClone(settings);
         },
 
+        getEconomyConfig() {
+            return structuredClone(economyConfig);
+        },
+
         updateSettings(patch) {
             if (patch.providers !== undefined)
                 validateProvidersPatch(patch.providers);
             if (patch.roles !== undefined)
                 validateRolesPatch(patch.roles);
+            if (patch.notificationPreferences !== undefined)
+                validateNotificationPreferencesPatch(patch.notificationPreferences);
             for (const [key, allowed] of Object.entries(DESKTOP_SETTINGS_SCHEMA)) {
                 if (patch[key] === undefined)
                     continue;
@@ -222,9 +294,16 @@ export function createDesktopServices({ dataDir, dialog }) {
                         throw new Error(`${key} must be a boolean`);
                     settings[key] = patch[key];
                 }
+                else if (allowed === "notification-preferences") {
+                    validateNotificationPreferencesPatch(patch[key]);
+                    for (const category of NOTIFICATION_CATEGORIES) {
+                        if (patch[key][category] !== undefined)
+                            settings.notificationPreferences[category] = patch[key][category];
+                    }
+                }
             }
             if (patch.providers !== undefined) {
-                for (const provider of ["codex", "claude"]) {
+                for (const provider of ["codex", "claude", "chatgpt-web", "antigravity", "economy"]) {
                     if (patch.providers[provider]?.enabled !== undefined)
                         settings.providers[provider].enabled = patch.providers[provider].enabled;
                 }

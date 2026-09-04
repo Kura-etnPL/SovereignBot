@@ -219,6 +219,18 @@ async function validateMemory(dataDir) {
             fail("memory.jsonl contains invalid scope/key metadata");
         if (record.tags !== undefined && (!Array.isArray(record.tags) || record.tags.some((tag) => typeof tag !== "string")))
             fail("memory.jsonl contains invalid tags");
+        if (record.kind !== undefined && !["suggestion", "suggestion-resolution"].includes(record.kind))
+            fail("memory.jsonl contains an invalid record kind");
+        if (record.kind === "suggestion-resolution" && !["approved", "rejected"].includes(record.state))
+            fail("memory.jsonl contains an invalid suggestion resolution state");
+        if (record.memoryId !== undefined && (typeof record.memoryId !== "string" || !record.memoryId))
+            fail("memory.jsonl contains an invalid memoryId");
+        if (record.state !== undefined && !["active", "forgotten", "deleted", "pending", "approved", "rejected"].includes(record.state))
+            fail("memory.jsonl contains an invalid state");
+        if (record.pinned !== undefined && typeof record.pinned !== "boolean")
+            fail("memory.jsonl contains an invalid pinned flag");
+        if (record.provenance !== undefined && (!record.provenance || typeof record.provenance !== "object" || Array.isArray(record.provenance) || !["conversation", "artifact", "job", "correction", "fact"].includes(record.provenance.type)))
+            fail("memory.jsonl contains invalid provenance");
     });
 }
 

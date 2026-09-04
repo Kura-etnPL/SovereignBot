@@ -1,14 +1,15 @@
 import { sanitizeRuntimeData } from "./runtime-data-redaction.js";
 
-const RESUMABLE_PROVIDER_KINDS = new Set(["codex", "claude-code"]);
+const RESUMABLE_PROVIDER_KINDS = new Set(["codex", "claude-code", "chatgpt-web", "antigravity", "economy"]);
 const PROCESS_HARNESS_KINDS = new Set(["command", "codex", "claude-code"]);
 const TASK_RESULT_TAGS = new Set(["task-result", "candidate-result"]);
 const PROVIDER_SESSION_REDACTION = "[REDACTED_PROVIDER_SESSION]";
 
 function providerContinuityRef(task) {
     const state = task?.harnessState;
-    return RESUMABLE_PROVIDER_KINDS.has(state?.kind) && typeof state.sessionId === "string" && state.sessionId
-        ? state.sessionId
+    const key = ["chatgpt-web", "antigravity", "economy"].includes(state?.kind) ? "continuationRef" : "sessionId";
+    return RESUMABLE_PROVIDER_KINDS.has(state?.kind) && typeof state[key] === "string" && state[key]
+        ? state[key]
         : undefined;
 }
 
@@ -32,7 +33,7 @@ export function redactProviderContinuityRefs(value, refs) {
         return value;
     const output = {};
     for (const [key, child] of Object.entries(value)) {
-        if (key === "sessionId" && typeof child === "string" && refs.has(child))
+        if ((key === "sessionId" || key === "continuationRef") && typeof child === "string" && refs.has(child))
             continue;
         if (key === "error" && typeof child === "string") {
             output[key] = redactErrorString(child, refs);

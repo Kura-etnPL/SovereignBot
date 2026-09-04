@@ -1,0 +1,61 @@
+{
+  "schema": "sovereignbot.local-acceptance-manifest.v1",
+  "phase": "V4.3-P13",
+  "correction": true,
+  "date": "2026-09-02",
+  "branch": "codex/v4-review-directed-handoff-protocol",
+  "sourceCommit": "a7d28efe0469ccf844cf135e42db654044c132a5",
+  "priorEvidence": {
+    "manifest": "../_evidence_v51_2026-09-02/P13-EVIDENCE-MANIFEST.json",
+    "sourceCommit": "6917ade7e920c50e48ac2d7ec7e0ec341cb9f672",
+    "status": "insufficient",
+    "reason": "The prior hidden Electron gate covered only the initial renderer-to-IPC handoff and restart; it did not prove review approval, handback, or the requested invalid and forged-field IPC cases."
+  },
+  "acceptance": {
+    "command": "node scripts/verify-p13-team-collaboration.mjs",
+    "gate": "verify-p13-team-collaboration",
+    "result": "PASS",
+    "checksPassed": 36,
+    "checksTotal": 36,
+    "rawJson": "verify-p13-team-collaboration.json",
+    "rawLog": "verify-p13-team-collaboration.log",
+    "scenario": "A single hidden Electron renderer/preload/validated-IPC session rejects inactive, self, non-roster, duplicate-active, and six forged-authority requests; completes a bounded handoff through trusted protocol steps; requests and approves review to another active Specialist; hands back to the original implementation Specialist; verifies target-only delivery, one owner at each stage, authority-free public state, and restart persistence."
+  },
+  "negativeCoverage": {
+    "semanticRejectedCases": ["inactive target", "self target", "non-roster target"],
+    "forgedAuthorityFields": ["ownerId", "providerAccountId", "capability", "token", "workspacePath", "sessionId"],
+    "duplicateActiveCases": 1,
+    "forgedRequestsEnteredCollaborationHandler": 0,
+    "allNegativeCasesPreservedOwnerLedgerDelivery": true
+  },
+  "transitionCoverage": {
+    "initialHandoffViaRendererUi": true,
+    "initialHandoffTrustedProtocolCompleted": true,
+    "reviewRequestViaSameRendererIpc": true,
+    "reviewApprovedViaTrustedProtocol": true,
+    "handbackViaSameRendererIpc": true,
+    "singleOwnerAndTargetOnlyDeliveryAssertedAtEachTransition": true,
+    "finalStateSurvivesRestart": true
+  },
+  "localChecks": {
+    "desktopSyntaxFiles": 173,
+    "desktopFullTestsPassed": 256,
+    "desktopFullTestsFailed": 0,
+    "collaborationLedgerTestsPassed": 15,
+    "collaborationLedgerTestsFailed": 0,
+    "secretScan": "clean",
+    "diffCheck": "pass"
+  },
+  "boundaries": {
+    "networkUsed": false,
+    "dependenciesInstalled": false,
+    "providerOrOAuthUsed": false,
+    "externalAppsOrConnectorsAdded": false,
+    "cloudSyncOrSharingAdded": false,
+    "schedulerOrExecutionAuthorityAdded": false,
+    "workflowOrDagEngineAdded": false,
+    "destructiveRetentionOrDeletionAdded": false,
+    "localRcSigned": false,
+    "publishEligible": false
+  }
+}

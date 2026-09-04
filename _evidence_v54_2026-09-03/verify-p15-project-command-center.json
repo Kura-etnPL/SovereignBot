@@ -1,0 +1,25 @@
+{
+  "at": "2026-09-02T17:04:05.956Z",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "real preload exposes Project command-center surface": true,
+    "renderer creates canonical Project": true,
+    "Project public projection contains all bounded command-center groups": true,
+    "all associated canonical entities are scoped into the Project": true,
+    "Project projection is bounded and authority-free": true,
+    "Project switcher selects the workbench without jumping to a conversation": true,
+    "workbench renders every grouped section and associated labels": true,
+    "Connected Apps navigation opens the existing Apps surface": true,
+    "canonical Channel navigation opens only the selected Project conversation": true,
+    "archived Project remains inspectable and labeled": true,
+    "Project and grouped contents survive a real service restart": true,
+    "unavailable workspace remains visible with fail-closed read-only projection": true
+  },
+  "projectId": "project_fc1ab2518e350a24",
+  "teamId": "team_f31cecaad899632d",
+  "conversationId": "conv_1a75e5c80a8097a1",
+  "artifactId": "artifact_bfaf010f0c324a01",
+  "memoryId": "mem_df3985e3-c29c-4239-b520-489a742b8fb7",
+  "routineId": "routine_ede7ffc010265eee",
+  "triggerId": "trigger_748bc856ca203686"
+}

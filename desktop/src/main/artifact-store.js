@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { rmSync } from "node:fs";
 import { copyFileSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
@@ -7,8 +8,10 @@ export const ARTIFACTS_SCHEMA = "sovereignbot.desktop.artifacts.v1";
 const MAX_ARTIFACTS = 5_000;
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 128 * 1024;
+const MAX_SEARCH_TEXT_BYTES = 64 * 1024;
 const MAX_ATTACHMENT_CONTEXT_BYTES = 24 * 1024;
 const MAX_TITLE = 180;
+const MAX_ARTIFACT_VERSION = MAX_ARTIFACTS;
 
 const MIME_BY_EXT = new Map([
     [".md", "text/markdown"], [".txt", "text/plain"], [".json", "application/json"],
@@ -20,13 +23,22 @@ const MIME_BY_EXT = new Map([
     [".pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
     [".zip", "application/zip"],
 ]);
+const TEXT_SEARCH_MIME_TYPES = new Set([...MIME_BY_EXT.values()].filter((mimeType) => mimeType.startsWith("text/") || mimeType === "application/json"));
 
 function makeId() {
     return `artifact_${randomBytes(8).toString("hex")}`;
 }
 
+function isArtifactId(value) {
+    return typeof value === "string" && /^artifact_[a-f0-9]{16}$/i.test(value);
+}
+
 function validId(value, prefix) {
     return typeof value === "string" && new RegExp(`^${prefix}_[A-Za-z0-9][\\w:-]{0,127}$`).test(value);
+}
+
+function isValidIsoTimestamp(value) {
+    return typeof value === "string" && value.length <= 64 && Number.isFinite(Date.parse(value));
 }
 
 function boundedText(value, label, max, required = false) {
@@ -49,6 +61,14 @@ function safeRelativePath(value) {
     if (normalized.split("/").some((part) => part === "" || part === "." || part === ".."))
         throw new Error("artifact path contains unsafe traversal components");
     return normalized;
+}
+
+function sanitizeArtifactSearchText(value) {
+    return String(value ?? "").slice(0, 20_000)
+        .replace(/[A-Za-z]:[\\/][^\s"'<>|?\r\n]+/g, "[redacted-path]")
+        .replace(/(?:file:\/\/|\\\\|\/(?:Users|home|tmp|var|private|mnt|workspace|opt|etc)\/)[^\s"'<>|?\r\n]*/gi, "[redacted-path]")
+        .replace(/(?:bearer\s+|token\s*[:=]\s*|cookie\s*[:=]\s*|secret\s*[:=]\s*|password\s*[:=]\s*)[^\s,;]+/gi, "[redacted-secret]")
+        .replace(/https?:\/\/[^\s"'<>]+/gi, "[redacted-url]");
 }
 
 function inside(root, candidate) {
@@ -90,12 +110,25 @@ function mimeFor(path) {
     return MIME_BY_EXT.get(extname(path).toLowerCase()) ?? "application/octet-stream";
 }
 
+const PROTOCOL_LINEAGE_KEYS = ["runId", "requestId", "operationId", "protocolRequestId", "revision"];
+function normalizeProtocolLineage(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    if (Object.keys(value).sort().join("|") !== PROTOCOL_LINEAGE_KEYS.slice().sort().join("|")) return undefined;
+    if (!/^run_[a-f0-9]{16}$/i.test(value.runId) || !/^request_[a-f0-9]{16}$/i.test(value.requestId) || !/^operation_[a-f0-9]{16}$/i.test(value.operationId) || !/^request_[a-f0-9]{16}$/i.test(value.protocolRequestId)) return undefined;
+    if (!Number.isInteger(value.revision) || value.revision < 0 || value.revision > 2) return undefined;
+    return { runId: value.runId, requestId: value.requestId, operationId: value.operationId, protocolRequestId: value.protocolRequestId, revision: value.revision };
+}
+
+
 function clone(value) {
     return structuredClone(value);
 }
 
 function publicView(entry) {
-    const { storageRelativePath: _internal, ...visible } = entry;
+    // Both paths are main-process-only implementation details. `sourceRelativePath`
+    // points back into a trusted workspace and is just as sensitive as the managed
+    // storage path; renderer-facing artifact APIs must never carry either one.
+    const { storageRelativePath: _storagePath, sourceRelativePath: _sourcePath, published: _published, protocolLineage: _protocolLineage, ...visible } = entry;
     return clone(visible);
 }
 
@@ -110,7 +143,24 @@ function sanitizePersisted(entry) {
         if (typeof entry.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(entry.sha256)) return undefined;
         if (typeof entry.storageRelativePath !== "string" || !entry.storageRelativePath) return undefined;
         if (typeof entry.createdAt !== "string") return undefined;
-        return { ...entry };
+        const artifactFamilyId = entry.artifactFamilyId === undefined ? entry.id : entry.artifactFamilyId;
+        if (!isArtifactId(artifactFamilyId)) return undefined;
+        const version = entry.version === undefined ? 1 : entry.version;
+        if (!Number.isInteger(version) || version < 1 || version > MAX_ARTIFACT_VERSION) return undefined;
+        const parentArtifactId = entry.parentArtifactId === undefined ? undefined : entry.parentArtifactId;
+        if (parentArtifactId !== undefined && (!isArtifactId(parentArtifactId) || parentArtifactId === entry.id)) return undefined;
+        const protocolLineage = entry.protocolLineage === undefined ? undefined : normalizeProtocolLineage(entry.protocolLineage);
+        if (entry.protocolLineage !== undefined && !protocolLineage) return undefined;
+        return {
+            ...entry,
+            artifactFamilyId,
+            version,
+            ...(parentArtifactId ? { parentArtifactId } : {}),
+            ...(protocolLineage ? { protocolLineage } : {}),
+            archived: entry.archived === true,
+            ...(isValidIsoTimestamp(entry.archivedAt) ? { archivedAt: entry.archivedAt } : {}),
+            published: entry.published !== false,
+        };
     } catch {
         return undefined;
     }
@@ -124,14 +174,89 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
     const artifacts = loaded?.schema === ARTIFACTS_SCHEMA && Array.isArray(loaded.artifacts)
         ? loaded.artifacts.map(sanitizePersisted).filter(Boolean).slice(-MAX_ARTIFACTS)
         : [];
+    const derivedIndex = {
+        all: new Set(),
+        published: new Set(),
+        active: new Set(),
+        archived: new Set(),
+        order: new Map(),
+        byId: new Map(),
+        byConversation: new Map(),
+        byCoworker: new Map(),
+        byFamily: new Map(),
+        byMimeType: new Map(),
+    };
+    let nextOrder = 0;
+    const changeObservers = new Set();
+
+    function addToIndex(map, key, id) {
+        if (!key) return;
+        if (!map.has(key)) map.set(key, new Set());
+        map.get(key).add(id);
+    }
+
+    function removeFromIndex(map, key, id) {
+        if (!key) return;
+        const values = map.get(key);
+        if (!values) return;
+        values.delete(id);
+        if (!values.size) map.delete(key);
+    }
+
+    function refreshVisibility(entry) {
+        const id = entry.id;
+        derivedIndex.published.delete(id);
+        derivedIndex.active.delete(id);
+        derivedIndex.archived.delete(id);
+        if (entry.published === false) return;
+        derivedIndex.published.add(id);
+        (entry.archived === true ? derivedIndex.archived : derivedIndex.active).add(id);
+    }
+
+    function indexEntry(entry) {
+        const id = entry.id;
+        derivedIndex.all.add(id);
+        derivedIndex.byId.set(id, entry);
+        derivedIndex.order.set(id, nextOrder++);
+        addToIndex(derivedIndex.byConversation, entry.conversationId, id);
+        addToIndex(derivedIndex.byCoworker, entry.createdByCoworkerId, id);
+        addToIndex(derivedIndex.byFamily, entry.artifactFamilyId ?? entry.id, id);
+        addToIndex(derivedIndex.byMimeType, entry.mimeType, id);
+        refreshVisibility(entry);
+    }
+
+    function unindexEntry(entry) {
+        const id = entry.id;
+        derivedIndex.all.delete(id);
+        derivedIndex.published.delete(id);
+        derivedIndex.active.delete(id);
+        derivedIndex.archived.delete(id);
+        derivedIndex.byId.delete(id);
+        derivedIndex.order.delete(id);
+        removeFromIndex(derivedIndex.byConversation, entry.conversationId, id);
+        removeFromIndex(derivedIndex.byCoworker, entry.createdByCoworkerId, id);
+        removeFromIndex(derivedIndex.byFamily, entry.artifactFamilyId ?? entry.id, id);
+        removeFromIndex(derivedIndex.byMimeType, entry.mimeType, id);
+    }
+
+    for (const entry of artifacts) indexEntry(entry);
 
     function save() {
         saveJsonState(persistPath, { schema: ARTIFACTS_SCHEMA, artifacts });
+        for (const observer of [...changeObservers]) {
+            try { observer(); } catch {}
+        }
     }
 
     function requireArtifact(id) {
-        const artifact = artifacts.find((entry) => entry.id === String(id));
+        const artifact = derivedIndex.byId.get(String(id));
         if (!artifact) throw new Error(`unknown artifact id: ${id}`);
+        return artifact;
+    }
+
+    function requirePublicArtifact(id) {
+        const artifact = requireArtifact(id);
+        if (artifact.published === false) throw new Error("artifact is not published");
         return artifact;
     }
 
@@ -139,6 +264,72 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
         const full = resolve(rootDir, entry.storageRelativePath);
         if (!inside(realpathSync(rootDir), full)) throw new Error("artifact storage path is invalid");
         return full;
+    }
+
+    function nextVersionFor(familyId) {
+        const currentVersion = [...(derivedIndex.byFamily.get(familyId) ?? [])]
+            .map((id) => derivedIndex.byId.get(id))
+            .filter(Boolean)
+            .reduce((highest, entry) => Math.max(highest, Number.isInteger(entry.version) ? entry.version : 1), 0);
+        if (currentVersion >= MAX_ARTIFACT_VERSION) throw new Error("artifact version limit reached");
+        return currentVersion + 1;
+    }
+
+    function normalizeIndexIds(value, label, prefix, max = 64) {
+        if (value === undefined) return undefined;
+        if (!Array.isArray(value) || value.length > max) throw new Error(`${label} must contain at most ${max} identifiers`);
+        const ids = [...new Set(value)];
+        if (ids.some((entry) => !validId(entry, prefix))) throw new Error(`${label} contains an invalid identifier`);
+        return ids;
+    }
+
+    function indexedEntries({ conversationId, conversationIds, coworkerId, coworkerIds, artifactFamilyId, mimeType, visibility = "active", limit = MAX_ARTIFACTS } = {}) {
+        if (!Number.isInteger(limit) || limit < 1 || limit > MAX_ARTIFACTS) throw new Error(`indexed artifact limit must be 1..${MAX_ARTIFACTS}`);
+        if (!Object.hasOwn({ active: true, archived: true, all: true }, visibility)) throw new Error("artifact visibility must be active, archived, or all");
+        const normalizedConversationIds = normalizeIndexIds(conversationIds, "conversationIds", "conv");
+        const normalizedCoworkerIds = normalizeIndexIds(coworkerIds, "coworkerIds", "coworker");
+        if (conversationId !== undefined && !validId(conversationId, "conv")) throw new Error("conversationId is invalid");
+        if (coworkerId !== undefined && !validId(coworkerId, "coworker")) throw new Error("coworkerId is invalid");
+        if (artifactFamilyId !== undefined && !isArtifactId(artifactFamilyId)) throw new Error("artifactFamilyId is invalid");
+        if (mimeType !== undefined && (typeof mimeType !== "string" || !mimeType.trim() || mimeType.length > 120)) throw new Error("mimeType is invalid");
+        const visibilitySet = visibility === "all" ? derivedIndex.published : derivedIndex[visibility];
+        const filterSets = [visibilitySet];
+        if (conversationId !== undefined) filterSets.push(derivedIndex.byConversation.get(conversationId) ?? new Set());
+        if (normalizedConversationIds !== undefined) {
+            const values = new Set();
+            for (const id of normalizedConversationIds) for (const artifactId of derivedIndex.byConversation.get(id) ?? []) values.add(artifactId);
+            filterSets.push(values);
+        }
+        if (coworkerId !== undefined) filterSets.push(derivedIndex.byCoworker.get(coworkerId) ?? new Set());
+        if (normalizedCoworkerIds !== undefined) {
+            const values = new Set();
+            for (const id of normalizedCoworkerIds) for (const artifactId of derivedIndex.byCoworker.get(id) ?? []) values.add(artifactId);
+            filterSets.push(values);
+        }
+        if (artifactFamilyId !== undefined) filterSets.push(derivedIndex.byFamily.get(artifactFamilyId) ?? new Set());
+        if (mimeType !== undefined) filterSets.push(derivedIndex.byMimeType.get(mimeType.trim()) ?? new Set());
+        const base = filterSets.reduce((smallest, values) => values.size < smallest.size ? values : smallest, filterSets[0]);
+        return [...base]
+            .filter((id) => filterSets.every((values) => values.has(id)))
+            .map((id) => derivedIndex.byId.get(id))
+            .filter(Boolean)
+            .sort((left, right) => (derivedIndex.order.get(right.id) ?? 0) - (derivedIndex.order.get(left.id) ?? 0))
+            .slice(0, limit);
+    }
+
+    function versionMetadata(source, { version, parentArtifactId, sourceKind = source.sourceKind } = {}) {
+        return {
+            artifactFamilyId: source.artifactFamilyId ?? source.id,
+            version,
+            parentArtifactId,
+            published: true,
+            ...(sourceKind ? { sourceKind } : {}),
+            ...(source.workspaceId ? { workspaceId: source.workspaceId } : {}),
+            ...(source.sourceRelativePath ? { sourceRelativePath: source.sourceRelativePath } : {}),
+            ...(source.createdByCoworkerId ? { createdByCoworkerId: source.createdByCoworkerId } : {}),
+            ...(source.conversationId ? { conversationId: source.conversationId } : {}),
+            ...(source.sourceMessageId ? { sourceMessageId: source.sourceMessageId } : {}),
+        };
     }
 
     function allocateStoredCopy({ actual, stat, title, metadata = {} }) {
@@ -152,6 +343,12 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
         const storedName = fileName.slice(0, 180) || "artifact";
         const destination = join(artifactDir, storedName);
         copyFileSync(actual, destination);
+        const artifactFamilyId = metadata.artifactFamilyId ?? id;
+        const version = metadata.version ?? 1;
+        const parentArtifactId = metadata.parentArtifactId;
+        if (!isArtifactId(artifactFamilyId)) throw new Error("artifact family id is invalid");
+        if (!Number.isInteger(version) || version < 1 || version > MAX_ARTIFACT_VERSION) throw new Error("artifact version is invalid");
+        if (parentArtifactId !== undefined && (!isArtifactId(parentArtifactId) || parentArtifactId === id)) throw new Error("artifact parent id is invalid");
         const entry = {
             id,
             title: boundedText(title, "artifact title", MAX_TITLE) ?? fileName,
@@ -160,10 +357,14 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             size: stat.size,
             sha256: sha256File(destination),
             ...metadata,
+            artifactFamilyId,
+            version,
+            ...(parentArtifactId ? { parentArtifactId } : {}),
             storageRelativePath: relative(rootDir, destination),
             createdAt: now(),
         };
         artifacts.push(entry);
+        indexEntry(entry);
         save();
         return publicView(entry);
     }
@@ -171,24 +372,62 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
     return {
         schema: ARTIFACTS_SCHEMA,
 
-        list({ conversationId, coworkerId, limit = 100 } = {}) {
+        onChanged(observer) {
+            if (typeof observer !== "function") throw new Error("artifact change observer must be a function");
+            changeObservers.add(observer);
+            return () => changeObservers.delete(observer);
+        },
+
+        list({ conversationId, coworkerId, visibility = "active", limit = 100 } = {}) {
             if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact list limit must be 1..500");
-            let result = artifacts;
-            if (conversationId !== undefined) result = result.filter((entry) => entry.conversationId === conversationId);
-            if (coworkerId !== undefined) result = result.filter((entry) => entry.createdByCoworkerId === coworkerId);
-            return { schema: ARTIFACTS_SCHEMA, artifacts: result.slice(-limit).reverse().map(publicView) };
+            return { schema: ARTIFACTS_SCHEMA, artifacts: indexedEntries({ conversationId, coworkerId, visibility, limit }).map(publicView) };
+        },
+
+        indexRecords({ conversationId, conversationIds, coworkerId, coworkerIds, artifactFamilyId, mimeType, visibility = "active", limit = MAX_ARTIFACTS } = {}) {
+            const allowed = new Set(["conversationId", "conversationIds", "coworkerId", "coworkerIds", "artifactFamilyId", "mimeType", "visibility", "limit"]);
+            for (const key of Object.keys(arguments[0] ?? {})) if (!allowed.has(key)) throw new Error(`unknown indexed artifact field: ${key}`);
+            return { schema: ARTIFACTS_SCHEMA, artifacts: indexedEntries({ conversationId, conversationIds, coworkerId, coworkerIds, artifactFamilyId, mimeType, visibility, limit }).map(publicView) };
+        },
+
+        searchRecords({ conversationId, conversationIds, coworkerId, coworkerIds, artifactFamilyId, mimeType, visibility = "active", limit = MAX_ARTIFACTS } = {}) {
+            const allowed = new Set(["conversationId", "conversationIds", "coworkerId", "coworkerIds", "artifactFamilyId", "mimeType", "visibility", "limit"]);
+            for (const key of Object.keys(arguments[0] ?? {})) if (!allowed.has(key)) throw new Error(`unknown artifact search field: ${key}`);
+            const entries = indexedEntries({ conversationId, conversationIds, coworkerId, coworkerIds, artifactFamilyId, mimeType, visibility, limit });
+            return {
+                schema: ARTIFACTS_SCHEMA,
+                artifacts: entries.map((entry) => {
+                    const visible = publicView(entry);
+                    if (!TEXT_SEARCH_MIME_TYPES.has(entry.mimeType) || entry.size > MAX_SEARCH_TEXT_BYTES) return visible;
+                    try {
+                        const full = storagePath(entry);
+                        const stat = statSync(full);
+                        if (!stat.isFile() || stat.size > MAX_SEARCH_TEXT_BYTES) return visible;
+                        const text = sanitizeArtifactSearchText(readFileSync(full).toString("utf8"));
+                        return text.length ? { ...visible, searchText: text } : visible;
+                    }
+                    catch {
+                        return visible;
+                    }
+                }),
+            };
         },
 
         get(id) {
-            return publicView(requireArtifact(id));
+            return publicView(requirePublicArtifact(id));
+        },
+
+        validateReference(id, conversationId) {
+            const entry = requireArtifact(id);
+            if (entry.conversationId && entry.conversationId !== String(conversationId)) throw new Error("artifact reference does not belong to this conversation");
+            return { id: entry.id };
         },
 
         managedPath(id) {
-            return storagePath(requireArtifact(id));
+            return storagePath(requirePublicArtifact(id));
         },
 
         previewText(id) {
-            const entry = requireArtifact(id);
+            const entry = requirePublicArtifact(id);
             if (!entry.mimeType.startsWith("text/") && entry.mimeType !== "application/json")
                 return { artifact: publicView(entry), preview: undefined, truncated: false };
             const full = storagePath(entry);
@@ -197,9 +436,78 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             return { artifact: publicView(entry), preview: slice.toString("utf8"), truncated: buffer.length > MAX_PREVIEW_BYTES };
         },
 
+        history(id, { limit = 100 } = {}) {
+            if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error("artifact history limit must be 1..500");
+            const source = requirePublicArtifact(id);
+            const familyId = source.artifactFamilyId ?? source.id;
+            const history = indexedEntries({ artifactFamilyId: familyId, visibility: "all", limit: MAX_ARTIFACTS })
+                .sort((left, right) => (right.version - left.version) || String(right.createdAt).localeCompare(String(left.createdAt)) || right.id.localeCompare(left.id))
+                .map(publicView);
+            history.splice(limit);
+            return { schema: ARTIFACTS_SCHEMA, artifactId: source.id, artifactFamilyId: familyId, history };
+        },
+
+        archive(id) {
+            const source = requirePublicArtifact(id);
+            const familyId = source.artifactFamilyId ?? source.id;
+            const archivedAt = new Date().toISOString();
+            const changed = indexedEntries({ artifactFamilyId: familyId, visibility: "all", limit: MAX_ARTIFACTS });
+            for (const entry of changed) {
+                entry.archived = true;
+                entry.archivedAt = archivedAt;
+                refreshVisibility(entry);
+            }
+            if (changed.length) save();
+            return publicView(requireArtifact(source.id));
+        },
+
+        restore(id) {
+            const source = requireArtifact(id);
+            if (source.published === false) throw new Error("artifact is not published");
+            const familyId = source.artifactFamilyId ?? source.id;
+            const changed = indexedEntries({ artifactFamilyId: familyId, visibility: "all", limit: MAX_ARTIFACTS });
+            for (const entry of changed) {
+                entry.archived = false;
+                delete entry.archivedAt;
+                refreshVisibility(entry);
+            }
+            if (changed.length) save();
+            return publicView(requireArtifact(source.id));
+        },
+
+        restoreAsNewVersion(id) {
+            const source = requirePublicArtifact(id);
+            const sourcePath = storagePath(source);
+            const sourceLstat = lstatSync(sourcePath);
+            if (sourceLstat.isSymbolicLink() || !sourceLstat.isFile()) throw new Error("artifact source is not a regular managed file");
+            const stat = statSync(sourcePath);
+            if (stat.size < 0 || stat.size > MAX_FILE_BYTES) throw new Error(`artifact source exceeds ${MAX_FILE_BYTES} bytes`);
+            const artifactFamilyId = source.artifactFamilyId ?? source.id;
+            const version = nextVersionFor(artifactFamilyId);
+            return allocateStoredCopy({
+                actual: sourcePath,
+                stat,
+                title: source.title,
+                metadata: versionMetadata(source, { version, parentArtifactId: source.id }),
+            });
+        },
+
+        reviseFromPickedFile({ artifactId, sourcePath }) {
+            const source = requirePublicArtifact(artifactId);
+            const picked = assertPickedFile(sourcePath);
+            const artifactFamilyId = source.artifactFamilyId ?? source.id;
+            const version = nextVersionFor(artifactFamilyId);
+            return allocateStoredCopy({
+                actual: picked.actual,
+                stat: picked.stat,
+                title: source.title,
+                metadata: versionMetadata(source, { version, parentArtifactId: source.id, sourceKind: "user" }),
+            });
+        },
+
         contextForMessage(artifactIds = []) {
             return artifactIds.slice(0, 12).map((id) => {
-                const entry = requireArtifact(id);
+                const entry = requirePublicArtifact(id);
                 const result = { id: entry.id, title: entry.title, fileName: entry.fileName, mimeType: entry.mimeType, size: entry.size };
                 if (entry.sourceKind === "user" && (entry.mimeType.startsWith("text/") || entry.mimeType === "application/json")) {
                     const buffer = readFileSync(storagePath(entry));
@@ -224,26 +532,92 @@ export function createArtifactStore({ dataDir, persistPath = join(dataDir, "desk
             });
         },
 
-        ingestWorkspaceFile({ workspaceId, workspacePath, relativePath, title, createdByCoworkerId, conversationId, sourceMessageId }) {
+        ingestWorkspaceFile({ workspaceId, workspacePath, relativePath, title, createdByCoworkerId, conversationId, sourceMessageId, published = true, protocolLineage }) {
             const safePath = safeRelativePath(relativePath);
             const { actual, stat } = assertWorkspaceFile(workspacePath, safePath);
             if (typeof workspaceId !== "string" || !workspaceId) throw new Error("workspaceId is required");
             if (createdByCoworkerId !== undefined && !validId(createdByCoworkerId, "coworker")) throw new Error("invalid createdByCoworkerId");
             if (conversationId !== undefined && !validId(conversationId, "conv")) throw new Error("invalid conversationId");
             if (sourceMessageId !== undefined && !validId(sourceMessageId, "msg")) throw new Error("invalid sourceMessageId");
+            const normalizedProtocolLineage = protocolLineage === undefined ? undefined : normalizeProtocolLineage(protocolLineage);
+            if (protocolLineage !== undefined && !normalizedProtocolLineage) throw new Error("invalid protocol lineage");
             return allocateStoredCopy({
                 actual,
                 stat,
                 title,
                 metadata: {
                     sourceKind: "coworker",
+                    published: published !== false,
                     workspaceId,
                     sourceRelativePath: safePath,
                     ...(createdByCoworkerId ? { createdByCoworkerId } : {}),
                     ...(conversationId ? { conversationId } : {}),
                     ...(sourceMessageId ? { sourceMessageId } : {}),
+                    ...(normalizedProtocolLineage ? { protocolLineage: normalizedProtocolLineage } : {}),
                 },
             });
+        },
+
+        protocolLineageFor(id) {
+            const entry = requireArtifact(id);
+            return entry.protocolLineage ? structuredClone(entry.protocolLineage) : undefined;
+        },
+
+        publishArtifacts(ids = [], { protocolLineage, protocolLineages } = {}) {
+            if (!Array.isArray(ids) || ids.length > 12) throw new Error("artifact ids must be an array of at most 12 entries");
+            const expectedLineage = protocolLineage === undefined ? undefined : normalizeProtocolLineage(protocolLineage);
+            if (protocolLineage !== undefined && !expectedLineage) throw new Error("invalid protocol lineage");
+            if (protocolLineages !== undefined && (!protocolLineages || typeof protocolLineages !== "object" || Array.isArray(protocolLineages))) throw new Error("invalid protocol lineages");
+            const entries = ids.map((id) => requireArtifact(id));
+            for (const entry of entries) {
+                const entryExpectedLineage = protocolLineages?.[entry.id] === undefined
+                    ? expectedLineage
+                    : normalizeProtocolLineage(protocolLineages[entry.id]);
+                if (protocolLineages?.[entry.id] !== undefined && !entryExpectedLineage) throw new Error("invalid protocol lineage");
+                if (entry.protocolLineage && !entryExpectedLineage) throw new Error("protocol artifact lineage is required");
+                if (entry.protocolLineage && JSON.stringify(entry.protocolLineage) !== JSON.stringify(entryExpectedLineage)) throw new Error("protocol artifact lineage is stale");
+                if (entryExpectedLineage && !entry.protocolLineage) throw new Error("protocol artifact lineage is missing");
+            }
+            const published = [];
+            const previous = new Map();
+            try {
+                for (const entry of entries) {
+                    if (!previous.has(entry.id)) previous.set(entry.id, entry.published !== false);
+                    entry.published = true;
+                    refreshVisibility(entry);
+                    published.push(publicView(entry));
+                }
+                if (ids.length) save();
+                return published;
+            }
+            catch (error) {
+                for (const [id, wasPublished] of previous) {
+                    const entry = requireArtifact(id);
+                    entry.published = wasPublished;
+                    refreshVisibility(entry);
+                }
+                throw error;
+            }
+        },
+        discardArtifacts(ids = []) {
+            if (!Array.isArray(ids) || ids.length > 12) throw new Error("artifact ids must be an array of at most 12 entries");
+            const entries = ids.map((id) => requireArtifact(id));
+            if (entries.some((entry) => entry.published !== false)) throw new Error("published artifacts cannot be discarded");
+            const root = realpathSync(rootDir);
+            const dirs = entries.map((entry) => {
+                const dir = resolve(rootDir, String(entry.id));
+                if (!inside(root, dir) || dir === root) throw new Error("artifact discard path is invalid");
+                return dir;
+            });
+            for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+            const removed = new Set(entries.map((entry) => entry.id));
+            for (let index = artifacts.length - 1; index >= 0; index -= 1) {
+                if (!removed.has(artifacts[index].id)) continue;
+                unindexEntry(artifacts[index]);
+                artifacts.splice(index, 1);
+            }
+            if (entries.length) save();
+            return entries.map(publicView);
         },
     };
 }

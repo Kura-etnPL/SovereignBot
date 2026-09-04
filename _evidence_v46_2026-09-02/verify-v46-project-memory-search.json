@@ -1,0 +1,151 @@
+{
+  "at": "2026-09-02T12:58:54.858Z",
+  "checks": {
+    "gate window stays hidden": true,
+    "renderer exposes the P9 Memory surface": true,
+    "renderer preload creates canonical Project": true,
+    "Project page renders the created Project and Add fact action": true,
+    "Project Add fact opens scoped Memory form": true,
+    "approved Project fact appears in Memory UI and IPC projection": true,
+    "public Project Memory stays authority-free": true,
+    "Project-scoped Search finds the approved fact": true,
+    "Search exposes bounded result metadata": true,
+    "Search result deep-links back to the selected Project Memory": true,
+    "public Search result has no raw authority or Team scope": true,
+    "renderer Search navigation selects the Memory row": true,
+    "Project and approved fact survive service restart": true,
+    "Search index rebuilds from durable Project Memory after restart": true,
+    "restart projection contains no raw paths or provider/session data": true
+  },
+  "projectId": "project_fed6dcd858bfd321",
+  "memoryId": "mem_3af8c755-6964-487c-8e28-5cc296c23480",
+  "firstProjection": {
+    "view": true,
+    "result": "1 memories · rebuilt locally / 条记忆 · 已在本地重建",
+    "cards": [
+      "P9 launch checklist\n\nKeep the local release checklist in Project Memory.\n\nactive · release, p9\nSource: User-added Project fact\nPin / 置顶\nEdit / 编辑\nForget / 忘记\nDelete / 删除\nSource / 来源"
+    ]
+  },
+  "firstSearch": {
+    "schema": "sovereignbot.desktop.search.v1",
+    "query": "P9 launch checklist",
+    "status": "active",
+    "indexedAt": "2026-09-02T12:58:53.224Z",
+    "total": 1,
+    "hasMore": false,
+    "results": [
+      {
+        "type": "memory",
+        "id": "mem_3af8c755-6964-487c-8e28-5cc296c23480",
+        "title": "P9 launch checklist",
+        "subtitle": "project memory · User-added Project fact",
+        "projectId": "project_fed6dcd858bfd321",
+        "status": "active",
+        "updatedAt": "2026-09-02T12:58:52.567Z",
+        "navigation": {
+          "view": "memory",
+          "memoryId": "mem_3af8c755-6964-487c-8e28-5cc296c23480",
+          "scope": "project",
+          "ownerId": "project_fed6dcd858bfd321",
+          "projectId": "project_fed6dcd858bfd321"
+        },
+        "score": 90,
+        "action": "open"
+      }
+    ]
+  },
+  "restartProjection": {
+    "project": [
+      {
+        "projectId": "project_fed6dcd858bfd321",
+        "name": "P9 Local Project",
+        "state": "active",
+        "available": true,
+        "createdAt": "2026-09-02T12:58:51.890Z",
+        "updatedAt": "2026-09-02T12:58:51.890Z",
+        "teams": [],
+        "coworkers": [],
+        "counts": {
+          "teams": 0,
+          "channels": 0,
+          "coworkers": 0,
+          "files": 0,
+          "artifacts": 0,
+          "skills": 0,
+          "playbooks": 0,
+          "routines": 0,
+          "triggers": 0,
+          "memory": 1,
+          "connectedApps": 0
+        },
+        "connectedApps": [],
+        "memory": [
+          {
+            "id": "mem_3af8c755-6964-487c-8e28-5cc296c23480",
+            "title": "P9 launch checklist",
+            "content": "Keep the local release checklist in Project Memory.",
+            "tags": [
+              "release",
+              "p9"
+            ],
+            "state": "active",
+            "pinned": false,
+            "source": {
+              "type": "fact",
+              "label": "User-added Project fact"
+            }
+          }
+        ]
+      }
+    ],
+    "memory": [
+      {
+        "schema": "sovereignbot.desktop.memory.v1",
+        "id": "mem_3af8c755-6964-487c-8e28-5cc296c23480",
+        "title": "P9 launch checklist",
+        "content": "Keep the local release checklist in Project Memory.",
+        "tags": [
+          "release",
+          "p9"
+        ],
+        "scope": "project",
+        "state": "active",
+        "pinned": false,
+        "createdAt": "2026-09-02T12:58:52.567Z",
+        "updatedAt": "2026-09-02T12:58:52.567Z",
+        "source": {
+          "type": "fact",
+          "label": "User-added Project fact"
+        }
+      }
+    ],
+    "search": {
+      "schema": "sovereignbot.desktop.search.v1",
+      "query": "P9 launch checklist",
+      "status": "active",
+      "indexedAt": "2026-09-02T12:58:54.857Z",
+      "total": 1,
+      "hasMore": false,
+      "results": [
+        {
+          "type": "memory",
+          "id": "mem_3af8c755-6964-487c-8e28-5cc296c23480",
+          "title": "P9 launch checklist",
+          "subtitle": "project memory · User-added Project fact",
+          "projectId": "project_fed6dcd858bfd321",
+          "status": "active",
+          "updatedAt": "2026-09-02T12:58:52.567Z",
+          "navigation": {
+            "view": "memory",
+            "memoryId": "mem_3af8c755-6964-487c-8e28-5cc296c23480",
+            "scope": "project",
+            "ownerId": "project_fed6dcd858bfd321",
+            "projectId": "project_fed6dcd858bfd321"
+          },
+          "score": 90,
+          "action": "open"
+        }
+      ]
+    }
+  }
+}

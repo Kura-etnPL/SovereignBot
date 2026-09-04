@@ -182,7 +182,7 @@ export const IPC_CHANNELS = Object.freeze({
         validateRequest: (payload) => {
             if (!isPlainObject(payload)) throw new Error("request payload must be an object");
             assertNoForbiddenKeys(payload);
-            assertOnlyKnownKeys(payload, ["title", "objective", "ownerCoworkerId", "parentJobId", "priority", "nextActionAt", "executionTarget"]);
+            assertOnlyKnownKeys(payload, ["title", "objective", "ownerCoworkerId", "parentJobId", "priority", "nextActionAt", "executionTarget", "computerTarget", "computerActions"]);
             if (typeof payload.title !== "string" || !payload.title.trim()) throw new Error("missing request field: title");
             if (payload.title.length > 120) throw new Error("title exceeds 120 characters");
             if (typeof payload.objective !== "string" || !payload.objective.trim()) throw new Error("missing request field: objective");
@@ -193,6 +193,8 @@ export const IPC_CHANNELS = Object.freeze({
             if (payload.priority !== undefined) out.priority = enumField(["low", "normal", "high"])(payload.priority, "priority");
             if (payload.nextActionAt !== undefined) out.nextActionAt = stringField(64)(payload.nextActionAt, "nextActionAt");
             if (payload.executionTarget !== undefined) out.executionTarget = workerExecutionTarget(payload.executionTarget);
+            if (payload.computerTarget !== undefined) out.computerTarget = workerComputerTarget(payload.computerTarget);
+            if (payload.computerActions !== undefined) out.computerActions = computerActions(payload.computerActions);
             return out;
         },
     }),
@@ -227,20 +229,59 @@ export const IPC_CHANNELS = Object.freeze({
         maxPayloadBytes: 1024,
         validateRequest: requiredFields({ jobId: idField() }, 1024),
     }),
+    "job:snooze": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({
+            jobId: idField(),
+            minutes: enumField([15, 60, 240, 1440]),
+        }, 1024),
+    }),
     "job:dismiss": Object.freeze({
         direction: "renderer->main",
         maxPayloadBytes: 1024,
         validateRequest: requiredFields({ jobId: idField() }, 1024),
     }),
-    "job:attention": emptyRequest(),
+    "job:attention": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: optionalFields({
+            category: enumField(["login-required", "secret-required", "approval-required", "provider-unavailable", "computer-takeover", "dangerous-action", "real-blocker", "all"]),
+            visibility: enumField(["active", "snoozed", "all"]),
+        }),
+    }),
     "settings:get": emptyRequest(),
+    "update:status": emptyRequest(),
+    "update:check": emptyRequest(),
+    "update:stage": emptyRequest(),
+    "update:apply": emptyRequest(),
+    "update:setChannel": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({ channel: enumField(["stable", "preview", "off"]) }, 1024),
+    }),
+    "data:status": emptyRequest(),
+    "data:listBackups": emptyRequest(),
+    "data:backup": emptyRequest(),
+    "data:export": emptyRequest(),
+    "data:prepareReset": emptyRequest(),
+    "data:restore": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 1024,
+        validateRequest: requiredFields({ id: stringField(100) }, 1024),
+    }),
+    "data:reset": Object.freeze({
+        direction: "renderer->main",
+        maxPayloadBytes: 2048,
+        validateRequest: requiredFields({ confirmation: stringField(100), backupId: stringField(100) }, 2048),
+    }),
     "provider:getRoster": emptyRequest(),
     "provider:refresh": emptyRequest(),
     "provider:openLogin": Object.freeze({
         direction: "renderer->main",
         maxPayloadBytes: 1024,
         validateRequest: requiredFields({
-            provider: enumField(["codex", "claude"]),
+            provider: enumField(["codex", "claude", "chatgpt-web", "antigravity", "economy"]),
         }, 1024),
     }),
     "provider:setRoleAssignment": Object.freeze({
@@ -258,7 +299,7 @@ export const IPC_CHANNELS = Object.freeze({
             if (!isPlainObject(payload) || Object.keys(payload).length === 0)
                 throw new Error("settings update payload must be a non-empty object");
             assertNoForbiddenKeys(payload);
-            const allowed = new Set(["theme", "closeBehavior", "notifications", "demoMode", "language", "providers", "roles"]);
+            const allowed = new Set(["theme", "closeBehavior", "notifications", "notificationPreferences", "defaultModelProfile", "demoMode", "language", "voiceLanguage", "speakReplies", "voiceMuted", "providers", "roles"]);
             for (const key of Object.keys(payload)) {
                 if (!allowed.has(key))
                     throw new Error(`unexpected settings field: ${key.slice(0, 40)}`);
@@ -267,6 +308,18 @@ export const IPC_CHANNELS = Object.freeze({
                 validateProvidersShape(payload.providers);
             if (payload.roles !== undefined)
                 validateRolesShape(payload.roles);
+            if (payload.notificationPreferences !== undefined)
+                validateNotificationPreferencesShape(payload.notificationPreferences);
+            if (payload.defaultModelProfile !== undefined
+                && !["automatic", "efficient", "deep", "economy"].includes(payload.defaultModelProfile))
+                throw new Error("invalid defaultModelProfile");
+            if (payload.voiceLanguage !== undefined
+                && !["system", "zh-CN", "en"].includes(payload.voiceLanguage))
+                throw new Error("invalid voiceLanguage");
+            for (const key of ["speakReplies", "voiceMuted"]) {
+                if (payload[key] !== undefined && typeof payload[key] !== "boolean")
+                    throw new Error(`${key} must be a boolean`);
+            }
             return payload;
         },
     }),
@@ -276,12 +329,22 @@ function validateProvidersShape(value) {
     if (!isPlainObject(value) || Object.keys(value).length === 0)
         throw new Error("providers must be a non-empty object");
     for (const [provider, entry] of Object.entries(value)) {
-        if (!["codex", "claude"].includes(provider))
+        if (!["codex", "claude", "chatgpt-web", "antigravity", "economy"].includes(provider))
             throw new Error(`unknown provider: ${String(provider).slice(0, 20)}`);
         if (!isPlainObject(entry))
             throw new Error(`${provider} settings must be an object`);
         if (entry.enabled !== undefined && typeof entry.enabled !== "boolean")
             throw new Error(`${provider}.enabled must be a boolean`);
+    }
+}
+
+function validateNotificationPreferencesShape(value) {
+    if (!isPlainObject(value) || Object.keys(value).length === 0)
+        throw new Error("notificationPreferences must be a non-empty object");
+    const categories = new Set(["attention", "routine-completed", "trigger-fired", "coworker-finished", "channel-unread"]);
+    for (const [category, enabled] of Object.entries(value)) {
+        if (!categories.has(category)) throw new Error(`unknown notification category: ${String(category).slice(0, 40)}`);
+        if (typeof enabled !== "boolean") throw new Error(`${category} notification preference must be a boolean`);
     }
 }
 
@@ -425,6 +488,44 @@ function workerExecutionTarget(value) {
         };
     }
     throw new Error("executionTarget.kind must be local or worker-node");
+}
+
+function workerComputerTarget(value) {
+    if (!isPlainObject(value)) throw new Error("computerTarget must be an object");
+    if (["worker-computer", "vm"].includes(value.kind)) {
+        assertOnlyKnownKeys(value, ["kind", "nodeId", "workspaceId", "computerId"]);
+        return { kind: value.kind, nodeId: workerNodeIdField()(value.nodeId, "computerTarget.nodeId"), workspaceId: idField()(value.workspaceId, "computerTarget.workspaceId"), computerId: idField()(value.computerId, "computerTarget.computerId") };
+    }
+    if (["local-isolated", "cloud"].includes(value.kind)) {
+        assertOnlyKnownKeys(value, value.kind === "cloud" ? ["kind", "profileId", "workspaceId", "optIn"] : ["kind", "profileId", "workspaceId"]);
+        if (value.kind === "cloud" && typeof value.optIn !== "boolean") throw new Error("computerTarget.optIn must be boolean");
+        return { kind: value.kind, profileId: idField()(value.profileId, "computerTarget.profileId"), workspaceId: idField()(value.workspaceId, "computerTarget.workspaceId"), ...(value.kind === "cloud" ? { optIn: value.optIn } : {}) };
+    }
+    if (value.kind === "this-pc") {
+        assertOnlyKnownKeys(value, ["kind", "workspaceId"]);
+        return { kind: "this-pc", workspaceId: idField()(value.workspaceId, "computerTarget.workspaceId") };
+    }
+    throw new Error("computerTarget.kind is unsupported");
+}
+
+function computerActions(value) {
+    if (!Array.isArray(value) || value.length < 1 || value.length > 8) throw new Error("computerActions must contain 1-8 actions");
+    const allowed = {
+        snapshot: [], navigate: ["url"], click: ["snapshotId", "ref"], type: ["snapshotId", "ref", "text"],
+        key: ["snapshotId", "ref", "key"], scroll: ["deltaX", "deltaY"], list_files: ["path"],
+        read_file: ["path", "encoding"], write_file: ["path", "content", "encoding"], request_help: ["reason"],
+    };
+    return value.map((action) => {
+        if (!isPlainObject(action) || !Object.hasOwn(action, "operation") || !Object.hasOwn(allowed, action.operation)) throw new Error("computer action operation is invalid");
+        if (!isPlainObject(action.input)) throw new Error("computer action input must be an object");
+        assertOnlyKnownKeys(action, ["operation", "input"]);
+        assertOnlyKnownKeys(action.input, allowed[action.operation]);
+        for (const [key, entry] of Object.entries(action.input)) {
+            if (typeof entry === "string" && (entry.length > 4000 || /(?:[A-Za-z]:[\\/]|file:\/\/|bearer|token|cookie|password|secret|credential|session|continuity|provider|cwd|command|coordinates?|click\s+at)/i.test(entry))) throw new Error(`computer action ${key} contains private or authority data`);
+        }
+        if (action.operation === "scroll" && (!Number.isInteger(action.input.deltaX) || !Number.isInteger(action.input.deltaY) || Math.abs(action.input.deltaX) > 2000 || Math.abs(action.input.deltaY) > 2000)) throw new Error("computer scroll delta is invalid");
+        return { operation: action.operation, input: structuredClone(action.input) };
+    });
 }
 
 function integerField(min, max) {

@@ -2,7 +2,7 @@
 // describes a coworker's preference, but never grants execution authority.
 
 export const MODEL_PROFILES = Object.freeze(["automatic", "efficient", "deep", "economy", "custom"]);
-export const MODEL_PROVIDERS = Object.freeze(["codex", "claude", "antigravity", "chatgpt-web"]);
+export const MODEL_PROVIDERS = Object.freeze(["codex", "claude", "antigravity", "chatgpt-web", "economy"]);
 
 const PROFILE_SET = new Set(MODEL_PROFILES);
 const PROVIDER_SET = new Set(MODEL_PROVIDERS);

@@ -3,7 +3,7 @@
 //   temp dataDir -> hidden window over sovereignbot://app -> renderer handshake IPC ->
 //   in-process Core RuntimeHost (vendored, integrity-verified) -> assertions ->
 //   machine-readable JSON on stdout -> exit 0/1.
-export async function runSmokeMode({ app }) {
+export async function runSmokeMode({ app, mode = "smoke" }) {
     const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
@@ -41,7 +41,7 @@ export async function runSmokeMode({ app }) {
     let services;
 
     const fail = async (error) => {
-        process.stdout.write(`${JSON.stringify({ smoke: "failed", checks, error: String(error?.message ?? error) })}\n`);
+        process.stdout.write(`${JSON.stringify({ [mode]: "failed", checks, error: String(error?.message ?? error) })}\n`);
         try {
             await host?.close();
         }
@@ -248,11 +248,11 @@ export async function runSmokeMode({ app }) {
             const jobs = globalThis.sovereignbot?.jobs;
             const jobsUi = globalThis.SovereignJobsUI;
             const surfaceIds = [
-                "nav-work", "view-work", "work-list", "nav-attention", "attention-badge",
-                "job-detail-dialog", "job-detail-approve", "job-detail-dismiss",
+                "nav-inbox", "open-command-palette", "nav-settings", "view-work", "work-list",
+                "notifications-badge", "job-detail-dialog", "job-detail-approve", "job-detail-dismiss",
             ];
             const surfaces = surfaceIds.every((id) => Boolean(document.getElementById(id)));
-            const jobMethods = ["submit", "list", "getStatus", "getConversation", "cancel", "pause", "resume", "approve", "dismiss", "attention"];
+            const jobMethods = ["submit", "list", "getStatus", "getConversation", "cancel", "pause", "resume", "approve", "snooze", "dismiss", "attention"];
             const jobPreload = jobMethods.every((name) => typeof jobs?.[name] === "function");
             const jobsUiLoaded = Boolean(jobsUi && typeof jobsUi.refresh === "function" && typeof jobsUi.renderList === "function");
             const chiefUiLoaded = typeof globalThis.openDirect === "function"
@@ -269,8 +269,8 @@ export async function runSmokeMode({ app }) {
                     const key = el.getAttribute("data-i18n");
                     if (key) el.textContent = I.t(key);
                 }
-                zhWork = document.querySelector('[data-i18n="nav.work"]')?.textContent?.trim() ?? "";
-                zhAttention = document.querySelector('[data-i18n="nav.attention"]')?.textContent?.trim() ?? "";
+                zhWork = document.querySelector('[data-i18n="work.title"]')?.textContent?.trim() ?? (I.t ? I.t("work.title") : "");
+                zhAttention = I.t ? I.t("nav.attention") : "需关注";
                 zhLang = document.documentElement.lang;
                 I.setLocale(previous);
                 for (const el of document.querySelectorAll("[data-i18n]")) {
@@ -309,7 +309,7 @@ export async function runSmokeMode({ app }) {
         checks.cleanQuit = true;
 
         const ok = Object.values(checks).every(Boolean);
-        process.stdout.write(`${JSON.stringify({ smoke: ok ? "ok" : "failed", checks })}\n`);
+        process.stdout.write(`${JSON.stringify({ [mode]: ok ? "ok" : "failed", checks })}\n`);
         app.exit(ok ? 0 : 1);
     }
     catch (error) {

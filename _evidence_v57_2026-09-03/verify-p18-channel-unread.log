@@ -1,0 +1,11 @@
+PASS hidden Electron window stays hidden {}
+PASS real preload exposes conversation acknowledge and notification methods {"hasAcknowledge":true,"hasGet":true,"hasNotifList":true}
+PASS coworker channel message automatically creates channel-unread notification and updates badge {"text":"1","hidden":false}
+PASS notification card renders in Notification Center with correct channel name, coworker name, and body {"count":1,"category":"💬Channel unread / 频道未读","title":"Project Channel · Coding Specialist","body":"Initial deliverable ready for inspection"}
+PASS predictable coalescing: subsequent coworker message in same channel updates card without duplicate card or spam {"count":1,"body":"Updated deliverable with second sprint results","badge":"1"}
+PASS suppression: fail-closed default suppresses unspecified intent, user messages, and internal protocol turns {"count":1}
+PASS conversation:get remains strictly read-only and does NOT clear unread state {"unreadCount":1,"badge":"1"}
+PASS truthful read resolution: opening/viewing the channel marks the notification read and clears badge {"isRead":true,"badge":"0"}
+PASS reactivation: later coworker message in that channel reactivates unread notification {"isRead":false,"body":"Subsequent question after channel was read","badge":"1"}
+PASS restart persistence & key security: notifications.json contains digest keys and survives restart without data loss {"allKeysAreDigests":true,"hasOpaqueIds":true,"diskClean":true,"restartedCount":1,"restartedUnread":1}
+[summary] 10/10 PASS

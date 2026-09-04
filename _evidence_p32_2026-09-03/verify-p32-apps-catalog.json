@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-03T05:24:06.657Z",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "real preload exposes the independent Apps Catalog": true,
+    "Apps Catalog renders connection, health, capability, approval, and cost summaries": true,
+    "catalog search narrows to the matching app": true,
+    "status filtering has an honest empty state": true,
+    "connection review precedes the local connect action": true,
+    "Approve and connect reaches the real local connected state": true,
+    "Apps Catalog loads Coworker assignment choices": true,
+    "Apps Catalog assigns a Team and Coworker through opaque IDs": true,
+    "Apps Catalog renders a Team unassignment action": true,
+    "Team unassignment IPC removes the opaque assignment": true,
+    "Apps Catalog unassigns Team and Coworker in the current scope": true,
+    "connection and assignment state survives a real service restart": true
+  }
+}

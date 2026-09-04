@@ -1,0 +1,26 @@
+{
+  "schema": "sovereignbot.desktop.p51-routine-history.v1",
+  "checks": {
+    "same Routine lifecycle controls lock while a history retry is pending": true,
+    "injected History Retry failure is visible, single-call, and retryable": true,
+    "another Routine has no cross-routine retry feedback or lock": true,
+    "History Retry succeeds on the second attempt with one additional call and refreshes History": true,
+    "successful retry refreshes History and reaches a completed Job": true,
+    "Routine History public text contains no opaque IDs or internal authority": true,
+    "Routine History renderer uses no native prompt or confirm": true
+  },
+  "failed": [],
+  "notes": [
+    "PASS same Routine lifecycle controls lock while a history retry is pending {\"alphaDisabled\":true,\"betaHistoryDisabled\":false}",
+    "PASS injected History Retry failure is visible, single-call, and retryable {\"feedback\":\"Injected P51 history retry failure; safe to retry.Dismiss / 消退\",\"retryDisabled\":false,\"retryCalls\":1}",
+    "PASS another Routine has no cross-routine retry feedback or lock {\"text\":\"2026/9/4 01:08:29 · waitingOpen JobRetry / 重试\",\"feedback\":\"\",\"retryDisabled\":false}",
+    "PASS History Retry succeeds on the second attempt with one additional call and refreshes History {\"retryCalls\":2,\"historyReadsBefore\":4,\"historyReadsAfter\":5}",
+    "PASS successful retry refreshes History and reaches a completed Job {\"runStatus\":\"completed\",\"jobStatus\":\"completed\"}",
+    "PASS Routine History public text contains no opaque IDs or internal authority {\"history\":\"2026/9/4 01:08:29 · completedOpen JobRoutine run retry requested: P51 Retry Alpha / 已请求重试例行运行：P51 Retry AlphaDismiss / 消退\",\"list\":\"P51 Retry AlphaEnabledCustom interval / 自定义间隔 · 60 min · Next run: 2026/9/4 02:08:29 · Last status: completedHistoryRun now / 立即运行DisableArchive / 归档RemoveP51 Peer BetaEnabledCustom interval / 自定义间隔 · 60 min · Next run: 2026/9/4 02:08:29 · Last status: waitingHistoryRun now / 立即运行DisableArchive / 归档Remove\"}",
+    "PASS Routine History renderer uses no native prompt or confirm native dialogs absent"
+  ],
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "externalActions": [],
+  "ok": true
+}

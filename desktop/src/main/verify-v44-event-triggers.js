@@ -138,7 +138,9 @@ export async function runVerifyV44EventTriggers({ app }) {
 
   let dataDir;
   let trustedWorkspace;
+  let secondaryWorkspace;
   let workspaceId;
+  let secondaryWorkspaceId;
   let win;
   let unbind;
   let uninstallProtocol;
@@ -163,6 +165,7 @@ export async function runVerifyV44EventTriggers({ app }) {
   let removedWorkspaceState;
   let stormState;
   let watcherErrorState;
+  const triggerCreatePayloads = [];
 
   async function renderer(script) {
     return await win.webContents.executeJavaScript(script);
@@ -270,14 +273,19 @@ export async function runVerifyV44EventTriggers({ app }) {
     const stateDir = join(dataDir, "desktop-state");
     await mkdir(stateDir, { recursive: true });
     trustedWorkspace = join(dataDir, "trusted-workspace");
+    secondaryWorkspace = join(dataDir, "reference-workspace");
     await mkdir(join(trustedWorkspace, "inbox"), { recursive: true });
     await mkdir(join(trustedWorkspace, "outside"), { recursive: true });
     await mkdir(join(trustedWorkspace, "storm"), { recursive: true });
+    await mkdir(secondaryWorkspace, { recursive: true });
 
     const services = createDesktopServices({ dataDir, dialog });
     const registered = services.addWorkspacePath(trustedWorkspace);
     workspaceId = registered.workspace?.id;
+    const secondaryRegistered = services.addWorkspacePath(secondaryWorkspace);
+    secondaryWorkspaceId = secondaryRegistered.workspace?.id;
     check("isolated trusted workspace registered through services", Boolean(workspaceId) && services.workspacePath(workspaceId) === trustedWorkspace, JSON.stringify({ workspaceId }));
+    check("second isolated workspace registered with a distinct safe label", Boolean(secondaryWorkspaceId) && secondaryWorkspaceId !== workspaceId && secondaryRegistered.workspace?.label === "reference-workspace", JSON.stringify({ secondaryWorkspaceId, label: secondaryRegistered.workspace?.label }));
 
     const coworkerStore = createCoworkerStore({ persistPath: join(stateDir, "coworkers.json") });
     coworkerStore.ensureDefaults();
@@ -357,7 +365,7 @@ export async function runVerifyV44EventTriggers({ app }) {
         "routine:history": ({ routineId }) => routines.history(routineId),
         "routine:setEnabled": ({ routineId, enabled }) => { const result = routines.setEnabled(routineId, enabled); eventTriggers?.reconcile(); return result; },
         "routine:remove": ({ routineId }) => { const result = routines.remove(routineId); eventTriggers?.reconcile(); return result; },
-        "eventTrigger:create": (payload) => eventTriggers.create(payload),
+        "eventTrigger:create": (payload) => { triggerCreatePayloads.push(structuredClone(payload)); return eventTriggers.create(payload); },
         "eventTrigger:list": () => eventTriggers.list(),
         "eventTrigger:get": ({ triggerId }) => eventTriggers.get(triggerId),
         "eventTrigger:setEnabled": ({ triggerId, enabled }) => eventTriggers.setEnabled(triggerId, enabled),
@@ -403,6 +411,10 @@ export async function runVerifyV44EventTriggers({ app }) {
     await sleep(300);
     await renderer("document.getElementById('triggers-new')?.click()");
     await waitFor("Triggers create dialog", async () => await renderer("document.getElementById('trigger-dialog')?.open === true"));
+    const triggerWorkspaceOptions = await renderer(`(()=>[...document.querySelectorAll('#trigger-workspace option')].map((option)=>({ value: option.value, label: option.textContent, markup: option.outerHTML })))()`);
+    const triggerWorkspaceOptionText = JSON.stringify(triggerWorkspaceOptions);
+    check("Trigger workspace selector shows two recognizable public workspace labels", triggerWorkspaceOptions?.length === 2 && triggerWorkspaceOptions.some((option) => option.label === "trusted-workspace") && triggerWorkspaceOptions.some((option) => option.label === "reference-workspace"), JSON.stringify({ options: triggerWorkspaceOptions }));
+    check("Trigger workspace selector contains no absolute workspace path", !triggerWorkspaceOptionText.includes(trustedWorkspace) && !triggerWorkspaceOptionText.includes(secondaryWorkspace) && !triggerWorkspaceOptionText.includes("workspace.path"), JSON.stringify({ options: triggerWorkspaceOptions }));
     await renderer(`(()=>{
       document.getElementById('trigger-name').value='Inbox file changes';
       document.getElementById('trigger-routine').value=${JSON.stringify(routine.id)};
@@ -418,6 +430,8 @@ export async function runVerifyV44EventTriggers({ app }) {
     const triggerList = await renderer("window.sovereignbot.eventTriggers.list({})");
     trigger = triggerList.triggers.find((entry) => entry.name === "Inbox file changes");
     check("trigger created through dedicated UI and exact IPC", trigger?.enabled && trigger.routineId === routine.id && trigger.workspaceId === workspaceId && trigger.pathPrefix === "inbox/order.json", JSON.stringify(projectTrigger(trigger)));
+    const triggerCreatePayload = triggerCreatePayloads.at(-1);
+    check("Trigger form submits only opaque workspaceId and governed relative fields", triggerCreatePayload && Object.keys(triggerCreatePayload).sort().join(",") === "name,pathPrefix,routineId,workspaceId" && triggerCreatePayload.workspaceId === workspaceId && !JSON.stringify(triggerCreatePayload).includes(trustedWorkspace) && !JSON.stringify(triggerCreatePayload).includes(secondaryWorkspace) && !/(authority|path|token|secret|cookie|provider)/i.test(JSON.stringify(triggerCreatePayload).replace("pathPrefix", "")), JSON.stringify({ payload: triggerCreatePayload }));
     check("trigger state persists only bounded metadata", trigger && !Object.keys(trigger).some((key) => /content|token|cookie|secret|shell|command|provider/i.test(key)), JSON.stringify(Object.keys(trigger ?? {})));
     await waitForWatcherReady(trigger.id);
 

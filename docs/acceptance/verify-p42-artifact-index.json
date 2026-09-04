@@ -1,0 +1,54 @@
+{
+  "schema": "sovereignbot.desktop.p42-artifact-index-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "canonical ArtifactStore index covers 620 metadata records": {
+      "ok": true,
+      "detail": "\"{\\\"count\\\":620,\\\"first\\\":\\\"artifact_000000000000026c\\\",\\\"targetPositions\\\":[619,618]}\""
+    },
+    "indexed query rejects unbounded limits and arbitrary fields": {
+      "ok": true
+    },
+    "renderer Search finds the old scoped Artifact outside the recent 500": {
+      "ok": true,
+      "detail": "\"{\\\"total\\\":2,\\\"ids\\\":[\\\"artifact_0000000000000002\\\",\\\"artifact_0000000000000001\\\"]}\""
+    },
+    "renderer Artifact Hub uses indexed Team/Channel candidates and latest family version": {
+      "ok": true,
+      "detail": "\"{\\\"cards\\\":[\\\"artifact_0000000000000002\\\"],\\\"body\\\":\\\"Saffron Needle ResultType: text/markdownVersion: v2Creator: P15 ChiefTeam: P42 Indexed Artifact TeamChannel: Project ChannelCreated: 2026-08-01T00:00:01.000ZHistory: created · 2026-08-01T00:00:01.000ZStatus: availablePreview / 预览Open / 打开Reveal / 显示Archive / 归档Export copy / 导出副本History / 历史Restore as new version / 恢复为新版本Revise with local file / 选择文件生成修订版Go to conversation / 前往会话\\\"}\""
+    },
+    "archive removes the indexed family from active Search": {
+      "ok": true,
+      "detail": "\"{\\\"total\\\":0}\""
+    },
+    "restore reindexes the family without changing latest version": {
+      "ok": true,
+      "detail": "\"{\\\"ids\\\":[\\\"artifact_0000000000000002\\\",\\\"artifact_0000000000000001\\\"],\\\"history\\\":[2,1]}\""
+    },
+    "public Hub and Search limits remain fail-closed": {
+      "ok": true,
+      "detail": "\"{\\\"hub\\\":true,\\\"search\\\":true}\""
+    },
+    "restart rebuilds the index and preserves scoped Hub/Search coverage": {
+      "ok": true,
+      "detail": "\"{\\\"searchIds\\\":[\\\"artifact_0000000000000002\\\",\\\"artifact_0000000000000001\\\"],\\\"hubIds\\\":[\\\"artifact_0000000000000002\\\"],\\\"count\\\":620}\""
+    }
+  },
+  "notes": [
+    "PASS hidden Electron window stays hidden",
+    "PASS canonical ArtifactStore index covers 620 metadata records \"{\\\"count\\\":620,\\\"first\\\":\\\"artifact_000000000000026c\\\",\\\"targetPositions\\\":[619,618]}\"",
+    "PASS indexed query rejects unbounded limits and arbitrary fields",
+    "PASS renderer Search finds the old scoped Artifact outside the recent 500 \"{\\\"total\\\":2,\\\"ids\\\":[\\\"artifact_0000000000000002\\\",\\\"artifact_0000000000000001\\\"]}\"",
+    "PASS renderer Artifact Hub uses indexed Team/Channel candidates and latest family version \"{\\\"cards\\\":[\\\"artifact_0000000000000002\\\"],\\\"body\\\":\\\"Saffron Needle ResultType: text/markdownVersion: v2Creator: P15 ChiefTeam: P42 Indexed Artifact TeamChannel: Project ChannelCreated: 2026-08-01T00:00:01.000ZHistory: created · 2026-08-01T00:00:01.000ZStatus: availablePreview / 预览Open / 打开Reveal / 显示Archive / 归档Export copy / 导出副本History / 历史Restore as new version / 恢复为新版本Revise with local file / 选择文件生成修订版Go to conversation / 前往会话\\\"}\"",
+    "PASS archive removes the indexed family from active Search \"{\\\"total\\\":0}\"",
+    "PASS restore reindexes the family without changing latest version \"{\\\"ids\\\":[\\\"artifact_0000000000000002\\\",\\\"artifact_0000000000000001\\\"],\\\"history\\\":[2,1]}\"",
+    "PASS public Hub and Search limits remain fail-closed \"{\\\"hub\\\":true,\\\"search\\\":true}\"",
+    "PASS restart rebuilds the index and preserves scoped Hub/Search coverage \"{\\\"searchIds\\\":[\\\"artifact_0000000000000002\\\",\\\"artifact_0000000000000001\\\"],\\\"hubIds\\\":[\\\"artifact_0000000000000002\\\"],\\\"count\\\":620}\""
+  ],
+  "externalActions": [],
+  "ok": true
+}

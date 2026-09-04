@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -37,11 +37,35 @@ test("artifact store copies trusted workspace output into durable managed storag
         assert.equal(artifact.mimeType, "text/markdown");
         assert.match(artifact.sha256, /^[a-f0-9]{64}$/);
         assert.equal(Object.hasOwn(artifact, "storageRelativePath"), false);
+        assert.equal(Object.hasOwn(artifact, "sourceRelativePath"), false);
         assert.equal(readFileSync(store.managedPath(artifact.id), "utf8"), "# Result\n\nUseful output.\n");
         const preview = store.previewText(artifact.id);
         assert.equal(preview.preview.includes("Useful output"), true);
         assert.equal(preview.truncated, false);
         assert.equal(store.list({ conversationId: "conv_1234567890abcdef" }).artifacts.length, 1);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("artifact search projection reads only bounded allowlisted text from managed files", () => {
+    const { root, workspace, store } = fixture();
+    try {
+        writeFileSync(join(workspace, "searchable.md"), "P45 bounded artifact body", "utf8");
+        writeFileSync(join(workspace, "binary.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+        writeFileSync(join(workspace, "oversized.txt"), Buffer.alloc(64 * 1024 + 1, 0x61));
+        const searchable = store.ingestWorkspaceFile({ workspaceId: "workspace_project", workspacePath: workspace, relativePath: "searchable.md", title: "Searchable" });
+        const binary = store.ingestWorkspaceFile({ workspaceId: "workspace_project", workspacePath: workspace, relativePath: "binary.png", title: "Binary" });
+        const oversized = store.ingestWorkspaceFile({ workspaceId: "workspace_project", workspacePath: workspace, relativePath: "oversized.txt", title: "Oversized" });
+        const records = store.searchRecords({ visibility: "all", limit: 5_000 }).artifacts;
+        const byId = new Map(records.map((entry) => [entry.id, entry]));
+        assert.equal(byId.get(searchable.id).searchText, "P45 bounded artifact body");
+        assert.equal(Object.hasOwn(byId.get(searchable.id), "storageRelativePath"), false);
+        assert.equal(Object.hasOwn(byId.get(binary.id), "searchText"), false);
+        assert.equal(Object.hasOwn(byId.get(oversized.id), "searchText"), false);
+        rmSync(store.managedPath(searchable.id));
+        assert.equal(Object.hasOwn(new Map(store.searchRecords({ visibility: "all", limit: 5_000 }).artifacts.map((entry) => [entry.id, entry])).get(searchable.id), "searchText"), false);
     }
     finally {
         rmSync(root, { recursive: true, force: true });
@@ -80,6 +104,131 @@ test("artifact state reloads from its versioned metadata without exposing manage
         assert.equal(reloaded.get(artifact.id).fileName, "data.json");
         assert.equal(reloaded.previewText(artifact.id).preview, '{"ok":true}');
         assert.equal(Object.hasOwn(reloaded.get(artifact.id), "storageRelativePath"), false);
+        assert.equal(Object.hasOwn(reloaded.get(artifact.id), "sourceRelativePath"), false);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("artifact restore creates an immutable durable version lineage", () => {
+    const { root, workspace, store } = fixture();
+    try {
+        const sourcePath = join(workspace, "reports", "release.md");
+        writeFileSync(sourcePath, "# Release v1\n", "utf8");
+        const source = store.ingestWorkspaceFile({
+            workspaceId: "workspace_project",
+            workspacePath: workspace,
+            relativePath: "reports/release.md",
+            title: "Release report",
+            createdByCoworkerId: "coworker_1234567890abcdef",
+            conversationId: "conv_1234567890abcdef",
+            sourceMessageId: "msg_1234567890abcdef",
+        });
+        const revisionPath = join(workspace, "reports", "revision.md");
+        writeFileSync(revisionPath, "# Release v2\n", "utf8");
+        const revised = store.reviseFromPickedFile({ artifactId: source.id, sourcePath: revisionPath });
+        const restored = store.restoreAsNewVersion(source.id);
+        assert.notEqual(revised.id, source.id);
+        assert.notEqual(restored.id, source.id);
+        assert.notEqual(restored.id, revised.id);
+        assert.equal(source.version, 1);
+        assert.equal(revised.version, 2);
+        assert.equal(restored.version, 3);
+        assert.equal(restored.artifactFamilyId, source.artifactFamilyId);
+        assert.equal(restored.parentArtifactId, source.id);
+        assert.equal(restored.conversationId, source.conversationId);
+        assert.equal(restored.createdByCoworkerId, source.createdByCoworkerId);
+        assert.equal(store.previewText(revised.id).preview, "# Release v2\n");
+        assert.equal(store.previewText(restored.id).preview, "# Release v1\n");
+        assert.equal(readFileSync(store.managedPath(source.id), "utf8"), "# Release v1\n");
+        assert.deepEqual(store.history(restored.id).history.map((entry) => [entry.id, entry.version, entry.parentArtifactId]), [
+            [restored.id, 3, source.id],
+            [revised.id, 2, source.id],
+            [source.id, 1, undefined],
+        ]);
+        const reloaded = createArtifactStore({ dataDir: join(root, "data") });
+        assert.deepEqual(reloaded.history(restored.id).history.map((entry) => [entry.id, entry.version, entry.artifactFamilyId]), [
+            [restored.id, 3, source.artifactFamilyId],
+            [revised.id, 2, source.artifactFamilyId],
+            [source.id, 1, source.artifactFamilyId],
+        ]);
+        assert.equal(Object.hasOwn(restored, "storageRelativePath"), false);
+        assert.equal(Object.hasOwn(restored, "sourceRelativePath"), false);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("artifact archive hides a whole family without deleting bytes or history, and restore survives restart", () => {
+    const { root, workspace, store } = fixture();
+    try {
+        const sourcePath = join(workspace, "reports", "retention.md");
+        writeFileSync(sourcePath, "# Retained\n", "utf8");
+        const source = store.ingestWorkspaceFile({ workspaceId: "workspace_project", workspacePath: workspace, relativePath: "reports/retention.md", title: "Retention report" });
+        const revisionPath = join(workspace, "reports", "retention-v2.md");
+        writeFileSync(revisionPath, "# Retained v2\n", "utf8");
+        const revised = store.reviseFromPickedFile({ artifactId: source.id, sourcePath: revisionPath });
+        const managedSource = store.managedPath(source.id);
+        const beforeHistory = store.history(revised.id).history.map((entry) => entry.id);
+        const archived = store.archive(revised.id);
+        assert.equal(archived.archived, true);
+        assert.equal(store.list().artifacts.length, 0);
+        assert.equal(store.list({ visibility: "archived" }).artifacts.length, 2);
+        assert.deepEqual(store.history(revised.id).history.map((entry) => entry.id), beforeHistory);
+        assert.equal(readFileSync(managedSource, "utf8"), "# Retained\n");
+        assert.equal(statSync(managedSource).isFile(), true);
+        assert.equal(store.get(revised.id).archived, true);
+        const reloaded = createArtifactStore({ dataDir: join(root, "data") });
+        assert.equal(reloaded.list().artifacts.length, 0);
+        assert.equal(reloaded.list({ visibility: "archived" }).artifacts.length, 2);
+        const restored = reloaded.restore(revised.id);
+        assert.equal(restored.archived, false);
+        assert.equal(reloaded.list().artifacts.length, 2);
+        assert.deepEqual(reloaded.history(revised.id).history.map((entry) => entry.id), beforeHistory);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("coworker artifacts remain private until the publish gate commits them", () => {
+    const { root, workspace, store } = fixture();
+    try {
+        writeFileSync(join(workspace, "pending.md"), "not public yet", "utf8");
+        const artifact = store.ingestWorkspaceFile({
+            workspaceId: "workspace_project",
+            workspacePath: workspace,
+            relativePath: "pending.md",
+            published: false,
+        });
+        assert.equal(store.list().artifacts.length, 0);
+        assert.throws(() => store.get(artifact.id), /not published/);
+        assert.throws(() => store.previewText(artifact.id), /not published/);
+        assert.deepEqual(store.publishArtifacts([artifact.id]).map((entry) => entry.id), [artifact.id]);
+        assert.equal(store.previewText(artifact.id).preview, "not public yet");
+        const reloaded = createArtifactStore({ dataDir: join(root, "data") });
+        assert.equal(reloaded.list().artifacts.length, 1);
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("artifact publication rolls back in-memory visibility when persistence fails", () => {
+    const { root, workspace } = fixture();
+    const dataDir = join(root, "data");
+    const persistPath = join(dataDir, "desktop-state", "artifacts.json");
+    const store = createArtifactStore({ dataDir, persistPath });
+    try {
+        writeFileSync(join(workspace, "rollback.md"), "rollback me", "utf8");
+        const artifact = store.ingestWorkspaceFile({ workspaceId: "workspace_project", workspacePath: workspace, relativePath: "rollback.md", published: false });
+        rmSync(persistPath, { force: true });
+        mkdirSync(persistPath, { recursive: true });
+        assert.throws(() => store.publishArtifacts([artifact.id]));
+        assert.equal(store.list().artifacts.length, 0);
+        assert.throws(() => store.get(artifact.id), /not published/);
     }
     finally {
         rmSync(root, { recursive: true, force: true });

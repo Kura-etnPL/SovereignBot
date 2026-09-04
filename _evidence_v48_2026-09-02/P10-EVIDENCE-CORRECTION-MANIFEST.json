@@ -1,0 +1,37 @@
+{
+  "schema": "sovereignbot.local-acceptance-manifest.v1",
+  "phase": "V4.3-P10-correction",
+  "date": "2026-09-02",
+  "branch": "codex/v4-review-directed-handoff-protocol",
+  "sourceCommits": [
+    "61017421fc3ccc02fc31ffe91571ad432d9c726a",
+    "1858efcddc3fb1b1de22039f2774554048543eca"
+  ],
+  "supersedesEvidenceCommit": "e9e9b3a26ee11a7a67f390280fa8489054a56fd6",
+  "supersededClaim": "Original P10 gate 14/14; incomplete because restore copied identical bytes and History was alert-only.",
+  "acceptance": {
+    "command": "node scripts/verify-v47-artifact-lineage.mjs",
+    "result": "PASS",
+    "checksPassed": 15,
+    "checksTotal": 15,
+    "rawJson": "_evidence_v48_2026-09-02/verify-v47-artifact-lineage.json",
+    "rawLog": "_evidence_v48_2026-09-02/verify-v47-artifact-lineage.log",
+    "scenario": "A→B→select v1→v3=A; v1, v2, and v3 retained; hashes, previews, lineage, and restart durability verified."
+  },
+  "localChecks": {
+    "syntax": "PASS — 164 files",
+    "fullTests": "PASS — 251 passed, 0 failed",
+    "focusedTests": "PASS — 10 passed, 0 failed",
+    "secretScan": "PASS — clean",
+    "gitDiffCheck": "PASS"
+  },
+  "boundaries": {
+    "networkUsed": false,
+    "dependenciesInstalled": false,
+    "providerOrOAuthUsed": false,
+    "cloudSyncOrSharingAdded": false,
+    "destructiveRetentionOrDeletionAdded": false,
+    "localRcSigned": false,
+    "publishEligible": false
+  }
+}

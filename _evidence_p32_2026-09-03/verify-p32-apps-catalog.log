@@ -1,0 +1,49 @@
+PASS hidden Electron window stays hidden
+PASS real preload exposes the independent Apps Catalog {"api":true,"nav":true,"view":true,"search":true,"filters":true,"list":true}
+PASS Apps Catalog renders connection, health, capability, approval, and cost summaries {"count":2,"sample":"This PC / 此电脑\n\ncomputer · SovereignBot governed computer\n\nAvailable\n\nUse the existing governed browser/computer lane with human takeover when needed.\n\nTrusted source / 可信来源:\nSovereignBot built-in\nVersion / 版本:\n1\nCatalog / 目录:\nAvailable in the trusted local catalog.\nInstallation / 安装:\ninstalled\nConnection / 连接:\nNot connected; assignments are inactive.\nHealth / 健康:\nSigned out or needs attention.\nCapabilities / 能力:\n3 governed capabilities\nApproval / 审批:\nGovernor-controlled; every action is task-bou"}
+PASS catalog search narrows to the matching app Project workspace / 项目工作区
+
+workspace · SovereignBot governed workspace
+
+Connected
+
+Read and write within the trusted shared or private workspace selected by the Governor.
+
+Trusted source / 可信来源:
+SovereignBot built-in
+Version / 版本:
+1
+Catalog / 目录:
+Available in the trusted local catalog.
+Installation / 安装:
+installed
+Connection / 连接:
+Connected through the trusted App bridge.
+Health / 健康:
+Ready for governed task-bound use.
+Capabilities / 能力:
+3 governed capabilities
+Approval / 审批:
+Governor-controlled
+PASS status filtering has an honest empty state
+PASS connection review precedes the local connect action Review before connecting / 连接前审查
+Trusted source / 可信来源:
+SovereignBot built-in
+Version / 版本:
+1
+Capabilities / 能力:
+View a live screen · Navigate and interact · Request human help
+Approval / 审批:
+Governor-controlled; every action is task-bound and reviewable.
+Cost / 费用:
+No additional metered app fee; governed local computer lane.
+Cancel / 取消
+Approve & connect / 同意并连接
+PASS Approve and connect reaches the real local connected state
+PASS Apps Catalog loads Coworker assignment choices {"options":[{"value":"","text":"Choose Coworker / 选择同事"},{"value":"coworker_0fe3d4a7fc1dc49d","text":"Coworker: P15 Chief"},{"value":"coworker_cf30136d8be74c5e","text":"Coworker: P15 Specialist"}],"buttons":["Disconnect / 断开","Disable / 禁用","Assign Team / 分配团队","Assign Coworker / 分配同事","Unassign Team / 解除团队"]}
+PASS Apps Catalog assigns a Team and Coworker through opaque IDs
+PASS Apps Catalog renders a Team unassignment action {"found":true,"labels":["Disconnect / 断开","Disable / 禁用","Assign Team / 分配团队","Assign Coworker / 分配同事","Unassign Team / 解除团队","Unassign Coworker / 解除同事"]}
+PASS Team unassignment IPC removes the opaque assignment
+PASS Apps Catalog unassigns Team and Coworker in the current scope
+PASS connection and assignment state survives a real service restart {"id":"sovereignbot-computer","name":"This PC / 此电脑","service":"SovereignBot governed computer","description":"Use the existing governed browser/computer lane with human takeover when needed.","category":"computer","version":1,"trustedSource":"SovereignBot built-in","capabilities":["View a live screen","Navigate and interact","Request human help"],"capabilitySummary":"3 governed capabilities","availability":{"state":"available","summary":"Available in the trusted local catalog."},"installationState":"installed","status":"connected","state":"ready","connectionState":"connected","connection":{"state":"connected","summary":"Connected through the trusted App bridge."},"health":{"state":"ready","summary":"Ready for governed task-bound use.","checkedAt":"2026-09-03T05:24:04.691Z"},"cost":{"mode":"included","summary":"No additional metered app fee; governed local computer lane.","metered":false},"authority":"Governor-controlled","approval":{"mode":"governed","summary":"Governor-controlled; every action is task-bound and reviewable."},"approvalSummary":"Governor-controlled; every action is task-bound and reviewable.","assignedTeamIds":[],"assignedCoworkerIds":[]}
+[summary] 13/13 PASS

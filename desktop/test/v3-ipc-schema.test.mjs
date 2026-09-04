@@ -8,8 +8,8 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     const expected = [
         "coworker:list", "coworker:get", "coworker:create", "coworker:update", "coworker:archive", "coworker:restore",
         "conversation:list", "conversation:get", "conversation:createDirect", "conversation:createTeam", "conversation:send",
-        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:exportPlaybook", "team:importPlaybook", "team:createChannelFromTemplate", "channel:list", "channel:get",
-        "connectedApps:list", "connectedApps:assign",
+        "team:list", "team:get", "team:installPack", "team:exportPack", "team:importPack", "team:importPackViaDialog", "team:exportPackViaDialog", "team:exportPlaybook", "team:importPlaybook", "team:createChannelFromTemplate", "team:requestParallel", "channel:list", "channel:get", "channel:create", "channel:update", "channel:archive", "channel:restore",
+        "connectedApps:list", "connectedApps:search", "connectedApps:review", "connectedApps:assign", "connectedApps:connect", "connectedApps:disconnect", "connectedApps:disable", "connectedApps:health",
     ];
     for (const channel of expected)
         assert.ok(V3_IPC_CHANNELS[channel], channel);
@@ -21,6 +21,46 @@ test("V3 coworker and conversation channels are enumerated and wired into the ma
     assert.match(ipcSource, /V3_IPC_CHANNELS/);
     assert.match(ipcSource, /validateV3IpcRequest/);
     assert.match(ipcSource, /ALL_IPC_CHANNELS/);
+    assert.match(ipcSource, /team:activity/);
+    const preloadSource = readFileSync(fileURLToPath(new URL("../src/main/preload.cjs", import.meta.url)), "utf8");
+    assert.match(preloadSource, /activity: invoke\("team:activity"\)/);
+    assert.match(preloadSource, /review: invoke\("connectedApps:review"\)/);
+    assert.match(preloadSource, /disable: invoke\("connectedApps:disable"\)/);
+});
+
+test("conversation:get accepts only bounded pagination inputs", () => {
+    assert.deepEqual(
+        validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef" }),
+        { conversationId: "conv_1234567890abcdef", limit: 100 },
+    );
+    assert.deepEqual(
+        validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", limit: 25, beforeMessageId: "msg_1234567890abcdef" }),
+        { conversationId: "conv_1234567890abcdef", limit: 25, beforeMessageId: "msg_1234567890abcdef" },
+    );
+    assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", limit: 101 }), /limit/);
+    assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", beforeMessageId: "msg_not-a-cursor" }), /message identifier/);
+    assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", unknown: true }), /unexpected request field/);
+    assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", sessionId: "provider-session" }), /not accepted from the renderer/);
+    assert.deepEqual(validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", limit: 25, aroundMessageId: "msg_1234567890abcdef" }), { conversationId: "conv_1234567890abcdef", limit: 25, aroundMessageId: "msg_1234567890abcdef" });
+    assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", aroundMessageId: "msg_not-an-anchor" }), /message identifier/);
+    assert.throws(() => validateV3IpcRequest("conversation:get", { conversationId: "conv_1234567890abcdef", beforeMessageId: "msg_1234567890abcdef", aroundMessageId: "msg_abcdefabcdefabcd" }), /ambiguous/);
+});
+
+test("parallel Team requests accept only bounded specialist tasks and a separate reviewer", () => {
+    const payload = {
+        conversationId: "conversation_1234567890abcdef",
+        children: [
+            { targetCoworkerId: "coworker_1111111111111111", boundedTask: "Inspect the bounded failure." },
+            { targetCoworkerId: "coworker_2222222222222222", boundedTask: "Implement the bounded change.", requiresComputer: true },
+        ],
+        reviewerCoworkerId: "coworker_3333333333333333",
+        reason: "These tasks are independent and need one required review.",
+    };
+    assert.deepEqual(validateV3IpcRequest("team:requestParallel", payload), payload);
+    assert.throws(() => validateV3IpcRequest("team:requestParallel", { ...payload, children: payload.children.slice(0, 1) }), /2 to 4/);
+    assert.throws(() => validateV3IpcRequest("team:requestParallel", { ...payload, ownerId: "coworker_1111111111111111" }), /unexpected request field: ownerId/);
+    assert.throws(() => validateV3IpcRequest("team:requestParallel", { ...payload, children: [{ ...payload.children[0], capability: "computer" }, payload.children[1]] }), /not accepted from the renderer/);
+    assert.throws(() => validateV3IpcRequest("team:requestParallel", { ...payload, children: payload.children.map((entry) => ({ ...entry, boundedTask: "" })) }), /boundedTask is required/);
 });
 
 test("coworker create/update accepts product metadata but rejects execution authority recursively", () => {
@@ -110,6 +150,11 @@ test("team pack transfer is declarative and rejects provider/account or workspac
     };
     assert.deepEqual(validateV3IpcRequest("team:importPack", { pack }), { pack });
     assert.deepEqual(validateV3IpcRequest("team:exportPack", { teamId: "team_1111111111111111" }), { teamId: "team_1111111111111111" });
+    assert.deepEqual(validateV3IpcRequest("team:importPackViaDialog", {}), {});
+    assert.deepEqual(validateV3IpcRequest("team:exportPackViaDialog", { teamId: "team_1111111111111111" }), { teamId: "team_1111111111111111" });
+    assert.deepEqual(validateV3IpcRequest("team:exportPackViaDialog", { packId: "demo-pack" }), { packId: "demo-pack" });
+    assert.throws(() => validateV3IpcRequest("team:exportPackViaDialog", {}), /exactly one/);
+    assert.throws(() => validateV3IpcRequest("team:exportPackViaDialog", { teamId: "team_1111111111111111", packId: "demo-pack" }), /exactly one/);
     assert.throws(
         () => validateV3IpcRequest("team:importPack", { pack: { ...pack, coworkers: pack.coworkers.map((entry, index) => index ? entry : { ...entry, modelBinding: { ...entry.modelBinding, providerAccountId: "account" } }) } }),
         /unexpected request field: providerAccountId/,
@@ -120,6 +165,14 @@ test("team pack transfer is declarative and rejects provider/account or workspac
     );
 });
 
+test("Antigravity account switching accepts only safe A/B/C slots and never renderer account IDs", () => {
+    assert.deepEqual(validateV3IpcRequest("provider:setCoworkerAccount", { coworkerId: "coworker_aaaaaaaaaaaaaaaa", provider: "antigravity", accountSlot: "B" }), {
+        coworkerId: "coworker_aaaaaaaaaaaaaaaa", provider: "antigravity", accountSlot: "B",
+    });
+    assert.throws(() => validateV3IpcRequest("provider:setCoworkerAccount", { coworkerId: "coworker_aaaaaaaaaaaaaaaa", provider: "antigravity", accountSlot: "account-b" }), /A, B, or C/);
+    assert.throws(() => validateV3IpcRequest("coworker:update", { coworkerId: "coworker_aaaaaaaaaaaaaaaa", patch: { modelBinding: { profile: "automatic", provider: "antigravity", providerAccountId: "account-b" } } }), /unexpected request field: providerAccountId/);
+});
+
 test("playbook transfer is declarative and rejects runtime state", () => {
     const playbook = {
         schema: "sovereignbot.desktop.playbook.v1",
@@ -127,6 +180,11 @@ test("playbook transfer is declarative and rejects runtime state", () => {
         name: "Delivery",
         description: "A bounded delivery method.",
         steps: ["chief", "coding-lead", "reviewer", "chief"],
+        stages: [{ id: "prepare", name: "Prepare", instructions: "Prepare the bounded change.", expectedOutput: "Draft", recommendedCoworkerRole: "Author", recommendedSkillIds: ["skill_writing"] }],
+        reviewPoints: [{ id: "review", name: "Review", instructions: "Current owner reviews the draft.", recommendedCoworkerRole: "Reviewer" }],
+        expectedOutput: "Approved delivery",
+        recommendedCoworkerRoles: ["Author", "Reviewer"],
+        recommendedSkillIds: ["skill_writing"],
     };
     assert.deepEqual(
         validateV3IpcRequest("team:importPlaybook", { teamId: "team_1111111111111111", playbook }),
@@ -140,6 +198,17 @@ test("playbook transfer is declarative and rejects runtime state", () => {
         () => validateV3IpcRequest("team:importPlaybook", { teamId: "team_1111111111111111", playbook: { ...playbook, workspacePath: "E:/private" } }),
         /unexpected request field: workspacePath/,
     );
+    assert.throws(
+        () => validateV3IpcRequest("playbook:update", { playbookId: "delivery", patch: { stages: [{ id: "prepare", name: "Prepare", instructions: "Draft", providerAccountId: "account" }] } }),
+        /unexpected request field: providerAccountId/,
+    );
+});
+
+test("native Playbook file channels accept only bounded dialog payloads", () => {
+    assert.deepEqual(validateV3IpcRequest("playbook:importViaDialog", {}), {});
+    assert.deepEqual(validateV3IpcRequest("playbook:exportViaDialog", { playbookId: "delivery" }), { playbookId: "delivery" });
+    assert.throws(() => validateV3IpcRequest("playbook:importViaDialog", { path: "E:/private/delivery.json" }), /request payload must be empty/);
+    assert.throws(() => validateV3IpcRequest("playbook:exportViaDialog", { playbookId: "delivery", sessionId: "secret" }), /payload\.sessionId/);
 });
 
 test("channel template creation accepts only a bounded team/template selection", () => {
@@ -151,6 +220,40 @@ test("channel template creation accepts only a bounded team/template selection",
     assert.throws(
         () => validateV3IpcRequest("team:createChannelFromTemplate", { ...payload, workspacePath: "E:/private" }),
         /unexpected request field: workspacePath/,
+    );
+});
+
+test("channel management accepts only bounded product fields", () => {
+    const create = validateV3IpcRequest("channel:create", {
+        teamId: "team_1111111111111111",
+        name: "Launch Room",
+        kind: "work",
+        instructions: "Bounded launch work.",
+        workspaceId: "workspace_1111111111111111",
+        playbookId: "software-delivery",
+    });
+    assert.deepEqual(create, {
+        teamId: "team_1111111111111111",
+        name: "Launch Room",
+        kind: "work",
+        instructions: "Bounded launch work.",
+        workspaceId: "workspace_1111111111111111",
+        playbookId: "software-delivery",
+    });
+    assert.deepEqual(validateV3IpcRequest("channel:update", {
+        channelId: "channel_1111111111111111",
+        patch: { name: "Launch Review", kind: "project" },
+    }), {
+        channelId: "channel_1111111111111111",
+        patch: { name: "Launch Review", kind: "project" },
+    });
+    assert.throws(
+        () => validateV3IpcRequest("channel:create", { teamId: "team_1111111111111111", name: "Leak", workspacePath: "E:/private" }),
+        /unexpected request field: workspacePath/,
+    );
+    assert.throws(
+        () => validateV3IpcRequest("channel:update", { channelId: "channel_1111111111111111", patch: { conversationId: "conversation_1" } }),
+        /unexpected request field: conversationId/,
     );
 });
 
@@ -169,4 +272,9 @@ test("connected app assignment accepts only an opaque target and no authority fi
         () => validateV3IpcRequest("connectedApps:assign", { ...payload, coworkerId: "coworker_1111111111111111" }),
         /exactly one/,
     );
+    assert.deepEqual(validateV3IpcRequest("connectedApps:assign", { ...payload, projectId: "project_1111111111111111" }), { ...payload, projectId: "project_1111111111111111" });
+    assert.deepEqual(validateV3IpcRequest("connectedApps:list", { projectId: "project_1111111111111111", query: "workspace", limit: 10 }), { projectId: "project_1111111111111111", query: "workspace", limit: 10 });
+    assert.deepEqual(validateV3IpcRequest("connectedApps:connect", { appId: "sovereignbot-computer", approveMetered: false }), { appId: "sovereignbot-computer", approveMetered: false });
+    assert.throws(() => validateV3IpcRequest("connectedApps:list", { path: "C:/private" }), /unexpected request field/);
+    assert.throws(() => validateV3IpcRequest("connectedApps:connect", { appId: "app", url: "https://example.invalid" }), /unexpected request field/);
 });

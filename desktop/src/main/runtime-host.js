@@ -6,6 +6,10 @@ import { verifyVendorTree } from "./lib/vendor-integrity.js";
 import { describeProvider } from "./lib/provider-discovery.js";
 import { loadJsonState } from "./lib/desktop-state.js";
 import { buildPolicyRules, buildProviderRoster, resolveFakeProviderLaunch } from "./provider-roster.js";
+import { accountIsolationNamespace } from "./provider-account.js";
+import { createChatGPTWebProviderFactory } from "./chatgpt-web-provider.js";
+import { antigravityAccountNamespace, createAntigravityProviderFactory } from "./antigravity-provider.js";
+import { createEconomyProviderFactory } from "./economy-provider.js";
 import { prepareInternalNode } from "./internal-node.js";
 
 const DESKTOP_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -111,7 +115,7 @@ export async function loadCoreResolvers() {
 // settings, and the persistent Coworker Registry. Coworkers are converted into dedicated
 // provider-backed runtime agents only here; renderer messages and model output never mint
 // runtime identities or capabilities.
-export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = () => [], getCoworkerAppAccess = () => undefined, workerNodeClientResolver }) {
+export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = () => [], getCoworkerAppAccess = () => undefined, workerNodeClientResolver, chatgptWebDriverFactory, antigravityDriverFactory, economyConfig, economyAdapterFactory }) {
     if (typeof getSettings !== "function")
         throw new Error("runtime host requires a settings reader");
     if (typeof getCoworkers !== "function")
@@ -121,6 +125,8 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
 
     const { createRuntime } = await loadCore();
     const coreModules = await loadCoreResolvers();
+    const defaultChatGPTAccount = accountIsolationNamespace("chatgpt-web", "default");
+    const defaultAntigravityAccount = antigravityAccountNamespace("A");
 
     const fakeLaunchers = {
         codex: resolveFakeProviderLaunch({ ...process.env, provider: "codex" }),
@@ -138,11 +144,12 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                 source: launch.source,
                 commandPathHidden: true,
                 auth: { state: "unverified" },
+                health: "ready",
                 interactiveLoginAvailable: false,
             };
         }
         catch (error) {
-            return { provider: label, found: false, reason: String(error?.message ?? error) };
+            return { provider: label, found: false, health: "unavailable", reason: String(error?.message ?? error) };
         }
     }
 
@@ -154,6 +161,15 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         return {
             codex: resolveFast(coreModules.resolveCodexLaunch, "codex", fakeLaunchers.codex),
             claude: resolveFast(coreModules.resolveClaudeCodeLaunch, "claude-code", fakeLaunchers.claude),
+            "chatgpt-web": chatgptWebEnabled
+                ? { provider: "chatgpt-web", found: true, source: "dedicated-profile", auth: { state: "unverified" }, health: "ready", interactiveLoginAvailable: true }
+                : chatgptWebUnavailable(),
+            antigravity: antigravityEnabled
+                ? { provider: "antigravity", found: true, source: "dedicated-profile", auth: { state: "unverified" }, health: "ready", interactiveLoginAvailable: true }
+                : antigravityUnavailable(),
+            economy: economyFactory.available()
+                ? { provider: "economy", found: true, source: "trusted-config", auth: { state: "configured" }, health: "ready", configured: economyFactory.configured(), interactiveLoginAvailable: false }
+                : economyUnavailable(),
         };
     }
 
@@ -174,7 +190,15 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                 ["--version"],
             ),
         ]);
-        return { codex, claude };
+        const chatgptWeb = chatgptWebEnabled
+            ? await chatgptWebFactory.health(defaultChatGPTAccount)
+            : chatgptWebUnavailable();
+        const antigravity = antigravityEnabled
+            ? await antigravityFactory.health(defaultAntigravityAccount)
+            : antigravityUnavailable();
+        const antigravityAccounts = antigravityEnabled ? await antigravityFactory.accounts() : [];
+        const economy = await economyFactory.health();
+        return { codex, claude, "chatgpt-web": { provider: "chatgpt-web", ...chatgptWeb }, antigravity: { provider: "antigravity", ...antigravity, accounts: antigravityAccounts }, economy: { provider: "economy", configured: economyFactory.configured(), ...economy } };
     }
 
     function computerRuntimeConfig() {
@@ -197,6 +221,30 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         };
     }
 
+    const chatgptWebEnabled = process.env.SOVEREIGNBOT_CHATGPT_WEB_ENABLED === "1" || typeof chatgptWebDriverFactory === "function";
+    const chatgptWebFactory = createChatGPTWebProviderFactory({
+        dataDir,
+        driverConfig: computerRuntimeConfig().config?.driver ?? {},
+        driverFactory: chatgptWebDriverFactory,
+    });
+    const antigravityEnabled = process.env.SOVEREIGNBOT_ANTIGRAVITY_ENABLED === "1" || typeof antigravityDriverFactory === "function";
+    const antigravityFactory = createAntigravityProviderFactory({
+        dataDir,
+        driverConfig: computerRuntimeConfig().config?.driver ?? {},
+        driverFactory: antigravityDriverFactory,
+    });
+    const economyFactory = createEconomyProviderFactory({ dataDir, config: economyConfig ?? { providers: [], metered: { enabled: false, budget: 0, perRunCap: 0, totalCap: 0 } }, adapterFactory: economyAdapterFactory });
+
+    function chatgptWebUnavailable() {
+        return { provider: "chatgpt-web", found: false, health: "unavailable", auth: { state: "signed-out" }, reason: "ChatGPT Web is not connected; use Sign in to connect the dedicated profile." };
+    }
+    function antigravityUnavailable() {
+        return { provider: "antigravity", found: false, health: "unavailable", auth: { state: "signed-out" }, reason: "Antigravity is not connected; use Advanced account setup to connect a dedicated profile." };
+    }
+    function economyUnavailable() {
+        return { provider: "economy", found: false, configured: economyFactory.configured(), health: "unavailable", auth: { state: "unavailable" }, reason: economyFactory.configured() ? "No configured Economy provider is available." : "No Economy provider is configured." };
+    }
+
     function coworkerSnapshot() {
         const value = getCoworkers();
         if (Array.isArray(value))
@@ -207,11 +255,41 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
     }
 
     function summarizeRoster(roster, discovery) {
+        const settings = getSettings();
+        const publicProvider = (key) => {
+            const result = discovery[key] ?? {};
+            const authState = result.auth?.state;
+            const disabled = settings.providers?.[key]?.enabled === false;
+            const health = disabled ? "unavailable" : result.health
+                ?? (!result.found ? "unavailable"
+                    : authState === "signed-out" ? "signed-out"
+                        : authState === "capacity-limited" ? "capacity-limited" : "ready");
+            return {
+                found: Boolean(result.found),
+                enabled: !disabled,
+                health,
+                ...(disabled ? { reason: "Provider disabled in Settings" } : result.reason ? { reason: String(result.reason).slice(0, 300) } : {}),
+                authState,
+                usable: roster.providers[key] === true,
+                ...(key === "economy" ? { configured: result.configured === true } : {}),
+                ...(Array.isArray(result.capabilities) ? { capabilities: result.capabilities.filter((entry) => typeof entry === "string").slice(0, 16) } : {}),
+                ...(Array.isArray(result.models) ? { models: result.models.filter((entry) => typeof entry === "string").slice(0, 16) } : {}),
+                ...(Array.isArray(result.accounts) ? { accounts: result.accounts.map((entry) => ({ slot: entry.slot, health: entry.health, authState: entry.authState, ...(entry.reason ? { reason: String(entry.reason).slice(0, 300) } : {}), ...(Array.isArray(entry.capabilities) ? { capabilities: entry.capabilities.slice(0, 16) } : {}), ...(Array.isArray(entry.models) ? { models: entry.models.slice(0, 16) } : {}) })) } : {}),
+            };
+        };
+        const publicCoworkerBindings = Object.fromEntries(Object.entries(roster.coworkerBindings ?? {}).map(([coworkerId, binding]) => {
+            const { accountNamespace: _accountNamespace, ...visible } = binding ?? {};
+            if (binding?.provider === "antigravity") {
+                const slot = ["A", "B", "C"].find((entry) => antigravityAccountNamespace(entry) === binding.accountNamespace);
+                if (slot) visible.accountSlot = slot;
+            }
+            return [coworkerId, visible];
+        }));
         return {
             mode: roster.mode,
             ready: roster.ready,
             roles: { ...roster.roles },
-            coworkerBindings: structuredClone(roster.coworkerBindings ?? {}),
+            coworkerBindings: publicCoworkerBindings,
             agents: roster.agents.map((agent) => ({
                 id: agent.id,
                 name: agent.name,
@@ -220,18 +298,11 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                 harnessKind: agent.harness.kind,
             })),
             providers: {
-                codex: {
-                    found: Boolean(discovery.codex?.found),
-                    enabled: getSettings().providers.codex.enabled,
-                    authState: discovery.codex?.auth?.state ?? undefined,
-                    usable: roster.providers.codex === true,
-                },
-                claude: {
-                    found: Boolean(discovery.claude?.found),
-                    enabled: getSettings().providers.claude.enabled,
-                    authState: discovery.claude?.auth?.state ?? undefined,
-                    usable: roster.providers.claude === true,
-                },
+                codex: publicProvider("codex"),
+                claude: publicProvider("claude"),
+                "chatgpt-web": publicProvider("chatgpt-web"),
+                antigravity: publicProvider("antigravity"),
+                economy: publicProvider("economy"),
             },
         };
     }
@@ -254,6 +325,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             coworkers: coworkerSnapshot(),
             getCoworkerAppAccess,
             includeWorkerNodeDispatcher: Boolean(workerNodeClientResolver),
+            economyProviderId: economyFactory.defaultProviderId(),
         });
         let nextRuntime;
         try {
@@ -267,7 +339,18 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
                     repeatWindowMs: 180000,
                     rules: buildPolicyRules(nextRoster.agents),
                 },
-            }, workerNodeClientResolver ? { workerNodeClientResolver } : {});
+            }, {
+                ...(workerNodeClientResolver ? { workerNodeClientResolver } : {}),
+                chatgptWebAdapterResolver: (agent) => agent.harness?.kind === "chatgpt-web"
+                    ? chatgptWebFactory.get(agent.harness.accountNamespace ?? defaultChatGPTAccount)
+                    : undefined,
+                antigravityAdapterResolver: (agent) => agent.harness?.kind === "antigravity"
+                    ? antigravityFactory.get(agent.harness.accountNamespace ?? defaultAntigravityAccount)
+                    : undefined,
+                economyAdapterResolver: (agent) => agent.harness?.kind === "economy"
+                    ? economyFactory.get(agent.harness.providerId)
+                    : undefined,
+            });
 
             // PolicyVersionStore intentionally keeps the active policy across a runtime
             // rebuild.  Reconcile only the exact per-agent rules generated from the
@@ -312,13 +395,14 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             coworkers: coworkerSnapshot(),
             getCoworkerAppAccess,
             includeWorkerNodeDispatcher: Boolean(workerNodeClientResolver),
+            economyProviderId: economyFactory.defaultProviderId(),
         });
         const sameShape =
             nextRoster.mode === roster.mode
             && JSON.stringify(nextRoster.roles) === JSON.stringify(roster.roles)
             && JSON.stringify(nextRoster.coworkerBindings ?? {}) === JSON.stringify(roster.coworkerBindings ?? {})
-            && JSON.stringify(nextRoster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind, agent.governedTools ?? []]))
-                === JSON.stringify(roster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind, agent.governedTools ?? []]))
+            && JSON.stringify(nextRoster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind, agent.harness.model ?? "", agent.governedTools ?? []]))
+                === JSON.stringify(roster.agents.map((agent) => [agent.id, agent.capabilities, agent.harness.kind, agent.harness.model ?? "", agent.governedTools ?? []]))
             && (computer.path ?? "") === (computerPath ?? "");
         if (sameShape) {
             discovery = nextDiscovery;
@@ -351,6 +435,18 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             return roster.mode;
         },
         coreModules,
+        openChatGPTWebLogin() {
+            return chatgptWebFactory.openLogin(defaultChatGPTAccount);
+        },
+        openAntigravityLogin(accountNamespace = defaultAntigravityAccount) {
+            return antigravityFactory.openLogin(accountNamespace);
+        },
+        openEconomyLogin() {
+            throw new Error("Economy providers are configured through the trusted main-process provider contract; renderer login is unavailable");
+        },
+        economyUsageSnapshot() {
+            return economyFactory.usageSnapshot();
+        },
         rosterSummary() {
             return structuredClone(summary);
         },
@@ -364,6 +460,9 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         },
         async close() {
             await runtime.close();
+            await chatgptWebFactory.close();
+            await antigravityFactory.close();
+            await economyFactory.close();
         },
     };
 }

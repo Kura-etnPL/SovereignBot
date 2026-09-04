@@ -1,0 +1,55 @@
+{
+  "schema": "sovereignbot.desktop.p41-coworker-roster-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "large roster starts bounded with visible controls and safe count": {
+      "ok": true,
+      "detail": "{\"rows\":14,\"more\":\"Show 40 more / 显示其余 40 位\",\"summary\":\"54 coworkers / 54 位同事 · 0 working / 工作中 · 0 attention / 需关注 · 1 paused / 已暂停\",\"controls\":true}"
+    },
+    "Show more reveals every non-archived Coworker": {
+      "ok": true,
+      "detail": "{\"rows\":54,\"button\":\"Collapse / 收起\"}"
+    },
+    "remote search reaches a Coworker beyond the initial crop": {
+      "ok": true,
+      "detail": "{\"rows\":1,\"names\":[\"ZZZ P41 Remote Search Target\"]}"
+    },
+    "selected direct Coworker is retained after the bounded crop": {
+      "ok": true,
+      "detail": "{\"rows\":15,\"selected\":true,\"title\":\"ZZZ P41 Remote Search Target\"}"
+    },
+    "status filter and counts expose paused state": {
+      "ok": true,
+      "detail": "{\"names\":[\"P41 Roster 51\"],\"summary\":\"54 coworkers / 54 位同事 · 0 working / 工作中 · 0 attention / 需关注 · 1 paused / 已暂停\"}"
+    },
+    "provider readiness maps to a safe available status": {
+      "ok": true,
+      "detail": "[\"P41 Roster 00\"]"
+    },
+    "refresh and service restart preserve the bounded roster": {
+      "ok": true,
+      "detail": "{\"rows\":14,\"summary\":\"54 coworkers / 54 位同事 · 0 working / 工作中 · 0 attention / 需关注 · 1 paused / 已暂停\"}"
+    },
+    "persisted remote Coworker remains searchable after restart": {
+      "ok": true,
+      "detail": "[\"ZZZ P41 Remote Search Target\"]"
+    }
+  },
+  "notes": [
+    "PASS hidden Electron window stays hidden",
+    "PASS large roster starts bounded with visible controls and safe count {\"rows\":14,\"more\":\"Show 40 more / 显示其余 40 位\",\"summary\":\"54 coworkers / 54 位同事 · 0 working / 工作中 · 0 attention / 需关注 · 1 paused / 已暂停\",\"controls\":true}",
+    "PASS Show more reveals every non-archived Coworker {\"rows\":54,\"button\":\"Collapse / 收起\"}",
+    "PASS remote search reaches a Coworker beyond the initial crop {\"rows\":1,\"names\":[\"ZZZ P41 Remote Search Target\"]}",
+    "PASS selected direct Coworker is retained after the bounded crop {\"rows\":15,\"selected\":true,\"title\":\"ZZZ P41 Remote Search Target\"}",
+    "PASS status filter and counts expose paused state {\"names\":[\"P41 Roster 51\"],\"summary\":\"54 coworkers / 54 位同事 · 0 working / 工作中 · 0 attention / 需关注 · 1 paused / 已暂停\"}",
+    "PASS provider readiness maps to a safe available status [\"P41 Roster 00\"]",
+    "PASS refresh and service restart preserve the bounded roster {\"rows\":14,\"summary\":\"54 coworkers / 54 位同事 · 0 working / 工作中 · 0 attention / 需关注 · 1 paused / 已暂停\"}",
+    "PASS persisted remote Coworker remains searchable after restart [\"ZZZ P41 Remote Search Target\"]"
+  ],
+  "externalActions": [],
+  "ok": true
+}

@@ -1,0 +1,44 @@
+{
+  "date": "2026-09-03",
+  "publishEligible": false,
+  "checks": [
+    {
+      "name": "P18 focused desktop unit suite",
+      "command": "node --test desktop/test/p18-channel-unread.test.mjs",
+      "summary": "9/9 PASS"
+    },
+    {
+      "name": "collaboration ledger and production dispatcher fixtures",
+      "command": "node --test desktop/test/collaboration-ledger.test.mjs",
+      "summary": "15/15 PASS",
+      "multiStageFlushNotificationCounts": [0, 0, 0, 1],
+      "fanoutIntentObservation": {
+        "coworkerMessages": 7,
+        "intermediateMessages": 6,
+        "intermediateInternal": true,
+        "intermediateNotifyChannelUnread": false,
+        "finalJoinInternal": false,
+        "finalJoinNotifyChannelUnread": true,
+        "trueIntentCount": 1,
+        "coalescedNotificationCount": 1,
+        "coalescedUnreadCount": 1
+      }
+    },
+    {
+      "name": "desktop full suite",
+      "command": "npm test (desktop)",
+      "summary": "276 tests: 275 pass, 1 skipped, 0 fail"
+    },
+    {
+      "name": "root full suite",
+      "command": "npm test (root)",
+      "summary": "234 tests: 232 pass, 2 skipped, 0 fail"
+    },
+    {
+      "name": "desktop static and secret checks",
+      "command": "npm run check && npm run secret-scan && git diff --check",
+      "summary": "syntax ok: 192 files; secretScan clean; diff check clean"
+    }
+  ],
+  "scopeNote": "The fanout fixture is a controlled local runtime. It observes ConversationStore.onMessage production options and retains the real NotificationService plus ChannelUnreadProducer boundary; it is not a live-provider or packaged-Electron fanout proof. Hidden Electron P18 evidence remains in verify-p18-channel-unread.json and is independently 10/10 PASS."
+}

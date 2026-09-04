@@ -43,6 +43,11 @@
     return t("triggers.ready", "Ready");
   }
 
+  function workspaceDisplayLabel(workspace) {
+    if (workspace?.kind === "shared-project") return t("workspace.shared", "Shared project workspace");
+    return workspace?.label || t("workspace.private", "Private workspace");
+  }
+
   function renderList() {
     const root = $("trigger-list");
     if (!root) return;
@@ -61,7 +66,7 @@
       const routine = routineById.get(trigger.routineId);
       const workspace = workspaceById.get(trigger.workspaceId);
       const meta = document.createElement("div"); meta.className = "setting-feedback"; meta.style.margin = "0";
-      meta.textContent = `${t("triggers.routine", "Routine")}: ${routine?.name ?? trigger.routineId} · ${t("triggers.workspace", "Workspace")}: ${workspace?.path ?? trigger.workspaceId} · ${t("triggers.pathPrefix", "Path prefix")}: ${trigger.pathPrefix || t("triggers.wholeWorkspace", "whole workspace")}`;
+      meta.textContent = `${t("triggers.routine", "Routine")}: ${routine?.name ?? trigger.routineId} · ${t("triggers.workspace", "Workspace")}: ${workspaceDisplayLabel(workspace)} · ${t("triggers.pathPrefix", "Path prefix")}: ${trigger.pathPrefix || t("triggers.wholeWorkspace", "whole workspace")}`;
       const event = document.createElement("div"); event.className = "setting-feedback"; event.style.margin = "8px 0 0";
       const eventTime = trigger.lastEventAt ? new Date(trigger.lastEventAt).toLocaleString() : "—";
       event.textContent = `${t("triggers.lastEvent", "Last event")}: ${eventTime} · ${t("triggers.lastPath", "Path")}: ${trigger.lastRelativePath || "—"} · ${t("triggers.lastStatus", "Status")}: ${statusLabel(trigger.lastStatus, trigger.enabled)} · ${t("triggers.failureCount", "Failures")}: ${trigger.failureCount ?? 0}`;
@@ -100,7 +105,7 @@
     workspaceSelect.textContent = "";
     const eligible = routines.filter((routine) => routine.enabled && routine.workspaceId && ["hourly", "daily", "weekly"].includes(routine.schedule?.type));
     for (const routine of eligible) { const option = document.createElement("option"); option.value = routine.id; option.textContent = routine.name; option.dataset.workspaceId = routine.workspaceId; routineSelect.append(option); }
-    for (const workspace of workspaces) { const option = document.createElement("option"); option.value = workspace.id; option.textContent = workspace.path; workspaceSelect.append(option); }
+    for (const workspace of workspaces) { const option = document.createElement("option"); option.value = workspace.id; option.textContent = workspaceDisplayLabel(workspace); workspaceSelect.append(option); }
     if (!eligible.length) { const option = document.createElement("option"); option.value = ""; option.textContent = t("triggers.noRoutines", "No enabled recurring workspace routines"); routineSelect.append(option); }
     const syncWorkspace = () => { const selected = routineSelect.selectedOptions[0]?.dataset.workspaceId; if (selected && [...workspaceSelect.options].some((option) => option.value === selected)) workspaceSelect.value = selected; };
     routineSelect.onchange = syncWorkspace;

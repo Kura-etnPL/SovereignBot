@@ -39,7 +39,7 @@
 - [x] Cross-platform core tests on Ubuntu/Windows Node 22/24
 - [x] Governed MCP/computer tool bridge for Codex/Claude Code workers
 - [x] Persistent repeat detection across runtime/process restarts
-- [ ] Optional container/VM/kernel egress isolation profile for higher-risk workers
+- [x] Optional Docker LocalIsolated and secure Worker VM Computer target profiles; kernel-level isolation remains deployment-specific
 
 ## v0.4 — operator experience
 

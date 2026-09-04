@@ -76,3 +76,19 @@ test("skills support validated Coworker and Team assignment with restart persist
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("archived Skills are read-only until restored, and governed retest records lifecycle metadata", () => {
+  const root = mkdtempSync(join(tmpdir(), "sovereign-skill-lifecycle-"));
+  try {
+    const store = createSkillStore({ persistPath: join(root, "skills.json"), makeSkillId: () => "skill_0000000000000003", now: () => "2026-09-03T00:00:00.000Z" });
+    const skill = store.create({ name: "Lifecycle", instructions: "Check the bounded result." });
+    store.archive(skill.id);
+    assert.throws(() => store.update(skill.id, { name: "Should fail" }), /read-only/);
+    store.restore(skill.id);
+    store.setRetestRunner(() => ({ id: "job_0000000000000001", status: "queued" }));
+    const tested = store.retestSkill(skill.id);
+    assert.equal(tested.mode, "governed-job");
+    assert.equal(tested.skill.lastTestedAt, "2026-09-03T00:00:00.000Z");
+    assert.equal(createSkillStore({ persistPath: join(root, "skills.json") }).get(skill.id).lastTestedAt, "2026-09-03T00:00:00.000Z");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

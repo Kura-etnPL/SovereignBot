@@ -1,7 +1,7 @@
 // V4.2 Routines vertical gate. Runs in a real Electron window with isolated state,
 // deterministic Job execution, real IPC/preload/UI, and an injected clock so the system
 // clock is never changed. Triggered only by the dedicated verify-routines entrypoint.
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,7 +20,7 @@ import { installAppProtocolHandler } from "./protocol.js";
 import { bindIpcChannels } from "./ipc.js";
 
 const WORKTREE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const EVIDENCE_DIR = join(WORKTREE_ROOT, "_evidence_v42_2026-08-29");
+const EVIDENCE_DIR = process.env.SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR ?? join(WORKTREE_ROOT, "_evidence_v42_2026-08-29");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function fakeRuntime() {
@@ -91,9 +91,10 @@ async function captureVisualEvidence(win) {
   return { image: undefined, method: undefined, attempts };
 }
 
-export async function runVerifyRoutines({ app }) {
+export async function runVerifyRoutines({ app, routineActionsGate = false }) {
   const { dialog } = await import("electron");
   await mkdir(EVIDENCE_DIR, { recursive: true });
+  const evidenceBase = routineActionsGate ? "verify-p30-routine-actions" : "verify-v42-routines";
   const log = [];
   const checks = {};
   const note = (line) => { log.push(line); try { process.stderr.write(`${line}\n`); } catch {} };
@@ -138,6 +139,15 @@ export async function runVerifyRoutines({ app }) {
 
   const uninstallProtocol = installAppProtocolHandler();
   const win = createMainWindow();
+  let routineRunCalls = 0;
+  let routineRestoreCalls = 0;
+  let routineSetEnabledCalls = 0;
+  let routineArchiveCalls = 0;
+  let routineRemoveCalls = 0;
+  let failSetEnabledRoutineId;
+  let failSetEnabledOnce = false;
+  let failRemoveRoutineId;
+  let failRemoveOnce = false;
   let unbind;
   try {
     unbind = bindIpcChannels({
@@ -161,6 +171,8 @@ export async function runVerifyRoutines({ app }) {
         "conversation:get": ({ conversationId }) => conversationStore.get(conversationId),
         "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
         "conversation:createTeam": ({ title, coworkerIds }) => conversationStore.createTeam({ title, coworkerIds }),
+        "team:list": () => ({ teams: [], playbooks: [] }),
+        "project:list": () => ({ projects: [] }),
         "skill:list": ({ includeArchived }) => skillStore.list({ includeArchived }),
         "skill:get": ({ skillId }) => skillStore.get(skillId),
         "artifact:list": () => ({ artifacts: [] }),
@@ -174,12 +186,23 @@ export async function runVerifyRoutines({ app }) {
         "job:approve": ({ jobId }) => jobs.approve(jobId),
         "job:dismiss": ({ jobId }) => jobs.dismiss(jobId),
         "job:attention": () => jobs.attentionJobs(),
+        "notification:list": () => ({ notifications: [] }),
+        "data:status": () => ({ backups: [] }),
+        "data:listBackups": () => ({ backups: [] }),
+        "update:status": () => ({ available: false }),
+        "connectedApps:list": () => ({ apps: [] }),
+        "workerNode:list": () => ({ nodes: [] }),
+        "memory:list": () => ({ memory: [], suggestions: [] }),
+        "memory:listSuggestions": () => ({ suggestions: [] }),
         "routine:create": (payload) => routines.create(payload),
-        "routine:list": () => routines.list(),
+        "routine:list": (payload) => routines.list(payload),
         "routine:get": ({ routineId }) => routines.get(routineId),
         "routine:history": ({ routineId }) => routines.history(routineId),
-        "routine:setEnabled": ({ routineId, enabled }) => routines.setEnabled(routineId, enabled),
-        "routine:remove": ({ routineId }) => routines.remove(routineId),
+        "routine:runNow": async ({ routineId }) => { routineRunCalls += 1; if (routineActionsGate) await sleep(120); return routines.runNow(routineId); },
+        "routine:archive": async ({ routineId }) => { routineArchiveCalls += 1; if (routineActionsGate) await sleep(120); return routines.archive(routineId); },
+        "routine:restore": async ({ routineId }) => { routineRestoreCalls += 1; if (routineActionsGate) await sleep(120); return routines.restore(routineId); },
+        "routine:setEnabled": async ({ routineId, enabled }) => { routineSetEnabledCalls += 1; if (routineActionsGate) await sleep(120); if (routineId === failSetEnabledRoutineId && failSetEnabledOnce) { failSetEnabledOnce = false; throw new Error("P47 injected IPC failure for retry"); } return routines.setEnabled(routineId, enabled); },
+        "routine:remove": async ({ routineId }) => { routineRemoveCalls += 1; if (routineActionsGate) await sleep(120); if (routineId === failRemoveRoutineId && failRemoveOnce) { failRemoveOnce = false; throw new Error("P47 injected IPC failure for retry"); } return routines.remove(routineId); },
         // The V4.2 harness does not instantiate the V4.4 controller, but the
         // shared renderer now hydrates this read-only surface on startup.
         "eventTrigger:list": () => ({ schema: EVENT_TRIGGERS_SCHEMA, triggers: [] }),
@@ -229,7 +252,7 @@ export async function runVerifyRoutines({ app }) {
     const historyAfter = routines.history(routine.id).history;
     check("Routine history links completed Job", historyAfter.length === 1 && historyAfter[0].jobId === job.id && historyAfter[0].status === "completed");
 
-    const jobCount = jobs.listJobs().jobs.length;
+    let jobCount = jobs.listJobs().jobs.length;
     routines.stop();
     routines = createRoutineController({ dataDir, jobController: jobs, coworkerStore, skillStore, services, persistPath, now: () => clock.value });
     await routines.tickNow();
@@ -241,6 +264,218 @@ export async function runVerifyRoutines({ app }) {
     check("disabled routine does not fire", jobs.listJobs().jobs.length === jobCount);
     const reenabled = await win.webContents.executeJavaScript(`window.sovereignbot.routines.setEnabled({routineId:${JSON.stringify(routine.id)},enabled:true})`);
     check("re-enable schedules future occurrence", Date.parse(reenabled.nextRunAt) > clock.value, reenabled.nextRunAt);
+
+    if (routineActionsGate) {
+      const jobsUiSource = await readFile(join(WORKTREE_ROOT, "desktop", "ui", "jobs-ui.js"), "utf8");
+      check("Routine lifecycle actions use a product dialog instead of window confirm or prompt", !/window\.(?:confirm|prompt)\s*\(/.test(jobsUiSource), "no native confirmation APIs in jobs UI");
+      await win.webContents.executeJavaScript("document.getElementById('nav-routines').click()");
+      await sleep(250);
+      const createRoutineViaUi = (name, targetWorkspaceId) => win.webContents.executeJavaScript(`window.sovereignbot.routines.create(${JSON.stringify({
+        name,
+        coworkerId: chief.id,
+        instruction: `P30 ${name} bounded action fixture.`,
+        workspaceId: targetWorkspaceId,
+        schedule: { type: "custom", intervalMinutes: 60 },
+      })})`);
+      const refreshRoutineCards = async () => { await win.webContents.executeJavaScript("window.SovereignJobsUI.refreshRoutines()"); await sleep(120); };
+      const cardAction = (name, label, doubleClick = false) => win.webContents.executeJavaScript(`(async()=>{
+        const card=[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(name)});
+        const button=card?[...card.querySelectorAll('button')].find((entry)=>entry.textContent.includes(${JSON.stringify(label)})):undefined;
+        if(!button) return {found:false};
+        button.click();
+        if(${doubleClick ? "true" : "false"}) button.click();
+        await new Promise((resolve)=>setTimeout(resolve,0));
+        const current=[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(name)});
+        const pendingButton=current?[...current.querySelectorAll('button')].find((entry)=>entry.textContent.includes(${JSON.stringify(label)})||entry.textContent.includes('Starting')||entry.textContent.includes('Restoring')||entry.textContent.includes('Updating')||entry.textContent.includes('Removing')):undefined;
+        return {found:true,disabled:pendingButton?.disabled === true,text:current?.textContent||''};
+      })()`);
+
+      const runnableName = "P30 UI runnable";
+      const runnable = await createRoutineViaUi(runnableName, workspaceId);
+      await refreshRoutineCards();
+      const runnableJobsBefore = jobs.listJobs().jobs.length;
+      const runClicks = await cardAction(runnableName, "Run now / 立即运行");
+      await sleep(350);
+      const runnableCard = await win.webContents.executeJavaScript(`(()=>{const card=[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(runnableName)}); return { text:card?.textContent||'', runButtonDisabled:[...card?.querySelectorAll('button')||[]].find((entry)=>entry.textContent.includes('Run now / 立即运行'))?.disabled };})()`);
+      check("real Routines UI Run now creates one governed Job and visible success", runClicks.found && jobs.listJobs().jobs.length === runnableJobsBefore + 1 && routineRunCalls === 1 && runnableCard.text.includes("Routine started") && runnableCard.runButtonDisabled === false, JSON.stringify({ runClicks, jobs: jobs.listJobs().jobs.length - runnableJobsBefore, routineRunCalls, card: runnableCard }));
+      check("Run now success remains bound to the selected Routine after refresh", routines.history(runnable.id).history.length === 1 && routines.history(runnable.id).history[0].source === "manual", JSON.stringify(routines.history(runnable.id).history[0]));
+
+      const duplicateRunName = "P30 UI duplicate run";
+      const duplicateRun = await createRoutineViaUi(duplicateRunName, workspaceId);
+      await refreshRoutineCards();
+      const duplicateJobsBefore = jobs.listJobs().jobs.length;
+      const duplicateRunClicks = await cardAction(duplicateRunName, "Run now / 立即运行", true);
+      await sleep(350);
+      check("Run now disables pending card and suppresses duplicate clicks", duplicateRunClicks.found && duplicateRunClicks.disabled === true && jobs.listJobs().jobs.length === duplicateJobsBefore + 1 && routineRunCalls === 2, JSON.stringify({ duplicateRunClicks, jobs: jobs.listJobs().jobs.length - duplicateJobsBefore, routineRunCalls }));
+
+      const disabledName = "P30 UI disabled";
+      const disabled = await createRoutineViaUi(disabledName, workspaceId);
+      await win.webContents.executeJavaScript(`window.sovereignbot.routines.setEnabled({routineId:${JSON.stringify(disabled.id)},enabled:false})`);
+      await refreshRoutineCards();
+      const disabledCard = await win.webContents.executeJavaScript(`(()=>{const card=[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(disabledName)}); return { text:card?.textContent||'', runDisabled:[...card?.querySelectorAll('button')||[]].find((entry)=>entry.textContent.includes('Run now / 立即运行'))?.disabled };})()`);
+      check("disabled Routine remains visibly fail-closed", disabledCard.runDisabled === true && routines.get(disabled.id).runState === "disabled", JSON.stringify(disabledCard));
+
+      const failureWorkspacePath = join(dataDir, "p30-failure-workspace");
+      await mkdir(failureWorkspacePath, { recursive: true });
+      const failureWorkspaceId = services.addWorkspacePath(failureWorkspacePath).workspace?.id;
+      const runFailureName = "P30 UI unavailable run";
+      const runFailure = await createRoutineViaUi(runFailureName, failureWorkspaceId);
+      await refreshRoutineCards();
+      services.removeWorkspace(failureWorkspaceId);
+      const failedJobsBefore = jobs.listJobs().jobs.length;
+      const runFailureClicks = await cardAction(runFailureName, "Run now / 立即运行");
+      await sleep(220);
+      const runFailureCard = await win.webContents.executeJavaScript(`(()=>{const card=[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(runFailureName)}); return {text:card?.textContent||'',error:card?.querySelector('.routine-action-feedback')?.textContent||''};})()`);
+      check("unavailable Run now stays in-card with sanitized failure and no Job", runFailureClicks.found && jobs.listJobs().jobs.length === failedJobsBefore && runFailureCard.error.includes("Routine Job could not be created") && !runFailureCard.error.match(/(?:token|secret|session|cwd|workspacePath|provider)/i), JSON.stringify({ runFailureClicks, jobs: jobs.listJobs().jobs.length - failedJobsBefore, card: runFailureCard }));
+
+      const restoreName = "P30 UI restore";
+      const restoreTarget = await createRoutineViaUi(restoreName, workspaceId);
+      await win.webContents.executeJavaScript(`window.sovereignbot.routines.archive({routineId:${JSON.stringify(restoreTarget.id)}})`);
+      await refreshRoutineCards();
+      const restoreJobsBefore = jobs.listJobs().jobs.length;
+      const restoreCallsBefore = routineRestoreCalls;
+      const restoreClicks = await cardAction(restoreName, "Restore / 恢复");
+      await sleep(350);
+      const restored = routines.get(restoreTarget.id);
+      const restoreCard = await win.webContents.executeJavaScript(`(()=>{const card=[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(restoreName)}); return {text:card?.textContent||''};})()`);
+      check("real Routines UI Restore reactivates the Routine without a Job", restoreClicks.found && jobs.listJobs().jobs.length === restoreJobsBefore && routineRestoreCalls === restoreCallsBefore + 1 && restored.state === "active" && restored.enabled === true && Boolean(restored.nextRunAt) && restoreCard.text.includes("Routine restored"), JSON.stringify({ restoreClicks, jobs: jobs.listJobs().jobs.length - restoreJobsBefore, restoreCalls: routineRestoreCalls - restoreCallsBefore, restored, card: restoreCard }));
+
+      const duplicateRestoreName = "P30 UI duplicate restore";
+      const duplicateRestore = await createRoutineViaUi(duplicateRestoreName, workspaceId);
+      await win.webContents.executeJavaScript(`window.sovereignbot.routines.archive({routineId:${JSON.stringify(duplicateRestore.id)}})`);
+      await refreshRoutineCards();
+      const duplicateRestoreCallsBefore = routineRestoreCalls;
+      const duplicateRestoreClicks = await cardAction(duplicateRestoreName, "Restore / 恢复", true);
+      await sleep(350);
+      check("Restore disables pending card and suppresses duplicate clicks", duplicateRestoreClicks.found && duplicateRestoreClicks.disabled === true && routines.get(duplicateRestore.id).state === "active" && routineRestoreCalls === duplicateRestoreCallsBefore + 1, JSON.stringify({ duplicateRestoreClicks, restoreCalls: routineRestoreCalls - duplicateRestoreCallsBefore }));
+
+      const restoreFailureWorkspacePath = join(dataDir, "p30-restore-failure-workspace");
+      await mkdir(restoreFailureWorkspacePath, { recursive: true });
+      const restoreFailureWorkspaceId = services.addWorkspacePath(restoreFailureWorkspacePath).workspace?.id;
+      const restoreFailureName = "P30 UI unavailable restore";
+      const restoreFailure = await createRoutineViaUi(restoreFailureName, restoreFailureWorkspaceId);
+      await win.webContents.executeJavaScript(`window.sovereignbot.routines.archive({routineId:${JSON.stringify(restoreFailure.id)}})`);
+      await refreshRoutineCards();
+      services.removeWorkspace(restoreFailureWorkspaceId);
+      const restoreFailureClicks = await cardAction(restoreFailureName, "Restore / 恢复");
+      await sleep(220);
+      const restoreFailureState = routines.get(restoreFailure.id);
+      const restoreFailureCard = await win.webContents.executeJavaScript(`(()=>{const card=[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(restoreFailureName)}); return {text:card?.textContent||'',error:card?.querySelector('.routine-action-feedback')?.textContent||''};})()`);
+      check("unavailable Restore stays archived with in-card sanitized failure", restoreFailureClicks.found && restoreFailureState.state === "archived" && restoreFailureState.enabled === false && restoreFailureCard.error.includes("unknown trusted workspace") && !restoreFailureCard.error.match(/(?:token|secret|session|cwd|workspacePath|provider)/i), JSON.stringify({ restoreFailureClicks, state: restoreFailureState, card: restoreFailureCard }));
+
+      const staleName = "P30 UI stale";
+      const stale = await createRoutineViaUi(staleName, workspaceId);
+      await refreshRoutineCards();
+      routines.remove(stale.id);
+      const staleJobsBefore = jobs.listJobs().jobs.length;
+      const staleClicks = await cardAction(staleName, "Run now / 立即运行");
+      await sleep(220);
+      const staleCard = await win.webContents.executeJavaScript(`(()=>{const card=[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(staleName)}); return {text:card?.textContent||'',error:card?.querySelector('.routine-action-feedback')?.textContent||''};})()`);
+      check("stale Routine card fails closed without creating a Job", staleClicks.found && jobs.listJobs().jobs.length === staleJobsBefore && staleCard.text.includes("unknown routine id"), JSON.stringify({ staleClicks, jobs: jobs.listJobs().jobs.length - staleJobsBefore, card: staleCard }));
+
+      jobCount = jobs.listJobs().jobs.length;
+      routines.stop();
+      routines = createRoutineController({ dataDir, jobController: jobs, coworkerStore, skillStore, services, persistPath, now: () => clock.value });
+      await win.webContents.executeJavaScript("window.SovereignJobsUI.refreshRoutines()");
+      await sleep(150);
+      const afterActionRestart = await win.webContents.executeJavaScript(`(()=>({
+        restored:[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(restoreName)})?.textContent||'',
+        archived:[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(restoreFailureName)})?.textContent||''
+      }))()`);
+      check("Routine action states and Job count remain isolated after controller restart", jobs.listJobs().jobs.length === jobCount && routines.get(restoreTarget.id).state === "active" && routines.get(restoreFailure.id).state === "archived" && afterActionRestart.restored.includes("Routine restored") && afterActionRestart.archived.includes(restoreFailureName) && !afterActionRestart.archived.includes(`Routine restored: ${restoreName}`), JSON.stringify({ jobs: jobs.listJobs().jobs.length, jobCount, ui: afterActionRestart }));
+
+      const cardState = (name) => win.webContents.executeJavaScript(`(()=>{const card=[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(name)}); return { text:card?.textContent||'', buttons:[...card?.querySelectorAll('button')||[]].map((button)=>({text:button.textContent.trim(),disabled:button.disabled})) };})()`);
+      const openRemoveDialog = (name) => win.webContents.executeJavaScript(`(()=>{const card=[...document.querySelectorAll('#routine-list .job-card')].find((entry)=>entry.querySelector('strong')?.textContent===${JSON.stringify(name)}); const button=card?[...card.querySelectorAll('button')].find((entry)=>entry.textContent.trim()==='Remove'):undefined; if(!button) return {found:false}; button.click(); const dialog=document.getElementById('routine-remove-dialog'); return {found:true,open:dialog?.open===true,text:dialog?.textContent||''};})()`);
+      const confirmRemoveDialog = (doubleClick = false) => win.webContents.executeJavaScript(`(async()=>{const button=document.getElementById('routine-remove-confirm'); if(!button || !document.getElementById('routine-remove-dialog')?.open) return {found:false}; button.click(); if(${doubleClick ? "true" : "false"}) button.click(); await new Promise((resolve)=>setTimeout(resolve,0)); return {found:true,open:document.getElementById('routine-remove-dialog')?.open===true};})()`);
+
+      const toggleName = "P47 UI toggle";
+      const toggleTarget = await createRoutineViaUi(toggleName, workspaceId);
+      await refreshRoutineCards();
+      const disableCallsBefore = routineSetEnabledCalls;
+      const disableClick = await cardAction(toggleName, "Disable");
+      await sleep(350);
+      const disabledAfterClick = routines.get(toggleTarget.id);
+      const toggleDisabledCard = await cardState(toggleName);
+      const enableClick = await cardAction(toggleName, "Enable");
+      await sleep(350);
+      const enabledAfterClick = routines.get(toggleTarget.id);
+      const enabledCard = await cardState(toggleName);
+      check("real Routines UI Disable then Enable keeps one card bound and shows success", disableClick.found && enableClick.found && disabledAfterClick.enabled === false && enabledAfterClick.enabled === true && routineSetEnabledCalls === disableCallsBefore + 2 && toggleDisabledCard.text.includes(`Routine disabled: ${toggleName}`) && enabledCard.text.includes(`Routine enabled: ${toggleName}`), JSON.stringify({ disableClick, enableClick, disabled: disabledAfterClick.enabled, enabled: enabledAfterClick.enabled, calls: routineSetEnabledCalls - disableCallsBefore }));
+
+      const archiveName = "P47 UI archive";
+      const archiveTarget = await createRoutineViaUi(archiveName, workspaceId);
+      await refreshRoutineCards();
+      const archiveCallsBefore = routineArchiveCalls;
+      const archiveClick = await cardAction(archiveName, "Archive / 归档");
+      await sleep(350);
+      const archivedAfterClick = routines.get(archiveTarget.id);
+      const archivedCard = await cardState(archiveName);
+      const restoreFromArchiveClick = await cardAction(archiveName, "Restore / 恢复");
+      await sleep(350);
+      const restoredAfterArchive = routines.get(archiveTarget.id);
+      const restoredArchiveCard = await cardState(archiveName);
+      check("real Routines UI Archive then Restore keeps existing recoverable semantics", archiveClick.found && restoreFromArchiveClick.found && archivedAfterClick.state === "archived" && restoredAfterArchive.state === "active" && restoredAfterArchive.enabled === true && routineArchiveCalls === archiveCallsBefore + 1 && archivedCard.text.includes(`Routine archived: ${archiveName}`) && restoredArchiveCard.text.includes(`Routine restored: ${archiveName}`), JSON.stringify({ archiveClick, restoreFromArchiveClick, archived: archivedAfterClick.state, restored: restoredAfterArchive.state, archiveCalls: routineArchiveCalls - archiveCallsBefore }));
+
+      const cancelName = "P47 UI remove cancel";
+      const cancelTarget = await createRoutineViaUi(cancelName, workspaceId);
+      await refreshRoutineCards();
+      const removeCallsBeforeCancel = routineRemoveCalls;
+      const cancelDialog = await openRemoveDialog(cancelName);
+      const cancelResult = await win.webContents.executeJavaScript(`(()=>{const button=[...document.querySelectorAll('#routine-remove-dialog [data-close-dialog]')].find((entry)=>entry.textContent.includes('Cancel')); button?.click(); return {open:document.getElementById('routine-remove-dialog')?.open===true};})()`);
+      check("Remove cancel leaves the selected Routine unchanged", cancelDialog.found && cancelDialog.open && cancelDialog.text.includes("permanently removes") && cancelDialog.text.includes("Archive") && cancelResult.open === false && routines.get(cancelTarget.id).state === "active" && routineRemoveCalls === removeCallsBeforeCancel, JSON.stringify({ cancelDialog, cancelResult, removeCalls: routineRemoveCalls - removeCallsBeforeCancel }));
+
+      const confirmName = "P47 UI remove confirm";
+      const confirmTarget = await createRoutineViaUi(confirmName, workspaceId);
+      await refreshRoutineCards();
+      const confirmDialog = await openRemoveDialog(confirmName);
+      const confirmResult = await confirmRemoveDialog();
+      await sleep(350);
+      const confirmedPresent = routines.list({ includeArchived: true }).routines.some((entry) => entry.id === confirmTarget.id);
+      const confirmStatus = await win.webContents.executeJavaScript("document.getElementById('routine-action-status')?.textContent||''");
+      check("Remove confirm permanently removes only the selected Routine with visible success", confirmDialog.found && confirmDialog.open && confirmResult.found && !confirmedPresent && routineRemoveCalls >= 1 && confirmStatus.includes(`Routine removed: ${confirmName}`), JSON.stringify({ confirmDialog, confirmResult, present: confirmedPresent, status: confirmStatus }));
+
+      const toggleFailureName = "P47 UI toggle retry";
+      const toggleFailureTarget = await createRoutineViaUi(toggleFailureName, workspaceId);
+      failSetEnabledRoutineId = toggleFailureTarget.id;
+      failSetEnabledOnce = true;
+      await refreshRoutineCards();
+      const failedToggleClick = await cardAction(toggleFailureName, "Disable");
+      await sleep(300);
+      const failedToggleCard = await cardState(toggleFailureName);
+      const failedToggleState = routines.get(toggleFailureTarget.id);
+      const retriedToggleClick = await cardAction(toggleFailureName, "Disable");
+      await sleep(350);
+      const retriedToggleCard = await cardState(toggleFailureName);
+      check("injected Enable-state IPC failure is visible and retry succeeds", failedToggleClick.found && failedToggleState.enabled === true && failedToggleCard.text.includes("P47 injected IPC failure for retry") && failedToggleCard.buttons.some((button) => button.text === "Disable" && button.disabled === false) && retriedToggleClick.found && routines.get(toggleFailureTarget.id).enabled === false && retriedToggleCard.text.includes(`Routine disabled: ${toggleFailureName}`), JSON.stringify({ failedToggleClick, failedToggleState: failedToggleState.enabled, failedToggleCard, retriedToggleClick, retried: routines.get(toggleFailureTarget.id).enabled }));
+      failSetEnabledRoutineId = undefined;
+
+      const removeFailureName = "P47 UI remove retry";
+      const removeFailureTarget = await createRoutineViaUi(removeFailureName, workspaceId);
+      failRemoveRoutineId = removeFailureTarget.id;
+      failRemoveOnce = true;
+      await refreshRoutineCards();
+      const failedRemoveDialog = await openRemoveDialog(removeFailureName);
+      const failedRemoveConfirm = await confirmRemoveDialog();
+      await sleep(300);
+      const failedRemoveCard = await cardState(removeFailureName);
+      const failedRemovePresent = routines.list({ includeArchived: true }).routines.some((entry) => entry.id === removeFailureTarget.id);
+      const retriedRemoveDialog = await openRemoveDialog(removeFailureName);
+      const retriedRemoveConfirm = await confirmRemoveDialog();
+      await sleep(350);
+      const retriedRemovePresent = routines.list({ includeArchived: true }).routines.some((entry) => entry.id === removeFailureTarget.id);
+      check("injected Remove IPC failure preserves the card and retry removes it", failedRemoveDialog.found && failedRemoveConfirm.found && failedRemovePresent && failedRemoveCard.text.includes("P47 injected IPC failure for retry") && retriedRemoveDialog.found && retriedRemoveConfirm.found && !retriedRemovePresent, JSON.stringify({ failedRemoveDialog, failedRemoveConfirm, failedRemovePresent, failedRemoveCard, retriedRemoveDialog, retriedRemoveConfirm, retriedRemovePresent }));
+      failRemoveRoutineId = undefined;
+
+      const doubleRemoveName = "P47 UI double remove";
+      const doubleRemoveTarget = await createRoutineViaUi(doubleRemoveName, workspaceId);
+      await refreshRoutineCards();
+      const removeCallsBeforeDouble = routineRemoveCalls;
+      const doubleDialog = await openRemoveDialog(doubleRemoveName);
+      const doubleConfirm = await confirmRemoveDialog(true);
+      await sleep(350);
+      const doublePresent = routines.list({ includeArchived: true }).routines.some((entry) => entry.id === doubleRemoveTarget.id);
+      check("double-clicking Remove confirmation issues one IPC call", doubleDialog.found && doubleConfirm.found && routineRemoveCalls === removeCallsBeforeDouble + 1 && !doublePresent, JSON.stringify({ doubleDialog, doubleConfirm, removeCalls: routineRemoveCalls - removeCallsBeforeDouble, present: doublePresent }));
+    }
 
     const failedRoutineName = "V4.2 gate one-time failure";
     const failedRoutine = await win.webContents.executeJavaScript(`window.sovereignbot.routines.create(${JSON.stringify({
@@ -308,7 +543,7 @@ export async function runVerifyRoutines({ app }) {
     })()`);
     const scheduleEditorOk = editor.open
       && editor.fields
-      && JSON.stringify(editor.options) === JSON.stringify(["one-time", "hourly", "daily", "weekly"])
+      && JSON.stringify(editor.options) === JSON.stringify(routineActionsGate ? ["one-time", "hourly", "daily", "weekly", "custom"] : ["one-time", "hourly", "daily", "weekly"])
       && editor.states["one-time"]?.at === false && editor.states["one-time"]?.minute === true && editor.states["one-time"]?.time === true && editor.states["one-time"]?.weekday === true
       && editor.states.hourly?.at === true && editor.states.hourly?.minute === false && editor.states.hourly?.time === true && editor.states.hourly?.weekday === true
       && editor.states.daily?.at === true && editor.states.daily?.minute === true && editor.states.daily?.time === false && editor.states.daily?.weekday === true
@@ -317,7 +552,7 @@ export async function runVerifyRoutines({ app }) {
 
     const visual = await captureVisualEvidence(win);
     check("real window visual evidence captured", Boolean(visual.image) && !visual.image.isEmpty(), JSON.stringify({ method: visual.method, attempts: visual.attempts }));
-    if (visual.image && !visual.image.isEmpty()) await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.png"), visual.image.toPNG());
+    if (visual.image && !visual.image.isEmpty()) await writeFile(join(EVIDENCE_DIR, `${evidenceBase}.png`), visual.image.toPNG());
 
     const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
     note(`[summary] ${Object.keys(checks).length - failed.length}/${Object.keys(checks).length} PASS`);
@@ -335,8 +570,8 @@ export async function runVerifyRoutines({ app }) {
       failedRoutine: routines.get(failedRoutine.id),
       job: jobs.getJob(job.id),
     };
-    await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.json"), `${JSON.stringify(summary, null, 2)}\n`, "utf8");
-    await writeFile(join(EVIDENCE_DIR, "verify-v42-routines.log"), `${log.join("\n")}\n`, "utf8");
+    await writeFile(join(EVIDENCE_DIR, `${evidenceBase}.json`), `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+    await writeFile(join(EVIDENCE_DIR, `${evidenceBase}.log`), `${log.join("\n")}\n`, "utf8");
 
     if (failed.length) throw new Error(`V4.2 routine gate failed: ${failed.join(", ")}`);
   } finally {

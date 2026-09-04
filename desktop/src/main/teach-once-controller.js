@@ -20,6 +20,12 @@ const VALIDATORS = new Set(["exists", "contains", "equals", "manual"]);
 const KEYS = new Set([
     "Enter", "Tab", "Escape", "Space", "Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
 ]);
+const UNSAFE_CONTENT = [
+    /(?:[A-Za-z]:[\\/]|\\\\(?:Users|home|tmp|var|private|workspace|worktrees?)[\\/]|(?:^|\s)\/(?:Users|home|tmp|var|private|workspace|worktrees?)[\\/]|file:\/\/)/i,
+    /(?:bearer|api[_-]?key|access[_-]?token|refresh[_-]?token|cookie|password|secret|credential)\s*[:=]\s*\S+/i,
+    /(?:session[_ -]?id|continuity|provider[_ -]?(?:id|session|account)|webdriver|sidecar|backendRef|rawPath|\bcwd\b)/i,
+    /(?:\bcoordinate(?:s)?\b|screen\s+position|click\s+at|\bx\s*[:=]\s*\d+\b|\by\s*[:=]\s*\d+\b)/i,
+];
 
 function makeId() {
     return `teach_${randomBytes(8).toString("hex")}`;
@@ -39,6 +45,12 @@ function text(value, label, max, { required = false } = {}) {
     if (required && !trimmed) throw new Error(`${label} is required`);
     if (trimmed.length > max) throw new Error(`${label} exceeds ${max} characters`);
     return trimmed || undefined;
+}
+
+function safeContent(value, label, max, options = {}) {
+    const clean = text(value, label, max, options);
+    if (clean && UNSAFE_CONTENT.some((pattern) => pattern.test(clean))) throw new Error(`${label} contains private or runtime-only content`);
+    return clean;
 }
 
 function boolean(value, label, fallback = false) {
@@ -117,7 +129,7 @@ function optionalSite(value) {
 function actionTarget(value, fallback = "semantic target") {
     const target = text(value ?? fallback, "action target", MAX_TARGET, { required: true });
     if (/^(?:[A-Za-z]:[\\/]|[\\/]{1,2})/.test(target)) throw new Error("action target must be semantic, not an absolute path");
-    return target;
+    return safeContent(target, "action target", MAX_TARGET, { required: true });
 }
 
 function publicAction(action) {
@@ -202,6 +214,7 @@ function sanitizeSession(value) {
             updatedAt: text(value.updatedAt, "updatedAt", 64, { required: true }),
             testedAt: value.testedAt ? text(value.testedAt, "testedAt", 64) : undefined,
             testResult: value.testResult ? sanitizeTestResult(value.testResult) : undefined,
+            manualConfirmed: value.manualConfirmed === true,
         };
     }
     catch {
@@ -223,7 +236,7 @@ export function sanitizeDraft(value) {
             return {
                 name,
                 type: "string",
-                description: text(entry.description ?? "", "draft input description", 240) ?? "",
+                description: safeContent(entry.description ?? "", "draft input description", 240) ?? "",
                 required: entry.required !== false,
             };
         });
@@ -232,21 +245,15 @@ export function sanitizeDraft(value) {
         if (value.requestedCapabilities.some((entry) => !["computer", "workspace"].includes(entry))) throw new Error("draft requestedCapabilities contains an unsupported capability");
         if (!Array.isArray(value.validators) || value.validators.length > 24) throw new Error("draft validators must be a bounded array");
         const draft = {
-            name: text(value.name, "draft name", MAX_NAME, { required: true }),
-            description: text(value.description ?? "", "draft description", MAX_DESCRIPTION) ?? "",
-            instructions: text(value.instructions, "draft instructions", 16_000, { required: true }),
+            name: safeContent(value.name, "draft name", MAX_NAME, { required: true }),
+            description: safeContent(value.description ?? "", "draft description", MAX_DESCRIPTION) ?? "",
+            instructions: safeContent(value.instructions, "draft instructions", 16_000, { required: true }),
             inputs,
-            steps: value.steps.map((entry, index) => text(entry, `draft step ${index}`, 800, { required: true })),
-            expectedOutput: text(value.expectedOutput ?? "", "draft expected output", 1_000) ?? "",
+            steps: value.steps.map((entry, index) => safeContent(entry, `draft step ${index}`, 800, { required: true })),
+            expectedOutput: safeContent(value.expectedOutput ?? "", "draft expected output", 1_000) ?? "",
             requestedCapabilities: [...new Set(value.requestedCapabilities)],
-            validators: value.validators.map((entry, index) => text(entry, `draft validator ${index}`, 500, { required: true })),
+            validators: value.validators.map((entry, index) => safeContent(entry, `draft validator ${index}`, 500, { required: true })),
         };
-        const serialized = JSON.stringify(draft);
-        // A provider must never turn a Skill into a carrier for raw local paths or
-        // one-shot credentials.  Reject suspicious values; do not silently rewrite them.
-        if (/[A-Za-z]:[\\/]|\\\\(?:Users|home|tmp)[\\/]/i.test(serialized)
-            || /(?:[?&](?:token|secret|cookie|api[_-]?key|access[_-]?token|refresh[_-]?token)=|(?:bearer|access[_-]?token|refresh[_-]?token)\s*[:=]\s*\S+)/i.test(serialized))
-            throw new Error("draft contains a private path or credential-like value");
         return draft;
     }
     catch {
@@ -384,7 +391,7 @@ function waitWithSignal(milliseconds, signal, deadline) {
     });
 }
 
-async function replayActions(session, { computer, agentId, taskId, signal, onProgress, deadline = Date.now() + MAX_TEST_MS } = {}) {
+async function replayActions(session, { computer, agentId, taskId, signal, onProgress, manualConfirmed = false, deadline = Date.now() + MAX_TEST_MS } = {}) {
     if (!computer?.snapshot || !computer?.navigate) throw new Error("Teach Once test requires a governed Computer executor");
     const checks = [];
     let validatorCount = 0;
@@ -437,7 +444,7 @@ async function replayActions(session, { computer, agentId, taskId, signal, onPro
         else if (action.kind === "assert") {
             validatorCount += 1;
             const current = await read();
-            if (action.validator === "manual") {
+            if (action.validator === "manual" && !manualConfirmed) {
                 report(index, action, "awaiting-confirmation");
                 return { ok: false, status: "awaiting-confirmation", checks, validatorCount };
             }
@@ -740,11 +747,13 @@ export function createTeachOnceController({
                             taskId,
                             signal: signal ?? controller.signal,
                             onProgress: executorProgress,
+                            manualConfirmed: session.manualConfirmed === true,
                             deadline,
                         }),
                     });
                     if (result?.status === "awaiting-confirmation") {
                         session.state = "drafted";
+                        session.manualConfirmed = false;
                         touch(session);
                         return {
                             ok: false,
@@ -758,6 +767,7 @@ export function createTeachOnceController({
                     const checks = Array.isArray(result.checks) ? result.checks.slice(0, MAX_ACTIONS).map((entry, index) => text(entry, `test check ${index}`, 180, { required: true })) : [];
                     if (checks.length !== session.actions.length) throw new Error("governed Skill test returned incomplete evidence");
                     session.state = "tested";
+                    session.manualConfirmed = false;
                     session.testedAt = nowIso(now);
                     session.testResult = {
                         mode: "governed-computer",
@@ -784,6 +794,14 @@ export function createTeachOnceController({
             })();
             inFlight.set(session.id, { kind: "test", controller, promise: operation });
             return operation;
+        },
+
+        confirm(sessionId) {
+            const session = requireSession(sessionId);
+            if (session.state !== "drafted" || !session.draft) throw new Error("manual confirmation requires a drafted Skill");
+            session.manualConfirmed = true;
+            touch(session);
+            return publicSession(session);
         },
 
         save(sessionId) {

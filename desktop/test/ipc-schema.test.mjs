@@ -47,6 +47,16 @@ test("renderer job submission rejects internal event metadata instead of strippi
     );
 });
 
+test("Attention query and snooze schemas expose only bounded operator inputs", () => {
+    assert.deepEqual(validateIpcRequest("job:attention", { category: "provider-unavailable", visibility: "snoozed" }), { category: "provider-unavailable", visibility: "snoozed" });
+    assert.deepEqual(validateIpcRequest("job:attention", {}), {});
+    assert.throws(() => validateIpcRequest("job:attention", { category: "made-up" }), /must be one of/);
+    assert.throws(() => validateIpcRequest("job:attention", { actorId: "spoofed" }), /not accepted from the renderer/);
+    assert.deepEqual(validateIpcRequest("job:snooze", { jobId: "job_1234567890abcdef", minutes: 60 }), { jobId: "job_1234567890abcdef", minutes: 60 });
+    assert.throws(() => validateIpcRequest("job:snooze", { jobId: "job_1234567890abcdef", minutes: 30 }), /must be one of/);
+    assert.throws(() => validateIpcRequest("job:snooze", { jobId: "job_1234567890abcdef", minutes: 60, actorId: "spoofed" }), /not accepted from the renderer/);
+});
+
 test("authority-bearing fields are rejected in any operator request payload", () => {
     for (const field of ["actorId", "actor", "harnessState", "sessionId", "bearerToken", "capability"]) {
         const payload = field === "actorId"

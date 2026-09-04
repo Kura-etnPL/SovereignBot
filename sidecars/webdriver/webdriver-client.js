@@ -91,6 +91,9 @@ return (() => {
   return { url: location.href, title: document.title, elements: output };
 })();`;
 
+const VISIBLE_TEXT_SCRIPT = String.raw`
+return String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(-16000);`;
+
 function endpointUrl(base, path) {
     return `${String(base).replace(/\/$/, "")}${path}`;
 }
@@ -232,6 +235,12 @@ export class WebDriverClient {
                 };
             }).filter(Boolean),
         };
+    }
+
+    async visibleText() {
+        await this.start();
+        const value = await this.execute(VISIBLE_TEXT_SCRIPT, []);
+        return String(value ?? "").slice(-16000);
     }
 
     async click(elementId) {

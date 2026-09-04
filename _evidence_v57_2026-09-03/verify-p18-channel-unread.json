@@ -1,0 +1,91 @@
+{
+  "at": "2026-09-02T21:28:49.974Z",
+  "publishEligible": false,
+  "summary": "10/10 PASS",
+  "results": [
+    {
+      "name": "hidden Electron window stays hidden",
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "real preload exposes conversation acknowledge and notification methods",
+      "passed": true,
+      "detail": {
+        "hasAcknowledge": true,
+        "hasGet": true,
+        "hasNotifList": true
+      }
+    },
+    {
+      "name": "coworker channel message automatically creates channel-unread notification and updates badge",
+      "passed": true,
+      "detail": {
+        "text": "1",
+        "hidden": false
+      }
+    },
+    {
+      "name": "notification card renders in Notification Center with correct channel name, coworker name, and body",
+      "passed": true,
+      "detail": {
+        "count": 1,
+        "category": "💬Channel unread / 频道未读",
+        "title": "Project Channel · Coding Specialist",
+        "body": "Initial deliverable ready for inspection"
+      }
+    },
+    {
+      "name": "predictable coalescing: subsequent coworker message in same channel updates card without duplicate card or spam",
+      "passed": true,
+      "detail": {
+        "count": 1,
+        "body": "Updated deliverable with second sprint results",
+        "badge": "1"
+      }
+    },
+    {
+      "name": "suppression: fail-closed default suppresses unspecified intent, user messages, and internal protocol turns",
+      "passed": true,
+      "detail": {
+        "count": 1
+      }
+    },
+    {
+      "name": "conversation:get remains strictly read-only and does NOT clear unread state",
+      "passed": true,
+      "detail": {
+        "unreadCount": 1,
+        "badge": "1"
+      }
+    },
+    {
+      "name": "truthful read resolution: opening/viewing the channel marks the notification read and clears badge",
+      "passed": true,
+      "detail": {
+        "isRead": true,
+        "badge": "0"
+      }
+    },
+    {
+      "name": "reactivation: later coworker message in that channel reactivates unread notification",
+      "passed": true,
+      "detail": {
+        "isRead": false,
+        "body": "Subsequent question after channel was read",
+        "badge": "1"
+      }
+    },
+    {
+      "name": "restart persistence & key security: notifications.json contains digest keys and survives restart without data loss",
+      "passed": true,
+      "detail": {
+        "allKeysAreDigests": true,
+        "hasOpaqueIds": true,
+        "diskClean": true,
+        "restartedCount": 1,
+        "restartedUnread": 1
+      }
+    }
+  ]
+}

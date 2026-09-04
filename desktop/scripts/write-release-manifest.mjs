@@ -5,6 +5,9 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
+import { releaseSigningConfig } from "./release-signing.mjs";
+import { verifyFusesOn } from "./fuses-core.mjs";
+import { assertStableSource, collectSourceProvenance, publishEligibility } from "./release-provenance.mjs";
 
 const DESKTOP_ROOT = process.cwd();
 const OUT_DIR = join(DESKTOP_ROOT, "out");
@@ -40,7 +43,7 @@ function requireFile(path) {
     return path;
 }
 
-function collectInstallerArtifacts() {
+async function collectInstallerArtifacts() {
     const squirrelDir = findInstallerDir();
     const relativeDir = squirrelDir.replace(DESKTOP_ROOT, "").replace(/\\/g, "/").replace(/^\//, "");
     const names = readdirSync(squirrelDir);
@@ -71,6 +74,7 @@ function collectInstallerArtifacts() {
         bytes: statSync(exePath).size,
         sha256: sha256File(exePath),
     });
+    await verifyFusesOn(exePath);
     return artifacts;
 }
 
@@ -93,10 +97,31 @@ const pkg = JSON.parse(readFileSync(join(DESKTOP_ROOT, "package.json"), "utf8"))
 const vendorCoreManifestPath = join(DESKTOP_ROOT, "vendor", "core", "core-manifest.json");
 const nodeRuntimeManifestPath = join(DESKTOP_ROOT, "resources", "node-runtime.manifest.json");
 
+const signing = releaseSigningConfig();
+const repoRoot = join(DESKTOP_ROOT, "..");
+const provenance = collectSourceProvenance({ repoRoot });
+assertStableSource({ repoRoot, provenance, signingStatus: signing.status });
+const channel = process.env.SOVEREIGNBOT_RELEASE_CHANNEL ?? "stable";
+if (!["stable", "preview"].includes(channel)) throw new Error("SOVEREIGNBOT_RELEASE_CHANNEL must be stable or preview");
+const artifacts = await collectInstallerArtifacts();
+const eligible = publishEligibility({ mode: signing.mode, signingStatus: signing.status, provenance });
 const manifest = {
     schema: "sovereignbot.desktop.release-manifest.v1",
     generatedAt: new Date().toISOString(),
-    gitCommitSha: process.env.GITHUB_SHA ?? null,
+    sourceHeadSha: provenance.sourceHeadSha,
+    sourceTreeState: provenance.sourceTreeState,
+    dirty: provenance.dirty,
+    publishEligible: eligible,
+    release: {
+        mode: signing.mode,
+        channel,
+        signature: {
+            status: signing.status,
+            verified: signing.status === "signed" ? "SKIP: Authenticode verifier not configured in this offline workspace" : false,
+        },
+        fuses: "verified",
+        publishBoundary: "explicit-maintainer-upload-only",
+    },
     desktop: {
         version: pkg.version,
         electron: pkg.devDependencies.electron,
@@ -112,10 +137,15 @@ const manifest = {
         advisories: "devDependency-only audit findings (electron-forge chain incl. extract-zip/tar); no runtime dependency footprint",
         evidence: "npm audit --omit=dev reports 0 vulnerabilities",
     },
-    artifacts: collectInstallerArtifacts(),
+    artifacts,
 };
 
 mkdirSync(OUT_DIR, { recursive: true });
 const target = join(OUT_DIR, "release-manifest.json");
 writeFileSync(target, `${JSON.stringify(manifest, null, 2)}\n`);
-console.log(JSON.stringify({ releaseManifest: target.replace(DESKTOP_ROOT, "").replace(/^[\\/]/, ""), artifacts: manifest.artifacts.map((a) => a.name) }));
+const checksumLines = manifest.artifacts.map((artifact) => `${artifact.sha256}  ${artifact.name}`).join("\n") + "\n";
+writeFileSync(join(OUT_DIR, "SHA256SUMS.txt"), checksumLines, "ascii");
+writeFileSync(join(OUT_DIR, "release-publish-command.txt"), eligible
+    ? ["# Review release-manifest.json and SHA256SUMS.txt, then explicitly upload these files.", `gh release create desktop-v${pkg.version} --title \"SovereignBot Desktop ${pkg.version}\" --notes-file docs/releases/desktop-v${pkg.version}.md out/make/**/SovereignBot-*Setup.exe out/make/**/*.nupkg out/make/**/RELEASES out/release-manifest.json out/SHA256SUMS.txt`].join("\n") + "\n"
+    : "# REFUSED: release-manifest.json publishEligible=false; do not upload this diagnostic artifact.\nexit 1\n", "utf8");
+console.log(JSON.stringify({ releaseManifest: target.replace(DESKTOP_ROOT, "").replace(/^[\\/]/, ""), checksums: "out/SHA256SUMS.txt", signature: manifest.release.signature, artifacts: manifest.artifacts.map((a) => a.name) }));

@@ -1,0 +1,37 @@
+{
+  "schema": "sovereignbot.local-acceptance-manifest.v1",
+  "phase": "V4.3-P12",
+  "date": "2026-09-02",
+  "branch": "codex/v4-review-directed-handoff-protocol",
+  "sourceCommit": "811243103d8ccf94be0d39077d4d2a05cb1df0d7",
+  "acceptance": {
+    "command": "node scripts/verify-p12-playbook-semantics.mjs",
+    "gate": "verify-p12-playbook-semantics",
+    "result": "PASS",
+    "checksPassed": 13,
+    "checksTotal": 13,
+    "rawJson": "verify-p12-playbook-semantics.json",
+    "rawLog": "verify-p12-playbook-semantics.log",
+    "scenario": "fresh hidden Electron create/edit/view/assign/export/import/duplicate/restart of a bounded semantic Playbook through the existing Product Surface, TeamService, IPC, and renderer paths."
+  },
+  "localChecks": {
+    "desktopSyntaxFiles": 170,
+    "desktopFullTestsPassed": 254,
+    "desktopFullTestsFailed": 0,
+    "playbookFocusedTestsPassed": 35,
+    "secretScan": "clean",
+    "diffCheck": "pass"
+  },
+  "boundaries": {
+    "networkUsed": false,
+    "dependenciesInstalled": false,
+    "providerOrOAuthUsed": false,
+    "externalAppsOrConnectorsAdded": false,
+    "cloudSyncOrSharingAdded": false,
+    "schedulerOrExecutionAuthorityAdded": false,
+    "workflowOrDagEngineAdded": false,
+    "destructiveRetentionOrDeletionAdded": false,
+    "localRcSigned": false,
+    "publishEligible": false
+  }
+}

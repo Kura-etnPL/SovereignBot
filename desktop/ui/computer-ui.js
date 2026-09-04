@@ -3,6 +3,66 @@
 (() => {
   if (!window.sovereignbot?.computer || !window.sovereignbot?.operator || typeof renderDetails !== "function") return;
 
+  // Conversation details keeps a compact, safe compatibility view. It resolves
+  // the Project server-side through the public Project projection and never uses
+  // the legacy operator/agent-shaped Computer payload.
+  if (window.sovereignbot?.thisPc) {
+    const baseRenderDetails = renderDetails;
+    function ensureSafeSection() {
+      const panel = document.getElementById("details-panel");
+      if (!panel) return undefined;
+      let section = document.getElementById("details-computer-section");
+      const t = (k, p) => globalThis.SovereignI18n?.t(k, p) || k;
+      if (!section) {
+        section = document.createElement("section");
+        section.id = "details-computer-section";
+        section.className = "detail-section computer-section";
+        const label = document.createElement("span"); label.className = "detail-label"; label.textContent = t("thisPc.title");
+        const root = document.createElement("div"); root.id = "details-computers"; root.className = "computer-list";
+        section.append(label, root);
+        panel.insertBefore(section, document.getElementById("details-artifacts-section") || panel.querySelector(".future-section") || null);
+      }
+      if (!section.querySelector(".computer-context-help")) {
+        const productTitle = document.createElement("strong");
+        productTitle.className = "computer-product-title";
+        productTitle.textContent = t("thisPc.title");
+        const help = document.createElement("p");
+        help.className = "computer-context-help computer-note";
+        help.textContent = t("thisPc.contextOptions");
+        section.insertBefore(productTitle, section.querySelector("#details-computers"));
+        section.insertBefore(help, section.querySelector("#details-computers"));
+      }
+      return section;
+    }
+    async function safeRender(conversation) {
+      const t = (k, p) => globalThis.SovereignI18n?.t(k, p) || k;
+      const section = ensureSafeSection(); const root = section?.querySelector("#details-computers"); if (!root) return;
+      root.textContent = "Checking This PC…";
+      try {
+        const projects = (await window.sovereignbot.projects.list({ includeArchived: false, limit: 50 })).projects ?? [];
+        const project = projects.find((entry) => entry.teams?.some((team) => team.channels?.some((channel) => channel.conversationId === conversation.id)));
+        if (!project) { root.textContent = t("thisPc.openToChoose"); return; }
+        const result = await window.sovereignbot.thisPc.list({ projectId: project.projectId, limit: 50 });
+        root.textContent = "";
+        for (const computer of (result.computers ?? []).filter((entry) => participantCoworkers(conversation).some((member) => member.id === entry.coworkerId))) {
+          const card = document.createElement("article"); card.className = "computer-card";
+          const name = document.createElement("strong"); name.textContent = computer.coworkerName || "Coworker";
+          const mode = document.createElement("span"); mode.textContent = `${t("thisPc.profileLabel")}: ${computer.context?.kind === "private" ? t("thisPc.privateContext") : t("thisPc.sharedContext")}`;
+          const status = document.createElement("span"); status.textContent = `${t("thisPc.statusLabel")}: ${computer.status} · ${computer.statusMessage}`;
+          card.append(name, mode, status);
+          const actions = document.createElement("div"); actions.className = "computer-actions-row";
+          if (computer.canTakeOver) actions.append(Object.assign(document.createElement("button"), { type: "button", className: "computer-action primary", textContent: t("thisPc.takeControl"), onclick: async () => { window.sovereignbotStopVoice?.(); await window.sovereignbot.thisPc.takeOver({ projectId: project.projectId, coworkerId: computer.coworkerId }); await safeRender(conversation); } }));
+          if (computer.canHandBack) actions.append(Object.assign(document.createElement("button"), { type: "button", className: "computer-action primary", textContent: t("thisPc.handBack"), onclick: async () => { await window.sovereignbot.thisPc.handBack({ projectId: project.projectId, coworkerId: computer.coworkerId }); await safeRender(conversation); } }));
+          card.append(actions); root.append(card);
+        }
+        if (!root.children.length) root.textContent = "No Coworker Computer lane in this Project.";
+      } catch { root.textContent = "This PC status is unavailable."; }
+    }
+    renderDetails = function renderDetailsWithSafeComputer(conversation) { baseRenderDetails(conversation); void safeRender(conversation); };
+    ensureSafeSection();
+    return;
+  }
+
   const baseRenderDetails = renderDetails;
   let refreshSeq = 0;
 
@@ -161,7 +221,7 @@
     const name = document.createElement("strong");
     name.textContent = coworker?.name || binding?.agentId || "Coworker";
     const agent = document.createElement("span");
-    agent.textContent = "This PC / 此电脑";
+    agent.textContent = t("thisPc.title");
     copy.append(name, agent);
     identity.append(icon, copy);
     const stateEl = document.createElement("span");
@@ -173,12 +233,12 @@
     const modeRow = document.createElement("label");
     modeRow.className = "computer-mode-row";
     const modeLabel = document.createElement("span");
-    modeLabel.textContent = "Profile / 登录方式";
+    modeLabel.textContent = t("thisPc.profileLabel");
     const mode = document.createElement("select");
     mode.className = "computer-mode-select";
     for (const option of [
-      ["shared-login", "Shared computer/login / 共享电脑登录"],
-      ["private-profile", "Private computer profile / 私有电脑配置"],
+      ["shared-login", t("thisPc.sharedContext")],
+      ["private-profile", t("thisPc.privateContext")],
     ]) {
       const item = document.createElement("option");
       item.value = option[0];
@@ -264,7 +324,7 @@
       actions.append(release);
     } else {
       const take = makeButton(computer.control?.mode === "requested" ? "Take over now" : "Take control", "computer-action primary");
-      take.addEventListener("click", () => runAction(take, () => window.sovereignbot.computer.control({ agentId: binding.agentId, action: "take" }), refresh));
+      take.addEventListener("click", () => runAction(take, () => { window.sovereignbotStopVoice?.(); return window.sovereignbot.computer.control({ agentId: binding.agentId, action: "take" }); }, refresh));
       actions.append(take);
       const stop = makeButton("Stop");
       stop.addEventListener("click", () => runAction(stop, () => window.sovereignbot.computer.lifecycle({ agentId: binding.agentId, action: "stop" }), refresh));

@@ -56,7 +56,7 @@ Core principles:
 - **immutable policy versions with transactional Apply/Rollback and crash recovery**;
 - **verified portable installers** without global npm/admin/PATH mutation.
 
-> **Status: Core v1.0.0 and Desktop v1.1.1 released.** The core runtime, Codex/Claude harnesses, supervisor-worker protocol, production governed browser, governed MCP bridge, persistent repeat guard, live local Operator Console, and versioned policy activation are released as **v1.0.0** (see the GitHub Releases page). **Desktop v1.1.1** is the corrective release that wires real Codex/Claude execution into normal mode with trusted workspace-bound provider processes, independent model review and synthesis, fake-provider installed E2E evidence, and a read-only-verify → downstream-publish provenance chain (tracked in issue #58; desktop-v1.1.0 remains published as history).
+> **Status: Core v1.0.0 and Desktop v1.1.1 are historical releases.** The current Desktop line is **SovereignBot 4.0.0**, represented here by an unsigned local RC/preview evidence build rather than a public release. The V4 line carries forward the governed Codex/Claude harnesses, supervisor-worker protocol, Computer boundary, product surfaces, durable state, and release/update checks; the local RC has not been installed or uploaded.
 
 ## Quick start from source
 
@@ -312,10 +312,13 @@ Required regression coverage includes:
 
 ## Release status
 
-Core v1.0.0 is published with a verified tag/release/asset chain. The active line is
-**Desktop v1.1** (`desktop/`, see [docs/desktop.md](docs/desktop.md)): an Electron front end over
-the same governed runtime, packaged as a signed-off Squirrel Setup.exe with installer E2E and a
-provenance release manifest. Desktop gates and acceptance criteria live in issue #48.
+Core v1.0.0 is the published historical baseline. The active line is **Desktop 4.0.0 RC**
+(`desktop/`, see [docs/desktop.md](docs/desktop.md)): an Electron front end over the same governed
+runtime, locally packaged as an unsigned Squirrel RC with a clean provenance manifest, verified
+fuses, packaged smoke, and packaged dogfood evidence. Setup.exe was generated but not run, and no
+public release claim is made until signing, protected release provenance, fresh installation, real
+provider validation, and upload gates are available. Desktop gates and acceptance criteria live in
+the acceptance documents under `docs/acceptance/`.
 
 Public Cloudflare/domain deployment, AG-UI, extra providers, and mandatory container/VM packaging remain intentionally non-blocking future work.
 
@@ -580,10 +583,13 @@ Required regression coverage includes:
 
 ## Release status
 
-Core v1.0.0 is published with a verified tag/release/asset chain. The active line is
-**Desktop v1.1** (`desktop/`, see [docs/desktop.md](docs/desktop.md)): an Electron front end over
-the same governed runtime, packaged as a signed-off Squirrel Setup.exe with installer E2E and a
-provenance release manifest. Desktop gates and acceptance criteria live in issue #48.
+Core v1.0.0 is the published historical baseline. The active line is **Desktop 4.0.0 RC**
+(`desktop/`, see [docs/desktop.md](docs/desktop.md)): an Electron front end over the same governed
+runtime, locally packaged as an unsigned Squirrel RC with a clean provenance manifest, verified
+fuses, packaged smoke, and packaged dogfood evidence. Setup.exe was generated but not run, and no
+public release claim is made until signing, protected release provenance, fresh installation, real
+provider validation, and upload gates are available. Desktop gates and acceptance criteria live in
+the acceptance documents under `docs/acceptance/`.
 
 Public Cloudflare/domain deployment, AG-UI, extra providers, and mandatory container/VM packaging remain intentionally non-blocking future work.
 

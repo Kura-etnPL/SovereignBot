@@ -1,0 +1,75 @@
+{
+  "schema": "sovereignbot.desktop.p39-conversation-pagination-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "default public conversation page is bounded": {
+      "ok": true,
+      "detail": "{\"count\":100,\"total\":450,\"pageInfo\":{\"total\":450,\"hasOlder\":true,\"nextBeforeMessageId\":\"msg_0b04ab14ecc24432\"}}"
+    },
+    "public conversation page strips internal fields": {
+      "ok": true,
+      "detail": "{\"keys\":[\"id\",\"kind\",\"title\",\"participants\",\"leadCoworkerId\",\"createdAt\",\"updatedAt\",\"messageCount\",\"lastMessage\",\"messages\",\"pageInfo\"],\"messageKeys\":[\"id\",\"senderId\",\"text\",\"mentions\",\"artifactIds\",\"delivery\",\"createdAt\"]}"
+    },
+    "initial Conversation DOM stays bounded": {
+      "ok": true,
+      "detail": "{\"count\":100,\"first\":\"P39 message 350\",\"last\":\"P39 message 449\",\"buttonHidden\":false}"
+    },
+    "Load older completes and preserves anchor: older message page": {
+      "ok": true,
+      "detail": "{\"before\":{\"id\":\"msg_165b3993ffce369e\",\"offset\":34.72917175292969},\"after\":{\"id\":\"msg_165b3993ffce369e\",\"offset\":34.97917175292969}}"
+    },
+    "Load older completes and preserves anchor: second older message page": {
+      "ok": true,
+      "detail": "{\"before\":{\"id\":\"msg_24a8846aa6f561de\",\"offset\":34.72917175292969},\"after\":{\"id\":\"msg_24a8846aa6f561de\",\"offset\":34.97917175292969}}"
+    },
+    "Load older completes and preserves anchor: sliding historical window": {
+      "ok": true,
+      "detail": "{\"before\":{\"id\":\"msg_da706bf0fa3d6232\",\"offset\":34.72917175292969},\"after\":{\"id\":\"msg_da706bf0fa3d6232\",\"offset\":34.97917175292969}}"
+    },
+    "Load older slides a bounded ordered unique history window": {
+      "ok": true,
+      "detail": "{\"count\":300,\"unique\":300,\"first\":\"P39 message 50\",\"last\":\"P39 message 349\",\"top\":12761.3330078125,\"height\":37812,\"latestHidden\":false,\"buttonHidden\":false}"
+    },
+    "polling preserves the historical window and offers latest": {
+      "ok": true,
+      "detail": "{\"count\":300,\"first\":\"P39 message 50\",\"last\":\"P39 message 349\",\"top\":12761.3330078125,\"height\":37812,\"latestText\":\"1 new message · Back to latest / 1 条新消息 · 回到最新\"}"
+    },
+    "explicit Back to latest reloads the latest bounded page": {
+      "ok": true,
+      "detail": "{\"count\":100,\"first\":\"P39 message 351\",\"last\":\"P39 polled new message\",\"buttonHidden\":true,\"top\":11998.6669921875,\"height\":12691}"
+    },
+    "conversation switch isolates pagination state": {
+      "ok": true,
+      "detail": "{\"count\":2,\"text\":[\"P39 second conversation one\",\"P39 second conversation two\"],\"olderHidden\":true}"
+    },
+    "pagination limit cursor and unknown fields fail closed": {
+      "ok": true,
+      "detail": "{\"rejected\":3,\"total\":3}"
+    },
+    "restart rebuilds the same bounded page from persistence": {
+      "ok": true,
+      "detail": "{\"count\":100,\"total\":451,\"lastId\":\"msg_b9babbfd8fe83345\"}"
+    }
+  },
+  "notes": [
+    "PASS hidden Electron window stays hidden",
+    "PASS default public conversation page is bounded {\"count\":100,\"total\":450,\"pageInfo\":{\"total\":450,\"hasOlder\":true,\"nextBeforeMessageId\":\"msg_0b04ab14ecc24432\"}}",
+    "PASS public conversation page strips internal fields {\"keys\":[\"id\",\"kind\",\"title\",\"participants\",\"leadCoworkerId\",\"createdAt\",\"updatedAt\",\"messageCount\",\"lastMessage\",\"messages\",\"pageInfo\"],\"messageKeys\":[\"id\",\"senderId\",\"text\",\"mentions\",\"artifactIds\",\"delivery\",\"createdAt\"]}",
+    "PASS initial Conversation DOM stays bounded {\"count\":100,\"first\":\"P39 message 350\",\"last\":\"P39 message 449\",\"buttonHidden\":false}",
+    "PASS Load older completes and preserves anchor: older message page {\"before\":{\"id\":\"msg_165b3993ffce369e\",\"offset\":34.72917175292969},\"after\":{\"id\":\"msg_165b3993ffce369e\",\"offset\":34.97917175292969}}",
+    "PASS Load older completes and preserves anchor: second older message page {\"before\":{\"id\":\"msg_24a8846aa6f561de\",\"offset\":34.72917175292969},\"after\":{\"id\":\"msg_24a8846aa6f561de\",\"offset\":34.97917175292969}}",
+    "PASS Load older completes and preserves anchor: sliding historical window {\"before\":{\"id\":\"msg_da706bf0fa3d6232\",\"offset\":34.72917175292969},\"after\":{\"id\":\"msg_da706bf0fa3d6232\",\"offset\":34.97917175292969}}",
+    "PASS Load older slides a bounded ordered unique history window {\"count\":300,\"unique\":300,\"first\":\"P39 message 50\",\"last\":\"P39 message 349\",\"top\":12761.3330078125,\"height\":37812,\"latestHidden\":false,\"buttonHidden\":false}",
+    "PASS polling preserves the historical window and offers latest {\"count\":300,\"first\":\"P39 message 50\",\"last\":\"P39 message 349\",\"top\":12761.3330078125,\"height\":37812,\"latestText\":\"1 new message · Back to latest / 1 条新消息 · 回到最新\"}",
+    "PASS explicit Back to latest reloads the latest bounded page {\"count\":100,\"first\":\"P39 message 351\",\"last\":\"P39 polled new message\",\"buttonHidden\":true,\"top\":11998.6669921875,\"height\":12691}",
+    "PASS conversation switch isolates pagination state {\"count\":2,\"text\":[\"P39 second conversation one\",\"P39 second conversation two\"],\"olderHidden\":true}",
+    "PASS pagination limit cursor and unknown fields fail closed {\"rejected\":3,\"total\":3}",
+    "PASS restart rebuilds the same bounded page from persistence {\"count\":100,\"total\":451,\"lastId\":\"msg_b9babbfd8fe83345\"}"
+  ],
+  "externalActions": [],
+  "ok": true
+}

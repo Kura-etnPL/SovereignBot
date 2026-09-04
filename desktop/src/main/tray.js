@@ -1,4 +1,4 @@
-import { Notification, Tray, Menu } from "electron";
+import { Tray, Menu } from "electron";
 import { fileURLToPath } from "node:url";
 
 // System tray presence for Desktop v1.1. The tray exists so "close to tray" is a real
@@ -49,15 +49,8 @@ export function createTrayController({ getWindow, onQuit }) {
     return {
         onWindowVisibilityChanged: rebuild,
         notifyHidden() {
-            try {
-                new Notification({
-                    title: "SovereignBot is still running",
-                    body: "Closed to the system tray. Use the tray icon to reopen or quit.",
-                    silent: true,
-                }).show();
-            }
-            catch {
-            }
+            // Closing to tray is a window-state transition, not a product event.
+            // Product notifications are emitted only by notification-service.js.
         },
         destroy() {
             try {

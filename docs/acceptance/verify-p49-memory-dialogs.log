@@ -1,0 +1,10 @@
+PASS hidden renderer exposes both Memory product dialogs {"edit":true,"del":true,"prompt":false,"confirm":false}
+PASS main Memory edit keeps the existing product dialog regression {"open":true,"title":"P49 Memory","content":"Before edit"}
+PASS Conversation Details Edit reuses the shared Memory dialog {"open":true,"content":"Before edit"}
+PASS injected edit failure stays visible, retryable, and suppresses duplicate submit {"open":true,"error":"Injected edit failure; retry is safe.","disabled":false,"editCalls":1}
+PASS edit retry closes the dialog, persists, and calls IPC twice {"open":false,"content":"After edit","editCalls":2}
+PASS Delete cancel closes the product dialog without IPC {"open":true,"after":false}
+PASS injected delete failure stays visible, retryable, and duplicate-safe {"open":true,"error":"Injected delete failure; retry is safe.","disabled":false,"deleteCalls":1}
+PASS delete retry removes only the selected Memory, refreshes scope, and calls IPC twice {"open":false,"memoryCount":0,"deleteCalls":2}
+PASS Memory dialog text exposes no fixture path or internal authority Injected delete failure; retry is safe.
+PASS P49 Memory dialog gate summary 9/9 checks passed

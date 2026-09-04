@@ -1,0 +1,32 @@
+{
+  "at": "2026-09-03T02:22:28.102Z",
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "real preload exposes Project command-center surface": true,
+    "Command Palette opens a bounded Routine selector by keyboard": true,
+    "selector exposes safe Routine names and fail-closed lifecycle states": true,
+    "selector cancellation performs no governed run": true,
+    "no Routine selection stays in-dialog and performs no run": true,
+    "selected Routine reuses palette IPC and creates one governed Job": true,
+    "stale Routine ids fail closed with an in-product error and no Job": true,
+    "forged Routine id is rejected by the governed palette service": true,
+    "renderer creates canonical Project": true,
+    "Project public projection contains all bounded command-center groups": true,
+    "all associated canonical entities are scoped into the Project": true,
+    "Project projection is bounded and authority-free": true,
+    "Project switcher selects the workbench without jumping to a conversation": true,
+    "workbench renders every grouped section and associated labels": true,
+    "Connected Apps navigation opens the existing Apps surface": true,
+    "canonical Channel navigation opens only the selected Project conversation": true,
+    "archived Project remains inspectable and labeled": true,
+    "Project and grouped contents survive a real service restart": true,
+    "unavailable workspace remains visible with fail-closed read-only projection": true
+  },
+  "projectId": "project_ecfdc524f49d1e53",
+  "teamId": "team_e7ea660e862459b2",
+  "conversationId": "conv_8be0f6dfb3cf011d",
+  "artifactId": "artifact_77816778bb61a6a6",
+  "memoryId": "mem_ea7f1bf5-6d33-4a3d-998c-51b044ff3a05",
+  "routineId": "routine_24dc605e689f24eb",
+  "triggerId": "trigger_a97070fc0f6ae4de"
+}

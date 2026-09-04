@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-03T05:49:18.850Z",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": true,
+    "ordinary Projects entry exposes the typed lifecycle surface": true,
+    "Project switcher and Recent/Project entry render safe labels without absolute paths": true,
+    "Project Create persists through the ordinary form and closes": true,
+    "Archive is reversible and keeps the Project visible": true,
+    "Restore returns the same Project without deleting its record": true,
+    "Project Export uses bounded native JSON and safe public projection": true,
+    "Project Export cancellation performs no write": true,
+    "Project lifecycle survives a real service and renderer restart": true
+  },
+  "ids": {}
+}

@@ -1,0 +1,10 @@
+PASS hidden Electron window stays hidden
+PASS ordinary Projects entry exposes the typed lifecycle surface {"api":"function","nav":true,"view":true,"switcher":true,"recent":true,"create":true}
+PASS Project switcher and Recent/Project entry render safe labels without absolute paths {"cards":1,"switcher":2}
+PASS Project Create persists through the ordinary form and closes {"count":2,"dialog":false,"id":"P34 Lifecycle Project"}
+PASS Archive is reversible and keeps the Project visible {"text":"P34 Lifecycle Project\n\nArchived / 已归档 · Available / 可用\n\nteams: 0 · channels: 0 · coworkers: 0 · files: 0 · artifacts: 0 · skills: 0 · playbooks: 0 · routines: 0 · triggers: 0 · memory: 0 · connectedApps: 0\n\n0 Teams · 0 Channels · 0 Coworkers\n\nInspect / 查看\nOpen / 打开\nRestore / 恢复\nExport / 导出\nBackup / 备份\nMemory / 记忆\nAdd fact / 添加事实","api":"archived"}
+PASS Restore returns the same Project without deleting its record {"text":"P34 Lifecycle Project\n\nActive / 活跃 · Available / 可用\n\nteams: 0 · channels: 0 · coworkers: 0 · files: 0 · artifacts: 0 · skills: 0 · playbooks: 0 · routines: 0 · triggers: 0 · memory: 0 · connectedApps: 0\n\n0 Teams · 0 Channels · 0 Coworkers\n\nInspect / 查看\nOpen / 打开\nArchive / 归档\nExport / 导出\nBackup / 备份\nMemory / 记忆\nAdd fact / 添加事实","api":"active"}
+PASS Project Export uses bounded native JSON and safe public projection {"schema":"sovereignbot.project-export.v1","exportedAt":"2026-09-03T05:49:17.591Z","project":{"name":"P34 Lifecycle Project","state":"active","createdAt":"2026-09-03T05:49:17.239Z","updatedAt":"2026-09-03T05:49:17.471Z","counts":{"teams":0,"channels":0,"coworkers":0,"files":0,"artifacts":0,"skills":0,"playbooks":0,"routines":0,"triggers":0,"memory":0,"connectedApps":0},"teams":[],"coworkers":[],"connectedApps":[],"memory":[]}}
+PASS Project Export cancellation performs no write
+PASS Project lifecycle survives a real service and renderer restart
+[summary] 9/9 PASS

@@ -1,7 +1,7 @@
 // Runtime records are durable diagnostics or public projections.  They may keep
 // ordinary domain values, but must never carry provider continuity, credentials,
 // profile/workspace paths, or raw provider-account identifiers.
-const OMIT_RUNTIME_KEY = /^(?:session[_-]?id|continuity|provider[_-]?continuity|harnessstate|executioncontext|cwd|path|workspace(?:path|dir)|profile(?:path|dir)|user[-_]?data(?:dir)?|storage(?:relative)?path|provider[_-]?account(?:[_-]?id)?|account[_-]?id)$/i;
+const OMIT_RUNTIME_KEY = /^(?:session[_-]?id|continuity|continuation(?:[_-]?(?:ref|url))?|provider[_-]?continuity|harnessstate|executioncontext|cwd|path|workspace(?:path|dir)|profile(?:path|dir)|user[-_]?data(?:dir)?|storage(?:relative)?path|provider[_-]?account(?:[_-]?id)?|account[_-]?id)$/i;
 const REDACT_RUNTIME_KEY = /^(?:password|passwd|secret|secret[_-]?value|token|authorization|cookie|set-cookie|api[_-]?key)$/i;
 const FIELD_NAME_ARRAY_KEY = /^(?:keys|fields|fieldnames)$/i;
 const WINDOWS_PATH = /(?:[A-Za-z]:[\\/])[^"'<>|?\r\n]+/g;

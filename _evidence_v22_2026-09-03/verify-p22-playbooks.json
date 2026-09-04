@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-02T23:47:29.500Z",
+  "checks": {
+    "gate window stays hidden": true,
+    "renderer exposes the structured Playbook Library path": true,
+    "New Playbook opens structured fields without raw JSON": true,
+    "New Playbook accepts bounded steps, stages, review points, and recommendations": true,
+    "saved Playbook persists its declarative composition": true,
+    "Edit saves through the product form and refreshes": true,
+    "Team and Channel assignments remain explicit and bounded": true,
+    "Duplicate, Archive, and Restore remain wired to the existing service": true,
+    "Playbook export uses native file IO and safe declarative JSON": true,
+    "Playbook import validates and refreshes the library": true,
+    "Playbook editor and native file state survive service restart": true
+  }
+}
