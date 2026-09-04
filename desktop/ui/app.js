@@ -999,8 +999,28 @@ function renderMessage(conversation, message) {
     delivery.className = "delivery-line";
     const values = Object.values(message.delivery);
     const pending = values.filter((entry) => entry?.status === "pending").length;
-    const failed = values.filter((entry) => entry?.status === "failed").length;
-    delivery.textContent = pending ? "Working…": failed ? `${failed} delivery failed` : "Delivered";
+    const attention = values.filter((entry) => entry?.status === "attention").length;
+    const redirected = values.filter((entry) => entry?.status === "redirected" || (entry?.status === "failed" && String(entry?.reason ?? "").toLowerCase().includes("redirect"))).length;
+    const failed = values.filter((entry) => entry?.status === "failed" && !String(entry?.reason ?? "").toLowerCase().includes("redirect")).length;
+
+    const pendingEntry = values.find((entry) => entry?.status === "pending" && entry?.detail);
+    const attentionEntry = values.find((entry) => entry?.status === "attention" && (entry?.detail || entry?.reason));
+
+    if (pendingEntry?.detail) {
+      delivery.textContent = pendingEntry.detail;
+      delivery.classList.add("delivery-pending");
+    } else if (pending) {
+      delivery.textContent = "Working…";
+    } else if (attentionEntry) {
+      delivery.textContent = `Needs Attention: ${attentionEntry.detail || attentionEntry.reason}`;
+      delivery.classList.add("delivery-attention");
+    } else if (redirected) {
+      delivery.textContent = "Redirected / 已重定向";
+    } else if (failed) {
+      delivery.textContent = `${failed} delivery failed`;
+    } else {
+      delivery.textContent = "Delivered";
+    }
     content.append(delivery);
   }
   row.append(content);
@@ -3239,6 +3259,16 @@ function bindEvents() {
       void openConversation(conversationId.trim(), { messageId });
     }
   });
+
+  window.sovereignbotUi = {
+    switchView,
+    openView(viewName) { switchView(viewName); },
+    openConversation,
+    openDirect,
+    refreshCoworkers,
+    refreshRoster,
+    state,
+  };
 }
 
 async function bootstrap() {

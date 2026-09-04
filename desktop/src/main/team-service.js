@@ -56,7 +56,7 @@ export const SOFTWARE_TEAM_PACK = Object.freeze({
             role: "Implement and validate the requested software change.",
             instructions: "Work in the shared project workspace, make focused changes, run the smallest useful checks, and return an honest implementation result for review.",
             avatar: "⌘",
-            modelBinding: { profile: "efficient", provider: "codex", model: "luna" },
+            modelBinding: { profile: "efficient", provider: "codex" },
         },
         {
             key: "reviewer",
@@ -64,7 +64,7 @@ export const SOFTWARE_TEAM_PACK = Object.freeze({
             role: "Review the implementation and report risks or approval.",
             instructions: "Review the Coding Lead result independently, identify concrete issues, and give the Chief a concise go/no-go assessment.",
             avatar: "✓",
-            modelBinding: { profile: "efficient", provider: "codex", model: "luna" },
+            modelBinding: { profile: "efficient", provider: "codex" },
         },
     ]),
     channels: Object.freeze([

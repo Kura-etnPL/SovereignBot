@@ -50,6 +50,73 @@ function publicConversationContext(conversation, coworkerId) {
     }));
 }
 
+export function classifyCoworkerError(errorText) {
+    const text = String(errorText ?? "");
+    const lower = text.toLowerCase();
+
+    if (
+        lower.includes("hit your usage limit") ||
+        lower.includes("usage limit") ||
+        lower.includes("insufficient_quota") ||
+        lower.includes("exceeded your current quota") ||
+        lower.includes("purchase more credits")
+    ) {
+        return {
+            retryable: false,
+            attention: true,
+            category: "quota_exceeded",
+            humanReason: "Provider usage quota reached. Requires subscription upgrade or waiting for quota reset.",
+        };
+    }
+
+    if (
+        lower.includes("not logged in") ||
+        lower.includes("sign in") ||
+        lower.includes("authentication is unavailable") ||
+        lower.includes("unauthorized") ||
+        lower.includes("token expired") ||
+        /\b401\b/.test(lower)
+    ) {
+        return {
+            retryable: false,
+            attention: true,
+            category: "authentication",
+            humanReason: "Provider authentication required. Sign in or refresh credentials.",
+        };
+    }
+
+    if (
+        /\b502\b|\b503\b|\b504\b|\b500\b/.test(lower) ||
+        lower.includes("bad gateway") ||
+        lower.includes("gateway timeout") ||
+        lower.includes("service unavailable") ||
+        lower.includes("internal server error") ||
+        lower.includes("unexpectedserverresponse") ||
+        lower.includes("transport channel closed") ||
+        lower.includes("econnreset") ||
+        lower.includes("etimedout") ||
+        lower.includes("econnrefused") ||
+        lower.includes("socket hang up") ||
+        lower.includes("fetch failed") ||
+        lower.includes("network error") ||
+        lower.includes("timed out")
+    ) {
+        return {
+            retryable: true,
+            attention: false,
+            category: "transient_upstream",
+            humanReason: "Upstream provider temporary network/gateway glitch (502/503/timeout).",
+        };
+    }
+
+    return {
+        retryable: false,
+        attention: true,
+        category: "execution_failure",
+        humanReason: text || "Coworker work did not complete.",
+    };
+}
+
 export function createCoworkerDispatcher({
     dataDir,
     runtime,
@@ -480,22 +547,57 @@ export function createCoworkerDispatcher({
             return { ok: false, taskId: task.id, stopped: true, reason: "conversation is blocked for takeover or cancellation" };
         }
         await runtime.orchestrator.runUntilIdle();
-        const finished = (await runtime.orchestrator.listTasks()).find((entry) => entry.id === task.id);
+        let finished = (await runtime.orchestrator.listTasks()).find((entry) => entry.id === task.id);
+        const MAX_COWORKER_RETRIES = 2;
+        let coworkerAttempt = 0;
+        while (finished?.status !== "completed" && coworkerAttempt < MAX_COWORKER_RETRIES) {
+            const rawError = finished?.error ?? "";
+            const classification = classifyCoworkerError(rawError);
+            if (!classification.retryable || isConversationBlocked(conversationId)) {
+                break;
+            }
+            coworkerAttempt += 1;
+            const backoffMs = coworkerAttempt * 1000;
+            const retryNotice = `Transient provider glitch (${classification.category}); retrying (${coworkerAttempt}/${MAX_COWORKER_RETRIES})...`;
+            try {
+                conversationStore.markDelivery(conversationId, messageId, coworkerId, "pending", retryNotice);
+            } catch {}
+            recordTeamEvent({
+                conversationId,
+                type: "work.started",
+                status: "active",
+                actorId: coworkerId,
+                ownerId: coworkerId,
+                messageId,
+                reason: retryNotice,
+            });
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
+            if (isConversationBlocked(conversationId)) break;
+
+            if (typeof runtime.orchestrator.retry === "function") {
+                await runtime.orchestrator.retry(task.id);
+            }
+            await runtime.orchestrator.runUntilIdle();
+            finished = (await runtime.orchestrator.listTasks()).find((entry) => entry.id === task.id);
+        }
+
         const resultGate = fanoutMode
             ? fanoutPublishGate(conversationId, messageId, coworkerId, { fanoutId: fanoutContext.fanout.fanoutId, childKey: fanoutContext.child?.key, taskId: task.id, runId: executionContext?.runId }, fanoutMode)
             : publishGate(conversationId, messageId, coworkerId, executionContext);
         if (!resultGate)
             return { ok: false, taskId: task.id, stopped: true, reason: "stale collaboration result was discarded" };
         if (finished?.status !== "completed") {
+            const classification = classifyCoworkerError(finished?.error);
             const detail = binding.provider === "economy"
                 ? String(finished?.error ?? "Economy work did not complete.").slice(0, 500)
-                : "Coworker work did not complete.";
-            conversationStore.markDelivery(conversationId, messageId, coworkerId, "failed", detail);
+                : (classification.humanReason || String(finished?.error ?? "Coworker work did not complete.").slice(0, 500));
+            const status = "attention";
+            conversationStore.markDelivery(conversationId, messageId, coworkerId, status, detail);
             if (fanoutMode) await blockPendingFanout(detail);
-            else recordTeamEvent({ conversationId, type: "work.failed", status: binding.provider === "economy" ? "attention" : "failed", actorId: coworkerId, ownerId: coworkerId, messageId, reason: detail });
+            else recordTeamEvent({ conversationId, type: "work.failed", status: "attention", actorId: coworkerId, ownerId: coworkerId, messageId, reason: detail });
             state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
             save();
-            return { ok: false, taskId: task.id, error: detail, ...(binding.provider === "economy" ? { attention: true, reason: detail } : {}) };
+            return { ok: false, taskId: task.id, attention: true, error: detail, reason: detail };
         }
 
         if (isConversationBlocked(conversationId)) {

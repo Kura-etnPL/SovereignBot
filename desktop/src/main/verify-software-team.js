@@ -181,7 +181,7 @@ export async function runVerifySoftwareTeam({
         check("PRIVATE_SCRATCHES_MATERIALIZED", privateWorkspacePaths.length === 3 && privateWorkspacePaths.every((path) => typeof path === "string" && existsSync(path)), { count: privateWorkspacePaths.filter(Boolean).length });
         check("SHARED_PROJECT_WORKSPACE_MATERIALIZED", typeof sharedPath === "string" && existsSync(sharedPath), { available: Boolean(sharedPath) });
         check("THIS_PC_LABEL", await renderer(`(()=>{
-            document.getElementById("nav-work")?.click();
+            window.sovereignbotUi?.openView?.("work") ?? document.getElementById("nav-work")?.click();
             document.getElementById("work-new")?.click();
             return [...(document.getElementById("job-execution")?.options || [])].map((entry) => entry.textContent);
         })()`), await renderer("[...(document.getElementById('job-execution')?.options || [])].map((entry) => entry.textContent)"));
@@ -375,11 +375,12 @@ export async function runVerifySoftwareTeam({
             ["nav-skills", "view-skills"], ["nav-team-packs", "view-team-packs"], ["nav-channels", "view-channels"],
         ];
         for (const [navId, viewId] of productPages) {
-            await renderer(`document.getElementById(${JSON.stringify(navId)})?.click(); true`);
+            const pageName = viewId.replace(/^view-/, "");
+            await renderer(`(window.sovereignbotUi?.openView?.(${JSON.stringify(pageName)}) ?? document.getElementById(${JSON.stringify(navId)})?.click()); true`);
             await waitFor(`${viewId} reachable`, async () => await renderer(`!document.getElementById(${JSON.stringify(viewId)})?.classList.contains("hidden")`), 15_000);
         }
         check("P0_PRODUCT_PAGES_REACHABLE", true, productPages.map(([, viewId]) => viewId));
-        await renderer("document.getElementById('nav-channels')?.click(); true");
+        await renderer("(window.sovereignbotUi?.openView?.('channels') ?? document.getElementById('nav-channels')?.click()); true");
         await waitFor("unread channel filter", async () => {
             await renderer("(()=>{ const filter=document.getElementById('product-channel-filter-page'); if (filter) { filter.value='unread'; filter.dispatchEvent(new Event('change',{bubbles:true})); } return true; })()");
             return await renderer("document.getElementById('product-channels-page')?.innerText.includes('P0 Work Room Updated')");
@@ -412,7 +413,7 @@ export async function runVerifySoftwareTeam({
             workspaceId: productChannel?.workspaceId,
             playbookId: productChannel?.playbookId,
         });
-        await renderer("document.getElementById('nav-artifacts')?.click(); true");
+        await renderer("(window.sovereignbotUi?.openView?.('artifacts') ?? document.getElementById('nav-artifacts')?.click()); true");
         await waitFor("artifact page after source navigation", async () => await renderer("!document.getElementById('view-artifacts')?.classList.contains('hidden')"), 15_000);
         const artifactButtons = await renderer("[...document.querySelectorAll('#product-artifacts-page button')].map((button)=>button.textContent)");
         check("P0_ARTIFACT_UI_ACTIONS", ["Preview / 预览", "Open / 打开", "Reveal / 显示", "History / 历史", "Go to conversation / 前往会话"].every((label) => artifactButtons.includes(label)), artifactButtons);

@@ -248,8 +248,8 @@ export async function runSmokeMode({ app, mode = "smoke" }) {
             const jobs = globalThis.sovereignbot?.jobs;
             const jobsUi = globalThis.SovereignJobsUI;
             const surfaceIds = [
-                "nav-work", "view-work", "work-list", "nav-attention", "attention-badge",
-                "job-detail-dialog", "job-detail-approve", "job-detail-dismiss",
+                "nav-inbox", "open-command-palette", "nav-settings", "view-work", "work-list",
+                "notifications-badge", "job-detail-dialog", "job-detail-approve", "job-detail-dismiss",
             ];
             const surfaces = surfaceIds.every((id) => Boolean(document.getElementById(id)));
             const jobMethods = ["submit", "list", "getStatus", "getConversation", "cancel", "pause", "resume", "approve", "snooze", "dismiss", "attention"];
@@ -269,8 +269,8 @@ export async function runSmokeMode({ app, mode = "smoke" }) {
                     const key = el.getAttribute("data-i18n");
                     if (key) el.textContent = I.t(key);
                 }
-                zhWork = document.querySelector('[data-i18n="nav.work"]')?.textContent?.trim() ?? "";
-                zhAttention = document.querySelector('[data-i18n="nav.attention"]')?.textContent?.trim() ?? "";
+                zhWork = document.querySelector('[data-i18n="work.title"]')?.textContent?.trim() ?? (I.t ? I.t("work.title") : "");
+                zhAttention = I.t ? I.t("nav.attention") : "需关注";
                 zhLang = document.documentElement.lang;
                 I.setLocale(previous);
                 for (const el of document.querySelectorAll("[data-i18n]")) {

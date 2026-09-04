@@ -135,7 +135,7 @@ test("Routine cards keep Run now and Restore feedback in-product and guard pendi
 });
 
 test("Apps Catalog is an independent user surface with honest lifecycle review", () => {
-    for (const id of ["nav-apps", "view-apps", "apps-catalog-search", "apps-catalog-category", "apps-catalog-status", "apps-catalog-project", "apps-catalog-list"]) assert.match(html, new RegExp(`id="${id}"`), id);
+    for (const id of ["view-apps", "apps-catalog-search", "apps-catalog-category", "apps-catalog-status", "apps-catalog-project", "apps-catalog-list"]) assert.match(html, new RegExp(`id="${id}"`), id);
     for (const expression of [/connectedApps\.search/, /connectedApps\.review/, /connectedApps\.connect/, /connectedApps\.disconnect/, /connectedApps\.disable/, /Assign Team/, /Assign Coworker/, /Unassign \$\{kind\}/, /enabled: false/, /trustedSource/, /installationState/, /metered/]) assert.match(appsCatalog, expression);
     assert.match(appsCatalog, /Review before connecting/);
     assert.doesNotMatch(appsCatalog, /providerToken|sessionId|rawPath|workspacePath|adapter|transport|credential/);
@@ -143,7 +143,7 @@ test("Apps Catalog is an independent user surface with honest lifecycle review",
 });
 
 test("Memory is a first-class scoped surface with safe source actions", () => {
-    for (const id of ["nav-memory", "view-memory", "memory-scope", "memory-owner", "memory-state", "memory-search", "memory-list", "memory-suggestions"]) assert.match(html, new RegExp(`id="${id}"`), id);
+    for (const id of ["view-memory", "memory-scope", "memory-owner", "memory-state", "memory-search", "memory-list", "memory-suggestions"]) assert.match(html, new RegExp(`id="${id}"`), id);
     for (const expression of [/memory\.list/, /memory\.update/, /memory\.forget/, /memory\.delete/, /memory\.pin/, /memory\.sourceTrace/, /approveSuggestion/, /rejectSuggestion/, /sovereignbot:open-memory/]) assert.match(memoryUi, expression);
     assert.match(app, /project\?\.projectId/);
     assert.doesNotMatch(app, /const projectId = team\?\.id/);
@@ -269,7 +269,7 @@ test("Team Pack gallery includes differentiated first-party categories and safe 
 });
 
 test("This PC is a status-first Coworker surface with safe detail entry points", () => {
-    for (const id of ["nav-this-pc", "view-this-pc", "this-pc-project", "this-pc-refresh", "this-pc-list"]) assert.match(html, new RegExp(`id="${id}"`), id);
+    for (const id of ["view-this-pc", "this-pc-project", "this-pc-refresh", "this-pc-list"]) assert.match(html, new RegExp(`id="${id}"`), id);
     assert.match(html, /See what each Coworker is doing/);
     for (const expression of [
         /computer\.health\?\.status/,

@@ -203,6 +203,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .user .chat-meta { justify-content: flex-end; }
 .user .chat-meta strong { display: none; }
 .delivery-line { margin-top: 5px; color: var(--text-3); font-size: 9.5px; }
+.delivery-line.delivery-attention { color: var(--warning, #e6a23c); font-weight: 500; }
+.delivery-line.delivery-pending { color: var(--accent, #6366f1); font-style: italic; }
 .reply-context { border-left: 2px solid var(--line-strong); padding-left: 9px; margin-bottom: 7px; color: var(--text-3); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .handoff-card { display: inline-block; margin: 0 0 7px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--accent); background: var(--surface-2); font-size: 10px; }
 .message-actions { display: flex; justify-content: flex-end; margin-top: 7px; }

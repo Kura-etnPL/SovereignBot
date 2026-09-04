@@ -33,10 +33,10 @@
         "verify:p26-artifact-export": "node scripts/verify-p26-artifact-export.mjs",
         "verify:p27-artifact-retention": "node scripts/verify-p27-artifact-retention.mjs",
         "verify:p28-project-create": "node scripts/verify-p28-project-create.mjs",
-    "verify:p29-routine-selector": "node scripts/verify-p29-routine-selector.mjs",
-    "verify:p30-routine-actions": "node scripts/verify-p30-routine-actions.mjs",
+        "verify:p29-routine-selector": "node scripts/verify-p29-routine-selector.mjs",
+        "verify:p30-routine-actions": "node scripts/verify-p30-routine-actions.mjs",
         "verify:p47-routine-lifecycle": "node scripts/verify-p30-routine-actions.mjs",
-    "verify:p31-team-pack-gallery": "node scripts/verify-p31-team-pack-gallery.mjs",
+        "verify:p31-team-pack-gallery": "node scripts/verify-p31-team-pack-gallery.mjs",
         "verify:p32-apps-catalog": "node scripts/verify-p32-apps-catalog.mjs",
         "verify:p33-search-palette": "node scripts/verify-p33-search-palette.mjs",
         "verify:p34-projects": "node scripts/verify-p34-projects.mjs",
@@ -63,7 +63,8 @@
         "make": "npm run prepare-runtime && node scripts/run-forge-with-internal-node.mjs make --platform win32 --arch x64",
         "installer-e2e": "node scripts/installer-e2e.mjs",
         "release-manifest": "node scripts/write-release-manifest.mjs",
-        "release-version": "node scripts/check-release-version.mjs"
+        "release-version": "node scripts/check-release-version.mjs",
+        "dogfood:live-codex": "node scripts/run-live-codex-dogfood.mjs"
     },
     "devDependencies": {
         "@electron-forge/cli": "7.11.2",

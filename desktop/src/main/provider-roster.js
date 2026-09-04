@@ -103,7 +103,29 @@ function agentName(provider, role) {
     return `${providerLabel} ${roleLabel}`;
 }
 
-function harnessConfig(provider, _role, fakeLaunchers, model, economyProviderId) {
+export const CODEX_MODELS = Object.freeze({
+    efficient: "gpt-5.3-codex-spark",
+    deep: "gpt-5.6-sol",
+});
+
+export function resolveProviderConcreteModel(provider, { profile, model } = {}) {
+    if (provider === "codex") {
+        if (model) {
+            const m = String(model).toLowerCase();
+            if (m === "luna" || m === "gpt-5.6-luna") return "gpt-5.6-luna";
+            if (m === "sol" || m === "gpt-5.6-sol") return "gpt-5.6-sol";
+            if (m === "mini" || m === "gpt-5.4-mini") return "gpt-5.4-mini";
+            if (m === "spark" || m === "gpt-5.3-codex-spark") return "gpt-5.3-codex-spark";
+            return model;
+        }
+        if (profile === "efficient") return CODEX_MODELS.efficient;
+        if (profile === "deep") return CODEX_MODELS.deep;
+        return undefined;
+    }
+    return model;
+}
+
+function harnessConfig(provider, _role, fakeLaunchers, model, economyProviderId, profile) {
     const harnessKind = PROVIDER_HARNESSES[provider];
     if (!harnessKind)
         throw new Error(`provider ${provider} has no registered executable harness`);
@@ -116,11 +138,9 @@ function harnessConfig(provider, _role, fakeLaunchers, model, economyProviderId)
         return { kind: harnessKind, model: model ?? "antigravity" };
     if (provider === "economy")
         return { kind: harnessKind, providerId: economyProviderId ?? "default", model: model ?? "economy" };
-    // Workspaces chosen by the operator may be plain folders; Codex must not refuse
-    // non-git directories. The execution cwd itself arrives per task through the
-    // trusted execution context, never through static harness configuration.
+    const concreteModel = resolveProviderConcreteModel(provider, { profile, model });
     return provider === "codex"
-        ? { kind: "codex", skipGitRepoCheck: true, ...(model ? { model } : {}) }
+        ? { kind: "codex", skipGitRepoCheck: true, ...(concreteModel ? { model: concreteModel } : {}) }
         : { kind: "claude-code" };
 }
 
@@ -142,18 +162,10 @@ export function coworkerCapability(coworkerId) {
 function effectiveModelBinding(coworker) {
     const legacy = coworker?.providerPreference ?? "auto";
     const raw = coworker?.modelBinding;
-    // Public coworker projections retain the legacy preference but intentionally omit
-    // provider/model details.  Rehydrate only the safe legacy provider for compatibility
-    // with older callers; the full main-process list already carries the binding.
     const normalized = raw && typeof raw === "object" && raw.provider === undefined && legacy !== "auto"
-        ? normalizeModelBinding({ ...raw, provider: legacy, ...(legacy === "codex" && raw.model === undefined ? { model: "luna" } : {}) }, { legacyPreference: legacy })
+        ? normalizeModelBinding({ ...raw, provider: legacy }, { legacyPreference: legacy })
         : normalizeModelBinding(raw, { legacyPreference: legacy });
-    // Efficient is the current Codex subscription lane. Keep its concrete target
-    // explicit in the trusted main-process binding so a runtime rebuild can detect
-    // and apply an operator-requested model change.
-    return normalized.profile === "efficient" && normalized.provider === "codex" && !normalized.model
-        ? { ...normalized, model: "luna" }
-        : normalized;
+    return normalized;
 }
 
 export function chooseCoworkerProvider(coworker, usableProviders = {}) {
@@ -229,7 +241,7 @@ function buildCoworkerAgents({ coworkers, usableProviders, fakeLaunchers, getCow
             name: `${coworker.name} · ${provider === "codex" ? "Codex" : provider === "claude" ? "Claude Code" : provider === "chatgpt-web" ? "ChatGPT Web / Sol" : provider === "antigravity" ? "Antigravity" : "Economy"}`,
             role: "worker",
             capabilities: ["general", coworkerCapability(coworker.id)],
-            harness: { ...harnessConfig(provider, "coworker", fakeLaunchers, modelBinding.model, modelBinding.providerAccountId ?? economyProviderId), ...(accountNamespace ? { accountNamespace } : {}) },
+            harness: { ...harnessConfig(provider, "coworker", fakeLaunchers, modelBinding.model, modelBinding.providerAccountId ?? economyProviderId, modelBinding.profile), ...(accountNamespace ? { accountNamespace } : {}) },
             maxConcurrency: 1,
             ...(governedTools.length ? { governedTools } : {}),
         };

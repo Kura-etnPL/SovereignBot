@@ -340,7 +340,7 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
             });
         },
         markDelivery(conversationId, messageId, coworkerId, status, detail) {
-            if (!["pending", "delivered", "failed"].includes(status)) throw new Error("delivery status must be pending, delivered, or failed");
+            if (!["pending", "delivered", "failed", "attention", "redirected"].includes(status)) throw new Error("delivery status must be pending, delivered, failed, attention, or redirected");
             const conversation = requireConversation(conversationId);
             const message = conversation.messages.find((entry) => entry.id === String(messageId));
             if (!message) throw new Error(`unknown message id: ${messageId}`);
