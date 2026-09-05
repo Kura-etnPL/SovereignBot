@@ -60,6 +60,23 @@ export async function runLiveCodexDogfood({
         console.error("[live-dogfood] Step 1: Waiting for production Electron document...");
         await waitFor("production Desktop document", async () => await renderer("document.readyState === 'complete'"));
 
+        if (process.env.SOVEREIGNBOT_LIVE_RESTART_CHECK === "1") {
+            const restored = await renderer(`(async () => {
+                const team = (await window.sovereignbot.teams.list({})).teams?.[0];
+                if (!team) throw new Error("Team missing after restart");
+                const detail = await window.sovereignbot.teams.get({teamId: team.id});
+                const conversation = await window.sovereignbot.conversations.get({conversationId: team.channels[0].conversationId});
+                const artifactId = conversation.messages.flatMap(message => message.artifactIds ?? []).at(-1);
+                const preview = artifactId ? await window.sovereignbot.artifacts.preview({artifactId}) : undefined;
+                return {complete: detail.flow?.stage === "complete", messages: conversation.messages.length, artifact: Boolean(artifactId), preview: Boolean(preview && JSON.stringify(preview).includes("fibonacci"))};
+            })()`);
+            check("RESTART_TEAM_COMPLETE", restored.complete);
+            check("RESTART_CONVERSATION_PERSISTED", restored.messages >= 4);
+            check("RESTART_ARTIFACT_PREVIEW", restored.artifact && restored.preview);
+            await writeFile(join(evidenceDir, "restart-result.json"), JSON.stringify(result, null, 2), "utf8");
+            return result;
+        }
+
         console.error("[live-dogfood] Step 2: Verifying live Codex provider presence...");
         const providerStatus = await waitFor("Codex provider ready", async () => {
             const host = getHost();
@@ -93,9 +110,17 @@ export async function runLiveCodexDogfood({
 
         const codingLead = team.coworkers.find((c) => c.key === "coding-lead" || c.name.includes("Coding"));
         const reviewer = team.coworkers.find((c) => c.key === "reviewer" || c.name.includes("Reviewer"));
+        for (const coworker of team.coworkers) {
+            getCoworkerStore().update(coworker.id, { modelBinding: { profile: "custom", provider: "codex", model: "gpt-5.6-luna" } });
+        }
+        await renderer("window.sovereignbot.providers.refresh({})");
+        const agents = getHost().runtime.config?.agents ?? getHost().runtime.runtimeConfig?.agents;
+        if (!Array.isArray(agents) || agents.some(agent => agent.harness.kind === "codex" && agent.harness.model !== "gpt-5.6-luna"))
+            throw new Error("Cannot verify the Luna-only runtime roster; no prompt sent");
+        check("LUNA_ONLY_ROSTER", true, { model: "gpt-5.6-luna", agents: agents.length });
 
         console.error("[live-dogfood] Step 4: Dispatching targeted task to Chief of Staff to delegate to Coding Lead...");
-        const initialPrompt = "Chief, please coordinate this delivery with the team: have Coding Lead implement a Python utility `math_helper.py` in the workspace with `fibonacci(n)`, then have Reviewer verify it.";
+        const initialPrompt = "Chief, deliver a tiny dependency-free JavaScript module math_helper.mjs in the team workspace. Coding Lead must implement named exports fibonacci(n) and isPrime(n), and test with the installed Node.js runtime. Reviewer independently checks the file, then Chief summarizes and attaches the actual file as an Artifact. Keep each reply brief. No Python, packages, network, git operations or unrelated files. fibonacci(0)=0, fibonacci(10)=55; negative/noninteger Fibonacci inputs throw. isPrime(2)=true, isPrime(9)=false, isPrime(1)=false; noninteger inputs throw. Coordinate autonomously and finish the delivery.";
         await renderer(`(()=>{
             const input = document.getElementById("composer-input");
             input.value = ${JSON.stringify(initialPrompt)};
@@ -110,16 +135,17 @@ export async function runLiveCodexDogfood({
             const teamInfo = (await window.sovereignbot.teams.get({ teamId: ${JSON.stringify(team.id)} })).flow;
             const isSpecialist = ["coding-lead", "reviewer"].includes(teamInfo.stage)
                 || [${JSON.stringify(codingLead?.id)}, ${JSON.stringify(reviewer?.id)}].includes(teamInfo.currentOwnerId)
-                || conversation.messages.length >= 2;
+                ;
             return isSpecialist ? { conversation, flow: teamInfo } : false;
         })()`), 120_000);
         check("SPECIALIST_STAGE_REACHED", Boolean(specialistActive), specialistActive?.flow);
         result.screenshots.push(await capture("2-specialist-active.png"));
 
+        if (process.env.SOVEREIGNBOT_LIVE_TEST_REDIRECT === "1") {
         console.error("[live-dogfood] Step 6: Triggering User Redirect during active work...");
         await new Promise((resolve) => setTimeout(resolve, 2_000));
 
-        const redirectPrompt = "Wait, before finalizing, also make sure `math_helper.py` includes an `is_prime(n)` function alongside `fibonacci(n)`.";
+        const redirectPrompt = "Before finalizing, also ensure both functions reject noninteger inputs.";
         await renderer(`(()=>{
             const redirectBtn = document.getElementById("conversation-redirect");
             if (redirectBtn && !redirectBtn.classList.contains("hidden")) {
@@ -135,27 +161,28 @@ export async function runLiveCodexDogfood({
         console.error("[live-dogfood] Step 7: Captured redirect submission state...");
         await new Promise((resolve) => setTimeout(resolve, 1_500));
         result.screenshots.push(await capture("3-redirect-submitted.png"));
+        }
 
         console.error("[live-dogfood] Step 8: Waiting for team flow to proceed through review and completion...");
         const finalDelivery = await waitFor("Software Team completion after redirect", async () => await renderer(`(async()=>{
             const conversation = await window.sovereignbot.conversations.get({ conversationId: ${JSON.stringify(channel.conversationId)} });
             const teamInfo = (await window.sovereignbot.teams.get({ teamId: ${JSON.stringify(team.id)} })).flow;
-            const isDone = teamInfo.stage === "complete" || (conversation.messages.length >= 4 && !teamInfo.activeProtocol);
+            const isDone = teamInfo.stage === "complete";
             return isDone ? { conversation, flow: teamInfo } : false;
-        })()`), 240_000);
+        })()`), 480_000);
         check("TEAM_WORKFLOW_COMPLETED", Boolean(finalDelivery), finalDelivery?.flow);
         result.screenshots.push(await capture("4-chief-synthesis.png"));
 
         console.error("[live-dogfood] Step 9: Inspecting workspace artifacts and code quality...");
         const filesInWorkspace = readdirSync(sharedWorkspacePath);
-        const mathHelperExists = filesInWorkspace.includes("math_helper.py");
+        const mathHelperExists = filesInWorkspace.includes("math_helper.mjs");
         check("WORKSPACE_FILE_WRITTEN", mathHelperExists, { files: filesInWorkspace });
 
         let mathHelperContent = "";
         if (mathHelperExists) {
-            mathHelperContent = await readFile(join(sharedWorkspacePath, "math_helper.py"), "utf8");
+            mathHelperContent = await readFile(join(sharedWorkspacePath, "math_helper.mjs"), "utf8");
             check("FIBONACCI_IMPLEMENTED", mathHelperContent.includes("fibonacci"), { preview: mathHelperContent.slice(0, 200) });
-            check("IS_PRIME_IMPLEMENTED", mathHelperContent.includes("is_prime"), { preview: mathHelperContent.slice(0, 400) });
+            check("IS_PRIME_IMPLEMENTED", mathHelperContent.includes("isPrime"), { preview: mathHelperContent.slice(0, 400) });
         }
 
         const messages = finalDelivery.conversation.messages;
@@ -164,11 +191,12 @@ export async function runLiveCodexDogfood({
         const hasLeakedDataDir = allText.includes(dataDir);
         check("PRIVACY_BOUNDARY_PRESERVED", !hasLeakedTokens && !hasLeakedDataDir, { leakedTokens: hasLeakedTokens, leakedDataDir: hasLeakedDataDir });
 
-        check("LIVE_DOGFOOD_ALL_PASSED", Object.values(checks).every((c) => c.ok === true), checks);
+        check("LIVE_DOGFOOD_ALL_PASSED", Object.values(checks).every((c) => c.ok === true));
     } catch (error) {
         check("LIVE_DOGFOOD_EXCEPTION", false, { error: String(error?.stack ?? error) });
         result.screenshots.push(await capture("error-state.png").catch(() => null));
     }
 
+    await writeFile(join(evidenceDir, "live-result.json"), JSON.stringify(result, null, 2), "utf8");
     return result;
 }

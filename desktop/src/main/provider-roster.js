@@ -104,7 +104,7 @@ function agentName(provider, role) {
 }
 
 export const CODEX_MODELS = Object.freeze({
-    efficient: "gpt-5.3-codex-spark",
+    efficient: "gpt-5.6-luna",
     deep: "gpt-5.6-sol",
 });
 
@@ -120,7 +120,7 @@ export function resolveProviderConcreteModel(provider, { profile, model } = {}) 
         }
         if (profile === "efficient") return CODEX_MODELS.efficient;
         if (profile === "deep") return CODEX_MODELS.deep;
-        return undefined;
+        return CODEX_MODELS.efficient;
     }
     return model;
 }

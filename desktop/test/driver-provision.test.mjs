@@ -30,9 +30,23 @@ test("detectBrowsers picks the newest complete install per root, chrome before e
         ...fakeFilesystem(tree),
     });
     assert.deepEqual(found.map(({ browser, version }) => ({ browser, version })), [
-        { browser: "edge", version: "140.0.9.9" },
         { browser: "chrome", version: "138.0.0.1" },
+        { browser: "edge", version: "140.0.9.9" },
     ]);
+});
+
+test("detectBrowsers recognizes the real Windows Chrome root executable layout", () => {
+    const base = "C:\\Program Files\\Google\\Chrome\\Application";
+    const found = detectBrowsers({ env: { ProgramFiles: "C:\\Program Files" }, ...fakeFilesystem({
+        [base]: { type: "dir", children: { "152.0.7977.77": {} } },
+        [`${base}\\chrome.exe`]: { type: "file" },
+    }) });
+    assert.equal(found[0]?.exePath, `${base}\\chrome.exe`);
+});
+
+test("driver selection prefers the installed build over a newer major-compatible build", () => {
+    const entry = version => ({ version, downloads: { chromedriver: [{ platform: "win64", url: `https://storage.googleapis.com/chrome-for-testing-public/${version}/win64/chromedriver-win64.zip` }] } });
+    assert.equal(findDriverDownload({ browserVersion: "152.0.7977.77" }, { versions: [entry("152.0.7977.82"), entry("152.0.7999.1")] }).driverVersion, "152.0.7977.82");
 });
 
 test("findDriverDownload matches the newest known-good build of the browser's major", () => {
@@ -144,4 +158,19 @@ test("provisionDriver refuses download URLs outside the pinned host allowlist", 
         /allowlist/,
     );
     assert.equal(wrote, false);
+});
+
+test("official GCS transfer checksum is recorded honestly and mismatches stop extraction", async () => {
+    const { createHash } = await import("node:crypto");
+    for (const matches of [true, false]) {
+        let wrote = false;
+        const base = fetcherFor({ metadataBody: GOOD_METADATA, driverArchive: ARCHIVE });
+        const result = provisionDriver({ browser: "chrome", browserVersion: "140.0.7339.80", fetcher: async url => {
+            const response = await base(url);
+            response.headers = new Headers({ "x-goog-hash": `crc32c=AAAAAA==, md5=${createHash("md5").update(matches ? ARCHIVE : "wrong").digest("base64")}` });
+            return response;
+        }, writeArchive: async () => { wrote = true; } });
+        if (matches) { const value = await result; assert.equal(value.digestVerified, true); assert.equal(value.digestAlgorithm, "gcs-md5"); assert.equal(wrote, true); }
+        else { await assert.rejects(result, /checksum mismatch/); assert.equal(wrote, false); }
+    }
 });

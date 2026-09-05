@@ -170,6 +170,11 @@ async function main() {
     });
     await dataLifecycle.recover();
     const services = createDesktopServices({ dataDir, dialog });
+    if (process.argv.includes("--live-codex-dogfood")) {
+        if (process.env.SOVEREIGNBOT_LIVE_LUNA_ONLY !== "1" || !process.env.SOVEREIGNBOT_DESKTOP_DATA_DIR)
+            throw new Error("Live dogfood requires explicit Luna-only opt-in and isolated data");
+        services.updateSettings({ providers: { codex: { enabled: true }, claude: { enabled: false }, "chatgpt-web": { enabled: false }, antigravity: { enabled: false }, economy: { enabled: false } }, defaultModelProfile: "efficient", updateChannel: "off", speakReplies: false });
+    }
     const notifications = createNotificationService({ dataDir, getSettings: () => services.getSettings(), NotificationClass: Notification });
     const updateFeedRoot = process.env.SOVEREIGNBOT_UPDATE_FEED_DIR;
     const updates = createUpdateService({
@@ -955,7 +960,7 @@ async function main() {
     }
 
     const start = async () => {
-        win = createMainWindow({ smoke: process.argv.includes("--verify-software-team") });
+        win = createMainWindow({ smoke: process.argv.includes("--verify-software-team") || process.argv.includes("--live-codex-dogfood") });
         attachWindowLifecycle({
             win,
             getCloseBehavior: () => services.getSettings().closeBehavior,
@@ -968,6 +973,14 @@ async function main() {
         win.on("closed", () => (win = undefined));
     };
     await start();
+
+    if (process.argv.includes("--live-codex-dogfood")) {
+        const { runLiveCodexDogfood } = await import("../../scripts/dogfood/live-codex-dogfood.js");
+        const result = await runLiveCodexDogfood({ win, dataDir, getHost: () => host, getServices: () => services, getCoworkerStore: () => coworkerStore, getConversationStore: () => conversationStore, getTeamService: () => teamService, getArtifactStore: () => artifactStore });
+        process.stdout.write(`${JSON.stringify(result)}\n`);
+        await requestQuit("live-codex-dogfood");
+        return;
+    }
 
     if (process.argv.includes("--verify-software-team")) {
         const { runVerifySoftwareTeam } = await import("./verify-software-team.js");

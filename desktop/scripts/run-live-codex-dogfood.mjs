@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp } from "node:fs/promises";
+import { join, resolve, sep, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DESKTOP_ROOT = join(fileURLToPath(new URL("../", import.meta.url)));
-const CONTROL_ROOT = join(DESKTOP_ROOT, "..", "..", "..", "runtime", "sovereign-control", "live-codex-dogfood");
+const TEMP_ROOT = join(DESKTOP_ROOT, "..", "temp");
+await mkdir(TEMP_ROOT, { recursive: true });
+const resumeAt = process.argv.indexOf("--resume-run");
+const CONTROL_ROOT = resumeAt < 0 ? await mkdtemp(join(TEMP_ROOT, "live-luna-")) : resolve(process.argv[resumeAt + 1] ?? "");
+if (!CONTROL_ROOT.startsWith(resolve(TEMP_ROOT) + sep) || !basename(CONTROL_ROOT).startsWith("live-luna-")) throw new Error("Live run must stay inside the project test directory");
 const EVIDENCE_DIR = join(CONTROL_ROOT, "evidence");
 const PRIVATE_RUNTIME_DIR = join(CONTROL_ROOT, "private-runtime");
 const DATA_DIR = join(PRIVATE_RUNTIME_DIR, "desktop-data");
@@ -14,12 +18,12 @@ const ELECTRON_USER_DATA_DIR = join(PRIVATE_RUNTIME_DIR, "electron-user-data");
 const ELECTRON = process.platform === "win32"
     ? join(DESKTOP_ROOT, "node_modules", "electron", "dist", "electron.exe")
     : join(DESKTOP_ROOT, "node_modules", ".bin", "electron");
-const TIMEOUT_MS = 360_000;
+const TIMEOUT_MS = 600_000;
 const ELECTRON_ARGS = process.env.SOVEREIGNBOT_ELECTRON_DISABLE_GPU === "1" ? ["--disable-gpu"] : [];
 
 await mkdir(EVIDENCE_DIR, { recursive: true });
-await rm(DATA_DIR, { recursive: true, force: true });
-await rm(ELECTRON_USER_DATA_DIR, { recursive: true, force: true });
+await mkdir(DATA_DIR, { recursive: true });
+await mkdir(ELECTRON_USER_DATA_DIR, { recursive: true });
 
 if (!existsSync(ELECTRON)) throw new Error(`Electron binary missing: ${ELECTRON}`);
 
@@ -27,7 +31,11 @@ const env = {
     ...process.env,
     SOVEREIGNBOT_DESKTOP_DATA_DIR: DATA_DIR,
     SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR: EVIDENCE_DIR,
+    SOVEREIGNBOT_LIVE_LUNA_ONLY: "1",
+    SOVEREIGNBOT_LIVE_RESTART_CHECK: resumeAt >= 0 ? "1" : "0",
 };
+delete env.ELECTRON_RUN_AS_NODE;
+for (const key of Object.keys(env)) if (key.startsWith("FAKE_PROVIDER")) delete env[key];
 
 console.error(`[live-codex-dogfood] Spawning production Electron with real Codex provider (${TIMEOUT_MS / 1000}s timeout)...`);
 console.error(`[live-codex-dogfood] Evidence directory: ${EVIDENCE_DIR}`);
@@ -60,5 +68,7 @@ const timer = setTimeout(() => {
 child.on("close", (code) => {
     clearTimeout(timer);
     console.error(`[live-codex-dogfood] Electron process exited with code ${code}`);
-    process.exit(code ?? 0);
+    let gate;
+    for (const line of stdout.split(/\r?\n/)) { try { const value = JSON.parse(line); if (value.schema === "sovereignbot.desktop.live-codex-dogfood.v1") gate = value; } catch {} }
+    process.exit(code === 0 && gate && Object.values(gate.checks ?? {}).every(check => check.ok === true) ? 0 : 1);
 });

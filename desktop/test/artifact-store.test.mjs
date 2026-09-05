@@ -111,6 +111,31 @@ test("artifact state reloads from its versioned metadata without exposing manage
     }
 });
 
+test("JavaScript module previews survive restart and upgrade legacy generic MIME only", () => {
+    const { root, workspace, store } = fixture();
+    try {
+        const source = "export const answer = 42;\n";
+        const artifacts = ["module.mjs", "module.cjs", "binary.bin"].map((relativePath) => {
+            writeFileSync(join(workspace, relativePath), source, "utf8");
+            return store.ingestWorkspaceFile({ workspaceId: "workspace_project", workspacePath: workspace, relativePath });
+        });
+        assert.equal(store.previewText(artifacts[0].id).preview, source);
+        assert.equal(store.previewText(artifacts[1].id).preview, source);
+        const statePath = join(root, "data", "desktop-state", "artifacts.json");
+        const state = JSON.parse(readFileSync(statePath, "utf8"));
+        state.artifacts[0].mimeType = "application/octet-stream";
+        state.artifacts[1].mimeType = "application/custom";
+        writeFileSync(statePath, JSON.stringify(state), "utf8");
+        const reloaded = createArtifactStore({ dataDir: join(root, "data") });
+        assert.equal(reloaded.get(artifacts[0].id).mimeType, "text/javascript");
+        assert.equal(reloaded.previewText(artifacts[0].id).preview, source);
+        assert.equal(reloaded.get(artifacts[1].id).mimeType, "application/custom");
+        assert.equal(reloaded.previewText(artifacts[2].id).preview, undefined);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("artifact restore creates an immutable durable version lineage", () => {
     const { root, workspace, store } = fixture();
     try {

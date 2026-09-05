@@ -280,6 +280,12 @@ async function main() {
                 return;
             }
 
+            if (request.method === "POST" && url.pathname === "/chatgpt-page") {
+                await startSession();
+                send(response, 200, { page: await client.chatGPTPage(), leaseId: sessionLease });
+                return;
+            }
+
             if (request.method === "POST" && url.pathname === "/navigate") {
                 const body = await readJson(request);
                 const target = new URL(String(body.url));

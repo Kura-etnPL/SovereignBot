@@ -285,6 +285,6 @@ test("deep requires an explicit strong Codex target and efficient maps to Luna",
         }],
     });
     const agent = roster.agents.find((entry) => entry.id === "coworker-agent-eeeeeeeeeeeeeeee");
-    assert.equal(agent.harness.model, "gpt-5.3-codex-spark");
+    assert.equal(agent.harness.model, "gpt-5.6-luna");
     assert.equal(roster.coworkerBindings["coworker_eeeeeeeeeeeeeeee"].provider, "codex");
 });

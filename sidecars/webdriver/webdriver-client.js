@@ -1,3 +1,4 @@
+import { CHATGPT_PAGE_SCRIPT } from "./chatgpt-page.js";
 const ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
 
 const KEY_CODES = new Map([
@@ -241,6 +242,11 @@ export class WebDriverClient {
         await this.start();
         const value = await this.execute(VISIBLE_TEXT_SCRIPT, []);
         return String(value ?? "").slice(-16000);
+    }
+
+    async chatGPTPage() {
+        await this.start();
+        return this.execute(CHATGPT_PAGE_SCRIPT, []);
     }
 
     async click(elementId) {

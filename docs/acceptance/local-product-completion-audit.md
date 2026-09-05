@@ -1,5 +1,10 @@
 # SovereignBot 本地产品完成度总审计
 
+> 2026-09-05 补充：[Provider 实际就绪度复核](provider-readiness-2026-09-05.md)
+> 发现 ChatGPT Web 仍有真实模型识别、回答提取和登录生命周期的源码缺口。
+> 下文“本地缺口 0 项”仅是当时 LOCAL_FIXTURE 范围的历史结论，不能代表
+> 当前真实 Provider 接入已经完成。用户现已允许 Luna-only 的真实 Codex 用量。
+
 ## 1) 审计范围与证据标准
 
 审计日期：2026-09-04（Asia/Shanghai）。权威目标是 canonical product plan：`C:\Users\Eternal\.codex\attachments\ddd527a5-594d-450b-b863-353be4c1161c\goal-objective.md`；权威 checkout 是 `E:\Eternal\Auto_Empire\projects\SovereignBot-luna-attention`，审计基线为 `0545d87bcd8f0541c7f2f15bb5a85c2d457c98a6`，工作树在提交前保持干净。

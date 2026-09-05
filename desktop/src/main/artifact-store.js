@@ -16,6 +16,7 @@ const MAX_ARTIFACT_VERSION = MAX_ARTIFACTS;
 const MIME_BY_EXT = new Map([
     [".md", "text/markdown"], [".txt", "text/plain"], [".json", "application/json"],
     [".csv", "text/csv"], [".html", "text/html"], [".css", "text/css"], [".js", "text/javascript"],
+    [".mjs", "text/javascript"], [".cjs", "text/javascript"],
     [".ts", "text/typescript"], [".py", "text/x-python"], [".diff", "text/x-diff"], [".patch", "text/x-diff"],
     [".png", "image/png"], [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"], [".webp", "image/webp"],
     [".pdf", "application/pdf"], [".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
@@ -153,6 +154,7 @@ function sanitizePersisted(entry) {
         if (entry.protocolLineage !== undefined && !protocolLineage) return undefined;
         return {
             ...entry,
+            mimeType: entry.mimeType === "application/octet-stream" ? mimeFor(entry.fileName) : entry.mimeType,
             artifactFamilyId,
             version,
             ...(parentArtifactId ? { parentArtifactId } : {}),

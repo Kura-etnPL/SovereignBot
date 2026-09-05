@@ -107,6 +107,12 @@ export class SidecarComputerDriver {
         return { url: result.url };
     }
 
+    async chatGPTPage() {
+        const result = await this.#request("POST", "/chatgpt-page", {});
+        if (result.leaseId) this.#sessionLease = result.leaseId;
+        return result.page;
+    }
+
     async click({ element }) {
         await this.#ensureElementLease(element);
         return this.#request("POST", "/click", {

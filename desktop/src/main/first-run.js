@@ -93,7 +93,7 @@ export function createFirstRunService({ host, services }) {
             const record = await provisionDriver({
                 browser: target.browser,
                 browserVersion: target.version,
-                fetcher: (url) => fetch(url),
+                fetcher: (url) => fetch(url, { redirect: "error", signal: AbortSignal.timeout(30_000) }),
                 writeArchive: (url, archive, meta) => {
                     const versionDir = join(driversRoot, meta.driverVersion);
                     mkdirSync(versionDir, { recursive: true });

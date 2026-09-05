@@ -16,23 +16,6 @@ function safeNamespace(value) {
     return value;
 }
 
-function compact(value, max = MAX_TEXT) {
-    return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
-}
-
-function driverText(driver) {
-    return Promise.resolve(driver.text?.()).then((value) => compact(value?.text ?? value));
-}
-
-function classifyPage(text) {
-    const value = compact(text, 16_000).toLowerCase();
-    if (/rate.?limit|too many requests|usage limit|capacity|try again later/.test(value))
-        return { health: "capacity-limited", auth: "signed-in", reason: "ChatGPT Web capacity is limited; retry later." };
-    if (/log in|login|sign up|welcome back|continue with google|continue with microsoft|not authenticated/.test(value))
-        return { health: "signed-out", auth: "signed-out", reason: "Sign in to ChatGPT Web." };
-    return { health: "ready", auth: "signed-in" };
-}
-
 function errorWithCode(message, code) {
     const error = new Error(message);
     error.code = code;
@@ -46,9 +29,11 @@ function ensureSignal(signal) {
 
 function wait(ms, signal) {
     return new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, ms);
+        const done = () => { signal?.removeEventListener("abort", abort); resolve(); };
+        const timer = setTimeout(done, ms);
         const abort = () => {
             clearTimeout(timer);
+            signal?.removeEventListener("abort", abort);
             reject(errorWithCode("ChatGPT Web task cancelled", "CANCELLED"));
         };
         signal?.addEventListener("abort", abort, { once: true });
@@ -59,7 +44,7 @@ function wait(ms, signal) {
 function allowedContinuationUrl(value) {
     try {
         const url = new URL(String(value));
-        if (url.protocol !== "https:" || !CHATGPT_HOSTS.has(url.hostname.toLowerCase()))
+        if (url.protocol !== "https:" || !CHATGPT_HOSTS.has(url.hostname.toLowerCase()) || url.username || url.password || url.port)
             return undefined;
         return url.toString();
     }
@@ -78,18 +63,12 @@ function promptFor(request) {
 function findComposer(snapshot) {
     return snapshot?.elements?.find((element) => !element.disabled
         && element.role === "textbox"
-        && /message|prompt|chat|ask|send/i.test(`${element.name} ${element.type ?? ""}`))
-        ?? snapshot?.elements?.find((element) => !element.disabled && element.role === "textbox");
+        && /message|prompt|chat|ask|send|与 ChatGPT 聊天/i.test(`${element.name} ${element.type ?? ""}`));
 }
 
-function responseDelta(before, after) {
-    const previous = compact(before);
-    const current = compact(after);
-    if (!current || current === previous)
-        return "";
-    if (previous && current.startsWith(previous))
-        return current.slice(previous.length).trim();
-    return current;
+function conversationUrl(value) {
+    const allowed = allowedContinuationUrl(value);
+    return allowed && /^\/(?:g\/[^/]+\/)?c\/[A-Za-z0-9_-]+\/?$/.test(new URL(allowed).pathname) ? allowed : undefined;
 }
 
 export class ChatGPTWebProvider {
@@ -99,18 +78,24 @@ export class ChatGPTWebProvider {
     #timeoutMs;
     #pollMs;
     #busy = false;
+    #activeController;
+    #makeDriver;
+    #closed = false;
+    #availableModels = [];
+    #chatVerified = false;
 
-    constructor({ accountNamespace, profileDir, driver, driverConfig = {}, timeoutMs = 90_000, pollMs = 150 } = {}) {
+    constructor({ accountNamespace, profileDir, driver, driverFactory, driverConfig = {}, timeoutMs = 90_000, pollMs = 150 } = {}) {
         this.#accountNamespace = safeNamespace(accountNamespace);
         if (!profileDir && !driver)
             throw new Error("ChatGPT Web provider requires a dedicated profile");
         if (!driver)
             mkdirSync(profileDir, { recursive: true });
-        this.#driver = driver ?? new SidecarComputerDriver({
+        this.#makeDriver = (mode) => driverFactory?.({ accountNamespace: this.#accountNamespace, profileDir, mode }) ?? new SidecarComputerDriver({
             agentId: this.#accountNamespace,
             profileDir,
             workspaceDir: profileDir,
-        }, { ...driverConfig, headless: true });
+        }, { ...(typeof driverConfig === "function" ? driverConfig() : driverConfig), headless: mode !== "login" });
+        this.#driver = driver ?? this.#makeDriver("headless");
         this.#statePath = profileDir ? join(profileDir, "provider-state.json") : undefined;
         this.#timeoutMs = timeoutMs;
         this.#pollMs = pollMs;
@@ -121,26 +106,72 @@ export class ChatGPTWebProvider {
     }
 
     models() {
-        return ["sol"];
+        return [...this.#availableModels];
+    }
+
+    async #page() {
+        const page = await this.#driver.chatGPTPage?.();
+        if (page?.schema !== "sovereignbot.chatgpt-page.v1" || !allowedContinuationUrl(page.url))
+            throw errorWithCode("ChatGPT Chat page cannot be verified", "UNAVAILABLE");
+        if (page.challenge) throw errorWithCode("ChatGPT requires human verification", "UNAVAILABLE");
+        if (!page.authenticated) throw errorWithCode("Sign in to ChatGPT Web.", "SIGN_IN_REQUIRED");
+        if (page.chatMode === true) this.#chatVerified = true;
+        if (page.chatMode === false || !this.#chatVerified) throw errorWithCode("ChatGPT Chat mode is required; Work is not used", "UNAVAILABLE");
+        if (page.capacityLimited) throw errorWithCode("ChatGPT Web capacity is limited; retry later", "CAPACITY_LIMITED");
+        this.#availableModels = [...new Set((page.availableModels ?? []).filter(id => ["sol", "gpt-5.6-luna"].includes(id)))];
+        return page;
+    }
+
+    async #selectModel(model, signal) {
+        const target = !model || model === "gpt-5.6-sol" ? "sol" : model;
+        if (!["sol", "gpt-5.6-luna"].includes(target)) throw errorWithCode("Requested ChatGPT model is unsupported", "MODEL_UNAVAILABLE");
+        let page = await this.#page();
+        if (page.selectedModel === target) return page;
+        let snapshot = await this.#driver.snapshot();
+        const label = target === "sol" ? /^GPT[- ]5\.6 Sol$/i : /^GPT[- ]5\.6 Luna$/i;
+        let option = snapshot.elements.find(el => el.role === "menuitemradio" && label.test(el.name) && !el.disabled);
+        if (!option) {
+            const toggle = snapshot.elements.find(el => el.role === "button" && /^(?:5\.6\s*)?(?:思考强度|极高|高|标准|低|Thinking|Extended|Standard|Light|Heavy)$/i.test(el.name) && !el.disabled);
+            if (!toggle) throw errorWithCode("ChatGPT model selector is unavailable", "MODEL_UNAVAILABLE");
+            ensureSignal(signal);
+            await this.#driver.click({ element: toggle });
+            snapshot = await this.#driver.snapshot();
+            const submenu = snapshot.elements.find(el => el.role === "menuitem" && /选择模型|Select model/i.test(el.name));
+            if (submenu) { await this.#driver.click({ element: submenu }); snapshot = await this.#driver.snapshot(); }
+            option = snapshot.elements.find(el => el.role === "menuitemradio" && label.test(el.name) && !el.disabled);
+        }
+        if (!option) throw errorWithCode("Requested model is not available in ChatGPT Chat", "MODEL_UNAVAILABLE");
+        ensureSignal(signal);
+        await this.#driver.click({ element: option });
+        page = await this.#page();
+        if (page.selectedModel !== target) throw errorWithCode("ChatGPT model selection could not be verified", "MODEL_UNAVAILABLE");
+        await this.#driver.key({ key: "Escape" });
+        await this.#driver.key({ key: "Escape" });
+        return page;
     }
 
     async health() {
+        if (this.#closed || this.#busy)
+            return { found: !this.#closed, health: "unavailable", auth: { state: "unverified" }, reason: "ChatGPT Web is busy or closed.", models: this.models(), capabilities: this.capabilities() };
         try {
             const transport = await this.#driver.health?.();
-            const text = await driverText(this.#driver);
-            const page = classifyPage(text);
+            const currentUrl = await this.#currentUrl();
+            if (!currentUrl || currentUrl === "about:blank") await this.#driver.navigate(HOME_URL);
+            await this.#page();
+            const snapshot = await this.#driver.snapshot();
+            if (!allowedContinuationUrl(snapshot?.url) || !findComposer(snapshot))
+                return { found: true, health: "unavailable", auth: { state: "unverified" }, reason: "ChatGPT Web conversation page is not ready.", capabilities: this.capabilities(), models: this.models() };
             return {
                 found: true,
-                health: page.health,
-                auth: { state: page.auth },
+                health: "ready",
+                auth: { state: "signed-in" },
                 capabilities: this.capabilities(),
                 models: this.models(),
-                ...(page.reason ? { reason: page.reason } : {}),
                 ...(transport?.browser ? { browser: String(transport.browser).slice(0, 32) } : {}),
             };
         }
         catch (error) {
-            return { found: false, health: "unavailable", auth: { state: "unverified" }, reason: String(error?.message ?? error).slice(0, 240), capabilities: this.capabilities(), models: this.models() };
+            return { found: false, health: error?.code === "SIGN_IN_REQUIRED" ? "signed-out" : error?.code === "CAPACITY_LIMITED" ? "capacity-limited" : "unavailable", auth: { state: error?.code === "SIGN_IN_REQUIRED" ? "signed-out" : "unverified" }, reason: "ChatGPT Chat is not verified; check sign-in, mode and model availability.", capabilities: this.capabilities(), models: this.models() };
         }
     }
 
@@ -150,63 +181,96 @@ export class ChatGPTWebProvider {
 
     async continue(request) {
         const state = this.#readState();
-        if (!state || state.continuationRef !== request?.continuationRef)
+        const stored = state?.continuations?.[request?.continuationRef];
+        if (!stored)
             throw errorWithCode("ChatGPT Web continuation does not belong to this provider account", "CONTINUITY_MISMATCH");
-        const url = allowedContinuationUrl(state.url);
+        const url = conversationUrl(stored.url);
         if (!url)
             throw errorWithCode("ChatGPT Web continuation is unavailable", "CONTINUITY_UNAVAILABLE");
-        await this.#driver.navigate(url);
-        return this.#send(request, state.continuationRef);
+        return this.#send(request, request.continuationRef, url, stored.mode === "chat");
+    }
+
+    async openLogin() {
+        if (this.#closed || this.#busy) throw errorWithCode("ChatGPT Web provider is busy or closed", "BUSY");
+        this.#busy = true;
+        try {
+            await this.#driver.close?.();
+            this.#driver = this.#makeDriver("login");
+            await this.#driver.navigate(LOGIN_URL);
+            return { opened: true };
+        } finally { this.#busy = false; }
+    }
+
+    async close() {
+        this.#closed = true;
+        this.#activeController?.abort();
+        await this.#driver.close?.();
     }
 
     async cancel() {
+        if (!this.#activeController) return { cancelled: true };
+        this.#activeController.abort();
         try { await this.#driver.key?.({ key: "Escape" }); } catch {}
-        this.#busy = false;
         return { cancelled: true };
     }
 
-    async #send(request, priorRef) {
+    async #send(request, priorRef, continuationUrl, verifiedChat = false) {
+        if (this.#closed) throw errorWithCode("ChatGPT Web provider is closed", "UNAVAILABLE");
         if (this.#busy)
             throw errorWithCode("ChatGPT Web provider is busy", "BUSY");
         this.#busy = true;
+        const controller = new AbortController();
+        this.#activeController = controller;
+        const abort = () => controller.abort();
+        request?.signal?.addEventListener("abort", abort, { once: true });
+        if (request?.signal?.aborted) abort();
+        const signal = controller.signal;
         try {
-            ensureSignal(request?.signal);
+            ensureSignal(signal);
+            this.#chatVerified = verifiedChat;
+            if (continuationUrl) await this.#driver.navigate(continuationUrl);
             if (!priorRef) {
-                const url = await this.#currentUrl();
-                if (!allowedContinuationUrl(url))
-                    await this.#driver.navigate(HOME_URL);
+                // A new coworker task must never append to another coworker's chat.
+                await this.#driver.navigate(HOME_URL);
             }
-            const before = await driverText(this.#driver);
-            const page = classifyPage(before);
-            if (page.health === "signed-out")
-                throw errorWithCode("Sign in to ChatGPT Web.", "SIGN_IN_REQUIRED");
-            if (page.health === "capacity-limited")
-                throw errorWithCode(page.reason, "CAPACITY_LIMITED");
-            const composer = findComposer(await this.#driver.snapshot());
+            const initialPage = await this.#selectModel(request?.model, signal);
+            if (initialPage.generating) throw errorWithCode("ChatGPT is still generating a prior response", "BUSY");
+            const priorMessages = new Set((initialPage.assistantMessages ?? []).map(message => message.id));
+            const snapshot = await this.#driver.snapshot();
+            if (!allowedContinuationUrl(snapshot?.url))
+                throw errorWithCode("ChatGPT Web conversation page is unavailable", "UNAVAILABLE");
+            const composer = findComposer(snapshot);
             if (!composer)
                 throw errorWithCode("ChatGPT Web composer is unavailable", "UNAVAILABLE");
+            ensureSignal(signal);
             await this.#driver.type({ element: composer, text: promptFor(request) });
+            ensureSignal(signal);
             await this.#driver.key({ element: composer, key: "Enter" });
             const deadline = Date.now() + this.#timeoutMs;
-            let latest = before;
+            let lastAnswer;
             while (Date.now() < deadline) {
-                ensureSignal(request?.signal);
-                latest = await driverText(this.#driver);
-                const answer = responseDelta(before, latest);
-                const state = classifyPage(latest);
-                if (state.health === "capacity-limited")
-                    throw errorWithCode(state.reason, "CAPACITY_LIMITED");
-                if (answer && state.health !== "signed-out") {
-                    const currentUrl = allowedContinuationUrl(await this.#currentUrl());
+                ensureSignal(signal);
+                const latest = await this.#page();
+                ensureSignal(signal);
+                const message = latest.assistantMessages?.at(-1);
+                const answer = message?.text;
+                if (message?.id && !priorMessages.has(message.id) && answer?.trim() && message.complete === true && !latest.generating && lastAnswer === `${message.id}:${answer}`) {
+                    if (message.truncated || answer.length > MAX_TEXT) throw errorWithCode("ChatGPT response exceeds the supported text limit", "RESPONSE_TOO_LARGE");
+                    const currentUrl = conversationUrl(await this.#currentUrl());
+                    ensureSignal(signal);
+                    if (!currentUrl) throw errorWithCode("ChatGPT conversation URL could not be saved", "CONTINUITY_UNAVAILABLE");
                     const continuationRef = priorRef ?? `continuation-${randomUUID()}`;
-                    this.#writeState({ continuationRef, url: currentUrl ?? HOME_URL });
+                    this.#writeState({ continuationRef, url: currentUrl });
                     return { text: answer, continuationRef };
                 }
-                await wait(this.#pollMs, request?.signal);
+                lastAnswer = message?.complete && !latest.generating ? `${message.id}:${answer}` : undefined;
+                await wait(this.#pollMs, signal);
             }
             throw errorWithCode("ChatGPT Web response timed out", "TIMEOUT");
         }
         finally {
+            request?.signal?.removeEventListener("abort", abort);
+            this.#activeController = undefined;
             this.#busy = false;
         }
     }
@@ -214,14 +278,18 @@ export class ChatGPTWebProvider {
     #readState() {
         if (!this.#statePath || !existsSync(this.#statePath)) return undefined;
         const value = loadJsonState(this.#statePath, undefined);
+        if (value?.schema === "sovereignbot.chatgpt-web.profile.v2" && value.continuations && typeof value.continuations === "object" && !Array.isArray(value.continuations)) return value;
         return value && typeof value.continuationRef === "string" && value.continuationRef.length <= MAX_STATE_REF
-            ? { continuationRef: value.continuationRef, url: value.url }
-            : undefined;
+            ? { continuations: { [value.continuationRef]: { url: value.url } } } : undefined;
     }
 
     #writeState(value) {
         if (!this.#statePath) return;
-        saveJsonState(this.#statePath, { schema: "sovereignbot.chatgpt-web.profile.v1", ...value });
+        const continuations = { ...(this.#readState()?.continuations ?? {}) };
+        if (!Object.hasOwn(continuations, value.continuationRef) && Object.keys(continuations).length >= 512)
+            throw errorWithCode("ChatGPT Web continuation capacity reached", "CAPACITY_LIMITED");
+        continuations[value.continuationRef] = { url: value.url, mode: "chat" };
+        saveJsonState(this.#statePath, { schema: "sovereignbot.chatgpt-web.profile.v2", continuations });
     }
 
     async #currentUrl() {
@@ -234,41 +302,25 @@ export class ChatGPTWebProvider {
 export function createChatGPTWebProviderFactory({ dataDir, driverConfig = {}, driverFactory } = {}) {
     if (!dataDir) throw new Error("ChatGPT Web provider factory requires dataDir");
     const providers = new Map();
-    const providerDrivers = new Map();
-    const loginDrivers = new Map();
     const root = join(dataDir, "desktop-state", "provider-profiles", "chatgpt-web");
     const get = (accountNamespace) => {
         const namespace = safeNamespace(accountNamespace);
         if (!providers.has(namespace)) {
             const profileDir = join(root, namespace);
-            const driver = driverFactory?.({ accountNamespace: namespace, profileDir, mode: "headless" });
-            providerDrivers.set(namespace, driver);
-            providers.set(namespace, new ChatGPTWebProvider({ accountNamespace: namespace, profileDir, driver, driverConfig }));
+            providers.set(namespace, new ChatGPTWebProvider({ accountNamespace: namespace, profileDir, driverFactory, driverConfig }));
         }
         return providers.get(namespace);
     };
     return {
         get,
         async openLogin(accountNamespace) {
-            const namespace = safeNamespace(accountNamespace);
-            let driver = loginDrivers.get(namespace);
-            if (!driver) {
-                const profileDir = join(root, namespace);
-                driver = driverFactory?.({ accountNamespace: namespace, profileDir, mode: "login" })
-                    ?? new SidecarComputerDriver({ agentId: namespace, profileDir, workspaceDir: profileDir }, { ...driverConfig, headless: false });
-                loginDrivers.set(namespace, driver);
-            }
-            await driver.navigate(LOGIN_URL);
-            return { opened: true };
+            return get(accountNamespace).openLogin();
         },
         async health(accountNamespace) {
             return get(accountNamespace).health();
         },
         async close() {
-            await Promise.allSettled([
-                ...[...providerDrivers.values()].map((driver) => driver?.close?.()),
-                ...[...loginDrivers.values()].map((driver) => driver.close?.()),
-            ]);
+            await Promise.allSettled([...providers.values()].map(provider => provider.close()));
         },
     };
 }

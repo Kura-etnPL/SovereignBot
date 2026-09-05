@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { saveJsonState } from "./lib/desktop-state.js";
 
-export const ECONOMY_MODES = Object.freeze(["fixed-subscription", "local", "metered"]);
+export const ECONOMY_MODES = Object.freeze(["free", "fixed-subscription", "local", "metered"]);
 const MAX_ID = 128;
 const MAX_MONEY = 1_000_000_000;
 const ECONOMY_SCHEMA = "sovereignbot.desktop.economy-usage.v1";
@@ -169,7 +169,7 @@ class EconomyProvider {
         const taskId = String(request.taskId ?? "");
         const active = this.active.get(taskId);
         if (active) active.cancelled = true;
-        try { await this.adapter.cancel({ continuationRef: request.continuationRef }); }
+        try { await this.adapter.cancel({ taskId, continuationRef: request.continuationRef }); }
         finally { if (this.metered && taskId) this.ledger.settle(taskId, { success: false }); }
         return { cancelled: true };
     }

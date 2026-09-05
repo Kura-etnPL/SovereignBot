@@ -16,9 +16,10 @@ function fakeBrowser() {
         health: async () => ({ browser: "fake-w3c" }),
         text: async () => text,
         currentUrl: async () => url,
+        chatGPTPage: async () => ({ schema: "sovereignbot.chatgpt-page.v1", url, authenticated: true, chatMode: true, selectedModel: "sol", availableModels: ["sol"], assistantMessages: turn ? [{ id: `reply-${turn}`, text, complete: true }] : [] }),
         snapshot: async () => ({ url, elements: [{ sidecarHandle: "composer", role: "textbox", name: "Message ChatGPT", disabled: false }] }),
         type: async () => {},
-        key: async () => { text = `fake Sol answer ${++turn}`; },
+        key: async () => { text = `fake Sol answer ${++turn}`; url = "https://chatgpt.com/c/fake"; },
         navigate: async (next) => { url = next; },
         close: async () => {},
     };

@@ -10,6 +10,7 @@ import { accountIsolationNamespace } from "./provider-account.js";
 import { createChatGPTWebProviderFactory } from "./chatgpt-web-provider.js";
 import { antigravityAccountNamespace, createAntigravityProviderFactory } from "./antigravity-provider.js";
 import { createEconomyProviderFactory } from "./economy-provider.js";
+import { createOpenCodeAdapterFactory } from "./opencode-runtime.js";
 import { prepareInternalNode } from "./internal-node.js";
 import { migrateProviderProfiles } from "./provider-profiles-migration.js";
 
@@ -164,7 +165,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             codex: resolveFast(coreModules.resolveCodexLaunch, "codex", fakeLaunchers.codex),
             claude: resolveFast(coreModules.resolveClaudeCodeLaunch, "claude-code", fakeLaunchers.claude),
             "chatgpt-web": chatgptWebEnabled
-                ? { provider: "chatgpt-web", found: true, source: "dedicated-profile", auth: { state: "unverified" }, health: "ready", interactiveLoginAvailable: true }
+                ? { provider: "chatgpt-web", found: true, source: "dedicated-profile", auth: { state: "unverified" }, health: "unavailable", interactiveLoginAvailable: true, reason: "Refresh ChatGPT connection to verify sign-in and Chat mode." }
                 : chatgptWebUnavailable(),
             antigravity: antigravityEnabled
                 ? { provider: "antigravity", found: true, source: "dedicated-profile", auth: { state: "unverified" }, health: "ready", interactiveLoginAvailable: true }
@@ -223,10 +224,11 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         };
     }
 
-    const chatgptWebEnabled = process.env.SOVEREIGNBOT_CHATGPT_WEB_ENABLED === "1" || typeof chatgptWebDriverFactory === "function";
+    let chatgptWebEnabled = process.env.SOVEREIGNBOT_CHATGPT_WEB_ENABLED === "1" || typeof chatgptWebDriverFactory === "function"
+        || existsSync(join(dataDir, "desktop-state", "provider-profiles", "chatgpt-web", defaultChatGPTAccount));
     const chatgptWebFactory = createChatGPTWebProviderFactory({
         dataDir,
-        driverConfig: computerRuntimeConfig().config?.driver ?? {},
+        driverConfig: () => computerRuntimeConfig().config?.driver ?? {},
         driverFactory: chatgptWebDriverFactory,
     });
     const antigravityEnabled = process.env.SOVEREIGNBOT_ANTIGRAVITY_ENABLED === "1" || typeof antigravityDriverFactory === "function";
@@ -235,7 +237,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         driverConfig: computerRuntimeConfig().config?.driver ?? {},
         driverFactory: antigravityDriverFactory,
     });
-    const economyFactory = createEconomyProviderFactory({ dataDir, config: economyConfig ?? { providers: [], metered: { enabled: false, budget: 0, perRunCap: 0, totalCap: 0 } }, adapterFactory: economyAdapterFactory });
+    const economyFactory = createEconomyProviderFactory({ dataDir, config: economyConfig ?? { providers: [], metered: { enabled: false, budget: 0, perRunCap: 0, totalCap: 0 } }, adapterFactory: economyAdapterFactory ?? createOpenCodeAdapterFactory({ goBalanceFallbackDisabled: process.env.SOVEREIGNBOT_OPENCODE_GO_BALANCE_FALLBACK_DISABLED === "1" }) });
 
     function chatgptWebUnavailable() {
         return { provider: "chatgpt-web", found: false, health: "unavailable", auth: { state: "signed-out" }, reason: "ChatGPT Web is not connected; use Sign in to connect the dedicated profile." };
@@ -437,8 +439,10 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
             return roster.mode;
         },
         coreModules,
-        openChatGPTWebLogin() {
-            return chatgptWebFactory.openLogin(defaultChatGPTAccount);
+        async openChatGPTWebLogin() {
+            const result = await chatgptWebFactory.openLogin(defaultChatGPTAccount);
+            chatgptWebEnabled = true;
+            return result;
         },
         openAntigravityLogin(accountNamespace = defaultAntigravityAccount) {
             return antigravityFactory.openLogin(accountNamespace);

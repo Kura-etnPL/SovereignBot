@@ -4,7 +4,7 @@ import { join } from "node:path";
 // WebDriver provisioning for the managed browser path.
 //
 // Detection is passive (filesystem only). Downloads come exclusively from pinned official
-// hosts over HTTPS, are size-capped, hash-verified against the vendor's published digest,
+// hosts over HTTPS, are size-capped, checked against the vendor's published checksum,
 // and extracted through the strict zip reader. The renderer never chooses URLs; failures
 // mark Computer provisioning unavailable instead of breaking the application.
 
@@ -68,7 +68,8 @@ export function detectBrowsers({ env, existsDir, existsFile, listDirs }) {
             .sort(compareVersions)
             .reverse();
         for (const version of versions) {
-            const exePath = join(root.base, version, root.exe);
+            const versionExe = join(root.base, version, root.exe);
+            const exePath = existsFile(join(root.base, root.exe)) ? join(root.base, root.exe) : versionExe;
             if (existsFile(exePath)) {
                 found.push({ browser: root.browser, version, exePath });
                 break; // newest installed version per install root
@@ -76,12 +77,13 @@ export function detectBrowsers({ env, existsDir, existsFile, listDirs }) {
         }
     }
     // Newest first; chrome preferred over edge when both are present.
-    return found.sort((a, b) => compareVersions(b.version, a.version) || (a.browser === "chrome" ? -1 : 1));
+    return found.sort((a, b) => (a.browser === b.browser ? compareVersions(b.version, a.version) : a.browser === "chrome" ? -1 : 1));
 }
 
 async function fetchJson(url, fetcher, maxBytes) {
     assertAllowedHost(url);
     const response = await fetcher(url);
+    if (response.url) assertAllowedHost(response.url);
     if (!response.ok)
         throw new Error(`metadata download failed: HTTP ${response.status}`);
     const text = await response.text();
@@ -92,11 +94,16 @@ async function fetchJson(url, fetcher, maxBytes) {
 
 export function findDriverDownload({ browserVersion }, metadata) {
     const wantedMajor = String(browserVersion).split(".")[0];
+    const wantedBuild = String(browserVersion).split(".").slice(0, 3).join(".");
     let best;
+    let matchingBuild;
     for (const entry of metadata?.versions ?? []) {
         if (String(entry.version ?? "").split(".")[0] === wantedMajor)
             best = entry; // known-good list is ascending; keep the newest matching major
+        if (String(entry.version ?? "").split(".").slice(0, 3).join(".") === wantedBuild)
+            matchingBuild = entry;
     }
+    best = matchingBuild ?? best;
     if (!best)
         throw new Error(`no Chrome-for-Testing known-good driver build for major ${wantedMajor}`);
     const downloads = best.downloads?.chromedriver ?? [];
@@ -112,12 +119,13 @@ export function findDriverDownload({ browserVersion }, metadata) {
 }
 
 export async function provisionDriver({ browser, browserVersion, fetcher, writeArchive }) {
-    void browser; // chromedriver serves chrome-family browsers incl. Edge
+    if (browser !== "chrome") throw new Error("Automatic provisioning currently requires Chrome; Edge requires its own matching driver");
     const metadata = await fetchJson(KNOWN_GOOD_VERSIONS_URL, fetcher, MAX_METADATA_BYTES);
     const { driverVersion, url } = findDriverDownload({ browserVersion }, metadata);
     assertAllowedHost(url);
 
     const response = await fetcher(url);
+    if (response.url && response.url !== url) throw new Error("driver download redirect is not permitted");
     if (!response.ok)
         throw new Error(`driver download failed: HTTP ${response.status}`);
     const archive = Buffer.from(await response.arrayBuffer());
@@ -126,6 +134,7 @@ export async function provisionDriver({ browser, browserVersion, fetcher, writeA
 
     let archiveSha256 = sha256(archive);
     let digestVerified = false;
+    let digestAlgorithm;
     try {
         const digestResponse = await fetcher(`${url}.sha256`);
         if (digestResponse.ok) {
@@ -134,6 +143,7 @@ export async function provisionDriver({ browser, browserVersion, fetcher, writeA
                 if (archiveSha256 !== expected)
                     throw new Error(`driver archive hash mismatch: expected ${expected}, got ${archiveSha256}`);
                 digestVerified = true;
+                digestAlgorithm = "sha256";
             }
         }
     }
@@ -143,6 +153,18 @@ export async function provisionDriver({ browser, browserVersion, fetcher, writeA
         // Digest unavailable from the vendor: keep going, record honest provenance below.
     }
 
-    await writeArchive(url, archive, { driverVersion, sha256: archiveSha256, digestVerified });
-    return { driverVersion, url, sha256: archiveSha256, digestVerified, bytes: archive.length, provisionedAt: new Date().toISOString() };
+    // CfT archives currently have no .sha256 companion. Google Storage publishes
+    // an MD5 checksum in its HTTPS response instead. This verifies transfer
+    // integrity, not a software signature; retain the local SHA-256 separately.
+    if (!digestVerified && /^https:\/\/storage\.googleapis\.com\/chrome-for-testing-public\//.test(url)) {
+        const expected = response.headers?.get?.("x-goog-hash")?.match(/(?:^|,\s*)md5=([A-Za-z0-9+/]{22}==)(?:,|$)/)?.[1];
+        if (expected) {
+            if (createHash("md5").update(archive).digest("base64") !== expected) throw new Error("driver archive vendor checksum mismatch");
+            digestVerified = true;
+            digestAlgorithm = "gcs-md5";
+        }
+    }
+
+    await writeArchive(url, archive, { driverVersion, sha256: archiveSha256, digestVerified, digestAlgorithm });
+    return { driverVersion, url, sha256: archiveSha256, digestVerified, digestAlgorithm, bytes: archive.length, provisionedAt: new Date().toISOString() };
 }
