@@ -51,6 +51,11 @@ syntax check: 311 files. These fixture counts do not replace the real-run eviden
 
 ## Live boundary and remaining blockers
 
+Follow-up: the user-authorized scoped Mihomo DNS repair resolved the Fake-IP
+block below. The production browser now reaches ChatGPT's `请稍候…` site-check
+page and stops there. See `chatgpt-dns-repair-2026-09-05.md`; live authenticated
+adapter execution remains unverified.
+
 1. In a new Codex in-app browser Chat, Sol was explicitly selected and returned
    `SB_WEB_SOL_OK`. Public DOM confirmed the assistant-only response and completion
    control. This is a **browser UI probe**, not SovereignBot's production adapter

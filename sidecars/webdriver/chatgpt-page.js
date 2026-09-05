@@ -25,7 +25,7 @@ export function readChatGPTPage() {
         selectedModel: selected ? modelId(name(selected)) : undefined,
         availableModels: menuModels.map(el => modelId(name(el))).filter(Boolean),
         generating: buttons.some(el => /^(停止生成|停止流式传输|Stop generating|Stop streaming)$/.test(name(el))),
-        challenge: /just a moment|verify you are human|验证.*人类/i.test(`${title} ${notices}`),
+        challenge: /just a moment|verify you are human|验证.*人类|请稍候|请稍等/i.test(`${title} ${notices}`),
         capacityLimited: /usage limit|rate limit|too many requests|达到.*上限/i.test(notices),
         assistantMessages: messages };
 }
