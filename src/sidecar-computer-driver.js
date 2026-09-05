@@ -179,12 +179,13 @@ export class SidecarComputerDriver {
 
     async close() {
         this.#closed = true;
+        await this.#starting?.catch(() => undefined);
         const child = this.#child;
         if (!child)
             return;
         try {
             if (this.#endpoint)
-                await this.#requestRaw("POST", "/shutdown", {}, { timeoutMs: 2000 });
+                await this.#requestRaw("POST", "/shutdown", {}, { timeoutMs: (this.#config.requestTimeoutMs ?? 30_000) + 5000 });
         }
         catch {
         }

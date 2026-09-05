@@ -30,6 +30,23 @@ function fixture() {
     return { root, coworkerStore, conversations, chief, coder, researcher };
 }
 
+test("attention and redirected delivery states survive reload", () => {
+    const { root, coworkerStore, conversations, coder } = fixture();
+    try {
+        const direct = conversations.createDirect(coder.id);
+        for (const status of ["attention", "redirected"]) {
+            const message = conversations.postUserMessage(direct.id, { text: status });
+            conversations.markDelivery(direct.id, message.id, coder.id, status, "Recovery detail");
+        }
+        const reloaded = createConversationStore({ persistPath: join(root, "conversations.json"), coworkerStore });
+        assert.deepEqual(reloaded.get(direct.id).messages.map(message => message.delivery[coder.id].status), ["attention", "redirected"]);
+        assert.ok(reloaded.get(direct.id).messages.every(message => message.delivery[coder.id].detail === "Recovery detail"));
+        assert.equal(reloaded.pendingFor(coder.id).length, 0);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
 test("direct conversations are durable, idempotent per coworker, and user messages create pending delivery", () => {
     const { root, coworkerStore, conversations, coder } = fixture();
     try {

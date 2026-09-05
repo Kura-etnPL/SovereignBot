@@ -1,5 +1,6 @@
 export function createSkillAwareConversationStore(conversationStore, skillStore) {
     return {
+        list(...args) { return conversationStore.list(...args); },
         get(conversationId) {
             return skillStore.decorateConversation(conversationStore.get(conversationId));
         },

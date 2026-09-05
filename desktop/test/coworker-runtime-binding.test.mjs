@@ -5,6 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { createCoworkerStore } from "../src/main/coworker-store.js";
 import { createConversationStore } from "../src/main/conversation-store.js";
+import { createAttachmentAwareConversationStore } from "../src/main/attachment-integration.js";
+import { createSkillAwareConversationStore } from "../src/main/skill-integration.js";
 import { createCoworkerDispatcher, classifyCoworkerError } from "../src/main/coworker-dispatcher.js";
 import {
     buildProviderRoster,
@@ -201,6 +203,39 @@ test("coworker dispatcher gives each coworker a durable provider lane and resume
 
         const serialized = JSON.stringify(view);
         assert.equal(serialized.includes(runtime._tasks[0].harnessState.sessionId), false, "provider session id must not enter conversation state");
+    }
+    finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("dispatcher restart marks only task-linked pending delivery as attention and requires explicit retry", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sb-coworker-recovery-"));
+    try {
+        const { store, coder } = makeCoworkers(root);
+        const reviewer = store.create({ name: "Reviewer", role: "Review", providerPreference: "codex" });
+        const roster = buildProviderRoster({ discovery: { codex: READY(), claude: READY() }, settings: {}, coworkers: store.list().coworkers });
+        const conversations = createConversationStore({ persistPath: join(root, "conversations.json"), coworkerStore: store });
+        const team = conversations.createTeam({ title: "Recovery", coworkerIds: [coder.id, reviewer.id], leadCoworkerId: coder.id });
+        const message = conversations.postUserMessage(team.id, { text: "Interrupted turn", mentions: ["everyone"] });
+        const runtime = fakeRuntime(roster);
+        runtime._tasks.push({ id: "task_interrupted", status: "running", assignedAgentId: coworkerAgentId(coder.id), input: { newestMessageId: message.id } });
+        const decorated = createSkillAwareConversationStore(createAttachmentAwareConversationStore(conversations, {}), { decorateConversation: value => value });
+        const dispatcher = createCoworkerDispatcher({
+            dataDir: root,
+            runtime,
+            roster: () => roster,
+            coworkerStore: store,
+            conversationStore: decorated,
+            services: { workspacePath() { return undefined; } },
+        });
+
+        await dispatcher.flush();
+        assert.equal(conversations.get(team.id).messages[0].delivery[coder.id].status, "attention");
+        assert.equal(conversations.get(team.id).messages[0].delivery[reviewer.id].status, "pending", "unrelated recipient must remain pending");
+        assert.match(conversations.get(team.id).messages[0].delivery[coder.id].detail, /explicitly retry/i);
+        assert.equal(runtime._tasks.length, 1, "restart recovery must not create or replay a provider task");
+        assert.equal(runtime._tasks[0].status, "cancelled", "recovery must terminate the stale core task");
     }
     finally {
         rmSync(root, { recursive: true, force: true });

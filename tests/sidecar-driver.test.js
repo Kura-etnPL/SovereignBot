@@ -9,7 +9,7 @@ import { isUnsafeAddress, resolveEgressTarget } from "../sidecars/webdriver/egre
 
 const ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
 
-async function fakeWebDriver() {
+async function fakeWebDriver({ quitDelayMs = 0, startDelayMs = 0, onQuit = () => {} } = {}) {
     const calls = [];
     let sessionCounter = 0;
     const server = createServer(async (request, response) => {
@@ -31,11 +31,14 @@ async function fakeWebDriver() {
             return;
         }
         if (request.method === "POST" && request.url === "/session") {
+            await new Promise(resolve => setTimeout(resolve, startDelayMs));
             sessionCounter += 1;
             send(200, { sessionId: `session-${sessionCounter}`, capabilities: { browserName: "fake" } });
             return;
         }
         if (request.method === "DELETE" && /^\/session\/[^/]+$/.test(request.url)) {
+            await new Promise(resolve => setTimeout(resolve, quitDelayMs));
+            onQuit();
             send(200, null);
             return;
         }
@@ -169,4 +172,37 @@ test("egress address classifier blocks private, loopback, multicast and metadata
         () => resolveEgressTarget("169.254.169.254", { allowPrivateHosts: true }),
         /metadata/,
     );
+});
+
+test("close waits for browser session teardown before terminating the sidecar", async () => {
+    let browserClosed = false;
+    const fixture = await fakeWebDriver({ quitDelayMs: 400, onQuit: () => { browserClosed = true; } });
+    const driver = await driverFor(fixture.url);
+    try {
+        await driver.health();
+        await driver.close();
+        assert.equal(browserClosed, true);
+        await assert.rejects(driver.health(), /closed/);
+    } finally {
+        await driver.close();
+        await fixture.close();
+    }
+});
+
+test("close during startup waits for and closes the owned browser", async () => {
+    let browserClosed = false;
+    const fixture = await fakeWebDriver({ startDelayMs: 150, onQuit: () => { browserClosed = true; } });
+    const driver = await driverFor(fixture.url);
+    try {
+        const startup = driver.health();
+        // Capture either outcome: closure may race the final health request.
+        const settled = startup.then(() => true, () => false);
+        await driver.close();
+        await settled;
+        assert.equal(browserClosed, true);
+        await assert.rejects(driver.health(), /closed/);
+    } finally {
+        await driver.close();
+        await fixture.close();
+    }
 });

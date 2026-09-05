@@ -43,7 +43,12 @@ Preserve any later user edits. No full secret-bearing config backup was created.
   test passes; browser validation is not repeated past the security boundary.
 - Probe-owned Chrome processes left after driver shutdown were stopped by their
   exact project test profile path. No user browser or other project was stopped.
-  The driver's incomplete process cleanup is a remaining local reliability issue.
+  Subsequent local repair fixed the shutdown acknowledgement race: the sidecar
+  now finishes browser/session teardown before acknowledging shutdown, and close
+  waits for an in-progress startup. A real Chrome-only check (no external site
+  navigation) returned zero owned Chrome processes after close. Regression tests
+  cover delayed session teardown and shutdown during startup. This does not
+  reattempt the blocked ChatGPT site check.
 
 DNS/network-address blocking is resolved. Authenticated desktop Chat/Sol execution
 is still unverified and requires normal user site verification/sign-in. The earlier

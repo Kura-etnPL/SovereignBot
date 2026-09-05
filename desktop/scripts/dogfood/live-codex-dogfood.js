@@ -41,7 +41,7 @@ export async function runLiveCodexDogfood({
     };
 
     const capture = async (name) => {
-        const image = await win.webContents.capturePage();
+        const image = await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
         const path = join(evidenceDir, name);
         const png = image.toPNG();
         await writeFile(path, png);
@@ -61,6 +61,33 @@ export async function runLiveCodexDogfood({
         await waitFor("production Desktop document", async () => await renderer("document.readyState === 'complete'"));
 
         if (process.env.SOVEREIGNBOT_LIVE_RESTART_CHECK === "1") {
+            if (process.env.SOVEREIGNBOT_INSPECT_INTERRUPTED === "1") {
+                const restored = await waitFor("interrupted delivery attention", async () => await renderer(`(async () => {
+                    const team = (await window.sovereignbot.teams.list({})).teams?.[0];
+                    if (!team) return false;
+                    const conversation = await window.sovereignbot.conversations.get({conversationId: team.channels[0].conversationId});
+                    const interrupted = conversation.messages.flatMap(message => Object.values(message.delivery ?? {})).filter(delivery => delivery.status === "attention" && /interrupted by application restart/i.test(delivery.detail ?? ""));
+                    return interrupted.length ? {count: interrupted.length, channel: team.channels[0].name} : false;
+                })()`), 15_000);
+                const tasks = await getHost().runtime.orchestrator.listTasks();
+                check("INTERRUPTED_DELIVERY_ATTENTION", restored.count > 0);
+                check("INTERRUPTED_NO_ACTIVE_EXECUTION", !tasks.some(task => ["running", "accepted", "queued"].includes(task.status)));
+                check("INTERRUPTED_NO_TASK_REPLAY", tasks.length === Number(process.env.SOVEREIGNBOT_EXPECTED_TASK_COUNT));
+                await waitFor("restored channel navigation", async () => await renderer(`Boolean(document.querySelector('.nav-channel-sublist button'))`), 10_000);
+                await renderer(`document.querySelector('.nav-channel-sublist button').click(); true`);
+                await waitFor("restored channel UI", async () => await renderer(`document.getElementById('conversation-title')?.textContent === ${JSON.stringify(restored.channel)}`), 10_000);
+                const redirect = await renderer(`(() => { const button = document.getElementById('conversation-redirect'); return Boolean(button && !button.classList.contains('hidden')); })()`);
+                check("INTERRUPTED_REDIRECT_AVAILABLE", redirect);
+                check("INTERRUPTED_CHANNEL_VISIBLE", await renderer(`getComputedStyle(document.getElementById('view-welcome')).display === 'none' && document.getElementById('conversation-redirect').getBoundingClientRect().width > 0`));
+                win.webContents.setBackgroundThrottling(false);
+                await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
+                win.webContents.invalidate();
+                await renderer(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                result.screenshots.push(await capture("interrupted-recovery.png"));
+                await writeFile(join(evidenceDir, "interrupted-result.json"), JSON.stringify(result, null, 2), "utf8");
+                return result;
+            }
             const restored = await renderer(`(async () => {
                 const team = (await window.sovereignbot.teams.list({})).teams?.[0];
                 if (!team) throw new Error("Team missing after restart");

@@ -833,6 +833,11 @@ function pendingUserRecipients(conversation) {
   return pending;
 }
 
+function hasInterruptedDelivery(conversation) {
+  return (conversation?.messages ?? []).some(message => Object.values(message.delivery ?? {}).some(delivery =>
+    delivery?.status === "attention" && /interrupted by application restart/i.test(delivery.detail ?? "")));
+}
+
 function renderReplyComposer(conversation) {
   const row = $("reply-row");
   if (!row) return;
@@ -933,10 +938,11 @@ function renderConversationHeader(conversation) {
 
   const stopButton = $("conversation-stop");
   const redirectButton = $("conversation-redirect");
+  const canRedirect = pending.size > 0 || hasInterruptedDelivery(conversation);
   if (stopButton) stopButton.classList.toggle("hidden", pending.size === 0);
   if (redirectButton) {
-    if (!pending.size) state.redirectMode = false;
-    redirectButton.classList.toggle("hidden", pending.size === 0);
+    if (!canRedirect) state.redirectMode = false;
+    redirectButton.classList.toggle("hidden", !canRedirect);
     redirectButton.textContent = state.redirectMode ? t("handoff.cancelRedirect") : t("conversation.redirect");
   }
   const hint = $("composer-hint");
@@ -2621,7 +2627,7 @@ async function stopCurrentConversation() {
 
 function toggleRedirectMode() {
   const conversation = state.selectedConversation;
-  if (!conversation || !pendingUserRecipients(conversation).size) return;
+  if (!conversation || (!pendingUserRecipients(conversation).size && !hasInterruptedDelivery(conversation))) return;
   state.redirectMode = !state.redirectMode;
   renderConversationHeader(conversation);
   try { $("composer-input")?.focus({ preventScroll: true }); } catch { $("composer-input")?.focus(); }

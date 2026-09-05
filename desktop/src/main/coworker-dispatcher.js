@@ -11,6 +11,7 @@ const MAX_CONTEXT_TEXT = 4_000;
 const MAX_REPLY_TEXT = 20_000;
 const MAX_CONTINUITY_REF = 512;
 const MAX_HANDOFF_DEPTH = 4;
+const RECOVERED_ORCHESTRATORS = new WeakMap();
 
 function stateKey(conversationId, coworkerId) {
     return `${conversationId}:${coworkerId}`;
@@ -144,6 +145,7 @@ export function createCoworkerDispatcher({
         : { schema: DISPATCH_SCHEMA, turns: {} };
     const chains = new Map();
     const activeTasks = new Map();
+    let startupRecovery;
 
     function save() {
         saveJsonState(persistPath, state);
@@ -362,6 +364,42 @@ export function createCoworkerDispatcher({
                 try { conversationStore.markDelivery(conversationId, reply.id, recipientId, "delivered"); } catch {}
             }
         }
+    }
+
+    // A process restart cannot resume an in-flight provider call.  Recover only
+    // deliveries that can be tied to a durable active task by message id; leave
+    // all other pending deliveries alone so a newly-created message is never
+    // mistaken for interrupted work.  Recovery is intentionally attention-only:
+    // retry must be an explicit operator action.
+    async function recoverInterruptedDeliveries() {
+        if (typeof runtime.orchestrator?.listTasks !== "function") return [];
+        const tasks = await runtime.orchestrator.listTasks();
+        const active = tasks.filter((task) => ["accepted", "queued", "running"].includes(task?.status));
+        const recovered = [];
+        for (const task of active) {
+            const messageId = task.input?.messageId ?? task.input?.newestMessageId;
+            if (!messageId) continue;
+            const agentId = task.assignedAgentId ?? task.preferredAgentId;
+            const targetCoworkerId = coworkerStore.list().coworkers
+                .find(coworker => coworkerAgentId(coworker.id) === agentId)?.id;
+            if (!targetCoworkerId) continue;
+            const listed = conversationStore.list?.();
+            for (const summary of listed?.conversations ?? []) {
+                const conversation = conversationStore.get(summary.id);
+                const message = conversation.messages?.find((entry) => entry.id === messageId);
+                if (!message) continue;
+                const delivery = message.delivery?.[targetCoworkerId];
+                if (delivery?.status !== "pending") continue;
+                await runtime.orchestrator.cancel(task.id, { reason: "interrupted by application restart", actor: "runtime-recovery" });
+                const detail = "Work was interrupted by application restart; review and explicitly retry.";
+                conversationStore.markDelivery(conversation.id, message.id, targetCoworkerId, "attention", detail);
+                recovered.push({ conversationId: conversation.id, messageId: message.id, coworkerId: targetCoworkerId, taskId: task.id });
+                try {
+                    recordTeamEvent({ conversationId: conversation.id, type: "work.failed", status: "attention", actorId: targetCoworkerId, ownerId: targetCoworkerId, messageId: message.id, reason: detail });
+                } catch {}
+            }
+        }
+        return recovered;
     }
 
     async function executeDelivery(conversationId, messageId, coworkerId) {
@@ -944,7 +982,7 @@ export function createCoworkerDispatcher({
 
     function scheduleDelivery(conversationId, messageId, coworkerId) {
         const key = stateKey(conversationId, coworkerId);
-        const previous = chains.get(key) ?? Promise.resolve();
+        const previous = chains.get(key) ?? startupRecovery ?? Promise.resolve();
         const run = previous
             .then(() => executeDelivery(conversationId, messageId, coworkerId))
             .catch((error) => {
@@ -1034,12 +1072,22 @@ export function createCoworkerDispatcher({
         });
     }
 
+    // Run once at service construction so normal desktop startup surfaces an
+    // interrupted delivery without replaying provider work.
+    if (runtime.orchestrator && !RECOVERED_ORCHESTRATORS.has(runtime.orchestrator)) {
+        RECOVERED_ORCHESTRATORS.set(runtime.orchestrator, recoverInterruptedDeliveries());
+    }
+    startupRecovery = RECOVERED_ORCHESTRATORS.get(runtime.orchestrator) ?? Promise.resolve([]);
+    startupRecovery.catch(() => {});
+
     return {
         dispatchMessage,
+        ready: () => startupRecovery,
         dispatchComputerTask,
         stopConversation,
         cancelConversation,
         async flush() {
+            if (startupRecovery) await startupRecovery;
             await Promise.allSettled([...chains.values()]);
         },
         stateSnapshot() {

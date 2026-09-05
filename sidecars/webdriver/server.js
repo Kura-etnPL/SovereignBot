@@ -338,6 +338,10 @@ async function main() {
             }
 
             if (request.method === "POST" && url.pathname === "/shutdown") {
+                // Acknowledge only after browser teardown. The parent may terminate
+                // this process immediately after receiving the response on Windows.
+                await stopSession();
+                await webdriver.close();
                 send(response, 200, { shuttingDown: true });
                 queueMicrotask(() => shutdown());
                 return;

@@ -80,7 +80,7 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
             const delivery = {};
             for (const [recipientId, entry] of Object.entries(message.delivery)) {
                 if (recipientId === USER_PARTICIPANT || !participants.includes(recipientId)) continue;
-                if (!entry || typeof entry !== "object" || Array.isArray(entry) || !["pending", "delivered", "failed"].includes(entry.status) || typeof entry.updatedAt !== "string") continue;
+                if (!entry || typeof entry !== "object" || Array.isArray(entry) || !["pending", "delivered", "failed", "attention", "redirected"].includes(entry.status) || typeof entry.updatedAt !== "string") continue;
                 delivery[recipientId] = { status: entry.status, updatedAt: entry.updatedAt, ...(typeof entry.detail === "string" && entry.detail.trim() ? { detail: entry.detail.trim().slice(0, 500) } : {}) };
             }
             return {

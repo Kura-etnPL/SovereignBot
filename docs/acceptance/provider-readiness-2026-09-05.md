@@ -51,6 +51,23 @@ syntax check: 311 files. These fixture counts do not replace the real-run eviden
 
 ## Live boundary and remaining blockers
 
+### Restart recovery follow-up
+
+The interrupted real Luna run `temp/live-luna-WAV2Ew` now recovers its exact
+task-linked recipient to Attention and cancels the stale execution without adding
+tasks or replaying provider work. Production Electron inspection passed five
+checks in `temp/live-luna-WAV2Ew/evidence/interrupted-result.json`; the channel and
+Redirect button were visually confirmed in `interrupted-recovery.png`. Reopening
+the recovered state exposed a load-time status filter that discarded Attention
+and Redirected; both now persist across reload. Relevant store tests: 9 passed;
+dispatcher and sidecar tests: 12 passed. No live model prompt was sent for these
+restart inspections. Explicit redirect execution after recovery remains unproven.
+
+Background schedulers wait for recovery; conversation-store decorators preserve
+the listing API used to identify affected messages. Normal browser shutdown now
+waits for session teardown, with a real owned about:blank browser leaving zero
+profile-matched Chrome processes. Forced OS termination cleanup is not proven.
+
 Follow-up: the user-authorized scoped Mihomo DNS repair resolved the Fake-IP
 block below. The production browser now reaches ChatGPT's `请稍候…` site-check
 page and stops there. See `chatgpt-dns-repair-2026-09-05.md`; live authenticated

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { join, resolve, sep, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,9 @@ if (!CONTROL_ROOT.startsWith(resolve(TEMP_ROOT) + sep) || !basename(CONTROL_ROOT
 const EVIDENCE_DIR = join(CONTROL_ROOT, "evidence");
 const PRIVATE_RUNTIME_DIR = join(CONTROL_ROOT, "private-runtime");
 const DATA_DIR = join(PRIVATE_RUNTIME_DIR, "desktop-data");
+const inspectInterrupted = process.argv.includes("--inspect-interrupted");
+if (inspectInterrupted && resumeAt < 0) throw new Error("Interrupted inspection requires an existing run");
+const priorTasks = inspectInterrupted ? JSON.parse(readFileSync(join(DATA_DIR, "tasks.json"), "utf8")) : undefined;
 const ELECTRON_USER_DATA_DIR = join(PRIVATE_RUNTIME_DIR, "electron-user-data");
 const ELECTRON = process.platform === "win32"
     ? join(DESKTOP_ROOT, "node_modules", "electron", "dist", "electron.exe")
@@ -33,6 +36,8 @@ const env = {
     SOVEREIGNBOT_PRODUCT_EVIDENCE_DIR: EVIDENCE_DIR,
     SOVEREIGNBOT_LIVE_LUNA_ONLY: "1",
     SOVEREIGNBOT_LIVE_RESTART_CHECK: resumeAt >= 0 ? "1" : "0",
+    SOVEREIGNBOT_INSPECT_INTERRUPTED: inspectInterrupted ? "1" : "0",
+    SOVEREIGNBOT_EXPECTED_TASK_COUNT: inspectInterrupted ? String((Array.isArray(priorTasks) ? priorTasks : priorTasks.tasks).length) : "",
 };
 delete env.ELECTRON_RUN_AS_NODE;
 for (const key of Object.keys(env)) if (key.startsWith("FAKE_PROVIDER")) delete env[key];

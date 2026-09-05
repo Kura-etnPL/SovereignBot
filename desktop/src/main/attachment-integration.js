@@ -15,6 +15,7 @@ function decorateMessageWithAttachments(message, artifactStore) {
 
 export function createAttachmentAwareConversationStore(conversationStore, artifactStore) {
     return {
+        list(...args) { return conversationStore.list(...args); },
         get(conversationId) {
             const conversation = structuredClone(conversationStore.get(conversationId));
             conversation.messages = conversation.messages.map((message) => decorateMessageWithAttachments(message, artifactStore));

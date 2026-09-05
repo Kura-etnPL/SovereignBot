@@ -485,9 +485,6 @@ async function main() {
         });
         eventTriggers = createEventTriggerController({ dataDir, routineController: routines, services });
         chiefLoop = createChiefLoop({ jobController: jobs, goalController: goals, roster: () => host.rosterSummary() });
-        routines.start();
-        eventTriggers.start();
-        chiefLoop.start();
         coworkerDispatcher = createCoworkerDispatcher({
             dataDir,
             runtime: host.runtime,
@@ -500,6 +497,13 @@ async function main() {
             teamFlow: teamService,
             isConversationBlocked: (conversationId) => blockedConversations.has(conversationId),
         });
+        const recoveringDispatcher = coworkerDispatcher;
+        recoveringDispatcher.ready().then(() => {
+            if (quitting || coworkerDispatcher !== recoveringDispatcher) return;
+            routines.start();
+            eventTriggers.start();
+            chiefLoop.start();
+        }).catch(error => logStartupError("coworker restart recovery failed; background work remains stopped", error));
     }
 
     const firstRun = createFirstRunService({ host, services });
