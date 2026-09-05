@@ -6,10 +6,11 @@
   const baseRenderDetails = renderDetails;
   let generation = 0;
   let selectedAgentId;
+  let currentConversationId = null;
 
   function ensureSection() {
-    const panel = document.getElementById("details-panel");
-    if (!panel) return undefined;
+    const container = document.getElementById("details-body") || document.getElementById("details-panel");
+    if (!container) return undefined;
     let section = document.getElementById("details-live-screen-section");
     if (section) return section;
 
@@ -38,6 +39,13 @@
     img.id = "live-screen-image";
     img.alt = "Live coworker computer screen";
     img.className = "live-screen-image hidden";
+    img.style.display = "none";
+    img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
+    img.onerror = function () {
+      this.style.display = "none";
+      this.classList.add("hidden");
+    };
+
     const empty = document.createElement("div");
     empty.id = "live-screen-empty";
     empty.className = "live-screen-empty";
@@ -58,9 +66,14 @@
 
     section.append(head, tabs, viewport, footer);
     const computer = document.getElementById("details-computer-section");
-    const future = panel.querySelector(".future-section");
-    panel.insertBefore(section, computer || future || null);
-    refresh.addEventListener("click", () => pullFrame(generation, true));
+    const future = container.querySelector(".future-section");
+    const refNode = (computer && computer.parentElement === container) ? computer : ((future && future.parentElement === container) ? future : null);
+    if (refNode) {
+      container.insertBefore(section, refNode);
+    } else {
+      container.appendChild(section);
+    }
+    refresh.addEventListener("click", () => pullFrame(++generation, true));
     return section;
   }
 
@@ -103,7 +116,8 @@
     const stateEl = document.getElementById("live-screen-state");
     if (img) {
       img.classList.add("hidden");
-      img.removeAttribute("src");
+      img.style.display = "none";
+      img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
     }
     if (empty) {
       empty.textContent = message;
@@ -123,23 +137,29 @@
       const img = document.getElementById("live-screen-image");
       const empty = document.getElementById("live-screen-empty");
       const url = document.getElementById("live-screen-url");
-      if (img) {
-        img.src = `data:${frame.mimeType};base64,${frame.data}`;
+      if (img && frame?.data) {
+        img.src = `data:${frame.mimeType || "image/png"};base64,${frame.data}`;
         img.classList.remove("hidden");
+        img.style.display = "block";
+        empty?.classList.add("hidden");
+        if (url) url.textContent = frame.url || "Active browser page";
+        if (stateEl) stateEl.textContent = "Live";
+        // Only loop pullFrame if the frame retrieval genuinely succeeded and session is alive
+        if (myGeneration === generation && !panel.classList.contains("hidden")) {
+          setTimeout(() => pullFrame(myGeneration), 2500);
+        }
+      } else {
+        setEmpty("No active display output", "Idle");
       }
-      empty?.classList.add("hidden");
-      if (url) url.textContent = frame.url || "Active browser page";
-      if (stateEl) stateEl.textContent = "Live";
     } catch (error) {
       if (myGeneration !== generation) return;
       const message = String(error?.message || error);
-      if (/not running|session is not running|unavailable/i.test(message))
+      if (/not running|session is not running|unavailable|offline/i.test(message)) {
         setEmpty("Start this coworker's computer to see its live screen.", "Offline");
-      else
+      } else {
         setEmpty("Live screen is temporarily unavailable.", "Unavailable");
+      }
     }
-    if (myGeneration === generation && !panel.classList.contains("hidden"))
-      setTimeout(() => pullFrame(myGeneration), 1400);
   }
 
   function startLiveScreen(conversation) {
@@ -153,13 +173,16 @@
       setEmpty("No coworker computer is bound to this conversation.", "Unavailable");
       return;
     }
-    setEmpty("Connecting to coworker computer…", "Connecting…");
-    pullFrame(current, true);
+    setEmpty("Start this coworker's computer to see its live screen.", "Offline");
+    pullFrame(current, false);
   }
 
   renderDetails = function renderDetailsWithLiveScreen(conversation) {
     baseRenderDetails(conversation);
-    startLiveScreen(conversation);
+    if (currentConversationId !== conversation?.id) {
+      currentConversationId = conversation?.id;
+      startLiveScreen(conversation);
+    }
   };
 
   ensureSection();

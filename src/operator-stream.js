@@ -11,11 +11,12 @@ function sendJson(response, status, value) {
 }
 function bearer(request){const value=request.headers.authorization;return typeof value==="string"&&value.startsWith("Bearer ")?value.slice("Bearer ".length).trim():""}
 function expectedOrigin(request){return `http://${request.headers.host}`}
-function originAllowed(request){const origin=request.headers.origin;return !origin||origin===expectedOrigin(request)}
+function originAllowed(request){const origin=request.headers.origin;return !origin||origin===`http://${request.headers.host}`||origin===`https://${request.headers.host}`}
 
 export async function handleOperatorStream(runtime,request,response){
     if(request.method!=="GET"){sendJson(response,405,{error:"method not allowed"});return}
-    if(!loopbackHost(runtime.config.bindHost??"127.0.0.1")||!loopbackRemote(request.socket.remoteAddress)){sendJson(response,403,{error:"operator telemetry is available only on loopback"});return}
+    const bindHost=runtime.config.bindHost??"127.0.0.1";
+    if(!loopbackHost(bindHost)||!loopbackRemote(request.socket.remoteAddress, bindHost)){sendJson(response,403,{error:"operator telemetry is available only on loopback"});return}
     if(!originAllowed(request)){sendJson(response,403,{error:"cross-origin operator telemetry refused"});return}
     const sessionToken=bearer(request);
     if(!await runtime.operatorSessions.authenticate(sessionToken)){sendJson(response,401,{error:"invalid or expired operator session"});return}

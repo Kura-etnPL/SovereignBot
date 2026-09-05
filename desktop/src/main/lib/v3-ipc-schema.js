@@ -173,8 +173,9 @@ export const V3_IPC_CHANNELS = Object.freeze({
     "coworker:archive": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),
     "coworker:restore": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),
     "conversation:list": spec(1024, empty),
-    "conversation:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["conversationId"])); return { conversationId: identifier(value.conversationId, "conversationId") }; }),
-    "conversation:createDirect": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId"])); return { coworkerId: identifier(value.coworkerId, "coworkerId") }; }),
+    "conversation:get": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["conversationId", "limit", "beforeMessageId", "aroundMessageId"])); return { conversationId: identifier(value.conversationId, "conversationId"), ...(value.limit ? { limit: value.limit } : {}), ...(value.beforeMessageId ? { beforeMessageId: value.beforeMessageId } : {}), ...(value.aroundMessageId ? { aroundMessageId: value.aroundMessageId } : {}) }; }),
+    "conversation:createDirect": spec(1024, (payload) => { const value = objectPayload(payload); exact(value, new Set(["coworkerId", "forceNew"])); return { coworkerId: identifier(value.coworkerId, "coworkerId"), ...(value.forceNew !== undefined ? { forceNew: Boolean(value.forceNew) } : {}) }; }),
+    "conversation:acknowledge": spec(1024, (payload) => { if (payload === undefined || payload === null) return {}; const value = objectPayload(payload); exact(value, new Set(["conversationId"])); return { conversationId: value.conversationId ? identifier(value.conversationId, "conversationId") : undefined }; }),
     "conversation:createTeam": spec(4096, (payload) => {
         const value = objectPayload(payload);
         exact(value, new Set(["title", "coworkerIds", "leadCoworkerId"]));

@@ -7,8 +7,8 @@
   let refreshSeq = 0;
 
   function ensureComputerSection() {
-    const panel = document.getElementById("details-panel");
-    if (!panel) return undefined;
+    const container = document.getElementById("details-body") || document.getElementById("details-panel");
+    if (!container) return undefined;
     let section = document.getElementById("details-computer-section");
     if (!section) {
       section = document.createElement("section");
@@ -22,10 +22,15 @@
       root.className = "computer-list";
       section.append(label, root);
       const artifacts = document.getElementById("details-artifacts-section");
-      const future = panel.querySelector(".future-section");
-      panel.insertBefore(section, artifacts || future || null);
+      const future = container.querySelector(".future-section");
+      const refNode = (artifacts && artifacts.parentElement === container) ? artifacts : ((future && future.parentElement === container) ? future : null);
+      if (refNode) {
+        container.insertBefore(section, refNode);
+      } else {
+        container.appendChild(section);
+      }
     }
-    for (const chip of panel.querySelectorAll(".future-chip-row span")) {
+    for (const chip of container.querySelectorAll(".future-chip-row span")) {
       if (chip.textContent.trim() === "Computer") chip.remove();
     }
     ensureTopbarButton();

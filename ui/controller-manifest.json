@@ -1,0 +1,9 @@
+{
+  "name": "SovereignBot Remote Controller",
+  "short_name": "Sovereign Remote",
+  "start_url": "./controller.html",
+  "display": "standalone",
+  "background_color": "#10161d",
+  "theme_color": "#10161d",
+  "icons": []
+}

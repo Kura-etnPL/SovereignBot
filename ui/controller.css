@@ -1,0 +1,29 @@
+:root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; background: #10161d; color: #ecf2f7; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #1b2b35, #10161d 55%); }
+button, textarea { font: inherit; }
+button { min-height: 44px; border: 0; border-radius: 12px; padding: 0 15px; color: inherit; background: #28414c; touch-action: manipulation; }
+button:focus-visible { outline: 3px solid #f2bd73; outline-offset: 2px; }
+.controller-shell { width: min(100%, 760px); margin: auto; padding: max(18px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+.controller-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 12px 0 20px; }
+.eyebrow { margin: 0 0 6px; color: #a9c5cd; font-size: 11px; letter-spacing: .14em; }
+h1 { margin: 0; font-size: clamp(26px, 7vw, 38px); }
+.connection-status { margin: 8px 0 0; color: #f2bd73; }
+.controller-nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 18px; }
+.controller-nav button { background: #17242c; border: 1px solid #2f4a55; }
+.controller-nav button[aria-current="page"] { background: #e1a75e; color: #182027; border-color: #e1a75e; }
+.card, .attention-banner { border: 1px solid #2f4a55; border-radius: 16px; background: rgba(22, 34, 42, .92); padding: 16px; margin-bottom: 12px; }
+.card h2, .card h3 { margin: 0 0 8px; }
+.card p { color: #b5c7cd; line-height: 1.45; }
+.card-list { display: grid; gap: 10px; }
+.attention-banner { color: #fff4df; border-color: #a96e38; background: #3a281e; }
+.attention-banner button { margin-top: 10px; background: #e1a75e; color: #182027; }
+.primary { background: #e1a75e; color: #182027; }
+.secondary { background: #28414c; }
+.text-button { min-height: auto; padding: 8px 0; background: transparent; color: #e1a75e; text-decoration: underline; }
+textarea { width: 100%; min-height: 88px; margin: 8px 0; padding: 12px; color: inherit; background: #0d1318; border: 1px solid #2f4a55; border-radius: 10px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.muted { color: #92aab2; }
+.hidden { display: none !important; }
+footer { color: #829aa3; font-size: 12px; line-height: 1.45; padding-top: 20px; }
+@media (min-width: 600px) { .controller-nav { grid-template-columns: repeat(6, 1fr); } .controller-shell { padding-left: 24px; padding-right: 24px; } }

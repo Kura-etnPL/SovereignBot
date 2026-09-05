@@ -1,0 +1,8 @@
+{
+  "name": "SovereignBot",
+  "description": "Local-first AI coworker runtime with durable memory, governed actions, and multi-agent orchestration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

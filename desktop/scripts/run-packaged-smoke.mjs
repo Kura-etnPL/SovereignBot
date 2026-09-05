@@ -49,10 +49,25 @@ async function main() {
 
     const exe = findPackagedExe(OUT_DIR);
     const dataDir = await mkdtemp(join(tmpdir(), "sovereign-packaged-smoke-"));
+    const fakeProviderNode = process.env.FAKE_PROVIDER_NODE ?? join(DESKTOP_ROOT, "resources", "node", "node.exe");
+    const fakeProviderDir = process.env.FAKE_PROVIDER_DIR ?? join(DESKTOP_ROOT, "e2e", "fixtures");
+    const transcriptPath = join(dataDir, "fake-provider-transcript.jsonl");
     try {
-        const child = spawn(exe, ["--desktop-smoke"], {
-            env: { ...process.env, SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: dataDir },
+        const child = spawn(exe, ["--disable-gpu", "--desktop-smoke"], {
+            env: {
+                ...process.env,
+                SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: dataDir,
+                FAKE_PROVIDER_NODE: fakeProviderNode,
+                FAKE_PROVIDER_DIR: fakeProviderDir,
+                FAKE_PROVIDER_TRANSCRIPT: transcriptPath,
+                FAKE_PROVIDER_FANOUT_CANARY: "1",
+                FAKE_PROVIDER_P1_CANARY: "1",
+                FAKE_PROVIDER_INCLUDE_CWD: "1",
+            },
             stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true,
+            detached: false,
+            shell: false,
         });
         let stdout = "";
         let stderr = "";
@@ -93,6 +108,7 @@ async function main() {
     }
     finally {
         await rm(dataDir, { recursive: true, force: true }).catch(() => {});
+        await rm(`${dataDir}-electron-userdata`, { recursive: true, force: true }).catch(() => {});
     }
 }
 

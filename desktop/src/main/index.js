@@ -424,8 +424,12 @@ async function main() {
                 "teach:save": ({ sessionId }) => teachOnce.save(sessionId),
                 "teach:cancel": ({ sessionId }) => teachOnce.cancel(sessionId),
                 "conversation:list": () => conversationStore.list(),
-                "conversation:get": ({ conversationId }) => conversationStore.get(conversationId),
-                "conversation:createDirect": ({ coworkerId }) => conversationStore.createDirect(coworkerId),
+                "conversation:get": ({ conversationId, limit, beforeMessageId, aroundMessageId }) =>
+                    typeof conversationStore.getPage === "function"
+                        ? conversationStore.getPage(conversationId, { limit, beforeMessageId, aroundMessageId })
+                        : conversationStore.get(conversationId),
+                "conversation:createDirect": ({ coworkerId, forceNew = false } = {}) => conversationStore.createDirect(coworkerId, { forceNew }),
+                "conversation:acknowledge": ({ conversationId } = {}) => ({ ok: true, conversationId }),
                 "conversation:createTeam": ({ title, coworkerIds, leadCoworkerId }) => teamService.createTeam({ title, coworkerIds, leadCoworkerId }).conversation,
                 "conversation:stop": async ({ conversationId }) => coworkerDispatcher.stopConversation(conversationId),
                 "conversation:redirect": async ({ conversationId, text, mentions, replyTo, clientMessageId }) => {

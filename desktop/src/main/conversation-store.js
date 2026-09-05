@@ -213,9 +213,46 @@ export function createConversationStore({ persistPath, coworkerStore, now = () =
         },
         list() { return { schema: CONVERSATIONS_SCHEMA, conversations: conversations.map(summarize) }; },
         get(id) { const conversation = requireConversation(id); return { ...summarize(conversation), messages: clone(conversation.messages) }; },
-        createDirect(coworkerId) {
-            const existing = conversations.find((entry) => entry.kind === "direct" && entry.participants.length === 2 && entry.participants.includes(coworkerId));
-            return existing ? summarize(existing) : createConversation({ kind: "direct", coworkerIds: [coworkerId] });
+        getPage(id, { limit = 100, beforeMessageId, aroundMessageId } = {}) {
+            const conversation = requireConversation(id);
+            let messages = conversation.messages || [];
+            const total = messages.length;
+            let hasOlder = false;
+            let nextBeforeMessageId;
+
+            if (beforeMessageId) {
+                const idx = messages.findIndex((m) => m.id === beforeMessageId);
+                if (idx > 0) {
+                    const start = Math.max(0, idx - limit);
+                    hasOlder = start > 0;
+                    nextBeforeMessageId = hasOlder ? messages[start].id : undefined;
+                    messages = messages.slice(start, idx);
+                } else {
+                    messages = [];
+                }
+            } else if (limit && messages.length > limit) {
+                hasOlder = true;
+                nextBeforeMessageId = messages[messages.length - limit].id;
+                messages = messages.slice(-limit);
+            }
+
+            return {
+                ...summarize(conversation),
+                messages: clone(messages),
+                pageInfo: {
+                    total,
+                    limit,
+                    hasOlder,
+                    nextBeforeMessageId,
+                },
+            };
+        },
+        createDirect(coworkerId, { forceNew = false } = {}) {
+            if (!forceNew) {
+                const existing = conversations.find((entry) => entry.kind === "direct" && entry.participants.length === 2 && entry.participants.includes(coworkerId));
+                if (existing) return summarize(existing);
+            }
+            return createConversation({ kind: "direct", coworkerIds: [coworkerId] });
         },
         createTeam({ title, coworkerIds, leadCoworkerId, deduplicate = true }) {
             if (deduplicate && leadCoworkerId) {

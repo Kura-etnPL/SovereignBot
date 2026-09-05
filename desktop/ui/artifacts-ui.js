@@ -149,8 +149,8 @@
   };
 
   function ensureDetailsArtifacts() {
-    const panel = document.getElementById("details-panel");
-    if (!panel) return undefined;
+    const container = document.getElementById("details-body") || document.getElementById("details-panel");
+    if (!container) return undefined;
     let section = document.getElementById("details-artifacts-section");
     if (section) return section;
     section = document.createElement("section");
@@ -163,9 +163,13 @@
     list.id = "details-artifacts";
     list.className = "artifact-rail-list";
     section.append(label, list);
-    const future = panel.querySelector(".future-section");
-    panel.insertBefore(section, future || null);
-    for (const chip of panel.querySelectorAll(".future-chip-row span")) {
+    const future = container.querySelector(".future-section");
+    if (future && future.parentElement === container) {
+      container.insertBefore(section, future);
+    } else {
+      container.appendChild(section);
+    }
+    for (const chip of container.querySelectorAll(".future-chip-row span")) {
       if (chip.textContent.trim() === "Artifacts") chip.remove();
     }
     return section;

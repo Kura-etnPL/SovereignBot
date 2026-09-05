@@ -21,18 +21,42 @@ for await (const chunk of process.stdin)
 function phase() {
     if (/Propose an execution plan|REJECTED by the strict validator/.test(prompt))
         return "planning";
-    if (/^review:/m.test(prompt) || /candidateResult|previousReviewNotes/.test(prompt))
+    if (/SOVEREIGN_REVIEW:|^review:/m.test(prompt) || /candidateResult|previousReviewNotes/.test(prompt))
         return "review";
     if (/originalGoal|"outcome"|Synthesize/.test(prompt))
         return "synthesis";
     return "work";
 }
 
+function fanoutPhase() {
+    if (process.env.FAKE_PROVIDER_FANOUT_CANARY !== "1" || !/FANOUT_CANARY/.test(prompt)) return undefined;
+    if (/independent fan-out child/i.test(prompt)) return "fanout-child";
+    if (/required independent review of parallel specialist results/i.test(prompt)) return "fanout-review";
+    if (/original owner's join step/i.test(prompt)) return "fanout-join";
+    if (/For independent parallel work/i.test(prompt)) return "fanout-owner";
+    return undefined;
+}
+
+function p1CollaborationPhase() {
+    if (process.env.FAKE_PROVIDER_P1_CANARY !== "1" || !/P1_COLLABORATION/.test(prompt)) return undefined;
+    if (/SOVEREIGN_REVIEW:|^review:/m.test(prompt) || /candidateResult|previousReviewNotes/.test(prompt)) return "p1-review";
+    if (/You are (?:P1 )?Researcher\./m.test(prompt)) return "p1-researcher";
+    if (/You are (?:P1 )?Chief(?: of Staff)?\./m.test(prompt) && /P1 Reviewer approved|Independent review approved|fix verified/.test(prompt)) return "p1-chief-final";
+    if (/You are (?:P1 )?Chief(?: of Staff)?\./m.test(prompt)) return "p1-chief";
+    return undefined;
+}
+
+function fanoutRoster() {
+    const ids = prompt.match(/coworker_[a-f0-9]{16}/gi) ?? [];
+    return [...new Set(ids)];
+}
+
 const resumeIndex = args.indexOf("resume");
 const resumed = resumeIndex >= 0;
 const sessionId = resumed ? args[resumeIndex + 1] : `fake-codex-session-${Date.now().toString(36)}`;
 const cwd = process.cwd();
-const kind = phase();
+const kind = fanoutPhase() ?? p1CollaborationPhase() ?? phase();
+const negativeFanout = /negative-stop/.test(prompt);
 
 // The V4.5 real Worker Node gate can hold one explicitly marked task long enough
 // to exercise confirmed remote cancellation. Normal fake-provider contracts remain
@@ -40,6 +64,9 @@ const kind = phase();
 const cancelHoldMs = Number(process.env.FAKE_PROVIDER_DELAY_MS ?? 0);
 if (cancelHoldMs > 0 && /V45_CANCEL_HOLD/.test(prompt))
     await new Promise((resolve) => setTimeout(resolve, Math.min(cancelHoldMs, 60_000)));
+
+if (kind === "fanout-child")
+    await new Promise((resolve) => setTimeout(resolve, negativeFanout ? 60_000 : 1_200));
 
 if (args.includes("--help")) {
     process.stdout.write([
@@ -72,13 +99,62 @@ const PROPOSAL = {
 };
 
 let text;
-if (kind === "planning") {
+if (kind === "p1-chief") {
+    const researcher = /(?:P1 )?Researcher \((coworker_[a-f0-9]{16})\)/i.exec(prompt)?.[1];
+    writeFileSync(join(cwd, "p1-research-note.md"), "# P1 research note\n\nDeterministic artifact reference.\n", "utf8");
+    text = `P1 Chief woke Researcher with a bounded artifact reference.\nSOVEREIGN_ARTIFACTS: [{"path":"p1-research-note.md","title":"P1 research note"}]\nSOVEREIGN_HANDOFFS: [${JSON.stringify(researcher)}]`;
+}
+else if (kind === "p1-researcher") {
+    const reviewer = /(?:P1 )?Reviewer \((coworker_[a-f0-9]{16})\)/i.exec(prompt)?.[1];
+    const reference = /"artifactIds"\s*:\s*\[[^\]]+\]/.test(prompt) ? " P1_ARTIFACT_REFERENCE_RECEIVED(fake)." : "";
+    text = `P1 Researcher reply${reference} Requesting bounded Reviewer review.\nSOVEREIGN_HANDOFFS: [${JSON.stringify(reviewer)}]`;
+}
+else if (kind === "p1-review") {
+    text = resumed || /previousReviewNotes/.test(prompt)
+        ? `P1 Reviewer approved the revised Researcher result.\nSOVEREIGN_REVIEW: "approved"`
+        : `P1 Reviewer requested changes from Researcher.\nSOVEREIGN_REVIEW: "changes-requested"`;
+}
+else if (kind === "p1-chief-final") {
+    text = "P1 Chief joined the approved Researcher result and delivered the final outcome.";
+}
+else if (kind === "fanout-owner") {
+    const [firstChild, secondChild, reviewer] = fanoutRoster();
+    const stopMarker = negativeFanout ? " negative-stop" : "";
+    text = `parallel bounded work requested\nSOVEREIGN_FANOUT: ${JSON.stringify({
+        reviewerCoworkerId: reviewer,
+        children: [
+            { key: "research", coworkerId: firstChild, task: `Research the bounded acceptance criteria.${stopMarker}` },
+            { key: "implement", coworkerId: secondChild, task: `Implement the bounded change and report the result.${stopMarker}` },
+        ],
+    })}`;
+}
+else if (kind === "fanout-child") {
+    const childKey = /independent fan-out child ([a-z0-9_-]+)/i.exec(prompt)?.[1] ?? "specialist";
+    const artifactLine = childKey === "implement"
+        ? `\nSOVEREIGN_ARTIFACTS: [{"path":"fanout-implementation.md","title":"Fanout implementation"}]`
+        : "";
+    if (childKey === "implement")
+        writeFileSync(join(cwd, "fanout-implementation.md"), "# Fanout implementation\n\nDeterministic bounded child result.\n", "utf8");
+    text = `FANOUT CHILD RESULT(fake): ${childKey} submitted${artifactLine}`;
+}
+else if (kind === "fanout-review") {
+    text = `FANOUT REVIEW RESULT(fake): independent results approved\nSOVEREIGN_REVIEW: "approved"`;
+}
+else if (kind === "fanout-join") {
+    text = "FANOUT JOIN RESULT(fake): Chief completed synthesis.";
+}
+else if (kind === "planning") {
     text = `${"```json"}\n${JSON.stringify(PROPOSAL)}\n${"```"}`;
 }
 else if (kind === "review") {
-    text = /previousReviewNotes/.test(prompt)
-        ? JSON.stringify({ decision: "approve", notes: "fix verified" })
-        : JSON.stringify({ decision: "changes_requested", notes: "add tests" });
+    const artifactLine = process.env.FAKE_PROVIDER_TEAM_CANARY === "1"
+        ? `\nSOVEREIGN_ARTIFACTS: [{"path":"delivery-result.md","title":"Software delivery result"}]`
+        : "";
+    if (process.env.FAKE_PROVIDER_TEAM_CANARY === "1")
+        writeFileSync(join(cwd, "delivery-result.md"), "# Software delivery result\n\nDeterministic reviewer artifact.\n", "utf8");
+    text = resumed || /previousReviewNotes/.test(prompt)
+        ? `fix verified${artifactLine}\nSOVEREIGN_REVIEW: "approved"`
+        : `add tests${artifactLine}\nSOVEREIGN_REVIEW: "changes-requested"`;
 }
 else if (kind === "synthesis") {
     let goal = "";

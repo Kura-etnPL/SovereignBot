@@ -5,8 +5,7 @@
 // verifies its vendored Core, and drives the governed runtime.
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 
@@ -74,9 +73,9 @@ function assertReleaseSet() {
         fail(`expected exactly one .full.nupkg, found: ${names.join(", ")}`);
 }
 
-function runChild(command, args, { timeoutMs, onData }) {
+function runChild(command, args, { timeoutMs, onData, env }) {
     return new Promise((resolve) => {
-        const child = spawn(command, args, { shell: false, windowsHide: true });
+        const child = spawn(command, args, { shell: false, windowsHide: true, env: { ...process.env, ...env } });
         let stdout = "";
         let settled = false;
         const timer = setTimeout(() => {
@@ -161,23 +160,38 @@ async function main() {
     SQUIRREL_DIR = installer.dir;
     assertReleaseSet();
     const setupExe = installer.setupExe;
+    const hostInstallRoot = join(process.env.LOCALAPPDATA ?? "", "sovereignbot");
+    // Squirrel Setup.exe resolves SpecialFolder.LocalApplicationData internally; merely
+    // overriding the child environment is not a reliable isolation boundary on Windows.
+    // Refuse to touch a host install unless an external disposable Windows profile has
+    // explicitly proven that special-folder resolution is redirected.
+    if (existsSync(hostInstallRoot) || process.env.SOVEREIGNBOT_ALLOW_HOST_SQUIRREL_INSTALL !== "1")
+        fail(`SKIP: Squirrel Setup.exe cannot be proven isolated from ${hostInstallRoot}; use a disposable Windows profile and set SOVEREIGNBOT_ALLOW_HOST_SQUIRREL_INSTALL=1 only for that profile`);
+    await mkdir(join(DESKTOP_ROOT, "temp"), { recursive: true });
+    const isolatedRoot = await mkdtemp(join(DESKTOP_ROOT, "temp", "p6-installer-e2e-"));
+    const isolatedLocalAppData = join(isolatedRoot, "LOCALAPPDATA");
+    const isolatedDataDir = join(isolatedRoot, "product-data");
+    await mkdir(isolatedLocalAppData, { recursive: true });
+    const isolatedEnv = { LOCALAPPDATA: isolatedLocalAppData, SOVEREIGNBOT_DESKTOP_DATA_DIR: isolatedDataDir };
     console.error(`[installer-e2e] silent install: ${setupExe}`);
 
     // Squirrel's --silent runs per-user without UI. The Setup.exe may exit while a
     // background installer process finishes, hence the install-root poll below.
-    const setupResult = await runChild(setupExe, ["--silent"], { timeoutMs: INSTALL_TIMEOUT_MS });
-    if (!setupResult.ok && !existsSync(join(process.env.LOCALAPPDATA ?? "", "sovereignbot", "SovereignBot.exe")))
+    const setupResult = await runChild(setupExe, ["--silent"], { timeoutMs: INSTALL_TIMEOUT_MS, env: isolatedEnv });
+    if (!setupResult.ok && !existsSync(join(isolatedLocalAppData, "sovereignbot", "SovereignBot.exe")))
         fail(`installer failed: ${setupResult.reason ?? `exit ${setupResult.code}`}`);
 
-    const installRoot = join(process.env.LOCALAPPDATA ?? join(tmpdir(), "fallback-localappdata"), "sovereignbot");
+    const installRoot = join(isolatedLocalAppData, "sovereignbot");
     const { appDir, exe: installedExe } = await waitForInstalledApp(installRoot);
     console.error(`[installer-e2e] installed app at ${appDir}`);
 
-    const smokeDataDir = await mkdtemp(join(tmpdir(), "sb-installer-e2e-"));
+    const smokeDataDir = join(isolatedRoot, "smoke-data");
+    await mkdir(smokeDataDir, { recursive: true });
     let smokeJson;
     try {
         const result = await runChild(installedExe, ["--desktop-smoke"], {
             timeoutMs: SMOKE_TIMEOUT_MS,
+            env: { ...isolatedEnv, SOVEREIGNBOT_DESKTOP_SMOKE_DATA_DIR: smokeDataDir },
         });
         const lines = result.stdout.split(/\r?\n/).filter((line) => line.startsWith("{"));
         if (!lines.length)
@@ -190,6 +204,30 @@ async function main() {
         await rm(smokeDataDir, { recursive: true, force: true });
     }
 
+    // The installed binary, not a developer process, owns this migration canary. A
+    // marker-less fixture is the supported V3 shape; the first run must create a backup
+    // before committing V4, and the second run must be idempotent.
+    const migrationDataDir = join(isolatedRoot, "migration-data");
+    await mkdir(join(migrationDataDir, "desktop-state"), { recursive: true });
+    await writeFile(join(migrationDataDir, "desktop-state", "settings.json"), JSON.stringify({ schema: "sovereignbot.desktop.settings.v1", theme: "system", language: "en" }));
+    const migrationEnv = { ...isolatedEnv, SOVEREIGNBOT_DESKTOP_DATA_DIR: migrationDataDir };
+    const migration = await runChild(installedExe, ["--desktop-migration-check"], { timeoutMs: SMOKE_TIMEOUT_MS, env: migrationEnv });
+    const migrationLines = migration.stdout.split(/\r?\n/).filter((line) => line.startsWith("{"));
+    if (migration.code !== 0 || !migrationLines.length || JSON.parse(migrationLines.at(-1)).migration !== "ok") fail(`installed V3→V4 migration failed: ${migration.stdout}`);
+    const marker = JSON.parse(await readFile(join(migrationDataDir, "desktop-state", "lifecycle.json"), "utf8"));
+    if (marker.stateVersion !== 4 || !marker.backupId || !existsSync(join(`${migrationDataDir}.backups`, marker.backupId, "manifest.json"))) fail("migration did not leave a pre-migration backup");
+    const secondMigration = await runChild(installedExe, ["--desktop-migration-check"], { timeoutMs: SMOKE_TIMEOUT_MS, env: migrationEnv });
+    if (secondMigration.code !== 0) fail(`migration restart resume failed: ${secondMigration.stdout}`);
+
+    // Re-running the same local Setup.exe proves the upgrade path without touching the
+    // user's real LOCALAPPDATA or product state.
+    const upgrade = await runChild(setupExe, ["--silent"], { timeoutMs: INSTALL_TIMEOUT_MS, env: isolatedEnv });
+    if (!upgrade.ok && upgrade.code !== 0) fail(`isolated upgrade failed: ${upgrade.reason ?? upgrade.code}`);
+
+    const rollbackDataDir = join(isolatedRoot, "rollback-data");
+    const rollback = await runChild(installedExe, ["--desktop-migration-check"], { timeoutMs: SMOKE_TIMEOUT_MS, env: { ...isolatedEnv, SOVEREIGNBOT_DESKTOP_DATA_DIR: rollbackDataDir, SOVEREIGNBOT_INJECT_MIGRATION_FAILURE: "1" } });
+    if (rollback.code === 0 || !existsSync(join(rollbackDataDir, "desktop-state", "attention.json")) || existsSync(join(rollbackDataDir, "desktop-state", "lifecycle.json"))) fail("injected migration failure did not preserve the V3 marker and record Attention");
+
     const pkg = JSON.parse(readFileSync(join(DESKTOP_ROOT, "package.json"), "utf8"));
     console.log(JSON.stringify({
         installerE2e: "ok",
@@ -197,7 +235,10 @@ async function main() {
         appDir,
         version: pkg.version,
         smokeChecks: smokeJson.checks,
+        isolatedLocalAppData,
+        migration: "v3-fixture-backup-restart-rollback-ok",
     }));
+    await rm(isolatedRoot, { recursive: true, force: true });
 }
 
 main().catch((error) => fail(String(error?.stack ?? error)));

@@ -20,8 +20,8 @@
   }
 
   function ensureSection() {
-    const panel = $("details-panel");
-    if (!panel) return undefined;
+    const container = $("details-body") || $("details-panel");
+    if (!container) return undefined;
     let section = $("details-teach-section");
     if (section) return section;
     section = make("section", "detail-section teach-section");
@@ -33,7 +33,15 @@
     button.addEventListener("click", () => openDialog());
     section.append(label, copy, button);
     const computer = $("details-computer-section");
-    panel.insertBefore(section, computer?.nextSibling || panel.querySelector(".future-section") || null);
+    const future = container.querySelector(".future-section");
+    const refNode = (computer?.nextSibling && computer.nextSibling.parentElement === container)
+      ? computer.nextSibling
+      : ((future && future.parentElement === container) ? future : null);
+    if (refNode) {
+      container.insertBefore(section, refNode);
+    } else {
+      container.appendChild(section);
+    }
     return section;
   }
 

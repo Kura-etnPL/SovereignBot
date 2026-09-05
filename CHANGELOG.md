@@ -4,7 +4,7 @@ All notable changes to SovereignBot are documented in this file.
 
 ## [4.0.0] - Unreleased
 
-SovereignBot 4.0.0 is the active V4 Always-On Autonomous Team development line. V3 remains frozen at the published 3.0.0 GA baseline while V4 evolves product-level persistent work and supervision without changing the existing trust boundary.
+SovereignBot 4.0.0 is the V4 Always-On Autonomous Team release. V3 remains frozen at the published 3.0.0 GA baseline; this release adds durable product work, reliability/data lifecycle controls, and a fail-closed local-first Windows release/update boundary without changing the existing trust boundary.
 
 ### Added
 
@@ -12,10 +12,11 @@ SovereignBot 4.0.0 is the active V4 Always-On Autonomous Team development line. 
 - Chief of Staff supervisor loop that reuses the existing orchestrator and governed execution path instead of introducing a second agent runtime.
 - Work and Attention product surfaces with bilingual zh-CN/en UI, visible attention counts, job detail actions, and restart hydration.
 - Real Windows V4.1 vertical-gate coverage for long-conversation viewport invariants, Job retry/attention/approve/dismiss flow, i18n, hydration, caps, and pump isolation.
+- Release/update infrastructure: stable SemVer freeze, signer-injected Windows packaging, verified local update metadata, pre-update backup, explicit restart apply, isolated installer migration/rollback E2E, fuse verification, release provenance manifest, and SHA-256 checksums.
 
 ### Changed
 
-- V4 development builds report `4.0.0-dev` across Core and Desktop so stable 3.0.0 provenance-bound release workflows intentionally skip V4 commits until the next explicit release freeze.
+- Core, Desktop, runtime, vendored Core, and the Desktop handshake now report the frozen stable version `4.0.0`.
 
 ## [3.0.0] - 2026-08-28
 

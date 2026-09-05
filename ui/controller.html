@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="theme-color" content="#10161d">
+  <link rel="manifest" href="./controller-manifest.json">
+  <link rel="stylesheet" href="./controller.css">
+  <title>SovereignBot Remote Controller</title>
+</head>
+<body>
+  <main class="controller-shell">
+    <header class="controller-header">
+      <div><p class="eyebrow">SOVEREIGNBOT / REMOTE</p><h1>Remote Controller</h1><p id="connection-status" class="connection-status" role="status">Desktop connection is offline.</p></div>
+      <button id="reconnect" class="secondary" type="button">Reconnect</button>
+    </header>
+    <section id="attention-banner" class="attention-banner hidden" aria-live="polite"></section>
+    <nav id="controller-nav" class="controller-nav" aria-label="Remote controller sections"></nav>
+    <section id="controller-content" class="controller-content" aria-live="polite"></section>
+    <footer><p>Pairing and transport are provided by the trusted WebView/native host. This page never opens a network socket.</p><button id="logout" class="text-button" type="button">Log out and clear controller cache</button></footer>
+  </main>
+  <script src="./controller-app.js"></script>
+</body>
+</html>
