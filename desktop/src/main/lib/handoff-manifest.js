@@ -1,6 +1,7 @@
 const MARKER = "SOVEREIGN_HANDOFFS:";
 const REVIEW_MARKER = "SOVEREIGN_REVIEW:";
 const FANOUT_MARKER = "SOVEREIGN_FANOUT:";
+const COMPLETION_MARKER = "SOVEREIGN_COMPLETION:";
 const MAX_HANDOFFS = 4;
 const MAX_FANOUT_CHILDREN = 4;
 const MAX_FANOUT_TASK = 800;
@@ -52,6 +53,30 @@ export function extractHandoffManifest(providerText, allowedIds = []) {
         if (!coworkerIds.includes(id)) coworkerIds.push(id);
     }
     return { text: visible, coworkerIds };
+}
+
+export function extractCompletionManifest(providerText) {
+    const original = typeof providerText === "string" ? providerText : "";
+    const lines = original.replace(/\r\n/g, "\n").split("\n");
+    const markerIndexes = lines
+        .map((line, index) => ({ line, index }))
+        .filter(({ line }) => line.trimStart().startsWith(COMPLETION_MARKER))
+        .map(({ index }) => index);
+    if (!markerIndexes.length)
+        return { text: original.trim(), requested: false };
+    const visible = lines.filter((_, index) => !markerIndexes.includes(index)).join("\n").trim();
+    const nonEmptyIndexes = lines.map((line, index) => line.trim() ? index : -1).filter((index) => index >= 0);
+    const lastNonEmpty = nonEmptyIndexes.at(-1);
+    const markerIndex = markerIndexes.at(-1);
+    if (markerIndexes.length !== 1 || markerIndex !== lastNonEmpty)
+        return { text: visible, requested: false, invalidManifest: true };
+    const raw = lines[markerIndex].trim().slice(COMPLETION_MARKER.length).trim();
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch { return { text: visible, requested: false, invalidManifest: true }; }
+    if (parsed !== "reply-only")
+        return { text: visible, requested: false, invalidManifest: true };
+    return { text: visible, requested: true };
 }
 
 export function reviewPromptInstruction() {

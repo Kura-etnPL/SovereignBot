@@ -303,6 +303,54 @@ function controlledRuntime(roster, responses, onAudit = async () => {}, onPrefli
     };
 }
 
+test("Dispatcher completes an explicit reply-only turn without launching a specialist", async () => {
+    const { root, coworkers, conversations, teams, services } = fixture();
+    try {
+        const chief = coworkers.create({ name: "Chief", role: "Coordinate work" });
+        const coder = coworkers.create({ name: "Coder", role: "Implement" });
+        const created = teams.createTeam({ title: "Plain conversation", coworkerIds: [chief.id, coder.id] });
+        conversations.setTeamRouteResolver(conversation => teams.currentOwnerForConversation(conversation.id));
+        const previous = conversations.postUserMessage(created.conversation.id, { text: "Previous specialist task", mentions: [coder.id] });
+        teams.onMessageQueued({ conversation: conversations.get(created.conversation.id), message: previous });
+        assert.equal(teams.currentOwnerForConversation(created.conversation.id), coder.id);
+        teams.stopRun(created.conversation.id, "user redirected");
+        conversations.markDelivery(created.conversation.id, previous.id, coder.id, "redirected");
+        assert.equal(teams.currentOwnerForConversation(created.conversation.id), chief.id, "a new run must route to the same lead its flow will claim");
+        const roster = buildProviderRoster({ discovery: { codex: { found: true, auth: { state: "signed-in" } } }, settings: {}, coworkers: coworkers.list().coworkers });
+        const runtime = controlledRuntime(roster, ['Acknowledged.\nSOVEREIGN_COMPLETION: "reply-only"']);
+        const dispatcher = createCoworkerDispatcher({ dataDir: root, runtime, roster: () => roster, coworkerStore: coworkers, conversationStore: conversations, services, teamFlow: teams });
+        const message = conversations.postUserMessage(created.conversation.id, { text: "Please acknowledge only." });
+        dispatcher.dispatchMessage(created.conversation.id, message.id);
+        await dispatcher.flush();
+        const replies = conversations.get(created.conversation.id).messages;
+        assert.equal(runtime.tasks.length, 1);
+        assert.equal(replies.length, 3);
+        assert.equal(replies[2].text, "Acknowledged.");
+        assert.equal(replies[2].voiceEligible, true);
+        assert.ok(!Object.values(replies[2].delivery).some(delivery => delivery.status === "pending"));
+        assert.equal(teams.get(created.team.id).flow.stage, "complete");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("reply-only cannot hide a conflicting artifact or handoff manifest", async () => {
+    for (const otherManifest of ['SOVEREIGN_ARTIFACTS: invalid', 'SOVEREIGN_HANDOFFS: ["unknown"]']) {
+        const { root, coworkers, conversations, teams, services } = fixture();
+        try {
+            const chief = coworkers.create({ name: "Chief", role: "Coordinate" });
+            const coder = coworkers.create({ name: "Coder", role: "Code" });
+            const created = teams.createTeam({ title: "Mixed protocol", coworkerIds: [chief.id, coder.id] });
+            const roster = buildProviderRoster({ discovery: { codex: { found: true, auth: { state: "signed-in" } } }, settings: {}, coworkers: coworkers.list().coworkers });
+            const runtime = controlledRuntime(roster, [`Done.\n${otherManifest}\nSOVEREIGN_COMPLETION: "reply-only"`]);
+            const dispatcher = createCoworkerDispatcher({ dataDir: root, runtime, roster: () => roster, coworkerStore: coworkers, conversationStore: conversations, services, teamFlow: teams });
+            const message = conversations.postUserMessage(created.conversation.id, { text: "Acknowledge only" });
+            dispatcher.dispatchMessage(created.conversation.id, message.id);
+            await dispatcher.flush();
+            assert.equal(conversations.get(created.conversation.id).messages.length, 1);
+            assert.notEqual(teams.get(created.team.id).flow.stage, "complete");
+        } finally { rmSync(root, { recursive: true, force: true }); }
+    }
+});
+
 test("Dispatcher runs a real Chief to Researcher to Coder chain through trusted bindings and workspace proof", async () => {
     const root = mkdtempSync(join(tmpdir(), "sovereign-dispatch-ledger-"));
     try {

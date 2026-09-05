@@ -61,13 +61,35 @@ export async function runLiveCodexDogfood({
         await waitFor("production Desktop document", async () => await renderer("document.readyState === 'complete'"));
 
         if (process.env.SOVEREIGNBOT_LIVE_RESTART_CHECK === "1") {
+            if (process.env.SOVEREIGNBOT_INSPECT_REPLY_ONLY === "1") {
+                const restored = await waitFor("completed reply-only team", async () => await renderer(`(async () => {
+                    const team = (await window.sovereignbot.teams.list({})).teams?.[0];
+                    if (!team) return false;
+                    const detail = await window.sovereignbot.teams.get({teamId:team.id});
+                    const conversation = await window.sovereignbot.conversations.get({conversationId:team.channels[0].conversationId});
+                    return detail.flow.stage === 'complete' ? {conversationId:conversation.id, text:conversation.messages.at(-1)?.text, pending:conversation.messages.some(message => Object.values(message.delivery ?? {}).some(delivery => delivery.status === 'pending'))} : false;
+                })()`), 15_000);
+                check("REPLY_ONLY_COMPLETE_AFTER_RESTART", true);
+                check("REPLY_ONLY_REPLY_PERSISTED", restored.text?.includes("RECOVERY_REDIRECT_OK") && !restored.text?.includes("SOVEREIGN_COMPLETION"));
+                check("REPLY_ONLY_NO_PENDING_AFTER_RESTART", !restored.pending);
+                await waitFor("desktop appearance settings", async () => await renderer(`Boolean(window.sovereignbotUi?.state.settings)`), 15_000);
+                await renderer(`window.sovereignbotUi.openConversation(${JSON.stringify(restored.conversationId)})`);
+                check("REPLY_ONLY_REDIRECT_CLEARED", await renderer(`document.getElementById('conversation-redirect').classList.contains('hidden')`));
+                win.webContents.setBackgroundThrottling(false);
+                await win.webContents.capturePage(undefined, {stayHidden:true, stayAwake:true});
+                win.webContents.invalidate();
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                result.screenshots.push(await capture("reply-only-completed.png"));
+                await writeFile(join(evidenceDir, "reply-only-restart-result.json"), JSON.stringify(result, null, 2), "utf8");
+                return result;
+            }
             if (process.env.SOVEREIGNBOT_INSPECT_INTERRUPTED === "1") {
                 const restored = await waitFor("interrupted delivery attention", async () => await renderer(`(async () => {
                     const team = (await window.sovereignbot.teams.list({})).teams?.[0];
                     if (!team) return false;
                     const conversation = await window.sovereignbot.conversations.get({conversationId: team.channels[0].conversationId});
                     const interrupted = conversation.messages.flatMap(message => Object.values(message.delivery ?? {})).filter(delivery => delivery.status === "attention" && /interrupted by application restart/i.test(delivery.detail ?? ""));
-                    return interrupted.length ? {count: interrupted.length, channel: team.channels[0].name, conversationId: conversation.id} : false;
+                    return interrupted.length ? {count: interrupted.length, channel: team.channels[0].name, conversationId: conversation.id, teamId:team.id} : false;
                 })()`), 15_000);
                 const tasks = await getHost().runtime.orchestrator.listTasks();
                 check("INTERRUPTED_DELIVERY_ATTENTION", restored.count > 0);
@@ -93,6 +115,7 @@ export async function runLiveCodexDogfood({
                     if (!Array.isArray(agents) || !agents.length || agents.some(agent => agent.harness.kind === "codex" && agent.harness.model !== "gpt-5.6-luna"))
                         throw new Error("Cannot verify Luna-only roster; no recovery prompt sent");
                     check("RECOVERY_LUNA_ONLY", true);
+                    const messageCountBeforeRedirect = getConversationStore().get(restored.conversationId).messages.length;
                     const prompt = "重定向这次已中断的测试：请 Chief 直接用一句中文确认已收到重定向，并说明此前 Python 文件只做了静态复核、未执行动态测试。不要再委派，不修改文件，不调用工具，不联网，不操作 Git。回复包含 RECOVERY_REDIRECT_OK。";
                     await renderer(`(() => {
                         document.getElementById('conversation-redirect').click();
@@ -103,11 +126,17 @@ export async function runLiveCodexDogfood({
                     })()`);
                     const reply = await waitFor("explicit recovery reply", async () => await renderer(`(async () => {
                         const conversation = await window.sovereignbot.conversations.get({conversationId:${JSON.stringify(restored.conversationId)}});
-                        const requestIndex = conversation.messages.findIndex(message => message.senderId === 'user' && message.text === ${JSON.stringify(prompt)});
+                        const requestIndex = conversation.messages.findIndex((message, index) => index >= ${messageCountBeforeRedirect} && message.senderId === 'user' && message.text === ${JSON.stringify(prompt)});
                         if (requestIndex < 0) return false;
                         return conversation.messages.slice(requestIndex + 1).find(message => message.senderId !== 'user' && message.text.includes('RECOVERY_REDIRECT_OK')) ?? false;
                     })()`), 120_000);
                     check("EXPLICIT_RECOVERY_REPLY", Boolean(reply), {messageId:reply.id});
+                    await waitFor("reply-only run complete", async () => getTeamService().get(restored.teamId).flow.stage === "complete", 120_000);
+                    const finalTasks = await getHost().runtime.orchestrator.listTasks();
+                    check("REPLY_ONLY_NO_SPECIALIST", finalTasks.filter(task => task.kind === "work").length === tasks.filter(task => task.kind === "work").length + 1);
+                    const finalConversation = getConversationStore().get(restored.conversationId);
+                    check("RECOVERY_NO_PENDING_DELIVERIES", !finalConversation.messages.some(message => Object.values(message.delivery ?? {}).some(delivery => delivery.status === "pending")));
+                    check("RECOVERY_ATTENTION_RESOLVED", !finalConversation.messages.some(message => Object.values(message.delivery ?? {}).some(delivery => delivery.status === "attention" && /interrupted by application restart/i.test(delivery.detail ?? ""))));
                     await writeFile(join(evidenceDir, "recovery-redirect-result.json"), JSON.stringify(result, null, 2), "utf8");
                 }
                 await writeFile(join(evidenceDir, "interrupted-result.json"), JSON.stringify(result, null, 2), "utf8");

@@ -1,9 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractFanoutManifest, extractHandoffManifest, extractReviewDecision, fanoutPromptInstruction, handoffPromptInstruction, reviewPromptInstruction } from "../src/main/lib/handoff-manifest.js";
+import { extractCompletionManifest, extractFanoutManifest, extractHandoffManifest, extractReviewDecision, fanoutPromptInstruction, handoffPromptInstruction, reviewPromptInstruction } from "../src/main/lib/handoff-manifest.js";
 
 const a = "coworker_0000000000000001";
 const b = "coworker_0000000000000002";
+
+test("completion manifest accepts only the final structured reply-only marker", () => {
+  const parsed = extractCompletionManifest('Chief confirmation.\nSOVEREIGN_COMPLETION: "reply-only"');
+  assert.equal(parsed.text, "Chief confirmation.");
+  assert.equal(parsed.requested, true);
+  assert.equal(parsed.invalidManifest, undefined);
+});
+
+test("completion manifest rejects duplicates, non-final markers, and unsupported values", () => {
+  for (const text of [
+    'SOVEREIGN_COMPLETION: "reply-only"\nStill talking.',
+    'SOVEREIGN_COMPLETION: "reply-only"\nSOVEREIGN_COMPLETION: "reply-only"',
+    'SOVEREIGN_COMPLETION: "complete"',
+    'SOVEREIGN_COMPLETION: reply-only',
+  ]) {
+    const parsed = extractCompletionManifest(text);
+    assert.equal(parsed.requested, false);
+    assert.equal(parsed.invalidManifest, true);
+    assert.doesNotMatch(parsed.text, /SOVEREIGN_COMPLETION/);
+  }
+  assert.deepEqual(extractCompletionManifest("ordinary reply"), { text: "ordinary reply", requested: false });
+});
 
 test("handoff manifest accepts only listed teammates and strips the internal marker", () => {
   const parsed = extractHandoffManifest(`I finished research and Coding Lead should implement next.\nSOVEREIGN_HANDOFFS: ["${b}"]`, [a, b]);

@@ -209,7 +209,7 @@ test("coworker dispatcher gives each coworker a durable provider lane and resume
     }
 });
 
-test("dispatcher restart marks only task-linked pending delivery as attention and requires explicit retry", async () => {
+for (const interruptedStatus of ["running", "completed"]) test(`dispatcher recovers pending delivery after ${interruptedStatus} execution without replay`, async () => {
     const root = mkdtempSync(join(tmpdir(), "sb-coworker-recovery-"));
     try {
         const { store, coder } = makeCoworkers(root);
@@ -219,7 +219,7 @@ test("dispatcher restart marks only task-linked pending delivery as attention an
         const team = conversations.createTeam({ title: "Recovery", coworkerIds: [coder.id, reviewer.id], leadCoworkerId: coder.id });
         const message = conversations.postUserMessage(team.id, { text: "Interrupted turn", mentions: ["everyone"] });
         const runtime = fakeRuntime(roster);
-        runtime._tasks.push({ id: "task_interrupted", status: "running", assignedAgentId: coworkerAgentId(coder.id), input: { newestMessageId: message.id } });
+        runtime._tasks.push({ id: "task_interrupted", status: interruptedStatus, assignedAgentId: coworkerAgentId(coder.id), input: { newestMessageId: message.id } });
         const decorated = createSkillAwareConversationStore(createAttachmentAwareConversationStore(conversations, {}), { decorateConversation: value => value });
         const dispatcher = createCoworkerDispatcher({
             dataDir: root,
@@ -235,7 +235,7 @@ test("dispatcher restart marks only task-linked pending delivery as attention an
         assert.equal(conversations.get(team.id).messages[0].delivery[reviewer.id].status, "pending", "unrelated recipient must remain pending");
         assert.match(conversations.get(team.id).messages[0].delivery[coder.id].detail, /explicitly retry/i);
         assert.equal(runtime._tasks.length, 1, "restart recovery must not create or replay a provider task");
-        assert.equal(runtime._tasks[0].status, "cancelled", "recovery must terminate the stale core task");
+        assert.equal(runtime._tasks[0].status, interruptedStatus === "completed" ? "completed" : "cancelled", "recovery must preserve completed work and terminate stale execution");
         await dispatcher.stopConversation(team.id, "user redirected", "desktop-operator", undefined, { redirected: true });
         assert.equal(conversations.get(team.id).messages[0].delivery[coder.id].status, "redirected", "explicit redirect closes recovered attention");
         assert.equal(conversations.get(team.id).messages[0].delivery[reviewer.id].status, "redirected");

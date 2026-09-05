@@ -61,12 +61,22 @@ Redirect button were visually confirmed in `interrupted-recovery.png`. Reopening
 the recovered state exposed a load-time status filter that discarded Attention
 and Redirected; both now persist across reload. Relevant store tests: 9 passed;
 dispatcher and sidecar tests: 12 passed. No live model prompt was sent for these
-restart inspections. A subsequent explicit redirect used the verified Luna-only
-roster and received a real Chief reply (`msg_045471e309918a01`, evidence:
-`recovery-redirect-result.json`). This proves submission and response, not whole
-team completion: the declared Software Team sequence still handed the reply to
-Coding Lead despite the request asking only for acknowledgement. Its interrupted
-child was recovered by the next inspection without replay.
+restart inspections. Follow-up live attempts exposed forced pack sequencing,
+new-run recipient/owner disagreement, and a composer branch that sent an ordinary
+message instead of redirecting recovered Attention. These are now fixed. The final
+Luna-only redirect completed with Chief reply `msg_68b766d2f3fb4791`, exactly one
+new work task, no specialist launch, no pending delivery and no recovered Attention.
+Evidence: `recovery-redirect-result.json` (11 checks passed). A separate restart
+preserved completion/reply and kept Redirect hidden: `reply-only-restart-result.json`
+(4 checks passed), with `reply-only-completed.png` visually inspected.
+
+Reply-only completion is explicit structured model intent, not a text heuristic.
+The trusted team service requires current owner/message and all five version/run/
+request/operation proofs, and denies active protocols, fanout and run artifacts.
+Conflicting manifests are rejected. Existing artifact review and fanout paths stay
+intact. Focused collaboration/recovery/manifest/team tests: 43 passed. Restart also
+handles a completed provider task whose conversation delivery never published;
+it preserves the result and requests attention rather than executing it again.
 
 The real channel exposed two further UI defects, now fixed: double-escaped inline
 code/underscore parsing (plus generated syntax-highlight markup corruption), and
@@ -75,6 +85,9 @@ The composer previously began at y=802 in an 802px viewport; it now occupies
 y=597–802. The revised channel screenshot was visually checked; six recovery/UI
 checks and four Markdown regressions passed. Explicit redirects also clear the
 old recovered Attention delivery rather than retaining a stale action indefinitely.
+Settings and palette appearance now agree after asynchronous startup, preventing
+white labels on a light sidebar. System-mode switching retains the preferred
+palette without overwriting it; the focused theme regression passed.
 
 OpenCode continuation now uses the existing atomic desktop-state persistence,
 partitioned by provider, mode, model, account namespace and credential fingerprint.

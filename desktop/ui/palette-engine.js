@@ -157,10 +157,10 @@
 
   const getPalette = (id) => PALETTES.find((p) => p.id === id) || PALETTES[0];
 
-  function applyPalette(id, notify = false) {
+  function applyPalette(id, notify = false, persist = true) {
     const p = getPalette(id);
     activePaletteId = p.id;
-    localStorage.setItem(STORAGE_KEY, activePaletteId);
+    if (persist) localStorage.setItem(STORAGE_KEY, activePaletteId);
     document.body.dataset.palette = activePaletteId;
 
     if (p.mode === "light" || p.id === "paper" || p.id === "champagne" || p.id === "aurora_light" || p.id === "mint_light") {
@@ -179,11 +179,24 @@
     updateSettingsChips();
 
     if (notify) {
+      global.sovereignbot?.settings?.update({ theme: document.body.dataset.theme }).catch(error => {
+        global.motionFx?.toast?.(String(error?.message ?? "Theme could not be saved"), "error");
+      });
       global.motionFx?.playChime?.();
       const name = isZh() ? p.nameZh : p.nameEn;
       const msg = isZh() ? `已切换至【${name}】色调` : `Switched to [${name}] color palette`;
       global.motionFx?.toast?.(msg, "success");
     }
+  }
+
+  function syncTheme(theme = "system") {
+    const mode = theme === "system" ? (global.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") : theme;
+    const preferred = getPalette(localStorage.getItem(STORAGE_KEY) || "midnight");
+    const preferredMode = preferred.mode === "light" ? "light" : "dark";
+    applyPalette(preferredMode === mode ? preferred.id : mode === "light" ? "paper" : "midnight", false, false);
+    document.body.dataset.theme = theme;
+    const select = document.getElementById("setting-theme");
+    if (select) select.value = theme;
   }
 
   function updateSidebarBadge() {
@@ -482,6 +495,9 @@
   // Initialize
   function init() {
     applyPalette(activePaletteId, false);
+    global.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
+      if (document.body.dataset.theme === "system") syncTheme("system");
+    });
     injectSidebarButton();
     injectSettingsPaletteView();
 
@@ -504,6 +520,7 @@
     PALETTES,
     get: () => getPalette(activePaletteId),
     getAll: () => PALETTES,
+    syncTheme,
     set: (id, notify = true) => applyPalette(id, notify),
     openModal: openPaletteModal
   };

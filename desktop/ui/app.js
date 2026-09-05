@@ -1523,7 +1523,7 @@ async function sendMessage(event) {
       ...(state.replyTo ? { replyTo: state.replyTo } : {}),
       clientMessageId: `ui-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     };
-    const send = state.redirectMode && pending.size
+    const send = state.redirectMode && (pending.size || hasInterruptedDelivery(state.selectedConversation))
       ? window.sovereignbot.conversations.redirect
       : window.sovereignbot.conversations.send;
     await send(payload);
@@ -2892,6 +2892,7 @@ function renderSettings() {
   voiceController?.setSettings(settings);
   $("setting-theme").value = settings.theme ?? "system";
   document.body.dataset.theme = settings.theme ?? "system";
+  window.SovereignPalette?.syncTheme(settings.theme ?? "system");
   $("setting-close").value = settings.closeBehavior ?? "ask";
   $("setting-notifications").checked = settings.notifications !== false;
   $("setting-demo-mode").checked = settings.demoMode === true;

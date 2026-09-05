@@ -1615,6 +1615,58 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         return recordCollaborationEvent({ conversationId, type: "run.stopped", status: "stopped", actorId: "user", ownerId: run.ownerId, stage: run.stage, reason, runId, requestId, operationId, operationToken, expectedVersion, idempotencyKey: `run.stopped:${runId}` });
     }
 
+    function completeOrdinaryReply({ conversationId, coworkerId, messageId, artifactIds = [], expectedVersion, expectedRunId, expectedRequestId, expectedOperationId, expectedOperationToken } = {}) {
+        const context = teamContextForConversation(conversationId);
+        if (!context) throw new Error("ordinary reply completion requires a managed team channel");
+        const flow = state.flows[context.team.id] ?? {};
+        const run = runForConversation(conversationId);
+        if (!run || !flow.runId || run.runId !== flow.runId || run.status !== "active" || flow.runStatus !== "active")
+            throw new Error("ordinary reply completion requires an active collaboration run");
+        if (expectedVersion === undefined) throw new Error("ordinary reply completion requires expectedVersion");
+        if (expectedRunId === undefined) throw new Error("ordinary reply completion requires expectedRunId");
+        if (expectedRequestId === undefined) throw new Error("ordinary reply completion requires expectedRequestId");
+        if (expectedOperationId === undefined) throw new Error("ordinary reply completion requires expectedOperationId");
+        if (expectedOperationToken === undefined) throw new Error("ordinary reply completion requires expectedOperationToken");
+        if (flow.ownerId !== coworkerId)
+            throw new Error("ordinary reply completion is authorized only for the current owner");
+        if (flow.userMessageId !== messageId)
+            throw new Error("ordinary reply completion must use the current run's initial user message");
+        const conversation = conversationStore.get(conversationId);
+        const source = conversation.messages.find((entry) => entry.id === messageId);
+        if (!source || source.senderId !== "user")
+            throw new Error("ordinary reply completion requires the current run's user message");
+        if (flow.activeProtocol)
+            throw new Error("ordinary reply completion is unavailable while a protocol is active");
+        if (flow.activeFanout)
+            throw new Error("ordinary reply completion is unavailable while fan-out is active");
+        if (!Array.isArray(artifactIds) || artifactIds.length)
+            throw new Error("ordinary reply completion cannot publish artifacts");
+        if (state.collaboration.events.some((entry) => entry.runId === run.runId && Array.isArray(entry.artifactIds) && entry.artifactIds.length))
+            throw new Error("ordinary reply completion is unavailable after run artifacts exist");
+        if (expectedVersion !== (flow.version ?? 0)) throw new Error("ordinary reply completion flow version is stale");
+        if (expectedRunId !== flow.runId) throw new Error("ordinary reply completion run token is stale");
+        if (expectedRequestId !== flow.requestId) throw new Error("ordinary reply completion request token is stale");
+        if (expectedOperationId !== flow.operationId) throw new Error("ordinary reply completion operation token is stale");
+        if (expectedOperationToken !== flow.operationToken) throw new Error("ordinary reply completion operation proof is stale");
+        recordCollaborationEvent({
+            conversationId,
+            type: "run.completed",
+            status: "completed",
+            actorId: coworkerId,
+            ownerId: coworkerId,
+            stage: "complete",
+            messageId,
+            runId: flow.runId,
+            requestId: flow.requestId,
+            operationId: flow.operationId,
+            operationToken: flow.operationToken,
+            expectedVersion,
+            flowPatch: { stage: "complete", handoffIndex: undefined, ownerId: undefined, runStatus: "completed", activeProtocol: undefined },
+            idempotencyKey: `run.completed:${messageId}`,
+        });
+        return { completed: true };
+    }
+
     function setRuntimeHandoffPreflight(preflight) {
         if (preflight !== undefined && typeof preflight !== "function") throw new Error("runtime handoff preflight must be a function");
         runtimeHandoffPreflight = preflight;
@@ -2416,9 +2468,12 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         if (!channel) return undefined;
         const team = requireTeam(channel.teamId);
         const status = flowStatus(team);
-        if (!status.currentOwnerId) return undefined;
+        const flow = state.flows[team.id] ?? {};
+        const startsNewRun = flow.stage === "complete" || ["completed", "stopped", "attention", "redirected"].includes(flow.runStatus) || !flow.runId;
+        const ownerId = startsNewRun ? handoffOrder(team)[0] : status.currentOwnerId;
+        if (!ownerId) return undefined;
         try {
-            return coworkerStore.get(status.currentOwnerId).state === "active" ? status.currentOwnerId : undefined;
+            return coworkerStore.get(ownerId).state === "active" ? ownerId : undefined;
         }
         catch { return undefined; }
     }
@@ -2504,6 +2559,7 @@ export function createTeamService({ dataDir, persistPath = join(dataDir, "deskto
         submitProtocolResult,
         recordReviewDecision,
         stopRun,
+        completeOrdinaryReply,
         recordCollaborationEvent,
         setRuntimeHandoffPreflight,
         authorizeHandoffTarget,

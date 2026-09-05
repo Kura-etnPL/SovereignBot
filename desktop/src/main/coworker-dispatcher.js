@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 import { artifactPromptInstruction, extractArtifactManifest } from "./lib/artifact-manifest.js";
-import { extractFanoutManifest, extractHandoffManifest, extractReviewDecision, fanoutPromptInstruction, handoffPromptInstruction, reviewPromptInstruction } from "./lib/handoff-manifest.js";
+import { extractCompletionManifest, extractFanoutManifest, extractHandoffManifest, extractReviewDecision, fanoutPromptInstruction, handoffPromptInstruction, reviewPromptInstruction } from "./lib/handoff-manifest.js";
 import { coworkerAgentId, coworkerCapability } from "./provider-roster.js";
 
 const DISPATCH_SCHEMA = "sovereignbot.desktop.coworker-dispatch.v1";
@@ -374,7 +374,7 @@ export function createCoworkerDispatcher({
     async function recoverInterruptedDeliveries() {
         if (typeof runtime.orchestrator?.listTasks !== "function") return [];
         const tasks = await runtime.orchestrator.listTasks();
-        const active = tasks.filter((task) => ["accepted", "queued", "running"].includes(task?.status));
+        const active = tasks.filter((task) => ["accepted", "queued", "running", "completed"].includes(task?.status));
         const recovered = [];
         for (const task of active) {
             const messageId = task.input?.messageId ?? task.input?.newestMessageId;
@@ -390,7 +390,7 @@ export function createCoworkerDispatcher({
                 if (!message) continue;
                 const delivery = message.delivery?.[targetCoworkerId];
                 if (delivery?.status !== "pending") continue;
-                await runtime.orchestrator.cancel(task.id, { reason: "interrupted by application restart", actor: "runtime-recovery" });
+                if (task.status !== "completed") await runtime.orchestrator.cancel(task.id, { reason: "interrupted by application restart", actor: "runtime-recovery" });
                 const detail = "Work was interrupted by application restart; review and explicitly retry.";
                 conversationStore.markDelivery(conversation.id, message.id, targetCoworkerId, "attention", detail);
                 recovered.push({ conversationId: conversation.id, messageId: message.id, coworkerId: targetCoworkerId, taskId: task.id });
@@ -506,6 +506,9 @@ export function createCoworkerDispatcher({
                     "Respond to the newest message as this persistent coworker. Preserve continuity with the conversation, be action-oriented, and do not claim work you did not actually complete.",
                     artifactStore ? artifactPromptInstruction() : "",
                     handoffPromptInstruction(availableHandoffs),
+                    source.senderId === "user" && !fanoutMode && !stageContext?.activeProtocol && teamFlow?.isManagedConversation?.(conversationId)
+                        ? 'For a purely conversational acknowledgement or answer requiring no files, tools, specialist work, or review, finish with the exact final line SOVEREIGN_COMPLETION: "reply-only". Do not use this marker to skip implementation, required review, or artifact delivery. Do not combine it with handoff, fanout, or artifact manifests.'
+                        : "",
                     !fanoutMode && !pendingProtocol ? fanoutPromptInstruction(availableHandoffs) : "",
                     fanoutPrompt(fanoutMode, fanoutContext, conversationId),
                     pendingProtocol?.kind === "review" || fanoutMode === "review" ? reviewPromptInstruction() : "",
@@ -684,8 +687,10 @@ export function createCoworkerDispatcher({
                 data: { conversationId, messageId },
             });
         }
+        const completionResult = extractCompletionManifest(handoffResult.text);
+        if (completionResult.invalidManifest) throw new Error("Invalid ordinary reply completion manifest");
         const artifactResult = await ingestDeclaredArtifacts({
-            rawText: handoffResult.text,
+            rawText: completionResult.text,
             context,
             coworkerId,
             conversationId,
@@ -703,6 +708,22 @@ export function createCoworkerDispatcher({
             return { ok: false, taskId: task.id, stopped: true, reason: "stale collaboration result was discarded" };
         }
         const visibleText = artifactResult.text || (artifactResult.artifactIds.length ? `Created ${artifactResult.artifactIds.length} artifact${artifactResult.artifactIds.length === 1 ? "" : "s"}.` : "Completed the requested work.");
+        if (completionResult.requested) {
+            try {
+                if (source.senderId !== "user" || fanoutMode || executionContext?.activeProtocol || executionContext?.activeFanout || artifactResult.artifactIds.length || fanoutResult.children.length || handoffResult.coworkerIds.length || /(?:^|\n)\s*SOVEREIGN_(?:ARTIFACTS|HANDOFFS|FANOUT|REVIEW):/.test(rawText) || !teamFlow?.completeOrdinaryReply)
+                    throw new Error("Ordinary reply completion cannot replace artifact, handoff, or review work");
+                teamFlow.completeOrdinaryReply({ conversationId, coworkerId, messageId: source.id, artifactIds: [], expectedVersion: executionContext.version, expectedRunId: executionContext.runId, expectedRequestId: executionContext.requestId, expectedOperationId: executionContext.operationId, expectedOperationToken: executionContext.operationToken });
+            } catch (error) {
+                discardArtifacts(createdArtifactIds);
+                throw error;
+            }
+            const reply = conversationStore.postCoworkerMessage(conversationId, coworkerId, { text: visibleText.slice(0, MAX_REPLY_TEXT), replyTo: source.id }, { voiceEligible: true, notifyChannelUnread: true });
+            closeInternalReply(conversationId, reply);
+            conversationStore.markDelivery(conversationId, messageId, coworkerId, "delivered");
+            state.turns[stateKey(conversationId, coworkerId)] = { lastTaskId: task.id, provider: binding.provider, ...(binding.accountNamespace ? { accountNamespace: binding.accountNamespace } : {}), updatedAt: now() };
+            save();
+            return { ok: true, taskId: task.id, reply, artifacts: [], handoffs: [] };
+        }
         if (fanoutResult.children.length) {
             let requested;
             try {

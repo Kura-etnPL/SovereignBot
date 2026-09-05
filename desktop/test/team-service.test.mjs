@@ -48,6 +48,16 @@ function commitHandoff(teams, args) {
     });
 }
 
+function expectedContext(context) {
+    return {
+        expectedVersion: context.version,
+        expectedRunId: context.runId,
+        expectedRequestId: context.requestId,
+        expectedOperationId: context.operationId,
+        expectedOperationToken: context.operationToken,
+    };
+}
+
 test("Software Team installation is idempotent and keeps workspace paths out of public state", () => {
     const { root, coworkers, conversations, services, teams } = fixture();
     try {
@@ -194,6 +204,69 @@ test("ordinary teams create a Project Channel and route the next user turn to th
     finally {
         rmSync(root, { recursive: true, force: true });
     }
+});
+
+test("ordinary reply completion is explicit, owner-bound, and fail-closed", () => {
+    const makeCase = () => {
+        const fixtureValue = fixture();
+        const chief = fixtureValue.coworkers.create({ name: "Chief", role: "Coordinate work" });
+        const coder = fixtureValue.coworkers.create({ name: "Coder", role: "Build software" });
+        const reviewer = fixtureValue.coworkers.create({ name: "Reviewer", role: "Review software" });
+        const created = fixtureValue.teams.createTeam({ title: "Reply Team", coworkerIds: [chief.id, coder.id, reviewer.id] });
+        const message = fixtureValue.conversations.postUserMessage(created.conversation.id, { text: "Confirm the bounded result." });
+        fixtureValue.teams.onMessageQueued({ conversation: fixtureValue.conversations.get(created.conversation.id), message });
+        return { ...fixtureValue, chief, coder, reviewer, created, message };
+    };
+    const completed = makeCase();
+    try {
+        const context = completed.teams.collaborationContextForConversation(completed.created.conversation.id);
+        assert.deepEqual(completed.teams.completeOrdinaryReply({ conversationId: completed.created.conversation.id, coworkerId: completed.chief.id, messageId: completed.message.id, ...expectedContext(context) }), { completed: true });
+        assert.equal(completed.teams.status(completed.created.team.id).stage, "complete");
+    }
+    finally { rmSync(completed.root, { recursive: true, force: true }); }
+
+    const guarded = makeCase();
+    try {
+        const conversationId = guarded.created.conversation.id;
+        const context = guarded.teams.collaborationContextForConversation(conversationId);
+        assert.throws(() => guarded.teams.completeOrdinaryReply({ conversationId, coworkerId: guarded.chief.id, messageId: guarded.message.id }), /expectedVersion/);
+        assert.throws(() => guarded.teams.completeOrdinaryReply({ conversationId, coworkerId: guarded.coder.id, messageId: guarded.message.id, ...expectedContext(context) }), /current owner/);
+        assert.throws(() => guarded.teams.completeOrdinaryReply({ conversationId, coworkerId: guarded.chief.id, messageId: guarded.message.id, ...expectedContext({ ...context, version: context.version + 1 }) }), /stale/);
+        for (const [field, error] of [["expectedRunId", /run token/], ["expectedRequestId", /request token/], ["expectedOperationId", /operation token/], ["expectedOperationToken", /operation proof/]]) {
+            assert.throws(() => guarded.teams.completeOrdinaryReply({ conversationId, coworkerId: guarded.chief.id, messageId: guarded.message.id, ...expectedContext(context), [field]: `stale-${field}` }), error);
+        }
+        const handoff = commitHandoff(guarded.teams, { conversation: guarded.conversations.get(conversationId), coworkerId: guarded.chief.id, source: guarded.message, requestedCoworkerIds: [guarded.coder.id] });
+        assert.equal(handoff, guarded.coder.id);
+        const protocolContext = guarded.teams.collaborationContextForConversation(conversationId);
+        assert.throws(() => guarded.teams.completeOrdinaryReply({ conversationId, coworkerId: guarded.coder.id, messageId: guarded.message.id, ...expectedContext(protocolContext) }), /protocol/);
+    }
+    finally { rmSync(guarded.root, { recursive: true, force: true }); }
+
+    const withArtifact = makeCase();
+    try {
+        const conversationId = withArtifact.created.conversation.id;
+        const context = withArtifact.teams.collaborationContextForConversation(conversationId);
+        withArtifact.teams.recordCollaborationEvent({ conversationId, type: "work.completed", status: "completed", actorId: withArtifact.chief.id, ownerId: withArtifact.chief.id, messageId: withArtifact.message.id, artifactIds: ["artifact_0000000000000001"], ...context, expectedVersion: context.version, idempotencyKey: "reply-artifact" });
+        const afterArtifact = withArtifact.teams.collaborationContextForConversation(conversationId);
+        assert.throws(() => withArtifact.teams.completeOrdinaryReply({ conversationId, coworkerId: withArtifact.chief.id, messageId: withArtifact.message.id, ...expectedContext(afterArtifact) }), /artifacts exist/);
+    }
+    finally { rmSync(withArtifact.root, { recursive: true, force: true }); }
+
+    const withFanout = fixture();
+    try {
+        const chief = withFanout.coworkers.create({ name: "Chief", role: "Coordinate work" });
+        const coder = withFanout.coworkers.create({ name: "Coder", role: "Build software" });
+        const researcher = withFanout.coworkers.create({ name: "Researcher", role: "Research software" });
+        const reviewer = withFanout.coworkers.create({ name: "Reviewer", role: "Review software" });
+        const created = withFanout.teams.createTeam({ title: "Fanout Reply Team", coworkerIds: [chief.id, coder.id, researcher.id, reviewer.id] });
+        const message = withFanout.conversations.postUserMessage(created.conversation.id, { text: "Confirm in parallel." });
+        withFanout.teams.onMessageQueued({ conversation: withFanout.conversations.get(created.conversation.id), message });
+        const context = withFanout.teams.collaborationContextForConversation(created.conversation.id);
+        withFanout.teams.requestFanout({ conversationId: created.conversation.id, ownerCoworkerId: chief.id, sourceMessageId: message.id, reviewerCoworkerId: reviewer.id, children: [{ key: "code", coworkerId: coder.id }, { key: "research", coworkerId: researcher.id }], ...expectedContext(context) });
+        const fanoutContext = withFanout.teams.collaborationContextForConversation(created.conversation.id);
+        assert.throws(() => withFanout.teams.completeOrdinaryReply({ conversationId: created.conversation.id, coworkerId: chief.id, messageId: message.id, ...expectedContext(fanoutContext) }), /fan-out/);
+    }
+    finally { rmSync(withFanout.root, { recursive: true, force: true }); }
 });
 
 test("Team Pack export/import carries only reusable product declarations", () => {
