@@ -150,6 +150,10 @@
       const response = await api.palette.list();
       if (sequence !== refreshSequence) return;
       commandList = response.commands ?? [];
+      addResult(t("searchPalette.cmdTheme"), t("searchPalette.cmdThemeDesc"), () => {
+        close();
+        globalThis.SovereignPalette?.openModal?.();
+      }, "🎨");
       for (const command of commandList) {
         const icon = COMMAND_ICONS.get(command.id) ?? "⚡";
         addResult(COMMAND_LABELS.get(command.id) ?? command.id, command.risk === "governed" ? t("searchPalette.riskGoverned") : command.risk === "read-only" ? t("searchPalette.riskReadOnly") : t("searchPalette.riskProduct"), () => void runPaletteCommand(command.id), icon);

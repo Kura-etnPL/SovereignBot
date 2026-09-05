@@ -1,0 +1,70 @@
+{
+  "schema": "sovereignbot.desktop.channels-product-path-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "Channels page exposes team, template, filter, and quick-switch controls": {
+      "ok": true,
+      "detail": "{\"view\":true,\"team\":\"team_f29216f7dd577a39\",\"templates\":[\"work\",\"personal\",\"project\"],\"text\":\"Project Channel\\n\\nSoftware Team · project · Available\\n\\nInstructions: Software Delivery: Chief scopes the outcome, Coding Lead implements, Reviewer reviews, and Chief synthesizes the result.Last activity: 2026-09-05T13:11:59.657ZLatest: —\\nOpen\\nEdit\\nDuplicate\\nArchive\"}"
+    },
+    "From template creates a real channel through the product page": {
+      "ok": true,
+      "detail": "{\"card\":true,\"hiddenId\":false,\"templateValue\":\"work\"}"
+    },
+    "Unread fixture starts outside the target conversation": {
+      "ok": true,
+      "detail": "{\"selectedConversation\":\"Project Channel\"}"
+    },
+    "Unread filter and last activity are visible for the created channel": {
+      "ok": true,
+      "detail": "{\"text\":\"Work Channel\\n\\nSoftware Team · work · Available\\n\\nUnreadInstructions: A focused work room for bounded tasks, progress updates, and teammate handoffs.Last activity: 2026-09-05T13:12:01.258ZLatest: Unread channel activity fixture\\nOpen\\nEdit\\nDuplicate\\nArchive\"}"
+    },
+    "Quick switch opens the selected channel conversation": {
+      "ok": true,
+      "detail": "{\"value\":\"conv_cdec398d2c421b22\",\"visible\":\"• Work Channel\"}"
+    },
+    "Archive click persists and includeArchived remains explicit": {
+      "ok": true,
+      "detail": "{\"all\":2,\"active\":1}"
+    },
+    "Archived and stale channel actions fail closed": {
+      "ok": true,
+      "detail": "{\"archivedSend\":\"Error invoking remote method 'conversation:send': Error: archived channel is read-only\",\"staleArchive\":\"Error invoking remote method 'channel:archive': Error: unknown channel id: channel_2c38453f5dd10276-stale\"}"
+    },
+    "Archived filter renders read-only channel with Restore action": {
+      "ok": true,
+      "detail": "{\"restore\":true}"
+    },
+    "Archived state survives service recreation": {
+      "ok": true,
+      "detail": "{\"archived\":true}"
+    },
+    "Reloaded Channels page preserves safe public projection": {
+      "ok": true,
+      "detail": "{\"bytes\":552}"
+    },
+    "Restore click re-enables the channel": {
+      "ok": true,
+      "detail": "Work Channel active"
+    }
+  },
+  "notes": [
+    "PASS hidden Electron window stays hidden",
+    "PASS Channels page exposes team, template, filter, and quick-switch controls {\"view\":true,\"team\":\"team_f29216f7dd577a39\",\"templates\":[\"work\",\"personal\",\"project\"],\"text\":\"Project Channel\\n\\nSoftware Team · project · Available\\n\\nInstructions: Software Delivery: Chief scopes the outcome, Coding Lead implements, Reviewer reviews, and Chief synthesizes the result.Last activity: 2026-09-05T13:11:59.657ZLatest: —\\nOpen\\nEdit\\nDuplicate\\nArchive\"}",
+    "PASS From template creates a real channel through the product page {\"card\":true,\"hiddenId\":false,\"templateValue\":\"work\"}",
+    "PASS Unread fixture starts outside the target conversation {\"selectedConversation\":\"Project Channel\"}",
+    "PASS Unread filter and last activity are visible for the created channel {\"text\":\"Work Channel\\n\\nSoftware Team · work · Available\\n\\nUnreadInstructions: A focused work room for bounded tasks, progress updates, and teammate handoffs.Last activity: 2026-09-05T13:12:01.258ZLatest: Unread channel activity fixture\\nOpen\\nEdit\\nDuplicate\\nArchive\"}",
+    "PASS Quick switch opens the selected channel conversation {\"value\":\"conv_cdec398d2c421b22\",\"visible\":\"• Work Channel\"}",
+    "PASS Archive click persists and includeArchived remains explicit {\"all\":2,\"active\":1}",
+    "PASS Archived and stale channel actions fail closed {\"archivedSend\":\"Error invoking remote method 'conversation:send': Error: archived channel is read-only\",\"staleArchive\":\"Error invoking remote method 'channel:archive': Error: unknown channel id: channel_2c38453f5dd10276-stale\"}",
+    "PASS Archived filter renders read-only channel with Restore action {\"restore\":true}",
+    "PASS Archived state survives service recreation {\"archived\":true}",
+    "PASS Reloaded Channels page preserves safe public projection {\"bytes\":552}",
+    "PASS Restore click re-enables the channel Work Channel active"
+  ],
+  "externalActions": [],
+  "ok": true
+}

@@ -36,7 +36,7 @@ export async function runVerifyP33SearchPalette({ app }) {
     check("hidden Electron window stays hidden", win.isVisible() === false); await loadWindow(win);
     const surface = await invoke(win, `async()=>({ search:typeof window.sovereignbot?.search?.query, palette:typeof window.sovereignbot?.palette?.list, opener:!!document.getElementById("open-command-palette"), ready:document.readyState })`);
     check("ordinary entry exposes typed Search and Command Palette", surface.search === "function" && surface.palette === "function" && surface.opener && surface.ready === "complete", JSON.stringify(surface));
-    await invoke(win, `async()=>{document.getElementById("open-command-palette")?.click(); return true}`); await waitFor(async () => (await invoke(win, `async()=>document.querySelectorAll("#palette-results .command-palette-result").length`)) === 7, "seven palette commands");
+    await invoke(win, `async()=>{document.getElementById("open-command-palette")?.click(); return true}`); await waitFor(async () => (await invoke(win, `async()=>document.querySelectorAll("#palette-results .command-palette-result").length`)) >= 7, "required palette commands");
     const commands = await invoke(win, `async()=>[...document.querySelectorAll("#palette-results .command-palette-result-title")].map((node)=>node.textContent)`);
     check("Command Palette lists the seven required actions", requiredCommands.every((label) => commands.includes(label)), JSON.stringify(commands));
     const summaries = [];

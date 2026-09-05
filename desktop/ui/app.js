@@ -29,6 +29,7 @@ const state = {
   editingChannelTeamId: undefined,
   channelEditorReturnView: undefined,
   pollTimer: undefined,
+  conversationCache: new Map(),
   conversationSignature: undefined,
   conversationPage: undefined,
   conversationRefreshRequest: 0,
@@ -346,13 +347,27 @@ function clearNode(node) {
   if (node) node.textContent = "";
 }
 
-function makeNavItem({ avatar, title, subtitle, meta, status, statusLabel, unread, active, compact, onClick }) {
+function makeNavItem({ avatar, coworker, title, subtitle, meta, status, statusLabel, unread, active, compact, phase = 0, onClick }) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `nav-item${active ? " active" : ""}${compact ? " compact" : ""}`;
   const icon = document.createElement("span");
   icon.className = "nav-avatar";
-  icon.textContent = avatar;
+  if (coworker && window.SovereignBotRobotEngine) {
+    window.SovereignBotRobotEngine.renderRobotHead(icon, coworker, {
+      size: compact ? "sm" : "md",
+      state: status,
+      phase,
+    });
+  } else if (window.SovereignBotRobotEngine && avatar) {
+    window.SovereignBotRobotEngine.renderRobotHead(icon, avatar, {
+      size: compact ? "sm" : "md",
+      state: status,
+      phase,
+    });
+  } else {
+    icon.textContent = avatar ?? "";
+  }
   const copy = document.createElement("span");
   copy.className = "nav-copy";
   const strong = document.createElement("strong");
@@ -439,10 +454,13 @@ function renderCoworkers() {
     const selected = filtered.find((entry) => entry.coworker.id === selectedCoworkerId);
     if (selected && !shown.some((entry) => entry.coworker.id === selectedCoworkerId)) shown.push(selected);
   }
+  let coworkerIdx = 0;
   for (const { coworker, status } of shown) {
     const direct = directByCoworker.get(coworker.id);
     const item = makeNavItem({
       avatar: avatarFor(coworker),
+      coworker,
+      phase: coworkerIdx++,
       title: displayCoworkerName(coworker.name),
       subtitle: `${displayCoworkerDescription(coworker)} · ${statusLabel[status]}`,
       status: status === "available" ? "ready" : status === "paused" ? "offline" : status,
@@ -561,14 +579,17 @@ function renderRecent() {
   const list = $("conversation-list");
   clearNode(list);
   const recent = [...state.conversations]
-    .filter((entry) => entry.messageCount > 0)
+    .filter((entry) => (entry.messageCount > 0 || entry.id === state.selectedConversationId))
     .sort((a, b) => text(b.updatedAt).localeCompare(text(a.updatedAt)))
     .slice(0, 8);
+  let recentIdx = 0;
   for (const conversation of recent) {
     const coworkerId = conversation.kind === "direct" ? conversation.participants?.find((id) => id !== "user") : undefined;
     const coworker = coworkerById(coworkerId);
     list.append(makeNavItem({
       avatar: conversation.kind === "team" ? "#" : avatarFor(coworker),
+      coworker: conversation.kind === "team" ? null : coworker,
+      phase: recentIdx++,
       title: conversation.title,
       subtitle: conversation.lastMessage?.textPreview || (conversation.kind === "team" ? t("team.conversation") : displayCoworkerDescription(coworker)),
       meta: formatRelative(conversation.updatedAt),
@@ -608,7 +629,38 @@ function renderProjects() {
   }
 }
 
-function renderSidebar() {
+function computeSidebarSignature() {
+  const cSig = (state.coworkers ?? []).map((c) => `${c.id}:${c.name}:${c.state}:${c.role || ""}`).join(",");
+  const tSig = (state.teams ?? []).map((t) => `${t.id}:${t.name}:${t.flow?.status || ""}:${t.flow?.currentOwnerId || ""}:${(t.channels ?? []).map((ch) => `${ch.conversationId}:${ch.archived ? 1 : 0}`).join(";")}`).join(",");
+  const rSig = (state.conversations ?? []).slice(0, 20).map((c) => `${c.id}:${c.unread ? 1 : 0}:${c.id === state.selectedConversationId ? 1 : 0}`).join(",");
+  const pSig = (state.projects ?? []).map((p) => `${p.projectId}:${p.name}`).join(",");
+  const rosterSig = `${state.coworkerRoster?.query || ""}:${state.coworkerRoster?.filter || ""}:${state.coworkerRoster?.expanded ? 1 : 0}`;
+  const selSig = state.selectedConversationId || "";
+  const langSig = state.locale || "en";
+  return [cSig, tSig, rSig, pSig, rosterSig, selSig, langSig].join("||");
+}
+
+let sidebarRenderRaf = null;
+function renderSidebar(force = false) {
+  if (force) {
+    if (sidebarRenderRaf) {
+      cancelAnimationFrame(sidebarRenderRaf);
+      sidebarRenderRaf = null;
+    }
+    doRenderSidebar(true);
+    return;
+  }
+  if (sidebarRenderRaf) return;
+  sidebarRenderRaf = requestAnimationFrame(() => {
+    sidebarRenderRaf = null;
+    doRenderSidebar(false);
+  });
+}
+
+function doRenderSidebar(force = false) {
+  const currentSig = computeSidebarSignature();
+  // Job status and channel activity can change without roster identity changes.
+  state._sidebarSignature = currentSig;
   renderCoworkers();
   renderTeams();
   renderProjects();
@@ -844,7 +896,22 @@ function renderConversationHeader(conversation) {
   const direct = conversation.kind === "direct" ? members[0] : undefined;
   const channel = channelForConversation(conversation.id);
   const team = teamForConversation(conversation.id);
-  $("conversation-avatar").textContent = conversation.kind === "team" ? "#" : avatarFor(direct);
+  const avatarEl = $("conversation-avatar");
+  if (avatarEl) {
+    if (conversation.kind === "team") {
+      if (window.SovereignBotRobotEngine) {
+        window.SovereignBotRobotEngine.renderRobotHead(avatarEl, channel ? "#" : "👥", { size: "lg" });
+      } else {
+        avatarEl.textContent = "#";
+        avatarEl.classList.remove("avatar-is-robot");
+      }
+    } else if (direct && window.SovereignBotRobotEngine) {
+      window.SovereignBotRobotEngine.renderRobotHead(avatarEl, direct, { size: "lg" });
+    } else {
+      avatarEl.textContent = avatarFor(direct);
+      avatarEl.classList.remove("avatar-is-robot");
+    }
+  }
   $("conversation-title").textContent = channel?.name ?? (direct ? direct.name : conversation.title);
   $("conversation-kind").textContent = channel ? t("conversation.kindProjectChannel") : conversation.kind === "team" ? t("conversation.kindTeam") : t("conversation.kindCoworker");
   $("conversation-subtitle").textContent = conversation.kind === "team"
@@ -951,7 +1018,11 @@ function renderMessage(conversation, message) {
   if (!user) {
     const avatar = document.createElement("div");
     avatar.className = "chat-avatar";
-    avatar.textContent = avatarFor(coworker);
+    if (coworker && window.SovereignBotRobotEngine) {
+      window.SovereignBotRobotEngine.renderRobotHead(avatar, coworker, { size: "md" });
+    } else {
+      avatar.textContent = avatarFor(coworker);
+    }
     row.append(avatar);
   }
 
@@ -989,7 +1060,11 @@ function renderMessage(conversation, message) {
   }
   const body = document.createElement("div");
   body.className = "chat-text";
-  body.textContent = message.text;
+  if (globalThis.SovereignMarkdown?.render) {
+    globalThis.SovereignMarkdown.renderInto(body, message.text);
+  } else {
+    body.textContent = message.text;
+  }
   content.append(meta, body);
 
   const actions = document.createElement("div");
@@ -1004,6 +1079,42 @@ function renderMessage(conversation, message) {
     try { $("composer-input")?.focus({ preventScroll: true }); } catch { $("composer-input")?.focus(); }
   });
   actions.append(reply);
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "message-action message-action-copy";
+  copyBtn.textContent = t("common.copy") || "Copy";
+  copyBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(message.text).then(() => {
+      globalThis.motionFx?.playChime?.();
+      globalThis.motionFx?.sparkleBurst?.(copyBtn);
+      const prev = copyBtn.textContent;
+      copyBtn.textContent = globalThis.SovereignI18n?.currentLocale?.() === "zh-CN" ? "已复制 ✓" : "Copied ✓";
+      globalThis.motionFx?.toast?.(globalThis.SovereignI18n?.currentLocale?.() === "zh-CN" ? "消息已复制" : "Message copied", "success");
+      setTimeout(() => { copyBtn.textContent = prev; }, 2000);
+    });
+  });
+  actions.append(copyBtn);
+
+  if (!user) {
+    const regenBtn = document.createElement("button");
+    regenBtn.type = "button";
+    regenBtn.className = "message-action message-action-regenerate";
+    regenBtn.textContent = globalThis.SovereignI18n?.currentLocale?.() === "zh-CN" ? "↺ 优化" : "↺ Retry";
+    regenBtn.addEventListener("click", () => {
+      regenBtn.classList.add("spinning");
+      globalThis.motionFx?.playBubblePop?.();
+      setTimeout(() => regenBtn.classList.remove("spinning"), 750);
+      const input = $("composer-input");
+      if (input) {
+        input.value = globalThis.SovereignI18n?.currentLocale?.() === "zh-CN" ? "请针对上一轮结果进行深度优化和完善" : "Please refine and optimize the previous response";
+        $("composer-form")?.dispatchEvent(new Event("submit", { cancelable: true }));
+      }
+    });
+    actions.append(regenBtn);
+  }
+
   if (!user && message.voiceEligible === true && window.speechSynthesis && typeof window.SpeechSynthesisUtterance === "function") {
     const speak = document.createElement("button");
     speak.type = "button";
@@ -1069,12 +1180,7 @@ function renderMessages(conversation, forceScroll = false, { voiceMessages = con
   const hasMessages = (conversation.messageCount ?? messages.length) > 0;
   start.classList.toggle("hidden", hasMessages);
   if (!hasMessages) {
-    const direct = conversation.kind === "direct" ? members[0] : undefined;
-    $("conversation-start-avatar").textContent = conversation.kind === "team" ? "#" : avatarFor(direct);
-    $("conversation-start-title").textContent = conversation.kind === "team" ? conversation.title : direct?.name || t("conversation.startTitle");
-    $("conversation-start-role").textContent = conversation.kind === "team"
-      ? (globalThis.SovereignI18n?.currentLocale?.() === "zh-CN" ? `包含 ${members.map((entry) => entry.name).join("、")} 的共享协作频道。` : `A shared room with ${members.map((entry) => entry.name).join(", ")}.`)
-      : (direct ? displayCoworkerDescription(direct) : t("conversation.startRole"));
+    renderConversationStart(conversation, members);
   }
 
   const pending = pendingUserRecipients(conversation);
@@ -1111,18 +1217,154 @@ function renderMessages(conversation, forceScroll = false, { voiceMessages = con
   }));
 }
 
-function highlightConversationMessage(messageId) {
-  if (typeof messageId !== "string" || !messageId) return;
-  const row = [...$("conversation-messages")?.querySelectorAll("[data-message-id]") ?? []]
-    .find((entry) => entry.dataset.messageId === messageId);
-  if (!row) return;
-  row.classList.add("conversation-message-highlight");
-  row.setAttribute("aria-current", "true");
-  row.scrollIntoView?.({ block: "center", behavior: "auto" });
-  window.setTimeout(() => {
-    row.classList.remove("conversation-message-highlight");
-    row.removeAttribute("aria-current");
-  }, 5000);
+function getCoworkerStarters(coworker, conversation, isZh) {
+  if (conversation.kind === "team") {
+    return isZh ? [
+      { icon: "🚀", label: "启动全功能项目开发", prompt: "请团队成员协同梳理需求，制定架构方案并开始第一版代码编写与验证。" },
+      { icon: "📋", label: "需求拆解与任务分派", prompt: "帮我拆解当前项目的核心需求，并分派给负责的架构师、程序员与测试员。" },
+      { icon: "🔍", label: "方案评审与可行性分析", prompt: "请针对我们当前的技术选型进行全方位评审，指出潜在风险与优化点。" }
+    ] : [
+      { icon: "🚀", label: "Start sprint", prompt: "Coordinate the team to review requirements, plan architecture, and start implementation." },
+      { icon: "📋", label: "Task breakdown", prompt: "Break down our project requirements and assign tasks across the team." }
+    ];
+  }
+
+  const role = (coworker?.role || "").toLowerCase();
+  const name = (coworker?.name || "").toLowerCase();
+
+  if (role.includes("chief") || name.includes("chief") || name.includes("幕僚长")) {
+    return isZh ? [
+      { icon: "💡", label: "帮我规划接下来要做的任务", prompt: "你好！请帮我梳理并规划接下来最重要的 3 项核心任务与具体执行路径。" },
+      { icon: "🎯", label: "分派任务给最合适的专家", prompt: "我有一个关于系统开发与优化的新需求，请帮我分析并分派给对应的专家同事。" },
+      { icon: "⚡", label: "一键调度自动化执行", prompt: "请帮我启动自动化检查，确认各模块状态并汇报待办事项。" }
+    ] : [
+      { icon: "💡", label: "Plan next milestones", prompt: "Help me prioritize the top 3 objectives and outline concrete action steps." },
+      { icon: "🎯", label: "Delegate to specialists", prompt: "I have a new feature request. Please route it to the best coworker." }
+    ];
+  }
+
+  if (role.includes("code") || role.includes("dev") || role.includes("program") || name.includes("code") || name.includes("编程") || name.includes("开发")) {
+    return isZh ? [
+      { icon: "💻", label: "编写全新功能模块代码", prompt: "请帮我实现一个高效、高内聚的模块，包含完整的类型定义与核心逻辑。" },
+      { icon: "🐞", label: "排查并修复代码 Bug", prompt: "我遇到了一个逻辑错误，请帮我审查相关代码并给出清晰的修复补丁。" },
+      { icon: "⚡", label: "重构与性能优化", prompt: "请帮我分析当前代码的性能瓶颈，并提供重构优化建议。" }
+    ] : [
+      { icon: "💻", label: "Implement a feature", prompt: "Please write a clean, well-structured implementation for the core module." },
+      { icon: "🐞", label: "Debug an issue", prompt: "Help me diagnose and fix an unexpected error in our code." }
+    ];
+  }
+
+  if (role.includes("research") || name.includes("research") || name.includes("研究")) {
+    return isZh ? [
+      { icon: "🔍", label: "调研最佳技术架构方案", prompt: "请针对业界主流方案做一份调研对比，列出优缺点及推荐实践。" },
+      { icon: "📊", label: "提炼核心要点与结论", prompt: "请帮我总结并提炼当前主题的核心概念、关键指标与决策依据。" }
+    ] : [
+      { icon: "🔍", label: "Research solutions", prompt: "Please conduct a comparative analysis of the best architectures for this problem." }
+    ];
+  }
+
+  if (role.includes("review") || name.includes("review") || name.includes("审查") || name.includes("评审")) {
+    return isZh ? [
+      { icon: "🛡️", label: "代码安全与边界审查", prompt: "请全面审查当前代码的安全漏洞、边界异常及类型健全性。" },
+      { icon: "✅", label: "验收标准与测试验证", prompt: "请根据需求设计完整的测试用例矩阵，验证各项边界条件。" }
+    ] : [
+      { icon: "🛡️", label: "Security & edge case review", prompt: "Please review the implementation for security vulnerabilities and edge cases." }
+    ];
+  }
+
+  return isZh ? [
+    { icon: "💬", label: "打个招呼并开始协作", prompt: "你好！我想先和你同步一下当前的工作目标。" },
+    { icon: "📋", label: "梳理需求与实现方案", prompt: "请帮我分析当前需求，并列出分步实施方案。" },
+    { icon: "🖥️", label: "协助自动化电脑操作", prompt: "请帮我查看当前电脑屏幕并协助执行相关操作。" }
+  ] : [
+    { icon: "💬", label: "Say hello and start", prompt: "Hello! Let's align on our current goal." },
+    { icon: "📋", label: "Analyze requirements", prompt: "Please analyze our requirements and suggest step-by-step next actions." }
+  ];
+}
+
+function renderConversationStart(conversation, members) {
+  const start = $("conversation-start");
+  if (!start) return;
+  const isZh = globalThis.SovereignI18n?.currentLocale?.() === "zh-CN";
+  const direct = conversation.kind === "direct" ? members[0] : undefined;
+  const name = direct ? displayCoworkerName(direct.name) : (conversation.title || (isZh ? "AI 员工协作空间" : "AI Workspace"));
+
+  const avatarEl = $("conversation-start-avatar");
+  if (avatarEl) {
+    if (conversation.kind === "team") {
+      if (window.SovereignBotRobotEngine) {
+        window.SovereignBotRobotEngine.renderRobotHead(avatarEl, "team", { size: "xl" });
+      } else {
+        avatarEl.textContent = "👥";
+        avatarEl.classList.remove("avatar-is-robot");
+      }
+    } else if (direct && window.SovereignBotRobotEngine) {
+      window.SovereignBotRobotEngine.renderRobotHead(avatarEl, direct, { size: "xl" });
+    } else {
+      avatarEl.textContent = avatarFor(direct);
+      avatarEl.classList.remove("avatar-is-robot");
+    }
+  }
+
+  const titleEl = $("conversation-start-title");
+  if (titleEl) {
+    if (conversation.kind === "team") {
+      titleEl.textContent = conversation.title;
+    } else if (direct) {
+      titleEl.textContent = isZh ? `你好！我是你的 ${name}` : `Hello! I'm your ${name}`;
+    } else {
+      titleEl.textContent = t("conversation.startTitle");
+    }
+  }
+
+  const roleEl = $("conversation-start-role");
+  if (roleEl) {
+    if (conversation.kind === "team") {
+      roleEl.textContent = isZh
+        ? `这是由 ${members.map((entry) => displayCoworkerName(entry.name)).join("、")} 组成的多智能体协作团队，支持自主协作与任务接力。`
+        : `A shared workspace with ${members.map((entry) => entry.name).join(", ")}.`;
+    } else if (direct) {
+      const desc = displayCoworkerDescription(direct);
+      roleEl.textContent = isZh
+        ? `${desc}。我可以协助你分析需求、编写代码、检索知识、自动化操作电脑。随时告诉我你的想法！`
+        : `${desc}. I'm ready to collaborate on tasks, code, research, and computer automation.`;
+    } else {
+      roleEl.textContent = t("conversation.startRole");
+    }
+  }
+
+  const labelEl = $("colleague-starters-label");
+  if (labelEl) {
+    labelEl.textContent = isZh ? "你可以试着这样对我说：" : "Try starting with:";
+  }
+
+  const chipsEl = $("conversation-start-chips");
+  if (chipsEl) {
+    chipsEl.textContent = "";
+    const starterPrompts = getCoworkerStarters(direct, conversation, isZh);
+    starterPrompts.forEach((item) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "colleague-starter-chip";
+      const icon = document.createElement("span");
+      icon.className = "starter-chip-icon";
+      icon.textContent = item.icon;
+      const label = document.createElement("span");
+      label.className = "starter-chip-text";
+      label.textContent = item.label;
+      chip.append(icon, label);
+      chip.addEventListener("click", () => {
+        globalThis.motionFx?.playBubblePop?.();
+        const input = $("composer-input");
+        if (input) {
+          input.value = item.prompt;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.focus();
+        }
+      });
+      chipsEl.appendChild(chip);
+    });
+  }
 }
 
 async function refreshConversation(forceScroll = false) {
@@ -1662,7 +1904,21 @@ function renderDetails(conversation, force = false) {
 
   if ($("details-owner-name")) $("details-owner-name").textContent = ownerName;
   if ($("details-owner-role")) $("details-owner-role").textContent = displayCoworkerRole(ownerRole);
-  if ($("details-owner-avatar")) $("details-owner-avatar").textContent = ownerAvatar;
+  if ($("details-owner-avatar")) {
+    const ownerEl = $("details-owner-avatar");
+    if (window.SovereignBotRobotEngine) {
+      if (team) {
+        window.SovereignBotRobotEngine.renderRobotHead(ownerEl, "team", { size: "md" });
+      } else if (members.length && members[0]) {
+        window.SovereignBotRobotEngine.renderRobotHead(ownerEl, members[0], { size: "md" });
+      } else {
+        window.SovereignBotRobotEngine.renderRobotHead(ownerEl, ownerAvatar, { size: "md" });
+      }
+    } else {
+      ownerEl.textContent = ownerAvatar;
+      ownerEl.classList.remove("avatar-is-robot");
+    }
+  }
   if ($("details-owner-status")) $("details-owner-status").textContent = ownerStatus;
 
   // Model profiles & workspace
@@ -1679,7 +1935,11 @@ function renderDetails(conversation, force = false) {
       row.className = "member-row";
       const avatar = document.createElement("div");
       avatar.className = "avatar";
-      avatar.textContent = avatarFor(coworker);
+      if (window.SovereignBotRobotEngine) {
+        window.SovereignBotRobotEngine.renderRobotHead(avatar, coworker, { size: "sm" });
+      } else {
+        avatar.textContent = avatarFor(coworker);
+      }
       const name = document.createElement("span");
       name.textContent = coworker.name;
       const edit = document.createElement("button");
@@ -2378,7 +2638,11 @@ function populateTeamPicker() {
     checkbox.value = coworker.id;
     const avatar = document.createElement("span");
     avatar.className = "nav-avatar";
-    avatar.textContent = avatarFor(coworker);
+    if (window.SovereignBotRobotEngine) {
+      window.SovereignBotRobotEngine.renderRobotHead(avatar, coworker, { size: "sm" });
+    } else {
+      avatar.textContent = avatarFor(coworker);
+    }
     const copy = document.createElement("span");
     copy.textContent = `${coworker.name} — ${displayCoworkerDescription(coworker)}`;
     label.append(checkbox, avatar, copy);
@@ -2853,8 +3117,12 @@ function ensureSettingsPreferences() {
     modelSelect.append(option);
   }
   model.append(modelLabel, modelSelect);
-  appearance.insertBefore(model, $("setting-notifications").closest(".toggle-row"));
-  const notifications = $("setting-notifications").closest(".toggle-row");
+  const notifications = $("setting-notifications")?.closest(".toggle-row");
+  if (notifications && notifications.parentElement) {
+    notifications.parentElement.insertBefore(model, notifications);
+  } else if (appearance) {
+    appearance.appendChild(model);
+  }
   const group = document.createElement("div");
   group.id = "notification-preferences";
   group.className = "notification-preferences";
@@ -2958,7 +3226,9 @@ function ensureDataLifecycleCard() {
   const refresh = async () => {
     try {
       const [lifecycleStatus, listed] = await Promise.all([window.sovereignbot.dataLifecycle.status({}), window.sovereignbot.dataLifecycle.listBackups({})]);
-      status.textContent = `State V${lifecycleStatus.stateVersion} · ${listed.backups.length} validated backup(s)`;
+      const v = lifecycleStatus?.stateVersion ?? lifecycleStatus?.version ?? state.handshake?.version ?? "4.0.0";
+      const count = listed?.backups?.length ?? 0;
+      status.textContent = t("backup.statusSummary", { version: v, count }) || `State v${v} · ${count} validated backup(s)`;
       listedBackups = listed.backups ?? [];
       renderBackups();
     } catch (error) { status.textContent = safeError(error, t("backup.stateUnavailable")); }
@@ -3034,15 +3304,20 @@ function ensureUpdateCard() {
   if (!grid || !window.sovereignbot.updates) return;
   const card = document.createElement("section"); card.id = "update-card"; card.className = "settings-card span-2";
   const heading = document.createElement("div"); heading.className = "card-heading";
-  const copy = document.createElement("div"); const title = document.createElement("h2"); title.textContent = "Release updates"; const description = document.createElement("p"); description.textContent = "Stable updates are verified locally before staging. Nothing downloads or applies automatically."; copy.append(title, description);
-  const refresh = document.createElement("button"); refresh.id = "update-check"; refresh.type = "button"; refresh.className = "quiet-action"; refresh.textContent = "Check for updates"; heading.append(copy, refresh);
-  const channelLabel = document.createElement("label"); channelLabel.textContent = t("updates.channel"); const channel = document.createElement("select"); channel.id = "update-channel";
-  for (const [value, label] of [["stable", "Stable"], ["preview", "Preview"], ["off", "Off"]]) { const option = document.createElement("option"); option.value = value; option.textContent = label; channel.append(option); }
+  const copy = document.createElement("div");
+  const title = document.createElement("h2"); title.textContent = t("updates.title", "Release updates");
+  const description = document.createElement("p"); description.textContent = t("updates.description", "Stable updates are verified locally before staging. Nothing downloads or applies automatically.");
+  copy.append(title, description);
+  const refresh = document.createElement("button"); refresh.id = "update-check"; refresh.type = "button"; refresh.className = "quiet-action"; refresh.textContent = t("updates.check", "Check for updates"); heading.append(copy, refresh);
+  const channelLabel = document.createElement("label"); channelLabel.textContent = t("updates.channel", "Release channel"); const channel = document.createElement("select"); channel.id = "update-channel";
+  for (const [value, labelKey, defaultLabel] of [["stable", "updates.channelStable", "Stable"], ["preview", "updates.channelPreview", "Preview"], ["off", "updates.channelOff", "Off"]]) {
+    const option = document.createElement("option"); option.value = value; option.textContent = t(labelKey, defaultLabel); channel.append(option);
+  }
   channelLabel.append(channel);
   const status = document.createElement("div"); status.id = "update-status"; status.className = "setting-feedback";
   const actions = document.createElement("div"); actions.className = "detail-actions";
-  const stage = document.createElement("button"); stage.id = "update-stage"; stage.type = "button"; stage.className = "quiet-action"; stage.textContent = "Stage verified update";
-  const apply = document.createElement("button"); apply.id = "update-apply"; apply.type = "button"; apply.className = "quiet-action"; apply.textContent = "Apply on restart"; actions.append(stage, apply);
+  const stage = document.createElement("button"); stage.id = "update-stage"; stage.type = "button"; stage.className = "quiet-action"; stage.textContent = t("updates.stage", "Stage verified update");
+  const apply = document.createElement("button"); apply.id = "update-apply"; apply.type = "button"; apply.className = "quiet-action"; apply.textContent = t("updates.apply", "Apply on restart"); actions.append(stage, apply);
   const applyDialog = document.createElement("dialog"); applyDialog.id = "update-apply-dialog"; applyDialog.className = "modal";
   const applyForm = document.createElement("form"); applyForm.id = "update-apply-form"; applyForm.method = "dialog"; applyForm.className = "modal-card";
   const applyHeading = document.createElement("div"); applyHeading.className = "modal-heading";
@@ -3061,9 +3336,20 @@ function ensureUpdateCard() {
   const safeError = (error, fallback) => { const message = String(error?.message || error).replace(/^.*Error:\s*/, "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/[A-Za-z]:\\[^\s,;)}]+/g, "selected local update").replace(/\\\\[^\s,;)}]+/g, "selected local update").replace(/\b(?:token|secret|password|credential|session|authorization|provider|cwd|workspacePath|storageRelativePath|sourceRelativePath)\b/gi, "protected detail").trim(); return !message || message === "protected detail" || message.length > 240 ? fallback : message; };
   const setApplyError = (message) => { applyError.textContent = message || ""; applyError.classList.toggle("hidden", !message); };
   const setApplyFeedback = (message) => { applyFeedback.textContent = message || ""; applyFeedback.classList.toggle("hidden", !message); };
-  const setApplyControls = () => { applyConfirm.disabled = applyPending; applyCancel.disabled = applyPending; applyClose.disabled = applyPending; apply.textContent = applyPending ? t("updates.applying") : "Apply on restart"; refresh.disabled = applyPending; stage.disabled = applyPending; channel.disabled = applyPending; };
+  const setApplyControls = () => { applyConfirm.disabled = applyPending; applyCancel.disabled = applyPending; applyClose.disabled = applyPending; apply.textContent = applyPending ? t("updates.applying") : t("updates.apply", "Apply on restart"); refresh.disabled = applyPending; stage.disabled = applyPending; channel.disabled = applyPending; };
   const showError = (error) => setStatus(safeError(error, t("updates.actionFailed")), "error");
-  const render = (value) => { state.updateStatus = value; channel.value = value.channel ?? "stable"; const a = value.available; const staged = value.staged; setStatus(`Current ${value.currentVersion} · ${value.channel} · ${a ? `Available ${a.version} · ${a.signature?.status ?? "unknown"} / verified` : "No verified update"}${staged ? ` · Backup ${staged.backupId} · restart required` : ""}`); };
+  const render = (value) => {
+    state.updateStatus = value;
+    channel.value = value.channel ?? "stable";
+    const curVer = value.currentVersion || state.handshake?.version || "4.0.0";
+    const ch = value.channel ?? "stable";
+    const chLabel = ch === "stable" ? t("updates.channelStable", "Stable") : ch === "preview" ? t("updates.channelPreview", "Preview") : t("updates.channelOff", "Off");
+    const a = value.available;
+    const staged = value.staged;
+    const availText = a ? `${t("updates.availableVer", "Available")} ${a.version}` : t("updates.noUpdate", "No verified update");
+    const stagedText = staged ? ` · ${t("updates.stagedWithBackup", { version: staged.version, backupId: staged.backupId })}` : "";
+    setStatus(`${t("updates.current", "Current")} v${curVer} · ${chLabel} · ${availText}${stagedText}`);
+  };
   const openApplyDialog = () => { if (applyPending) return; const staged = state.updateStatus?.staged; const available = state.updateStatus?.available; applySummary.textContent = staged ? t("updates.stagedWithBackup", { version: staged.version, backupId: staged.backupId }) : available ? t("updates.readyToApply", { version: available.version }) : t("updates.noneStaged"); setApplyError(""); setApplyFeedback(""); setApplyControls(); applyDialog.showModal?.(); };
   channel.addEventListener("change", async () => { try { render(await window.sovereignbot.updates.setChannel({ channel: channel.value })); } catch (error) { showError(error); } });
   refresh.addEventListener("click", async () => { refresh.disabled = true; try { render(await window.sovereignbot.updates.check({})); } catch (error) { showError(error); } finally { if (!applyPending) refresh.disabled = false; } });
@@ -3377,9 +3663,13 @@ function bindEvents() {
   $("team-archive-channel")?.addEventListener("click", () => setSelectedChannelArchived(true));
   $("team-restore-channel")?.addEventListener("click", () => setSelectedChannelArchived(false));
   $("channel-form")?.addEventListener("submit", saveChannel);
-  $("welcome-open-chief").addEventListener("click", () => {
-    const chief = state.coworkers.find((entry) => /chief of staff/i.test(entry.name)) ?? state.coworkers[0];
-    if (chief) openDirect(chief.id);
+  $("welcome-open-chief")?.addEventListener("click", async () => {
+    let chief = state.coworkers?.find((entry) => /chief/i.test(entry.name)) ?? state.coworkers?.[0];
+    if (!chief) {
+      await refreshCoworkers();
+      chief = state.coworkers?.find((entry) => /chief/i.test(entry.name)) ?? state.coworkers?.[0];
+    }
+    if (chief) await openDirect(chief.id);
   });
   $("coworker-form").addEventListener("submit", saveCoworker);
   $("team-form").addEventListener("submit", createTeam);
@@ -3418,9 +3708,16 @@ function bindEvents() {
   });
   $("close-details").addEventListener("click", () => hide($("details-panel")));
   $("new-conversation-button")?.addEventListener("click", () => {
-    const chief = state.coworkers.find((c) => /chief/i.test(c.name)) ?? state.coworkers[0];
-    if (chief) openDirect(chief.id);
-    else switchView("welcome");
+    const composer = $("composer-input");
+    if (composer) {
+      composer.value = "";
+      composer.style.height = "auto";
+    }
+    state.selectedConversationId = null;
+    state.selectedConversation = null;
+    switchView("welcome");
+    renderCoworkers();
+    renderRecent();
   });
   $("new-project")?.addEventListener("click", () => $("project-create-dialog")?.showModal());
   $("nav-notifications")?.addEventListener("click", () => switchView("notifications"));
@@ -3504,19 +3801,22 @@ function bindEvents() {
     openDirect,
     refreshCoworkers,
     refreshRoster,
+    renderSidebar,
+    renderDetails,
     state,
   };
 }
 
 async function bootstrap() {
   bindEvents();
+  // Screenshot attachments continue to use the governed artifact picker.
   try {
     state.handshake = await window.sovereignbot.handshake({});
     $("chip-version").textContent = state.handshake?.version || "V3";
     applyLocale(state.handshake?.language ?? "system", state.handshake?.locale);
   } catch (error) {
     $("chip-version").textContent = "offline";
-    $("provider-summary").textContent = "Offline — restart the app.";
+    $("provider-summary").textContent = globalThis.SovereignI18n?.currentLocale?.() === "zh-CN" ? "服务离线 — 请重启应用程序。" : "Offline — restart the app.";
     $("provider-dot")?.classList.add("offline");
     $("provider-action-result").textContent = String(error?.message ?? error).slice(0, 300);
     return;

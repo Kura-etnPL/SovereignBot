@@ -1,0 +1,65 @@
+{
+  "schema": "sovereignbot.desktop.p37-settings-canary.v1",
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "checks": {
+    "hidden Electron window stays hidden": {
+      "ok": true
+    },
+    "ordinary Settings view is visible": {
+      "ok": true,
+      "detail": "{\"view\":true,\"advancedOpen\":false,\"providersInAdvanced\":true,\"workspacesInAdvanced\":true,\"roster\":true,\"appearance\":true,\"model\":true,\"computer\":true,\"connectedApps\":true,\"notifications\":true,\"backup\":true,\"updates\":true,\"advancedLabel\":\"Advanced runtime\"}"
+    },
+    "Advanced is closed by default": {
+      "ok": true,
+      "detail": "{\"view\":true,\"advancedOpen\":false,\"providersInAdvanced\":true,\"workspacesInAdvanced\":true,\"roster\":true,\"appearance\":true,\"model\":true,\"computer\":true,\"connectedApps\":true,\"notifications\":true,\"backup\":true,\"updates\":true,\"advancedLabel\":\"Advanced runtime\"}"
+    },
+    "ordinary settings cards remain visible": {
+      "ok": true,
+      "detail": "{\"view\":true,\"advancedOpen\":false,\"providersInAdvanced\":true,\"workspacesInAdvanced\":true,\"roster\":true,\"appearance\":true,\"model\":true,\"computer\":true,\"connectedApps\":true,\"notifications\":true,\"backup\":true,\"updates\":true,\"advancedLabel\":\"Advanced runtime\"}"
+    },
+    "providers, workspaces, and roster are inside Advanced": {
+      "ok": true,
+      "detail": "{\"view\":true,\"advancedOpen\":false,\"providersInAdvanced\":true,\"workspacesInAdvanced\":true,\"roster\":true,\"appearance\":true,\"model\":true,\"computer\":true,\"connectedApps\":true,\"notifications\":true,\"backup\":true,\"updates\":true,\"advancedLabel\":\"Advanced runtime\"}"
+    },
+    "Advanced label is bilingual": {
+      "ok": true,
+      "detail": "{\"view\":true,\"advancedOpen\":false,\"providersInAdvanced\":true,\"workspacesInAdvanced\":true,\"roster\":true,\"appearance\":true,\"model\":true,\"computer\":true,\"connectedApps\":true,\"notifications\":true,\"backup\":true,\"updates\":true,\"advancedLabel\":\"Advanced runtime\"}"
+    },
+    "Advanced opens and exposes provider/workspace controls": {
+      "ok": true,
+      "detail": "{\"open\":true,\"providerRefresh\":true,\"addWorkspace\":true,\"providers\":4,\"roster\":\"No active runtime agents.\"}"
+    },
+    "Advanced provider roster is rendered": {
+      "ok": true,
+      "detail": "{\"open\":true,\"providerRefresh\":true,\"addWorkspace\":true,\"providers\":4,\"roster\":\"No active runtime agents.\"}"
+    },
+    "existing Advanced provider refresh binding remains active": {
+      "ok": true,
+      "detail": "{\"provider:refresh\":1}"
+    },
+    "Advanced interaction performs no dialog or write action": {
+      "ok": true,
+      "detail": "{\"afterRefresh\":{\"open\":true,\"dialogs\":0},\"writeCalls\":{}}"
+    },
+    "Advanced closes without dropping its content": {
+      "ok": true,
+      "detail": "{\"open\":false,\"providersInDom\":true}"
+    }
+  },
+  "notes": [
+    "PASS hidden Electron window stays hidden",
+    "PASS ordinary Settings view is visible {\"view\":true,\"advancedOpen\":false,\"providersInAdvanced\":true,\"workspacesInAdvanced\":true,\"roster\":true,\"appearance\":true,\"model\":true,\"computer\":true,\"connectedApps\":true,\"notifications\":true,\"backup\":true,\"updates\":true,\"advancedLabel\":\"Advanced runtime\"}",
+    "PASS Advanced is closed by default {\"view\":true,\"advancedOpen\":false,\"providersInAdvanced\":true,\"workspacesInAdvanced\":true,\"roster\":true,\"appearance\":true,\"model\":true,\"computer\":true,\"connectedApps\":true,\"notifications\":true,\"backup\":true,\"updates\":true,\"advancedLabel\":\"Advanced runtime\"}",
+    "PASS ordinary settings cards remain visible {\"view\":true,\"advancedOpen\":false,\"providersInAdvanced\":true,\"workspacesInAdvanced\":true,\"roster\":true,\"appearance\":true,\"model\":true,\"computer\":true,\"connectedApps\":true,\"notifications\":true,\"backup\":true,\"updates\":true,\"advancedLabel\":\"Advanced runtime\"}",
+    "PASS providers, workspaces, and roster are inside Advanced {\"view\":true,\"advancedOpen\":false,\"providersInAdvanced\":true,\"workspacesInAdvanced\":true,\"roster\":true,\"appearance\":true,\"model\":true,\"computer\":true,\"connectedApps\":true,\"notifications\":true,\"backup\":true,\"updates\":true,\"advancedLabel\":\"Advanced runtime\"}",
+    "PASS Advanced label is bilingual {\"view\":true,\"advancedOpen\":false,\"providersInAdvanced\":true,\"workspacesInAdvanced\":true,\"roster\":true,\"appearance\":true,\"model\":true,\"computer\":true,\"connectedApps\":true,\"notifications\":true,\"backup\":true,\"updates\":true,\"advancedLabel\":\"Advanced runtime\"}",
+    "PASS Advanced opens and exposes provider/workspace controls {\"open\":true,\"providerRefresh\":true,\"addWorkspace\":true,\"providers\":4,\"roster\":\"No active runtime agents.\"}",
+    "PASS Advanced provider roster is rendered {\"open\":true,\"providerRefresh\":true,\"addWorkspace\":true,\"providers\":4,\"roster\":\"No active runtime agents.\"}",
+    "PASS existing Advanced provider refresh binding remains active {\"provider:refresh\":1}",
+    "PASS Advanced interaction performs no dialog or write action {\"afterRefresh\":{\"open\":true,\"dialogs\":0},\"writeCalls\":{}}",
+    "PASS Advanced closes without dropping its content {\"open\":false,\"providersInDom\":true}"
+  ],
+  "externalActions": [],
+  "ok": true
+}

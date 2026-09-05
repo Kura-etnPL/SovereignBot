@@ -1,0 +1,1126 @@
+/* ==========================================================================
+   SovereignBot Motion & Fluid UX System (Grok / Manus AI / OpenBot tier)
+   ========================================================================== */
+
+/* 1. Ambient Background Particle Canvas */
+.ambient-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.95;
+  transition: opacity 0.6s ease;
+}
+
+body[data-theme="light"] .ambient-canvas {
+  opacity: 0.88;
+}
+
+/* Conversation Ambient Canvas & Luminous Mesh Background */
+.conversation-view {
+  position: relative;
+  overflow: hidden;
+}
+
+.conversation-ambient-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.92;
+  transition: opacity 0.8s ease;
+}
+
+body[data-theme="light"] .conversation-ambient-canvas {
+  opacity: 0.82;
+}
+
+.conversation-ambient-mesh {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 18% 22%, color-mix(in srgb, var(--brand) 22%, transparent) 0%, transparent 48%),
+    radial-gradient(circle at 82% 55%, color-mix(in srgb, #8b5cf6 20%, transparent) 0%, transparent 52%),
+    radial-gradient(circle at 50% 88%, color-mix(in srgb, #06b6d4 18%, transparent) 0%, transparent 45%),
+    radial-gradient(circle at 30% 90%, color-mix(in srgb, #f59e0b 15%, transparent) 0%, transparent 42%);
+  filter: blur(52px);
+  opacity: 0.88;
+  animation: convAmbientDrift 14s ease-in-out infinite alternate;
+}
+
+body[data-theme="light"] .conversation-ambient-mesh {
+  background:
+    radial-gradient(circle at 14% 18%, color-mix(in srgb, var(--brand) 26%, transparent) 0%, transparent 50%),
+    radial-gradient(circle at 86% 35%, color-mix(in srgb, #8b5cf6 22%, transparent) 0%, transparent 52%),
+    radial-gradient(circle at 70% 80%, color-mix(in srgb, #06b6d4 20%, transparent) 0%, transparent 48%),
+    radial-gradient(circle at 25% 85%, color-mix(in srgb, #f59e0b 18%, transparent) 0%, transparent 46%);
+  filter: blur(62px);
+  opacity: 0.95;
+  animation: convAmbientDrift 16s ease-in-out infinite alternate;
+}
+
+@keyframes convAmbientDrift {
+  0% { transform: scale(1) translate(0, 0); opacity: 0.75; }
+  50% { transform: scale(1.12) translate(-22px, 26px); opacity: 0.95; }
+  100% { transform: scale(1.05) translate(22px, -18px); opacity: 0.82; }
+}
+
+/* Ensure message scroller and composer float smoothly above ambient layer */
+.conversation-topbar,
+.message-scroller,
+.composer-shell,
+.demo-banner {
+  position: relative;
+  z-index: 2;
+}
+
+/* 2. Enhanced Welcome Orb - Dynamic Levitation & High-Energy Halo */
+.welcome-orb {
+  perspective: 800px;
+  transform-style: preserve-3d;
+  cursor: pointer;
+  box-shadow:
+    0 20px 52px -6px var(--brand-glow),
+    inset 0 1px 2px rgba(255, 255, 255, 0.6),
+    0 0 0 1.5px color-mix(in srgb, var(--brand) 35%, transparent);
+  animation: welcomeOrbLevitate 4.5s ease-in-out infinite;
+  transform: perspective(800px) rotateY(var(--tilt-x, 0deg)) rotateX(var(--tilt-y, 0deg)) scale(var(--orb-scale, 1));
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease;
+  position: relative;
+}
+
+@keyframes welcomeOrbLevitate {
+  0%, 100% {
+    top: 0px;
+    filter: drop-shadow(0 4px 12px var(--brand-glow));
+  }
+  50% {
+    top: -14px;
+    filter: drop-shadow(0 18px 28px var(--brand-glow));
+  }
+}
+
+.welcome-orb:hover {
+  box-shadow:
+    0 28px 72px -4px var(--brand-glow),
+    0 0 32px color-mix(in srgb, var(--brand) 65%, transparent),
+    inset 0 1px 3px rgba(255, 255, 255, 0.9),
+    0 0 0 2.5px var(--brand);
+}
+
+.welcome-orb::before {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  border-radius: 38px;
+  background: radial-gradient(circle, var(--brand-glow) 0%, color-mix(in srgb, #8b5cf6 45%, transparent) 50%, transparent 75%);
+  filter: blur(14px);
+  z-index: -1;
+  animation: orbAuraPulse 3.5s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes orbAuraPulse {
+  0% { opacity: 0.55; transform: scale(0.92); }
+  100% { opacity: 1; transform: scale(1.18); }
+}
+
+.welcome-orb::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 32px;
+  border: 2px solid transparent;
+  border-top: 2px solid var(--brand);
+  border-right: 2px solid color-mix(in srgb, #a855f7 85%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, #06b6d4 85%, transparent);
+  opacity: 0.85;
+  animation: orb-spin-slow 6s linear infinite;
+  pointer-events: none;
+}
+
+.welcome-orb.orb-clicked {
+  animation: orbBurstClick 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes orbBurstClick {
+  0% { transform: scale(0.9) rotate(0deg); }
+  45% { transform: scale(1.22) rotate(180deg); }
+  100% { transform: scale(1) rotate(360deg); }
+}
+
+@keyframes orb-spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 3. Spring-Loaded Chat Message Entrance Animation */
+@keyframes grokMessageIn {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.985);
+  }
+  70% {
+    opacity: 0.95;
+    transform: translateY(-1px) scale(1.002);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* User Message Entrance & Apple-Grade Glass Gloss */
+.chat-row.user.newly-arrived .chat-content {
+  animation: userBubblePop 0.36s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes userBubblePop {
+  0% {
+    opacity: 0;
+    transform: scale(0.88) translateY(18px);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.02) translateY(-2px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.user .chat-content {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+}
+
+.user .chat-content:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 8px 24px -2px rgba(0, 122, 255, 0.45);
+}
+
+.user .chat-content::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 42%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, transparent 100%);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* Assistant Message Entrance & AI Shine Sweep */
+.chat-row:not(.user).newly-arrived .chat-content {
+  animation: assistantMessageIn 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+  position: relative;
+  overflow: hidden;
+}
+
+@keyframes assistantMessageIn {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.chat-row:not(.user) .chat-content {
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.22s ease, box-shadow 0.22s ease;
+  position: relative;
+}
+
+.chat-row:not(.user) .chat-content:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--line));
+  box-shadow: 0 6px 20px -2px rgba(0, 0, 0, 0.08);
+}
+
+body[data-theme="dark"] .chat-row:not(.user) .chat-content:hover {
+  box-shadow: 0 8px 26px -2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+/* Iridescent Shine Sweep when AI message arrives */
+.chat-row:not(.user).newly-arrived .chat-content::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -150%;
+  width: 60%;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.45) 50%, transparent 100%);
+  transform: skewX(-24deg);
+  pointer-events: none;
+  animation: aiCardShine 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+}
+
+body[data-theme="dark"] .chat-row:not(.user).newly-arrived .chat-content::after {
+  background: linear-gradient(90deg, transparent 0%, rgba(10, 132, 255, 0.3) 50%, transparent 100%);
+}
+
+@keyframes aiCardShine {
+  from { left: -150%; opacity: 0; }
+  50% { opacity: 1; }
+  to { left: 220%; opacity: 0; }
+}
+
+/* Floating Action Bar Smooth Pop-In */
+.message-actions {
+  opacity: 0.65;
+  transform: translateY(2px);
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chat-row:hover .message-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Regenerate Button 360 Spin on Click */
+.message-action-regenerate.spinning {
+  animation: regenSpin 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes regenSpin {
+  from { transform: rotate(0deg) scale(0.95); }
+  to { transform: rotate(360deg) scale(1); }
+}
+
+/* ==========================================================================
+   Agent Reasoning Holographic Pod (Manus / Grok 3 / Sonnet Thinking Engine)
+   ========================================================================== */
+.typing-row {
+  min-height: 48px;
+  padding: 10px 2px 14px;
+  display: flex;
+  align-items: center;
+}
+
+.typing-reasoning-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 18px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand) 32%, var(--line-strong));
+  box-shadow:
+    0 8px 32px -4px color-mix(in srgb, var(--brand) 18%, transparent),
+    0 2px 8px -2px rgba(0, 0, 0, 0.05),
+    inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  animation: reasoningPodIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transition: all 0.25s ease;
+  max-width: min(720px, 100%);
+}
+
+@keyframes reasoningPodIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+body[data-theme="dark"] .typing-reasoning-card {
+  background: rgba(28, 28, 30, 0.88);
+  border-color: rgba(10, 132, 255, 0.35);
+  box-shadow:
+    0 10px 36px -4px rgba(10, 132, 255, 0.25),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+}
+
+.typing-avatar-glow {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.typing-avatar-glow .typing-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--brand), #8b5cf6);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: 0 4px 14px -2px var(--brand);
+  z-index: 2;
+  position: relative;
+}
+
+.typing-halo-ring {
+  position: absolute;
+  inset: -5px;
+  border-radius: 14px;
+  background: conic-gradient(from 0deg, var(--brand), #a855f7, #06b6d4, var(--brand));
+  filter: blur(4px);
+  opacity: 0.65;
+  animation: haloSpin 3s linear infinite;
+  z-index: 1;
+}
+
+@keyframes haloSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.typing-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.typing-header-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.typing-wave {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 16px;
+  padding: 0 2px;
+}
+
+.typing-wave-bar {
+  width: 3px;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--brand), #a855f7);
+  animation: waveBounce 1s ease-in-out infinite alternate;
+}
+
+.typing-wave-bar:nth-child(1) { height: 40%; animation-delay: 0.0s; }
+.typing-wave-bar:nth-child(2) { height: 85%; animation-delay: 0.2s; }
+.typing-wave-bar:nth-child(3) { height: 60%; animation-delay: 0.4s; }
+.typing-wave-bar:nth-child(4) { height: 100%; animation-delay: 0.15s; }
+.typing-wave-bar:nth-child(5) { height: 45%; animation-delay: 0.35s; }
+
+@keyframes waveBounce {
+  0% { transform: scaleY(0.3); opacity: 0.5; }
+  100% { transform: scaleY(1); opacity: 1; }
+}
+
+.typing-status-pill {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: linear-gradient(90deg, var(--text) 0%, var(--brand) 45%, var(--text) 90%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: textShimmer 2.4s ease-in-out infinite;
+  white-space: nowrap;
+}
+
+@keyframes textShimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.typing-timer {
+  font-size: 11px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--text-3);
+  padding: 1.5px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+  border: 1px solid var(--line);
+  letter-spacing: 0.04em;
+}
+
+.typing-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.typing-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1.5px 6px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.typing-step.active {
+  color: var(--brand);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
+.step-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.typing-step.active .step-dot {
+  animation: stepPulse 1.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes stepPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.6); opacity: 0.5; }
+}
+
+.typing-step-arrow {
+  font-size: 12px;
+  color: var(--text-3);
+  opacity: 0.6;
+}
+
+/* Composer Focus Dynamic Aurora Halo */
+.composer-box {
+  transition: border-color 0.25s ease, box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s ease;
+}
+
+.composer-box:focus-within {
+  border-color: var(--brand);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--brand) 20%, transparent),
+    0 10px 36px -6px color-mix(in srgb, var(--brand) 24%, transparent),
+    0 2px 6px rgba(0, 0, 0, 0.04);
+  transform: translateY(-1px);
+}
+
+/* Send Button Active Spring Pulse */
+.send-button {
+  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.send-button.active-ready {
+  background: linear-gradient(135deg, var(--brand), #0056b3);
+  box-shadow: 0 4px 14px -1px var(--brand-glow);
+  transform: scale(1.05);
+}
+
+.send-button.active-ready:hover {
+  transform: scale(1.14);
+  box-shadow: 0 6px 18px 0 var(--brand-glow);
+}
+
+.send-button:active {
+  transform: scale(0.92);
+}
+
+/* Quick Prompt Chips Luminous Glow & Micro Sparkle */
+.quick-prompt-chip {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.quick-prompt-chip:hover {
+  border-color: var(--brand);
+  background: var(--panel-2);
+  transform: translateY(-2.5px) scale(1.02);
+  box-shadow:
+    0 6px 18px -3px color-mix(in srgb, var(--brand) 28%, transparent),
+    0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+.quick-prompt-chip::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+  transform: skewX(-20deg);
+  pointer-events: none;
+}
+
+.quick-prompt-chip:hover::before {
+  animation: chipShine 0.65s ease;
+}
+
+@keyframes chipShine {
+  from { left: -100%; }
+  to { left: 200%; }
+}
+
+/* Sparkle Particle Burst Effect for Copy & Action clicks */
+.sparkle-burst-container {
+  position: absolute;
+  pointer-events: none;
+  z-index: 999;
+}
+
+.sparkle-particle {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: particlePop 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes particlePop {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--tx), var(--ty)) scale(0.2);
+  }
+}
+
+
+/* 4. Rich Markdown Formatting & Typography */
+.chat-text {
+  font-size: 14.5px;
+  line-height: 1.68;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.chat-p {
+  margin: 0 0 10px;
+}
+.chat-p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-spacer {
+  height: 8px;
+}
+
+.chat-h1, .chat-h2, .chat-h3, .chat-h4 {
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 14px 0 6px;
+}
+.chat-h1 { font-size: 19px; }
+.chat-h2 { font-size: 16.5px; }
+.chat-h3 { font-size: 15px; }
+.chat-h4 { font-size: 14px; }
+
+.chat-list {
+  margin: 6px 0 10px;
+  padding-left: 20px;
+}
+.chat-list li {
+  margin: 3px 0;
+}
+.chat-list.ordered {
+  padding-left: 22px;
+}
+
+.chat-blockquote {
+  margin: 8px 0;
+  padding: 6px 14px;
+  border-left: 3px solid var(--brand);
+  background: color-mix(in srgb, var(--panel-2) 65%, transparent);
+  border-radius: 0 8px 8px 0;
+  font-style: italic;
+  color: var(--text-2);
+}
+
+.chat-hr {
+  border: 0;
+  height: 1px;
+  background: var(--line-strong);
+  margin: 14px 0;
+}
+
+.inline-code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Cascadia Code", monospace;
+  font-size: 12.5px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel-3) 80%, transparent);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+}
+
+.user .inline-code {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+}
+
+.chat-link {
+  color: var(--brand);
+  text-decoration: none;
+  font-weight: 550;
+  transition: opacity 0.15s ease;
+}
+.chat-link:hover {
+  text-decoration: underline;
+  opacity: 0.85;
+}
+
+/* 5. Obsidian Glass Code Blocks with Copy Controls */
+.code-block {
+  margin: 12px 0;
+  border-radius: 14px;
+  background: #111215;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+body[data-theme="light"] .code-block {
+  background: #1c1d22;
+  border-color: rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.18);
+}
+
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.code-lang {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8e8e93;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.code-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: #d1d1d6;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.code-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  transform: translateY(-0.5px);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.code-copy-btn.copied {
+  background: rgba(48, 209, 88, 0.2);
+  border-color: #30d158;
+  color: #30d158;
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #e4e4e7;
+}
+
+.code-block code {
+  font-family: inherit;
+}
+
+/* Syntax Token Colors */
+.tok-keyword { color: #ff7b72; font-weight: 600; }
+.tok-string { color: #a5d6ff; }
+.tok-number { color: #79c0ff; }
+.tok-comment { color: #8b949e; font-style: italic; }
+.tok-builtin { color: #d2a8ff; }
+
+/* Markdown Table */
+.table-container {
+  overflow-x: auto;
+  margin: 12px 0;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+.markdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+.markdown-table th, .markdown-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.markdown-table th {
+  background: var(--panel-2);
+  font-weight: 600;
+  color: var(--text);
+}
+.markdown-table tr:hover td {
+  background: color-mix(in srgb, var(--panel-2) 50%, transparent);
+}
+
+/* 6. Manus-Style Thought Process / Reasoning Accordion (<think>) */
+.thought-container {
+  margin: 10px 0 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line));
+  background: color-mix(in srgb, var(--panel-2) 75%, transparent);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.thought-container:hover {
+  border-color: var(--brand);
+}
+
+.thought-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 14px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--brand) 6%, transparent);
+  list-style: none;
+  transition: background 0.15s ease;
+}
+
+.thought-summary::-webkit-details-marker {
+  display: none;
+}
+
+.thought-summary:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
+.thought-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thought-orb {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 10px var(--brand);
+  animation: pulse-dot 1.8s infinite alternate;
+}
+
+@keyframes pulse-dot {
+  0% { transform: scale(0.85); opacity: 0.6; }
+  100% { transform: scale(1.25); opacity: 1; }
+}
+
+.thought-chevron {
+  font-size: 14px;
+  transition: transform 0.2s ease;
+}
+
+.thought-container[open] .thought-chevron {
+  transform: rotate(180deg);
+}
+
+.thought-body {
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-3);
+  background: color-mix(in srgb, var(--panel) 40%, transparent);
+  font-family: ui-monospace, "SF Mono", Menlo, sans-serif;
+}
+
+/* 7. Grok Floating Capsule Composer & Border Beam */
+.composer-box {
+  position: relative;
+  border-radius: 26px !important;
+  background: color-mix(in srgb, var(--panel) 94%, transparent) !important;
+  backdrop-filter: blur(36px) saturate(190%) !important;
+  -webkit-backdrop-filter: blur(36px) saturate(190%) !important;
+  border: 1px solid var(--line-strong) !important;
+  box-shadow: 0 10px 32px -4px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+body[data-theme="light"] .composer-box {
+  background: rgba(255, 255, 255, 0.94) !important;
+  box-shadow: 0 10px 32px -4px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04) !important;
+}
+
+.composer-box:focus-within {
+  border-color: var(--brand) !important;
+  box-shadow: 0 12px 40px -4px rgba(0, 0, 0, 0.35), 0 0 0 3px var(--brand-glow) !important;
+  transform: translateY(-1px);
+}
+
+/* Animated Energetic Send Button */
+.send-button {
+  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+
+.send-button.active-ready {
+  background: linear-gradient(135deg, var(--brand) 0%, #5856d6 100%) !important;
+  color: #ffffff !important;
+  opacity: 1 !important;
+  cursor: pointer !important;
+  box-shadow: 0 4px 16px var(--brand-glow), 0 0 0 2px rgba(255, 255, 255, 0.2) !important;
+  transform: scale(1.08) !important;
+}
+
+.send-button.active-ready:hover {
+  transform: scale(1.16) translateY(-1px) !important;
+  box-shadow: 0 6px 20px var(--brand-glow) !important;
+}
+
+.send-button.active-ready:active {
+  transform: scale(0.96) !important;
+}
+
+/* Voice Equalizer Soundwave Animation */
+.composer-tool.voice-input.listening {
+  background: var(--bad) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 18px rgba(255, 59, 48, 0.6) !important;
+  animation: voice-pulse 1.2s infinite alternate;
+}
+
+@keyframes voice-pulse {
+  0% { transform: scale(1); filter: brightness(1); }
+  100% { transform: scale(1.12); filter: brightness(1.2); }
+}
+
+/* 8. Manus-Style Multi-Agent Workflow Visualizer (Typing Row) */
+.typing-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 6px 0;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel-2) 65%, transparent);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+  width: fit-content;
+  max-width: min(600px, 92%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  animation: grokMessageIn 0.3s ease;
+}
+
+.typing-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--brand) 0%, #5856d6 100%);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 2px 10px var(--brand-glow);
+  animation: avatar-breath 2s infinite ease-in-out;
+}
+
+@keyframes avatar-breath {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+.typing-wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+}
+
+.typing-wave-bar {
+  width: 3px;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand);
+  animation: wave-bounce 1.2s infinite ease-in-out;
+}
+
+.typing-wave-bar:nth-child(1) { animation-delay: 0s; }
+.typing-wave-bar:nth-child(2) { animation-delay: 0.15s; }
+.typing-wave-bar:nth-child(3) { animation-delay: 0.3s; }
+.typing-wave-bar:nth-child(4) { animation-delay: 0.45s; }
+
+@keyframes wave-bounce {
+  0%, 100% { transform: scaleY(0.25); opacity: 0.4; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+
+.typing-status-pill {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+/* 9. Floating Glass Toast Notifications */
+.motion-toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.motion-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  border-radius: 9999px;
+  background: rgba(28, 28, 30, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(255, 255, 255, 0.1) inset;
+  animation: toast-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transition: all 0.25s ease;
+}
+
+body[data-theme="light"] .motion-toast {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #1c1c1e;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.15);
+}
+
+.motion-toast.toast-success {
+  border-color: rgba(48, 209, 88, 0.45);
+}
+.motion-toast.toast-success .toast-icon {
+  color: #30d158;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+  }
+}
+
+/* 10. Micro Hover Polish on Action Buttons & Cards */
+.hero-action, .primary-wide {
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-action::before, .primary-wide::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+  transform: skewX(-20deg);
+  pointer-events: none;
+}
+
+.hero-action:hover::before, .primary-wide:hover::before {
+  animation: shimmer-sweep 0.75s ease;
+}
+
+@keyframes shimmer-sweep {
+  from { left: -100%; }
+  to { left: 200%; }
+}
+
+/* Card & Button Dynamic Springs */
+.hero-action,
+.quiet-action,
+.settings-card,
+.palette-card,
+.coworker-item {
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.24s ease, border-color 0.24s ease !important;
+}
+
+.hero-action:hover {
+  transform: translateY(-4px) scale(1.015) !important;
+  box-shadow: 0 18px 40px -6px var(--brand-glow), 0 0 0 1.5px color-mix(in srgb, var(--brand) 55%, transparent) !important;
+}
+
+.quiet-action:hover,
+.settings-card:hover,
+.coworker-item:hover {
+  transform: translateY(-3px) !important;
+  box-shadow: 0 14px 34px -4px rgba(0, 0, 0, 0.12), 0 0 0 1.5px color-mix(in srgb, var(--brand) 35%, transparent) !important;
+}
+
+body[data-theme="dark"] .quiet-action:hover,
+body[data-theme="dark"] .settings-card:hover,
+body[data-theme="dark"] .coworker-item:hover {
+  box-shadow: 0 14px 36px -4px rgba(0, 0, 0, 0.55), 0 0 0 1.5px rgba(255, 255, 255, 0.2) !important;
+}
+
+.hero-action:active,
+.quiet-action:active,
+.settings-card:active,
+.coworker-item:active {
+  transform: scale(0.965) !important;
+}

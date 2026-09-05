@@ -172,10 +172,10 @@ export async function runVerifyChannelsProductPath({ app } = {}) {
 
     fixture.conversations.postCoworkerMessage(workChannel.conversationId, owner.id, { text: "Unread channel activity fixture" }, { notifyChannelUnread: false });
     await invoke(win, "async()=>{ const filter=document.getElementById('product-channel-filter-page'); filter.value='unread'; filter.dispatchEvent(new Event('change',{bubbles:true})); return true; }");
-    await waitFor(win, "async()=>{ const text=(document.getElementById('product-channels-page')?.innerText||'').toLocaleLowerCase(); return text.includes('unread / 未读') && text.includes('unread channel activity fixture'); }", "unread channel projection");
+    await waitFor(win, "async()=>{ const root=document.getElementById('product-channels-page'); const badge=root?.querySelector('.soft-pill')?.textContent.trim(); return badge===SovereignI18n.t('channels.unread') && root.innerText.includes('Unread channel activity fixture'); }", "unread channel projection");
     const unread = await invoke(win, "async()=>document.getElementById('product-channels-page')?.innerText||''");
     const unreadText = unread.toLocaleLowerCase();
-    check("Unread filter and last activity are visible for the created channel", unread.includes("Work Channel") && unreadText.includes("unread / 未读") && unreadText.includes("unread channel activity fixture"), JSON.stringify({ text: unread }));
+    check("Unread filter and last activity are visible for the created channel", unread.includes("Work Channel") && /unread|未读/.test(unreadText) && unreadText.includes("unread channel activity fixture"), JSON.stringify({ text: unread }));
 
     const quickSwitch = await invoke(win, "async()=>{ const select=document.getElementById('product-channel-switch-page'); const option=[...select.options].find((entry)=>entry.textContent.includes('Work Channel')); if(!option) return { value:'' }; select.value=option.value; select.dispatchEvent(new Event('change',{bubbles:true})); return { value:option.value, visible:option.textContent }; }");
     await waitFor(win, `async()=>document.getElementById('conversation-title')?.textContent==='Work Channel'`, "quick switch conversation");
@@ -193,9 +193,9 @@ export async function runVerifyChannelsProductPath({ app } = {}) {
     check("Archived and stale channel actions fail closed", String(archivedSend).includes("archived channel is read-only") && Boolean(staleArchive), JSON.stringify({ archivedSend, staleArchive }));
 
     await invoke(win, "async()=>{ const filter=document.getElementById('product-channel-filter-page'); filter.value='archived'; filter.dispatchEvent(new Event('change',{bubbles:true})); return true; }");
-    await waitFor(win, "async()=>document.getElementById('product-channels-page')?.innerText.includes('Read-only / 只读')", "archived channel page");
+    await waitFor(win, "async()=>document.getElementById('product-channels-page')?.innerText.includes(SovereignI18n.t('state.readOnly'))", "archived channel page");
     const archivedUi = await invoke(win, "async()=>({ text:document.getElementById('product-channels-page')?.innerText||'', restore:[...document.querySelectorAll('#product-channels-page article button')].some((button)=>button.textContent.includes('Restore')) })");
-    check("Archived filter renders read-only channel with Restore action", archivedUi.text.includes("Work Channel") && archivedUi.text.includes("Read-only / 只读") && archivedUi.restore, JSON.stringify({ restore: archivedUi.restore }));
+    check("Archived filter renders read-only channel with Restore action", archivedUi.text.includes("Work Channel") && /Read-only|只读/.test(archivedUi.text) && archivedUi.restore, JSON.stringify({ restore: archivedUi.restore }));
 
     unbind?.(); unbind = undefined; win.destroy(); win = undefined; uninstallProtocol?.(); uninstallProtocol = undefined;
     fixture = await makeFixture(dataDir);
@@ -206,7 +206,7 @@ export async function runVerifyChannelsProductPath({ app } = {}) {
     unbind = bindIpcChannels({ win, handlers: makeHandlers(fixture) });
     await loadChannels(win);
     await invoke(win, "async()=>{ const filter=document.getElementById('product-channel-filter-page'); filter.value='archived'; filter.dispatchEvent(new Event('change',{bubbles:true})); return true; }");
-    await waitFor(win, "async()=>document.getElementById('product-channels-page')?.innerText.includes('Work Channel') && document.getElementById('product-channels-page')?.innerText.includes('Read-only / 只读')", "reloaded archived channel");
+    await waitFor(win, "async()=>document.getElementById('product-channels-page')?.innerText.includes('Work Channel') && document.getElementById('product-channels-page')?.innerText.includes(SovereignI18n.t('state.readOnly'))", "reloaded archived channel");
     const publicText = await invoke(win, "async()=>document.getElementById('view-channels')?.innerText||''");
     check("Reloaded Channels page preserves safe public projection", publicText.includes("Work Channel") && !publicText.includes(workChannel.id) && !forbiddenPublicMarkers.some((marker) => publicText.toLowerCase().includes(marker.toLowerCase())) && !publicText.includes(dataDir), JSON.stringify({ bytes: publicText.length }));
     await invoke(win, "async()=>{ const filter=document.getElementById('product-channel-filter-page'); filter.value='all'; filter.dispatchEvent(new Event('change',{bubbles:true})); return true; }");

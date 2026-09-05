@@ -1,0 +1,36 @@
+{
+  "schema": "sovereignbot.desktop.p50-job-actions.v1",
+  "checks": {
+    "Work cards use human-readable owner/workspace/Worker labels without opaque IDs": true,
+    "Work Retry failure is visible, retryable, single-call, and isolated to its Job": true,
+    "Work Retry reaches completed state through the existing Job authority": true,
+    "Work Dismiss clearly clears Attention without affecting another Job": true,
+    "P50 Pause fixture remains queued before its detail action": true,
+    "P50 Resume fixture is waiting before its detail action": true,
+    "Job Details Approve reaches completed state through the shared pending path": true,
+    "Job Details Pause is available only for a legal queued nonterminal state": true,
+    "Job Details Resume reaches completed state from a legal waiting state": true,
+    "Job Details Dismiss clears Attention with scoped feedback": true,
+    "Job Details feedback and identity text contain no opaque IDs or internal authority": true,
+    "Work/Job renderer uses no native prompt or confirm": true
+  },
+  "failed": [],
+  "notes": [
+    "PASS Work cards use human-readable owner/workspace/Worker labels without opaque IDs {\"worker\":true,\"owner\":true,\"workspace\":true,\"ids\":false,\"workerCard\":\"P50 Worker LabelCompletedResearcher · Investigate questions, compare evidence, and produce decision-ready findings. · normal · Worker Node: Remote Builder · Worker workspace: Builder workspaceOpen\"}",
+    "PASS Work Retry failure is visible, retryable, single-call, and isolated to its Job {\"failed\":true,\"cross\":false,\"button\":false,\"approveCalls\":1}",
+    "PASS Work Retry reaches completed state through the existing Job authority {\"approveCalls\":2,\"status\":\"completed\"}",
+    "PASS Work Dismiss clearly clears Attention without affecting another Job {\"status\":\"failed\",\"dismissCalls\":1}",
+    "PASS P50 Pause fixture remains queued before its detail action {\"status\":\"queued\",\"source\":\"controller.submitJob\"}",
+    "PASS P50 Resume fixture is waiting before its detail action {\"status\":\"waiting\",\"source\":\"controller.submitJob+pause\"}",
+    "PASS Job Details Approve reaches completed state through the shared pending path {\"approveCalls\":3,\"status\":\"completed\"}",
+    "PASS Job Details Pause is available only for a legal queued nonterminal state {\"pauseCalls\":1,\"status\":\"waiting\"}",
+    "PASS Job Details Resume reaches completed state from a legal waiting state {\"resumeCalls\":1,\"status\":\"completed\"}",
+    "PASS Job Details Dismiss clears Attention with scoped feedback {\"dismissCalls\":2,\"status\":\"failed\"}",
+    "PASS Job Details feedback and identity text contain no opaque IDs or internal authority {\"meta\":\"Failed · Coding Lead · Implement, debug, test, and improve software in trusted workspaces. · normal · Workspace: P50 Trusted Workspace · Shared project workspace\",\"feedback\":\"Attention dismissed.\",\"body\":\"[seed] P50 fixture for P50 Detail Dismiss\\n\\n[decision] Attention dismissed by operator.\\n\\n[status] job status: failed\"}",
+    "PASS Work/Job renderer uses no native prompt or confirm native dialogs absent"
+  ],
+  "fixtureBoundary": "LOCAL_FIXTURE",
+  "publishEligible": false,
+  "externalActions": [],
+  "ok": true
+}

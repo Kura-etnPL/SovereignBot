@@ -13,6 +13,15 @@ const PNG = "image/png";
 const SVG = "image/svg+xml";
 
 export const APP_ASSETS = Object.freeze({
+    "/interactive-engine.css": Object.freeze({ file: "interactive-engine.css", type: CSS }),
+    "/interactive-engine.js": Object.freeze({ file: "interactive-engine.js", type: JS }),
+    "/motion-fx.css": Object.freeze({ file: "motion-fx.css", type: CSS }),
+    "/motion-fx.js": Object.freeze({ file: "motion-fx.js", type: JS }),
+    "/palette-engine.css": Object.freeze({ file: "palette-engine.css", type: CSS }),
+    "/palette-engine.js": Object.freeze({ file: "palette-engine.js", type: JS }),
+    "/robot-avatar-engine.js": Object.freeze({ file: "robot-avatar-engine.js", type: JS }),
+    "/markdown-renderer.js": Object.freeze({ file: "markdown-renderer.js", type: JS }),
+    "/robot-avatar.css": Object.freeze({ file: "robot-avatar.css", type: CSS }),
     "/": Object.freeze({ file: "index.html", type: HTML }),
     "/index.html": Object.freeze({ file: "index.html", type: HTML }),
     "/app.js": Object.freeze({ file: "app.js", type: JS }),
