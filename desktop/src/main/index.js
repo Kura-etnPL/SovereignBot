@@ -815,7 +815,7 @@ async function main() {
                 "conversation:redirect": async ({ conversationId, text, mentions, replyTo, clientMessageId }) => {
                     if (teamService.isArchivedConversation(conversationId)) throw new Error("archived channel is read-only");
                     const redirectContext = teamService.collaborationContextForConversation(conversationId);
-                    const stopped = await coworkerDispatcher.stopConversation(conversationId, "conversation redirected by the user", "desktop-operator", redirectContext);
+                    const stopped = await coworkerDispatcher.stopConversation(conversationId, "conversation redirected by the user", "desktop-operator", redirectContext, { redirected: true });
                     const afterStop = teamService.collaborationContextForConversation(conversationId);
                     if (redirectContext && afterStop?.runId === redirectContext.runId) {
                         teamService.recordCollaborationEvent({ conversationId, type: "run.redirected", status: "redirected", actorId: "user", reason: "Work was redirected by the user.", runId: redirectContext.runId, requestId: afterStop.requestId, operationId: afterStop.operationId, operationToken: afterStop.operationToken, expectedVersion: afterStop.version, idempotencyKey: `run.redirected:${redirectContext.runId}:${afterStop.version}` });

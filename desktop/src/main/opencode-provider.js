@@ -1,6 +1,9 @@
 // OpenCode Zen free-model and Go adapter. Runtime registration is intentionally
 // left to the caller; this module only implements the economy-provider contract.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { loadJsonState, saveJsonState } from "./lib/desktop-state.js";
 
 export const OPENCODE_ENDPOINTS = Object.freeze({
     zen: "https://opencode.ai/zen/v1/chat/completions",
@@ -28,6 +31,10 @@ const MAX_OUTPUT = 20_000;
 const MAX_RESPONSE_BYTES = 512_000;
 const MAX_CONTEXT_MESSAGES = 48;
 const DEFAULT_TIMEOUT = 60_000;
+const CONTINUATION_SCHEMA = "sovereignbot.opencode.continuations.v1";
+const MAX_PERSISTED_CONTEXTS = 512;
+const MAX_STATE_REF = 512;
+const MAX_STATE_SESSION = 128;
 
 class OpenCodeError extends Error {
     constructor(code, message) { super(`[OPENCODE:${code}] ${message}`); this.code = code; }
@@ -89,19 +96,57 @@ function makeRef(counter) {
     return `opencode-${counter.toString(36)}-${randomUUID()}`;
 }
 
+function stateKey(value) {
+    const text = String(value ?? "default");
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(text)) throw new Error("OpenCode state key must be a safe opaque identifier");
+    return text;
+}
+
 export function createOpenCodeProviderAdapter({
     providerId = "opencode-zen-free", kind = "zen", model,
     credentialResolver, transport = globalThis.fetch, timeoutMs = DEFAULT_TIMEOUT,
+    dataDir, accountNamespace = "default", continuationPath,
 } = {}) {
     const models = kind === "zen" ? OPENCODE_ZEN_FREE_MODELS : kind === "go" ? OPENCODE_GO_CHAT_MODELS : [];
     if (!(kind in OPENCODE_ENDPOINTS)) throw new Error("OpenCode kind must be zen or go");
     if (!models.includes(model)) throw fail("MODEL_NOT_ALLOWED", `Model is not allowlisted for OpenCode ${kind}`);
     if (typeof credentialResolver !== "function") throw fail("CREDENTIAL_RESOLVER_REQUIRED", "A trusted credential resolver is required");
     if (typeof transport !== "function") throw new Error("OpenCode transport must be fetch-compatible");
+    const persistRoot = dataDir ? join(dataDir, "desktop-state", "provider-profiles", "opencode", stateKey(providerId), stateKey(kind), stateKey(model)) : undefined;
+    const statePathFor = (fingerprint) => continuationPath ? `${continuationPath}.${fingerprint}.json` : persistRoot ? join(persistRoot, `${stateKey(accountNamespace)}-${fingerprint}.json`) : undefined;
     const contexts = new Map();
+    let activeStatePath;
+    let activeFingerprint;
     const active = new Map();
     let sequence = 0;
     let closed = false;
+
+    function loadContexts(fingerprint) {
+        if (activeFingerprint === fingerprint) return;
+        activeStatePath = statePathFor(fingerprint);
+        activeFingerprint = fingerprint;
+        contexts.clear();
+        const persisted = activeStatePath && existsSync(activeStatePath) ? loadJsonState(activeStatePath, undefined) : undefined;
+        if (!persisted || persisted.schema !== CONTINUATION_SCHEMA || persisted.providerId !== providerId || persisted.kind !== kind || persisted.model !== model || persisted.accountNamespace !== stateKey(accountNamespace) || persisted.credentialFingerprint !== fingerprint || !Array.isArray(persisted.contexts)) return;
+        for (const entry of persisted.contexts.slice(-MAX_PERSISTED_CONTEXTS)) {
+            if (typeof entry?.continuationRef !== "string" || entry.continuationRef.length > MAX_STATE_REF || typeof entry.session !== "string" || entry.session.length > MAX_STATE_SESSION || !Array.isArray(entry.messages) || entry.messages.length > MAX_CONTEXT_MESSAGES) continue;
+            const messages = entry.messages.filter((message) => message && (message.role === "user" || message.role === "assistant") && typeof message.content === "string" && message.content.length <= MAX_INPUT);
+            if (messages.length === entry.messages.length && JSON.stringify(messages).length <= MAX_INPUT + MAX_OUTPUT + 1000) contexts.set(entry.continuationRef, { session: entry.session, messages });
+        }
+    }
+
+    function persistContexts(fingerprint = activeFingerprint) {
+        if (!activeStatePath) return;
+        saveJsonState(activeStatePath, {
+            schema: CONTINUATION_SCHEMA,
+            providerId,
+            kind,
+            model,
+            accountNamespace: stateKey(accountNamespace),
+            credentialFingerprint: fingerprint,
+            contexts: [...contexts.entries()].slice(-MAX_PERSISTED_CONTEXTS).map(([continuationRef, value]) => ({ continuationRef, session: value.session, messages: value.messages })),
+        });
+    }
 
     async function credential() {
         let value;
@@ -121,13 +166,10 @@ export function createOpenCodeProviderAdapter({
     async function callRequest(method, input = {}) {
         if (closed) throw fail("UNAVAILABLE", "OpenCode adapter is closed");
         const activeKey = String(input.taskId ?? input.continuationRef ?? makeRef(++sequence));
-        if (active.has(activeKey)) throw fail("BUSY", "OpenCode task is already active");
-        if (method === "continue" && (!input.continuationRef || !contexts.has(input.continuationRef))) throw fail("INVALID_CONTINUATION", "Continuation does not belong to this adapter");
-        const prior = method === "continue" ? contexts.get(input.continuationRef).messages : [];
-        const messages = messagesFor(input, prior);
-        if (!messages.length) throw fail("INVALID_REQUEST", "instruction or conversation is required");
+        // A factory adapter owns one account context at a time. Reject overlapping
+        // calls so an account switch cannot publish into another account's state.
+        if (active.size) throw fail("BUSY", "OpenCode adapter is already active");
         const controller = new AbortController();
-        const session = method === "continue" ? contexts.get(input.continuationRef)?.session : makeRef(++sequence);
         const signal = input.signal;
         const abort = () => controller.abort(signal?.reason ?? new Error("cancelled"));
         if (signal) { if (signal.aborted) abort(); else signal.addEventListener("abort", abort, { once: true }); }
@@ -135,6 +177,13 @@ export function createOpenCodeProviderAdapter({
         active.set(activeKey, controller);
         try {
             const token = await credential();
+            const fingerprint = createHash("sha256").update(token).digest("hex").slice(0, 32);
+            loadContexts(fingerprint);
+            if (method === "continue" && (!input.continuationRef || !contexts.has(input.continuationRef))) throw fail("INVALID_CONTINUATION", "Continuation does not belong to this adapter");
+            const prior = method === "continue" ? contexts.get(input.continuationRef).messages : [];
+            const messages = messagesFor(input, prior);
+            if (!messages.length) throw fail("INVALID_REQUEST", "instruction or conversation is required");
+            const session = method === "continue" ? contexts.get(input.continuationRef)?.session : makeRef(++sequence);
             if (controller.signal.aborted) throw fail("CANCELLED", "OpenCode request cancelled");
             const response = await transport(OPENCODE_ENDPOINTS[kind], {
                 method: "POST", signal: controller.signal,
@@ -154,7 +203,8 @@ export function createOpenCodeProviderAdapter({
             const continuationRef = makeRef(++sequence);
             contexts.set(continuationRef, { session, messages: [...messages, { role: "assistant", content: text.slice(0, MAX_OUTPUT) }].slice(-MAX_CONTEXT_MESSAGES) });
             if (method === "continue") contexts.delete(input.continuationRef);
-            if (contexts.size > 512) contexts.delete(contexts.keys().next().value);
+            if (contexts.size > MAX_PERSISTED_CONTEXTS) contexts.delete(contexts.keys().next().value);
+            persistContexts(fingerprint);
             return { text: text.slice(0, MAX_OUTPUT), continuationRef };
         } catch (error) {
             if (controller.signal.aborted) {
@@ -176,7 +226,7 @@ export function createOpenCodeProviderAdapter({
         cancel: async ({ taskId, continuationRef } = {}) => {
             const key = taskId ?? continuationRef;
             if (key && active.has(String(key))) active.get(String(key)).abort(new Error("cancelled"));
-            if (continuationRef) contexts.delete(String(continuationRef));
+            if (continuationRef) { contexts.delete(String(continuationRef)); persistContexts(); }
             return { cancelled: true };
         },
     };

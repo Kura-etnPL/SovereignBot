@@ -67,7 +67,7 @@ export async function runLiveCodexDogfood({
                     if (!team) return false;
                     const conversation = await window.sovereignbot.conversations.get({conversationId: team.channels[0].conversationId});
                     const interrupted = conversation.messages.flatMap(message => Object.values(message.delivery ?? {})).filter(delivery => delivery.status === "attention" && /interrupted by application restart/i.test(delivery.detail ?? ""));
-                    return interrupted.length ? {count: interrupted.length, channel: team.channels[0].name} : false;
+                    return interrupted.length ? {count: interrupted.length, channel: team.channels[0].name, conversationId: conversation.id} : false;
                 })()`), 15_000);
                 const tasks = await getHost().runtime.orchestrator.listTasks();
                 check("INTERRUPTED_DELIVERY_ATTENTION", restored.count > 0);
@@ -79,12 +79,37 @@ export async function runLiveCodexDogfood({
                 const redirect = await renderer(`(() => { const button = document.getElementById('conversation-redirect'); return Boolean(button && !button.classList.contains('hidden')); })()`);
                 check("INTERRUPTED_REDIRECT_AVAILABLE", redirect);
                 check("INTERRUPTED_CHANNEL_VISIBLE", await renderer(`getComputedStyle(document.getElementById('view-welcome')).display === 'none' && document.getElementById('conversation-redirect').getBoundingClientRect().width > 0`));
+                const composerBounds = await renderer(`(() => { const r = document.getElementById('composer-form').getBoundingClientRect(); return {top:r.top, bottom:r.bottom, height:r.height, viewport:innerHeight}; })()`);
+                check("CHANNEL_COMPOSER_IN_VIEWPORT", composerBounds.top >= 0 && composerBounds.bottom <= composerBounds.viewport + 1 && composerBounds.height > 0, composerBounds);
                 win.webContents.setBackgroundThrottling(false);
                 await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
                 win.webContents.invalidate();
                 await renderer(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 result.screenshots.push(await capture("interrupted-recovery.png"));
+                if (process.env.SOVEREIGNBOT_REDIRECT_RECOVERED === "1") {
+                    await waitFor("Luna provider ready", async () => getHost().rosterSummary()?.providers?.codex?.usable === true, 30_000);
+                    const agents = getHost().runtime.config?.agents ?? getHost().runtime.runtimeConfig?.agents;
+                    if (!Array.isArray(agents) || !agents.length || agents.some(agent => agent.harness.kind === "codex" && agent.harness.model !== "gpt-5.6-luna"))
+                        throw new Error("Cannot verify Luna-only roster; no recovery prompt sent");
+                    check("RECOVERY_LUNA_ONLY", true);
+                    const prompt = "重定向这次已中断的测试：请 Chief 直接用一句中文确认已收到重定向，并说明此前 Python 文件只做了静态复核、未执行动态测试。不要再委派，不修改文件，不调用工具，不联网，不操作 Git。回复包含 RECOVERY_REDIRECT_OK。";
+                    await renderer(`(() => {
+                        document.getElementById('conversation-redirect').click();
+                        const input = document.getElementById('composer-input');
+                        input.value = ${JSON.stringify(prompt)};
+                        input.dispatchEvent(new Event('input', {bubbles:true}));
+                        document.getElementById('composer-form').requestSubmit();
+                    })()`);
+                    const reply = await waitFor("explicit recovery reply", async () => await renderer(`(async () => {
+                        const conversation = await window.sovereignbot.conversations.get({conversationId:${JSON.stringify(restored.conversationId)}});
+                        const requestIndex = conversation.messages.findIndex(message => message.senderId === 'user' && message.text === ${JSON.stringify(prompt)});
+                        if (requestIndex < 0) return false;
+                        return conversation.messages.slice(requestIndex + 1).find(message => message.senderId !== 'user' && message.text.includes('RECOVERY_REDIRECT_OK')) ?? false;
+                    })()`), 120_000);
+                    check("EXPLICIT_RECOVERY_REPLY", Boolean(reply), {messageId:reply.id});
+                    await writeFile(join(evidenceDir, "recovery-redirect-result.json"), JSON.stringify(result, null, 2), "utf8");
+                }
                 await writeFile(join(evidenceDir, "interrupted-result.json"), JSON.stringify(result, null, 2), "utf8");
                 return result;
             }

@@ -236,6 +236,9 @@ test("dispatcher restart marks only task-linked pending delivery as attention an
         assert.match(conversations.get(team.id).messages[0].delivery[coder.id].detail, /explicitly retry/i);
         assert.equal(runtime._tasks.length, 1, "restart recovery must not create or replay a provider task");
         assert.equal(runtime._tasks[0].status, "cancelled", "recovery must terminate the stale core task");
+        await dispatcher.stopConversation(team.id, "user redirected", "desktop-operator", undefined, { redirected: true });
+        assert.equal(conversations.get(team.id).messages[0].delivery[coder.id].status, "redirected", "explicit redirect closes recovered attention");
+        assert.equal(conversations.get(team.id).messages[0].delivery[reviewer.id].status, "redirected");
     }
     finally {
         rmSync(root, { recursive: true, force: true });

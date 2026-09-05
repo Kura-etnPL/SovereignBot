@@ -1002,7 +1002,7 @@ export function createCoworkerDispatcher({
         return run;
     }
 
-    async function stopConversation(conversationId, reason = "conversation stopped by the user", actor = "desktop-operator", expectedContext) {
+    async function stopConversation(conversationId, reason = "conversation stopped by the user", actor = "desktop-operator", expectedContext, { redirected = false } = {}) {
         const prefix = `${conversationId}:`;
         const taskIds = [...activeTasks.entries()]
             .filter(([key]) => key.startsWith(prefix))
@@ -1016,8 +1016,9 @@ export function createCoworkerDispatcher({
             const conversation = conversationStore.get(conversationId);
             for (const message of conversation.messages ?? []) {
                 for (const [coworkerId, delivery] of Object.entries(message.delivery ?? {})) {
-                    if (delivery?.status !== "pending") continue;
-                    conversationStore.markDelivery(conversationId, message.id, coworkerId, "failed", reason);
+                    const interrupted = delivery?.status === "attention" && /interrupted by application restart/i.test(delivery.detail ?? "");
+                    if (delivery?.status !== "pending" && !(redirected && interrupted)) continue;
+                    conversationStore.markDelivery(conversationId, message.id, coworkerId, redirected ? "redirected" : "failed", reason);
                     stoppedDeliveries += 1;
                 }
             }

@@ -551,6 +551,10 @@ body[data-theme="light"] .quiet-action {
 
 /* Conversation */
 .conversation-view { display: grid; grid-template-rows: auto auto minmax(0,1fr) auto; background: var(--bg); }
+.conversation-view > .conversation-topbar { grid-row: 1; }
+.conversation-view > .demo-banner { grid-row: 2; }
+.conversation-view > .message-scroller { grid-row: 3; }
+.conversation-view > .composer-shell { grid-row: 4; }
 .conversation-topbar {
   min-height: 72px; padding: 12px 24px; padding-right: 148px;
   display: flex; align-items: center; justify-content: space-between;

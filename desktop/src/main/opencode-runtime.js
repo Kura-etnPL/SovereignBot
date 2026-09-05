@@ -15,13 +15,13 @@ export function resolveOpenCodeCredential({ kind }, { env = process.env, home = 
     } catch { return undefined; }
 }
 
-export function createOpenCodeAdapterFactory({ credentialResolver = resolveOpenCodeCredential, transport, goBalanceFallbackDisabled = false } = {}) {
-    return ({ providerId, mode, model }) => {
+export function createOpenCodeAdapterFactory({ dataDir, credentialResolver = resolveOpenCodeCredential, transport, goBalanceFallbackDisabled = false } = {}) {
+    return ({ providerId, mode, model, accountNamespace = "default" }) => {
         if (!["opencode-zen-free", "opencode-go"].includes(providerId)) return undefined;
         const kind = providerId === "opencode-go" ? "go" : "zen";
         if (mode !== (kind === "zen" ? "free" : "fixed-subscription"))
             throw new Error("OpenCode provider mode does not match its cost boundary");
-        const adapter = createOpenCodeProviderAdapter({ providerId, kind, model, credentialResolver, ...(transport ? { transport } : {}) });
+        const adapter = createOpenCodeProviderAdapter({ providerId, kind, model, accountNamespace, dataDir, credentialResolver, ...(transport ? { transport } : {}) });
         if (kind === "go" && !goBalanceFallbackDisabled) {
             const blocked = () => { const error = new Error("OpenCode Go balance fallback must be confirmed disabled before use"); error.code = "BILLING_CONFIRMATION_REQUIRED"; throw error; };
             return { ...adapter, health: async () => ({ found: true, health: "unavailable", reason: "Confirm OpenCode Go Use balance is off before enabling execution." }), start: blocked, continue: blocked };

@@ -15,6 +15,8 @@ const EVIDENCE_DIR = join(CONTROL_ROOT, "evidence");
 const PRIVATE_RUNTIME_DIR = join(CONTROL_ROOT, "private-runtime");
 const DATA_DIR = join(PRIVATE_RUNTIME_DIR, "desktop-data");
 const inspectInterrupted = process.argv.includes("--inspect-interrupted");
+const redirectRecovered = process.argv.includes("--redirect-recovered");
+if (redirectRecovered && !inspectInterrupted) throw new Error("Recovered redirect requires interrupted inspection");
 if (inspectInterrupted && resumeAt < 0) throw new Error("Interrupted inspection requires an existing run");
 const priorTasks = inspectInterrupted ? JSON.parse(readFileSync(join(DATA_DIR, "tasks.json"), "utf8")) : undefined;
 const ELECTRON_USER_DATA_DIR = join(PRIVATE_RUNTIME_DIR, "electron-user-data");
@@ -37,6 +39,7 @@ const env = {
     SOVEREIGNBOT_LIVE_LUNA_ONLY: "1",
     SOVEREIGNBOT_LIVE_RESTART_CHECK: resumeAt >= 0 ? "1" : "0",
     SOVEREIGNBOT_INSPECT_INTERRUPTED: inspectInterrupted ? "1" : "0",
+    SOVEREIGNBOT_REDIRECT_RECOVERED: redirectRecovered ? "1" : "0",
     SOVEREIGNBOT_EXPECTED_TASK_COUNT: inspectInterrupted ? String((Array.isArray(priorTasks) ? priorTasks : priorTasks.tasks).length) : "",
 };
 delete env.ELECTRON_RUN_AS_NODE;

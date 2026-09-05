@@ -61,7 +61,26 @@ Redirect button were visually confirmed in `interrupted-recovery.png`. Reopening
 the recovered state exposed a load-time status filter that discarded Attention
 and Redirected; both now persist across reload. Relevant store tests: 9 passed;
 dispatcher and sidecar tests: 12 passed. No live model prompt was sent for these
-restart inspections. Explicit redirect execution after recovery remains unproven.
+restart inspections. A subsequent explicit redirect used the verified Luna-only
+roster and received a real Chief reply (`msg_045471e309918a01`, evidence:
+`recovery-redirect-result.json`). This proves submission and response, not whole
+team completion: the declared Software Team sequence still handed the reply to
+Coding Lead despite the request asking only for acknowledgement. Its interrupted
+child was recovered by the next inspection without replay.
+
+The real channel exposed two further UI defects, now fixed: double-escaped inline
+code/underscore parsing (plus generated syntax-highlight markup corruption), and
+the hidden demo banner shifting the message scroller into an unbounded grid row.
+The composer previously began at y=802 in an 802px viewport; it now occupies
+y=597–802. The revised channel screenshot was visually checked; six recovery/UI
+checks and four Markdown regressions passed. Explicit redirects also clear the
+old recovered Attention delivery rather than retaining a stale action indefinitely.
+
+OpenCode continuation now uses the existing atomic desktop-state persistence,
+partitioned by provider, mode, model, account namespace and credential fingerprint.
+Runtime host passes its actual dataDir to the factory. Reload/account-switch,
+concurrent-call isolation and failed/cancelled response tests plus Economy canaries
+passed (17 tests). No raw credential is stored and no live OpenCode call was made.
 
 Background schedulers wait for recovery; conversation-store decorators preserve
 the listing API used to identify affected messages. Normal browser shutdown now

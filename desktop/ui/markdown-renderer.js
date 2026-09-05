@@ -23,17 +23,19 @@
     const lower = lang.toLowerCase();
     // Keywords for JS/TS, Python, Bash, JSON, SQL, etc.
     if (/^(js|javascript|ts|typescript|json|jsx|tsx|py|python|sh|bash|zsh|sql|html|css)$/.test(lower)) {
-      return escaped
-        // Comments
-        .replace(/(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/)/g, '<span class="tok-comment">$1</span>')
-        // Strings
-        .replace(/(&quot;[\s\S]*?&quot;|&#39;[\s\S]*?&#39;|`[\s\S]*?`)/g, '<span class="tok-string">$1</span>')
-        // Numbers
-        .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="tok-number">$1</span>')
-        // Keywords
-        .replace(/\b(const|let|var|function|return|if|else|for|while|import|export|from|class|extends|async|await|try|catch|def|self|None|True|False|elif|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|table)\b/g, '<span class="tok-keyword">$1</span>')
-        // Builtins & Booleans
-        .replace(/\b(true|false|null|undefined|this|new|typeof|instanceof)\b/g, '<span class="tok-builtin">$1</span>');
+      // Tokenize source once: later replacements must never rewrite generated
+      // span attributes or the digits inside HTML entities.
+      const tokens = /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(\b\d+(?:\.\d+)?\b)|(\b(?:const|let|var|function|return|if|else|for|while|import|export|from|class|extends|async|await|try|catch|def|self|None|True|False|elif|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|table)\b)|(\b(?:true|false|null|undefined|this|new|typeof|instanceof)\b)/g;
+      const source = String(code ?? "");
+      let result = "";
+      let cursor = 0;
+      for (const match of source.matchAll(tokens)) {
+        result += escapeHtml(source.slice(cursor, match.index));
+        const kind = match[1] ? "comment" : match[2] ? "string" : match[3] ? "number" : match[4] ? "keyword" : "builtin";
+        result += `<span class="tok-${kind}">${escapeHtml(match[0])}</span>`;
+        cursor = match.index + match[0].length;
+      }
+      return result + escapeHtml(source.slice(cursor));
     }
     return escaped;
   }
@@ -67,25 +69,32 @@
 
   function renderInline(str) {
     let res = str;
+    // Callers already escape raw input. Keep code and links out of subsequent
+    // emphasis replacements, and never escape their entities a second time.
+    let marker = "\u0000INLINE";
+    while (str.includes(marker)) marker += "X";
+    const protectedHtml = [];
+    const protect = html => `${marker}${protectedHtml.push(html) - 1}\u0000`;
 
     // Inline code `code`
-    res = res.replace(/`([^`]+)`/g, (_, code) => `<code class="inline-code">${escapeHtml(code)}</code>`);
+    res = res.replace(/`([^`]+)`/g, (_, code) => protect(`<code class="inline-code">${code}</code>`));
+
+    res = res.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) =>
+      protect(`<a href="${url}" target="_blank" rel="noopener noreferrer" class="chat-link">${label} ↗</a>`));
 
     // Bold **text** or __text__
     res = res.replace(/(\*\*|__)(.*?)\1/g, '<strong>$2</strong>');
 
     // Italic *text* or _text_
-    res = res.replace(/(\*|_)(.*?)\1/g, '<em>$2</em>');
+    res = res.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    res = res.replace(/(^|[^\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, '$1<em>$2</em>');
 
     // Strikethrough ~~text~~
     res = res.replace(/~~(.*?)~~/g, '<del>$1</del>');
 
-    // Links [text](url)
-    res = res.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
-      const cleanUrl = escapeHtml(url);
-      return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" class="chat-link">${escapeHtml(label)} ↗</a>`;
-    });
-
+    for (let index = protectedHtml.length - 1; index >= 0; index--) {
+      res = res.split(`${marker}${index}\u0000`).join(protectedHtml[index]);
+    }
     return res;
   }
 

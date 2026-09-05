@@ -237,7 +237,7 @@ export async function startRuntimeHost({ dataDir, getSettings, getCoworkers = ()
         driverConfig: computerRuntimeConfig().config?.driver ?? {},
         driverFactory: antigravityDriverFactory,
     });
-    const economyFactory = createEconomyProviderFactory({ dataDir, config: economyConfig ?? { providers: [], metered: { enabled: false, budget: 0, perRunCap: 0, totalCap: 0 } }, adapterFactory: economyAdapterFactory ?? createOpenCodeAdapterFactory({ goBalanceFallbackDisabled: process.env.SOVEREIGNBOT_OPENCODE_GO_BALANCE_FALLBACK_DISABLED === "1" }) });
+    const economyFactory = createEconomyProviderFactory({ dataDir, config: economyConfig ?? { providers: [], metered: { enabled: false, budget: 0, perRunCap: 0, totalCap: 0 } }, adapterFactory: economyAdapterFactory ?? createOpenCodeAdapterFactory({ dataDir, goBalanceFallbackDisabled: process.env.SOVEREIGNBOT_OPENCODE_GO_BALANCE_FALLBACK_DISABLED === "1" }) });
 
     function chatgptWebUnavailable() {
         return { provider: "chatgpt-web", found: false, health: "unavailable", auth: { state: "signed-out" }, reason: "ChatGPT Web is not connected; use Sign in to connect the dedicated profile." };
